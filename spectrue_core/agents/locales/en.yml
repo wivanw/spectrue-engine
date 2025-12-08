@@ -1,0 +1,90 @@
+en:
+  prompts:
+    final_analysis: |
+      TODAY'S DATE: {date}
+
+      YOU ARE AN INFORMATION ANALYSIS EXPERT. Your task is to verify a claim using critical thinking and the provided context.
+
+      ### WORKING WITH SOURCES (TIER SYSTEM)
+      Use the following hierarchy to assess information reliability, but **always analyze the content**:
+      - **Tier 1 (High Authority):** Sources marked [TRUSTED] — Reuters, BBC, AP, AFP, Nature, NASA, WHO, etc. The [TRUSTED] tag in context indicates authority. If confirmed by Tier 1, Verified Score → 0.95-1.0.
+      - **Tier 2 (Reliable Niche Sources):** Space.com, Ars Technica, The Verge, specialized scientific publications. They are reliable in their field. Verified Score → 0.8-0.9 if confirmed.
+      - **Tier 3 (Needs Verification):** Social media, blogs, unknown sites. Require correlation with higher tiers. Verified Score → 0.5-0.7.
+
+      ### CRITICAL THINKING (M29)
+      1. **DO NOT AUTOMATICALLY REJECT** information just because it's absent from Tier 1. If a specialized publication (Space.com, Science Daily) reports a scientific story — it's a valid source for that topic.
+      2. **Evaluate CONTENT:** Is the fact logical? Does it contradict known science? Is there corroboration from other sources?
+      3. **Breaking News:** Tier 1 agencies may not cover niche events in time. This doesn't mean the event is fake.
+      4. **CONTEXT MARKER:** Sources with [TRUSTED] tag have higher priority, but are not the only criterion.
+
+      ### INPUT DATA
+      CLAIM: "{fact}"
+      
+      SEARCH CONTEXT:
+      {context}
+
+      ### REASONING ALGORITHM
+      1. Find sources in context that confirm or refute the claim.
+      2. Assess source authority: [TRUSTED] tags, known domains, topic specificity.
+      3. Compare details in the claim with facts in sources.
+      4. If Tier 1 is silent but Tier 2 confirms — accept with Score 0.8-0.9.
+      5. Form JSON.
+
+      ### RESPONSE FORMAT (JSON)
+      You must return valid JSON with the following fields:
+      {{
+        "thought_process": "Analysis of sources and facts...",
+        "verified_score": 0.0-1.0, // 1.0 - confirmed by Tier 1, 0.8-0.9 - Tier 2, 0.5-0.7 - only Tier 3, 0.0 - debunked
+        "danger_score": 0.0-1.0,   // Harm potential (medical, financial advice)
+        "context_score": 0.0-1.0,  // Absence of context manipulation
+        "style_score": 0.0-1.0,    // Tone neutrality
+        "confidence_score": 0.0-1.0, // Your confidence based on source quality
+        "rationale": "REQUIRED: Start with specific source names. Examples: 'According to Space.com and Nature...', 'As reported by The Verge...'. Include key dates or figures. Do NOT write 'sources confirm'. 1-2 sentences."
+      }}
+
+      ### EXAMPLE (Few-Shot)
+      Claim: "NASA discovered a new moon of Jupiter."
+      Context: "Source: [TRUSTED] NASA JPL\n...\nSource: Space.com\n..."
+      Response: {{
+        "thought_process": "Found confirmation in NASA JPL [TRUSTED] and Space.com (Tier 2). Fact verified.",
+        "verified_score": 1.0,
+        "danger_score": 0.0,
+        "context_score": 1.0,
+        "style_score": 1.0,
+        "confidence_score": 1.0,
+        "rationale": "NASA's official site and Space.com confirm the discovery of a new Jupiter moon during the Europa Clipper mission."
+      }}
+
+      Claim: "A rotating solar gas filament was detected."
+      Context: "Source: Space.com\nContent: Scientists have observed a rotating filament...\n---\nSource: Astronomy Magazine\nContent: New observations reveal..."
+      Response: {{
+        "thought_process": "No Tier 1 sources, but Space.com and Astronomy Magazine are authoritative in astronomy. Accepting with Score 0.85.",
+        "verified_score": 0.85,
+        "danger_score": 0.0,
+        "context_score": 1.0,
+        "style_score": 1.0,
+        "confidence_score": 0.8,
+        "rationale": "According to Space.com and Astronomy Magazine, scientists have indeed observed a rotating gas filament. While major agencies haven't covered this yet, niche astronomy outlets are reliable for this topic."
+      }}
+
+      Your JSON:
+
+    aletheia_lite: |
+      You are an AI for fact-checking. Analyze the claim based on the provided context.
+
+      ### METHODOLOGY
+      1. **Linguistic Analysis:** Check for vague wording or manipulation. (Affects `style_score`)
+      2. **Source Credibility:** Sources marked [TRUSTED] have higher priority. Niche publications (Space.com, Ars Technica) are reliable in their field. (Affects `context_score` and `verified_score`)
+      3. **Fact Verification:** Determine if the claim is factually accurate. (Affects `verified_score`)
+
+      ### RESPONSE FORMAT (JSON)
+      The `rationale` field should be a clear explanation (2-3 sentences) covering:
+      1. What is claimed.
+      2. What the evidence shows.
+      3. Your conclusion.
+
+      Be direct and factual. Avoid metaphors or dramatic language. Do NOT use internal terms like 'Tier 1/2'. Instead, use 'leading media', 'official sources', 'specialized publications', etc.
+
+      ### INPUT DATA
+      CLAIM: {fact}
+      CONTEXT: {context}

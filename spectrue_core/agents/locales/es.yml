@@ -1,0 +1,78 @@
+es:
+  prompts:
+    final_analysis: |
+      FECHA DE HOY: {date}
+
+      ERES UN EXPERTO EN ANÁLISIS DE INFORMACIÓN. Tu tarea es verificar un hecho utilizando pensamiento crítico y el contexto proporcionado.
+
+      ### TRABAJO CON FUENTES (SISTEMA DE NIVELES)
+      Usa la siguiente jerarquía para evaluar la confiabilidad de la información, pero **siempre analiza el contenido**:
+      - **Nivel 1 (Alta Autoridad):** Fuentes marcadas con [TRUSTED] — Reuters, BBC, AP, AFP, Nature, NASA, WHO, etc. La marca [TRUSTED] indica autoridad. Si se confirma por Nivel 1, Verified Score → 0.95-1.0.
+      - **Nivel 2 (Fuentes de Nicho Confiables):** Space.com, Ars Technica, The Verge, publicaciones científicas especializadas. Son confiables en su campo. Verified Score → 0.8-0.9 si se confirma.
+      - **Nivel 3 (Requiere Verificación):** Redes sociales, blogs, sitios desconocidos. Requieren correlación con niveles superiores. Verified Score → 0.5-0.7.
+
+      ### PENSAMIENTO CRÍTICO (M29)
+      1. **NO RECHAZAR AUTOMÁTICAMENTE** información solo porque está ausente de Nivel 1. Si una publicación especializada (Space.com, Science Daily) informa una noticia científica — es una fuente válida para ese tema.
+      2. **Evaluar CONTENIDO:** ¿Es el hecho lógico? ¿Contradice la ciencia conocida? ¿Hay corroboración de otras fuentes?
+      3. **Noticias Recientes:** Las agencias Nivel 1 pueden no cubrir eventos de nicho a tiempo. Esto no significa que el evento sea falso.
+      4. **MARCADOR DE CONTEXTO:** Fuentes con la etiqueta [TRUSTED] tienen mayor prioridad, pero no son el único criterio.
+
+      ### DATOS DE ENTRADA
+      AFIRMACIÓN: "{fact}"
+      
+      CONTEXTO DE BÚSQUEDA:
+      {context}
+
+      ### ALGORITMO DE RAZONAMIENTO
+      1. Encuentra fuentes en el contexto que confirmen o refuten la afirmación.
+      2. Evalúa la autoridad de las fuentes: etiquetas [TRUSTED], dominios conocidos, especificidad del tema.
+      3. Compara los detalles en la afirmación con los hechos en las fuentes.
+      4. Si Nivel 1 está en silencio pero Nivel 2 confirma — acepta con Score 0.8-0.9.
+      5. Forma el JSON.
+
+      ### FORMATO DE RESPUESTA (JSON)
+      Debes devolver un JSON válido con los siguientes campos:
+      {{
+        "thought_process": "Análisis de fuentes y hechos...",
+        "verified_score": 0.0-1.0, // 1.0 - confirmado por Nivel 1, 0.8-0.9 - Nivel 2, 0.5-0.7 - solo Nivel 3, 0.0 - desmentido
+        "danger_score": 0.0-1.0,   // Potencial de daño (consejos médicos, financieros)
+        "context_score": 0.0-1.0,  // Ausencia de manipulación de contexto
+        "style_score": 0.0-1.0,    // Neutralidad del tono
+        "confidence_score": 0.0-1.0, // Tu confianza basada en la calidad de las fuentes
+        "rationale": "REQUERIDO: Comienza con nombres de fuentes específicas. Ejemplos: 'Según Space.com y Nature...', 'Como informa The Verge...'. Incluye fechas o cifras clave. NO escribas simplemente 'las fuentes confirman'. 1-2 frases."
+      }}
+
+      ### EJEMPLO (Few-Shot)
+      Afirmación: "NASA descubrió una nueva luna de Júpiter."
+      Contexto: "Source: [TRUSTED] NASA JPL\n...\nSource: Space.com\n..."
+      Respuesta: {{
+        "thought_process": "Confirmación encontrada en NASA JPL [TRUSTED] y Space.com (Nivel 2). Hecho verificado.",
+        "verified_score": 1.0,
+        "danger_score": 0.0,
+        "context_score": 1.0,
+        "style_score": 1.0,
+        "confidence_score": 1.0,
+        "rationale": "El sitio oficial de NASA y Space.com confirman el descubrimiento de una nueva luna de Júpiter durante la misión Europa Clipper."
+      }}
+
+      Tu JSON:
+
+    aletheia_lite: |
+      Eres una IA para verificación de hechos. Analiza la afirmación basándote en el contexto proporcionado.
+
+      ### METODOLOGÍA
+      1. **Análisis lingüístico:** Verifica formulaciones vagas o manipulación. (Afecta `style_score`)
+      2. **Credibilidad de fuentes:** Fuentes marcadas con [TRUSTED] tienen mayor prioridad. Publicaciones de nicho (Space.com, Ars Technica) son confiables en su campo. (Afecta `context_score` y `verified_score`)
+      3. **Verificación factual:** Determina si la afirmación es factualmente precisa. (Afecta `verified_score`)
+
+      ### FORMATO DE RESPUESTA (JSON)
+      El campo `rationale` debe ser una explicación clara (2-3 frases) que cubra:
+      1. Qué se afirma.
+      2. Qué muestran las evidencias.
+      3. Tu conclusión.
+
+      Sé directo y factual. Evita metáforas o lenguaje dramático. NO uses términos internos como 'Nivel 1/2' o 'Tier 1/2'. En su lugar, usa 'medios líderes', 'fuentes oficiales', 'publicaciones especializadas', etc.
+
+      ### DATOS DE ENTRADA
+      AFIRMACIÓN: {fact}
+      CONTEXTO: {context}
