@@ -1,76 +1,46 @@
 # Contributing to Spectrue Engine
 
-First off, thank you for considering contributing to Spectrue Engine! It's people like you that make Spectrue such a great tool.
+Thank you for your interest in contributing to Spectrue Engine! We strictly follow a standardized Git Flow process to ensure code quality and stability.
 
-## 1. Getting Started
+## 🚀 How to Contribute Code (The Right Way)
 
-### Prerequisites
-- Python 3.10+
-- pip
+You **must** use a new branch and a Pull Request (PR) for all changes. Direct commits to `main` are not allowed.
 
-### Installation
-1. Fork the repository on GitHub.
-2. Clone your fork locally:
-   ```bash
-   git clone https://github.com/wivanw/spectrue-engine.git
-   cd spectrue-engine
-   ```
-3. Create a virtual environment:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   ```
-4. Install dependencies in editable mode with dev tools:
-   ```bash
-   pip install -e ".[dev]"
-   ```
-
-## 2. Running Tests
-
-We use `pytest` for testing. Ensure your tests pass before submitting a PR.
+### Step 1. Create a New Branch (Locally)
+In your terminal (inside the project folder):
 
 ```bash
-pytest
+# Create and switch to a new feature branch
+git checkout -b feature/initial-setup
 ```
 
-## 3. Code Style
+**Branch Naming Convention:**
+- `feature/name` - for new features
+- `fix/name` - for bug fixes
+- `refactor/name` - for code restructuring
+- `docs/name` - for documentation updates
 
-- We follow **PEP 8**.
-- We use **Ruff** for linting and formatting.
+### Step 2. Push Your Branch to GitHub
 
-To lint your code:
 ```bash
-ruff check .
+# Push the branch and set upstream tracking
+git push -u origin feature/initial-setup
 ```
 
-To format your code:
-```bash
-ruff format .
-```
+### Step 3. Open a Pull Request (PR)
+1. Go to the [GitHub repository](https://github.com/wivanw/spectrue-engine).
+2. You will see a banner "Compare & pull request". Click it.
+3. Fill in the PR template: describe **what** you changed and **why**.
+4. Request a review from maintainers.
 
-## 4. Submission Guidelines (Pull Requests)
+---
 
-1. **Fork & Branch**: Create a new branch for your feature or fix.
-   ```bash
-   git checkout -b feature/amazing-feature
-   ```
-2. **Commit**: Make your changes. Write clear, concise commit messages.
-   ```bash
-   git commit -m "feat: add amazing feature"
-   ```
-3. **Push**: Push to your fork.
-   ```bash
-   git push origin feature/amazing-feature
-   ```
-4. **Pull Request**: Open a Pull Request from your fork to the `main` branch of `spectrue-engine`.
-   - Describe your changes clearly.
-   - Link any relevant issues (e.g., "Fixes #123").
-   - Ensure checks pass.
+## 🛠️ Development Guidelines
 
-## 5. Reporting Bugs
+1. **Linting:** Run `ruff check .` before committing.
+2. **Testing:** Run `pytest` to ensure no regressions.
+3. **Type Checking:** Run `mypy .` for type safety.
 
-Please use the [Bug Report Template](.github/ISSUE_TEMPLATE/bug_report.md) to report bugs. Include as much detail as possible.
+## 📝 License
 
-## 6. License
-
-By contributing, you agree that your contributions will be licensed under the [AGPLv3 License](LICENSE).
+By contributing, you agree that your contributions will be licensed under the **AGPLv3**.
