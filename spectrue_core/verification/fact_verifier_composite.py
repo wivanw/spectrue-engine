@@ -1,10 +1,9 @@
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
-from spectrue_core.tools.search_tool import WebSearchTool, TRUSTED_DOMAINS
+from spectrue_core.tools.search_tool import WebSearchTool
 from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
-from spectrue_core.verification.trusted_sources import get_domains_for_language, get_trusted_domains_by_lang
+from spectrue_core.verification.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.config import SpectrueConfig
 import asyncio
-import re
 
 RAG_ONLY_COST = 0
 SEARCH_COSTS = {"basic": 80, "advanced": 160}
