@@ -19,7 +19,7 @@
 Text analysis utilities for HTML parsing and sentence segmentation.
 
 This module provides the TextAnalyzer class for:
-- Parsing HTML content into clean text using newspaper3k
+- Parsing HTML content into clean text using trafilatura
 - Segmenting text into sentences using spaCy
 - Extracting metadata (title, authors, publish date)
 """
@@ -31,8 +31,8 @@ from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
 from dataclasses import dataclass
 import spacy
-from newspaper import Article
-from newspaper.configuration import Configuration
+# newspaper3k replaced with trafilatura
+import trafilatura
 
 
 @dataclass
@@ -57,7 +57,7 @@ class TextAnalyzer:
     """
     Analyzes text by parsing HTML and segmenting sentences.
     
-    Uses newspaper3k for HTML parsing and spaCy for sentence segmentation.
+    Uses trafilatura for HTML parsing and spaCy for sentence segmentation.
     Lazy-loads spaCy model to avoid startup delays.
     Supports 8 languages with lightweight models.
     """
@@ -160,11 +160,11 @@ class TextAnalyzer:
     
     def parse_html(self, html_content: str, language: str = "en") -> ParsedText:
         """
-        Parse HTML content into clean text using newspaper3k.
+        Parse HTML content into clean text using trafilatura.
         
         Args:
-            html_content: Raw HTML string (from Readability.js)
-            language: Language code for parsing (default: en)
+            html_content: Raw HTML string
+            language: ISO language code
             
         Returns:
             ParsedText object with extracted text and metadata
@@ -178,36 +178,53 @@ class TextAnalyzer:
         # M29: Preserve links before parsing
         html_with_links = self._preserve_links_in_html(html_content)
         
-        # Configure newspaper3k for string mode
-        config = Configuration()
-        config.language = language
-        config.fetch_images = False
-        config.memoize_articles = False
-        
-        # Create article from HTML string
-        article = Article("", config=config)
-        article.set_html(html_with_links)
-        
         try:
-            article.parse()
+            # Use trafilatura for extraction
+            text = trafilatura.extract(
+                html_with_links,
+                include_comments=False,
+                include_tables=True,
+                include_links=True,
+                include_images=False,
+                no_fallback=False
+            )
+            
+            # Extract metadata separately
+            metadata = trafilatura.extract_metadata(html_with_links)
+            
+            if not text or not text.strip():
+                raise ValueError("Parsed text is empty")
+            
+            title = None
+            authors = None
+            publish_date = None
+            
+            if metadata:
+                title = getattr(metadata, 'title', None)
+                author = getattr(metadata, 'author', None)
+                if author:
+                    authors = [author] if isinstance(author, str) else list(author)
+                date_str = getattr(metadata, 'date', None)
+                if date_str:
+                    try:
+                        publish_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    except (ValueError, TypeError):
+                        pass
+            
+            return ParsedText(
+                text=text.strip(),
+                title=title,
+                authors=authors,
+                publish_date=publish_date
+            )
+        except ValueError:
+            raise
         except Exception as e:
             raise ValueError(f"Failed to parse HTML: {e}")
-        
-        # Extract text and metadata
-        text = article.text
-        if not text or not text.strip():
-            raise ValueError("Parsed text is empty")
-        
-        return ParsedText(
-            text=text.strip(),
-            title=article.title if article.title else None,
-            authors=article.authors if article.authors else None,
-            publish_date=article.publish_date if article.publish_date else None
-        )
 
     def fetch_url(self, url: str, language: str = "en") -> ParsedText:
         """
-        Fetch and parse content from a URL using newspaper3k.
+        Fetch and parse content from a URL using trafilatura.
         
         Args:
             url: URL to fetch
@@ -221,31 +238,20 @@ class TextAnalyzer:
         """
         if not url:
             raise ValueError("URL cannot be empty")
-            
-        config = Configuration()
-        config.language = language
-        config.fetch_images = False
-        config.memoize_articles = False
-        
-        article = Article(url, config=config)
         
         try:
-            article.download()
-            article.parse()
+            # Fetch using trafilatura
+            downloaded = trafilatura.fetch_url(url)
+            if not downloaded:
+                raise ValueError(f"Failed to download URL: {url}")
+            
+            # Parse the downloaded content
+            return self.parse_html(downloaded, language=language)
+        except ValueError:
+            raise
         except Exception as e:
             raise ValueError(f"Failed to fetch/parse URL: {e}")
-            
-        text = article.text
-        if not text or not text.strip():
-            raise ValueError("Parsed text is empty")
-            
-        return ParsedText(
-            text=text.strip(),
-            title=article.title if article.title else None,
-            authors=article.authors if article.authors else None,
-            publish_date=article.publish_date if article.publish_date else None
-        )
-    
+
     def segment_sentences(self, text: str, language: str = "en") -> List[SentenceSegment]:
         """
         Segment text into sentences using spaCy.
@@ -380,7 +386,7 @@ class TextAnalyzer:
                     seen_urls.add(url)
                     all_sources.append(source)
         
-        # Check if any result used RAG cache (search_cache_hit)
+        # Check if any result used search cache
         search_cache_hit = any(r.get("search_cache_hit", False) for r in results)
             
         return {
