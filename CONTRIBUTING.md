@@ -2,6 +2,51 @@
 
 First off, thank you for considering contributing to Spectrue Engine! It's people like you that make Spectrue such a great tool.
 
+## 🚀 The Golden Rule: Git Flow & Pull Requests
+
+To maintain code quality and stability, we follow a strict process:
+**Direct commits to `main` are NOT allowed.** You must use a new branch and a Pull Request.
+
+### How to Contribute (Step-by-Step)
+
+**1. Create a New Branch**  
+Always create a new branch for your work. Do not work on `main`.
+
+```bash
+# Good examples:
+git checkout -b feature/search-optimization
+git checkout -b fix/api-timeout
+git checkout -b docs/update-readme
+```
+
+**Branch Naming Convention:**
+- `feature/name` - for new features
+- `fix/name` - for bug fixes
+- `refactor/name` - for code restructuring
+- `docs/name` - for documentation updates
+
+**2. Commit Your Changes**  
+Write clear, concise commit messages (Conventional Commits preferred).
+
+```bash
+git commit -m "feat: implement vector verification logic"
+```
+
+**3. Push to GitHub**  
+Push your branch to the remote repository.
+
+```bash
+git push -u origin feature/search-optimization
+```
+
+**4. Create a Pull Request (PR)**
+- Go to the repository on GitHub.
+- Click "Compare & pull request".
+- Describe **what** you changed and **why**.
+- Request a review.
+
+---
+
 ## 1. Getting Started
 
 ### Prerequisites
@@ -9,8 +54,8 @@ First off, thank you for considering contributing to Spectrue Engine! It's peopl
 - pip
 
 ### Installation
-1. Fork the repository on GitHub.
-2. Clone your fork locally:
+1. Fork the repository on GitHub (if you don't have write access).
+2. Clone the repository locally:
    ```bash
    git clone https://github.com/wivanw/spectrue-engine.git
    cd spectrue-engine
@@ -25,52 +70,35 @@ First off, thank you for considering contributing to Spectrue Engine! It's peopl
    pip install -e ".[dev]"
    ```
 
-## 2. Running Tests
+## 2. Code Style & Quality
 
-We use `pytest` for testing. Ensure your tests pass before submitting a PR.
+We enforce high standards for code quality.
+
+- **Linting:** We use [Ruff](https://github.com/astral-sh/ruff).
+  ```bash
+  ruff check .
+  ```
+- **Formatting:**
+  ```bash
+  ruff format .
+  ```
+- **Type Checking:** We use `mypy`.
+  ```bash
+  mypy .
+  ```
+
+## 3. Running Tests
+
+Ensure all tests pass before submitting your PR.
 
 ```bash
 pytest
 ```
 
-## 3. Code Style
+## 4. Reporting Bugs
 
-- We follow **PEP 8**.
-- We use **Ruff** for linting and formatting.
+Please use the [Bug Report Template](.github/ISSUE_TEMPLATE/bug_report.md) to report bugs. Include as much detail as possible (logs, reproduction steps).
 
-To lint your code:
-```bash
-ruff check .
-```
+## 5. License
 
-To format your code:
-```bash
-ruff format .
-```
-
-## 4. Submission Guidelines (Pull Requests)
-
-1. **Fork & Branch**: Create a new branch for your feature or fix.
-   ```bash
-   git checkout -b feature/amazing-feature
-   ```
-2. **Commit**: Make your changes. Write clear, concise commit messages.
-   ```bash
-   git commit -m "feat: add amazing feature"
-   ```
-3. **Push**: Push to your fork.
-   ```bash
-   git push origin feature/amazing-feature
-   ```
-4. **Pull Request**: Open a Pull Request from your fork to the `main` branch of `spectrue-engine`.
-   - Describe your changes clearly.
-   - Link any relevant issues (e.g., "Fixes #123").
-   - Ensure checks pass.
-
-## 5. Reporting Bugs
-
-Please use the [Bug Report Template](.github/ISSUE_TEMPLATE/bug_report.md) to report bugs. Include as much detail as possible.
-
-## 6. License
-
-By contributing, you agree that your contributions will be licensed under the [AGPLv3 License](LICENSE).
+By contributing, you agree that your contributions will be licensed under the **GNU Affero General Public License v3 (AGPLv3)**.
