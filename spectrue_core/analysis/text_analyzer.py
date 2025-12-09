@@ -19,7 +19,7 @@
 Text analysis utilities for HTML parsing and sentence segmentation.
 
 This module provides the TextAnalyzer class for:
-- Parsing HTML content into clean text using newspaper3k
+- Parsing HTML content into clean text using trafilatura
 - Segmenting text into sentences using spaCy
 - Extracting metadata (title, authors, publish date)
 """
@@ -31,8 +31,8 @@ from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
 from dataclasses import dataclass
 import spacy
-from newspaper import Article
-from newspaper.configuration import Configuration
+# newspaper3k replaced with trafilatura
+import trafilatura
 
 
 @dataclass
@@ -57,7 +57,7 @@ class TextAnalyzer:
     """
     Analyzes text by parsing HTML and segmenting sentences.
     
-    Uses newspaper3k for HTML parsing and spaCy for sentence segmentation.
+    Uses trafilatura for HTML parsing and spaCy for sentence segmentation.
     Lazy-loads spaCy model to avoid startup delays.
     Supports 8 languages with lightweight models.
     """
@@ -380,7 +380,7 @@ class TextAnalyzer:
                     seen_urls.add(url)
                     all_sources.append(source)
         
-        # Check if any result used RAG cache (search_cache_hit)
+        # Check if any result used search cache
         search_cache_hit = any(r.get("search_cache_hit", False) for r in results)
             
         return {

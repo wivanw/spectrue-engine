@@ -22,7 +22,7 @@ from pathlib import Path
 _PROMPTS = {}
 
 # Use path relative to this file
-AGENTS_ROOT = Path(__file__).resolve().parents[1]
+AGENTS_ROOT = Path(__file__).resolve().parent
 LOCALES_PATH = AGENTS_ROOT / 'locales'
 
 
