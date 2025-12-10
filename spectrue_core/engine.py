@@ -1,7 +1,7 @@
 # Simplified engine.py without TextAnalyzer dependency
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from langdetect import detect, DetectorFactory, LangDetectException
 import re
 

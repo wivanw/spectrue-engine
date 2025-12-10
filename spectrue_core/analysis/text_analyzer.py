@@ -24,10 +24,7 @@ This module provides the TextAnalyzer class for:
 - Extracting metadata (title, authors, publish date)
 """
 
-from spectrue_core.verification.fact_verifier_composite import FactVerifierComposite
-import logging
-import asyncio
-from typing import Dict, Any, List, Optional, Callable
+from typing import List, Optional, Callable
 from datetime import datetime
 from dataclasses import dataclass
 import spacy
