@@ -46,7 +46,15 @@ class FactCheckerAgent:
         c = max(1, min(c, 16))
         self._sem = asyncio.Semaphore(c)
 
-    async def analyze(self, fact: str, context: str, gpt_model: str, lang: str, analysis_mode: str = "general") -> dict:
+    async def analyze(
+        self, 
+        fact: str, 
+        context: str, 
+        gpt_model: str, 
+        lang: str, 
+        analysis_mode: str = "general",
+        search_mode: str = "basic"
+    ) -> dict:
         """Анализирует факт на основе контекста и возвращает структурированный JSON."""
 
         prompt_key = 'prompts.aletheia_lite' if analysis_mode == 'lite' else 'prompts.final_analysis'
@@ -61,8 +69,13 @@ class FactCheckerAgent:
         safe_context = f"<context>{sanitize_input(context)}</context>"
         
         current_date = datetime.now().strftime("%Y-%m-%d")
-        # date kwarg is ignored if not present in template, safe to add
-        prompt = prompt_template.format(fact=safe_fact, context=safe_context, date=current_date)
+        # M39: Pass search_mode to prompt for smart recommendations
+        prompt = prompt_template.format(
+            fact=safe_fact, 
+            context=safe_context, 
+            date=current_date,
+            search_mode=search_mode
+        )
         
         # Debug: Log the prompt
         print(f"--- Prompt for {gpt_model} ({lang}) ---")

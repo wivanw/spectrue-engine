@@ -82,8 +82,11 @@ class FactVerifierComposite:
         return enriched
 
     async def _get_final_analysis(self, fact: str, context: str, sources_list: list, gpt_model: str, cost: int,
-                                  lang: str, analysis_mode: str = "general") -> dict:
-        analysis_result = await self.agent.analyze(fact, context, gpt_model, lang, analysis_mode)
+                                  lang: str, analysis_mode: str = "general", search_type: str = "basic") -> dict:
+        # M39: Pass search_mode to LLM for smart Advanced Search recommendations
+        analysis_result = await self.agent.analyze(
+            fact, context, gpt_model, lang, analysis_mode, search_mode=search_type
+        )
         
         enriched_sources = self._enrich_sources_with_trust(sources_list)
         analysis_result["sources"] = enriched_sources
@@ -134,7 +137,7 @@ class FactVerifierComposite:
             model_cost = MODEL_COSTS.get(gpt_model, 20)
             return await self._get_final_analysis(
                 fact, context_to_use, sources_to_use[:10], gpt_model,
-                model_cost, lang, analysis_mode
+                model_cost, lang, analysis_mode, search_type
             )
 
         # Generate search queries
@@ -206,7 +209,7 @@ class FactVerifierComposite:
             model_cost = MODEL_COSTS.get(gpt_model, 20)
             return await self._get_final_analysis(
                 fact, tier1_context, tier1_sources[:10], gpt_model,
-                search_cost + model_cost, lang, analysis_mode
+                search_cost + model_cost, lang, analysis_mode, search_type
             )
 
         # Deep Dive (EN + Native)
@@ -255,5 +258,5 @@ class FactVerifierComposite:
         
         return await self._get_final_analysis(
             fact, all_context, unique_sources[:10], gpt_model,
-            total_cost, lang, analysis_mode
+            total_cost, lang, analysis_mode, search_type
         )
