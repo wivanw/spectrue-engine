@@ -629,7 +629,7 @@ class FactCheckerAgent:
             )
             return result
 
-        # Single LLM call: queries + claim decomposition + Tavily country option (performance).
+        # Single LLM call: queries + claim decomposition.
         prompt_queries = f"""Decompose the claim into a structured object and generate exactly {len(languages_needed)} search queries to fact-check it.
 
 Rules:
@@ -645,10 +645,6 @@ Rules:
    - object
 5) If where/when/by_whom are null, queries MUST include contextual probes (e.g., "venue security", "organizers said", "when did it happen").
 6) 5-12 words per query, no URLs.
-7) Decide if a Tavily country filter would help:
-   - Only set when the claim is clearly tied to a specific country (explicit country/city, or clearly domestic to one country).
-   - IMPORTANT: Do NOT set a country just because the topic mentions "Ukraine", "Ukrainian", or "Ukrainian flag".
-   - Use an English country name, not ISO codes like "UA". Default is null.
 
 LANGUAGES NEEDED:
 {language_instructions}
@@ -663,8 +659,7 @@ Output JSON only:
     "when": null,
     "by_whom": null
   }},
-  "queries": [{", ".join([f'"{lang[1].lower()} query"' for lang in languages_needed])}],
-  "tavily_country": null
+  "queries": [{", ".join([f'"{lang[1].lower()} query"' for lang in languages_needed])}]
 }}
 
 CLAIM: {clean_fact}
@@ -680,16 +675,6 @@ CONTEXT: {clean_context if clean_context else "None"}"""
             claim_decomp_raw = result_queries.get("claim")
             claim_decomp = self._normalize_claim_decomposition(claim_decomp_raw, fact=fact)
             self.last_query_meta = {"claim_decomposition": claim_decomp}
-
-            raw_country = result_queries.get("tavily_country", None)
-            if isinstance(raw_country, str):
-                c = raw_country.strip()
-                if c and not re.fullmatch(r"[A-Za-z]{2}", c) and len(c) <= 64:
-                    self.last_query_meta["tavily_country"] = c
-                    if is_local_run():
-                        logger.info("[M31] Suggested Tavily country filter: %s", c)
-                    else:
-                        logger.debug("[M31] Suggested Tavily country filter: %s", c)
             
             if queries and len(queries) >= 1:
                 # Filter out URLs and too-short queries

@@ -80,10 +80,6 @@ class WebSearchTool:
         self.last_cache_hit: bool = False
         self.last_search_meta: dict = {}
 
-    def country_for_lang(self, lang: str | None) -> str | None:
-        """Deprecated: do not infer `country` from language."""
-        return None
-
     def _normalize_params(self, search_depth: str, max_results: int) -> Tuple[str, int]:
         depth = (search_depth or "basic").lower()
         if depth not in ("basic", "advanced"):
@@ -467,7 +463,6 @@ class WebSearchTool:
         *,
         ttl: int | None,
         domains: list[str] | None = None,
-        country: str | None = None,
     ) -> dict:
         raw_mode = self._raw_content_mode(depth=depth, domains=domains)
         effective_limit = min(limit, self._raw_max_results()) if raw_mode else limit
@@ -490,11 +485,6 @@ class WebSearchTool:
         if raw_mode:
             payload["include_raw_content"] = True
 
-        if country and isinstance(country, str):
-            c = country.strip()
-            if c and not re.fullmatch(r"[A-Za-z]{2}", c) and len(c) <= 64:
-                payload["country"] = c
-        
         url = "https://api.tavily.com/search"
         async with self._sem:
             Trace.event("tavily.request", {"url": url, "payload": payload})
@@ -576,7 +566,6 @@ class WebSearchTool:
         ttl: int | None = None,
         domains: list[str] | None = None,
         lang: str | None = None,
-        country: str | None = None,
     ) -> tuple[str, list[dict]]:
         """Search with Tavily and return both context text and structured sources.
         
@@ -603,7 +592,6 @@ class WebSearchTool:
         depth, limit = self._normalize_params(search_depth, max_results)
         raw_mode = self._raw_content_mode(depth=depth, domains=domains)
         effective_limit = min(limit, self._raw_max_results()) if raw_mode else limit
-        country = country
         Trace.event(
             "tavily.search.start",
             {
@@ -612,19 +600,13 @@ class WebSearchTool:
                 "limit": effective_limit,
                 "raw_content_mode": bool(raw_mode),
                 "domains_count": len(domains or []),
-                "country": country,
             },
         )
-        if country:
-            if is_local_run():
-                logger.info("[Tavily] Using country filter: %s", country)
-            else:
-                logger.debug("[Tavily] Using country filter: %s", country)
         domains_key = ""
         if domains:
             # Cache key must reflect domain filtering; keep it stable & bounded.
             domains_key = ",".join(sorted(set(domains)))[:2000]
-        cache_key = f"{q}|{depth}|{effective_limit}|{int(bool(raw_mode))}|{country or ''}|{domains_key}"
+        cache_key = f"{q}|{depth}|{effective_limit}|{int(bool(raw_mode))}|{domains_key}"
 
         effective_ttl = ttl if ttl is not None else self.ttl
         self.last_cache_hit = False
@@ -643,7 +625,6 @@ class WebSearchTool:
                         "limit": effective_limit,
                         "raw_content_mode": bool(raw_mode),
                         "domains_count": len(domains or []),
-                        "country": country,
                         "context_chars": len(context_str or ""),
                         "sources_count": len(sources_list or []),
                     },
@@ -656,7 +637,6 @@ class WebSearchTool:
                         "limit": effective_limit,
                         "raw_content_mode": bool(raw_mode),
                         "domains_count": len(domains or []),
-                        "country": country,
                         "cache_hit": True,
                         "context_chars": len(context_str or ""),
                         "sources_count": len(sources_list or []),
@@ -681,7 +661,6 @@ class WebSearchTool:
                 "limit": effective_limit,
                 "raw_content_mode": bool(raw_mode),
                 "domains_count": len(domains or []),
-                "country": country,
             },
         )
 
@@ -694,7 +673,6 @@ class WebSearchTool:
                 effective_limit,
                 ttl=ttl,
                 domains=domains,
-                country=country,
             )
             results_raw = response.get('results', [])
             logger.debug("[Tavily] Got %d raw results", len(results_raw))
@@ -722,7 +700,6 @@ class WebSearchTool:
                 **self._detect_time_filters(ttl=ttl, query=q),
                 "raw_content_mode": raw_mode,
                 "raw_max_results": self._raw_max_results() if raw_mode else None,
-                "country": country,
                 **quality,
             }
             
@@ -781,7 +758,6 @@ class WebSearchTool:
                     "limit": effective_limit,
                     "raw_content_mode": bool(raw_mode),
                     "domains_count": len(domains or []),
-                    "country": country,
                     "cache_hit": bool(self.last_cache_hit),
                     "context_chars": len(context),
                     "sources_count": len(sources_list),
@@ -803,7 +779,6 @@ class WebSearchTool:
                     "limit": effective_limit if "effective_limit" in locals() else None,
                     "raw_content_mode": bool(raw_mode) if "raw_mode" in locals() else None,
                     "domains_count": len(domains or []),
-                    "country": country,
                     "error": str(e),
                 },
             )

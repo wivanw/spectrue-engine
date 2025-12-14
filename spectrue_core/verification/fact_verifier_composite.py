@@ -1368,11 +1368,6 @@ class FactVerifierComposite:
         except Exception as e:
             logger.warning("[Waterfall] Failed to generate queries: %s. Using fallback.", e)
 
-        tavily_country = None
-        try:
-            tavily_country = (self.agent.last_query_meta or {}).get("tavily_country")
-        except Exception:
-            tavily_country = None
         claim_decomposition = None
         try:
             claim_decomposition = (self.agent.last_query_meta or {}).get("claim_decomposition")
@@ -1384,11 +1379,6 @@ class FactVerifierComposite:
                 logger.info("[Claim] Decomposition: %s", claim_decomposition)
             else:
                 logger.debug("[Claim] Decomposition: %s", claim_decomposition)
-        if tavily_country:
-            if is_local_run():
-                logger.info("[Waterfall] Tavily country filter enabled: %s", tavily_country)
-            else:
-                logger.debug("[Waterfall] Tavily country filter enabled: %s", tavily_country)
 
         # Normalize queries (used by Oracle and search providers) to keep payloads valid and deterministic.
         search_queries = [self._normalize_search_query(q) for q in (search_queries or [])]
@@ -1507,7 +1497,6 @@ class FactVerifierComposite:
                         "depth": search_type,
                         "ttl": ttl,
                         "domains_count": len(tier1_domains or []),
-                        "country": tavily_country,
                     },
                 )
                 tier1_context, tier1_sources = await self.web_search_tool.search(
@@ -1516,7 +1505,6 @@ class FactVerifierComposite:
                     ttl=ttl,
                     domains=tier1_domains,
                     lang=search_lang,
-                    country=tavily_country,
                 )
                 Trace.event(
                     "search.tavily.done",
@@ -1619,7 +1607,6 @@ class FactVerifierComposite:
                         "depth": search_type,
                         "ttl": ttl,
                         "domains_count": len(tier1_domains or []),
-                        "country": tavily_country,
                         "anchored_refine": True,
                     },
                 )
@@ -1629,7 +1616,6 @@ class FactVerifierComposite:
                     ttl=ttl,
                     domains=tier1_domains,
                     lang=search_lang,
-                    country=tavily_country,
                 )
                 Trace.event(
                     "search.tavily.done",
@@ -1723,7 +1709,6 @@ class FactVerifierComposite:
                             "depth": "basic",
                             "ttl": ttl,
                             "domains_count": 0,
-                            "country": tavily_country,
                             "fallback": True,
                         },
                     )
@@ -1733,7 +1718,6 @@ class FactVerifierComposite:
                         ttl=ttl,
                         domains=None,
                         lang=search_lang,
-                        country=tavily_country,
                     )
                     Trace.event(
                         "search.tavily.done",
