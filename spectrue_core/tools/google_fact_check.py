@@ -17,8 +17,10 @@
 
 import httpx
 import logging
+import re
 from typing import Optional, Dict, Any
 from spectrue_core.config import SpectrueConfig
+from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +29,25 @@ class GoogleFactCheckTool:
 
     def __init__(self, config: SpectrueConfig = None):
         if config:
-            self.api_key = config.google_search_api_key
+            # Prefer dedicated Fact Check key. Fallback to the CSE key if user uses one key for both APIs.
+            self.api_key = config.google_fact_check_key or config.google_search_api_key
         else:
-             # Fallback (optional, better to require config)
-             self.api_key = None
+            self.api_key = None
+        self.client = httpx.AsyncClient(
+            timeout=10.0,
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+
+    def _normalize_query(self, query: str) -> str:
+        q = (query or "").strip()
+        q = re.sub(r"http\\S+", "", q)
+        q = re.sub(r"@\\w+", "", q)
+        q = re.sub(r"#\\w+", "", q)
+        q = re.sub(r"\\s+", " ", q).strip()
+        if len(q) > 256:
+            q = q[:256].strip()
+        return q
 
     async def search(self, query: str, lang: str = "en") -> Optional[Dict[str, Any]]:
         """
@@ -38,30 +55,60 @@ class GoogleFactCheckTool:
         Returns a FactVerificationResult-compatible dictionary if a high-confidence match is found.
         """
         if not self.api_key:
-            logger.warning("GOOGLE_FACT_CHECK_KEY is not set. Skipping Google Fact Check.")
+            logger.warning("[Google FC] Key is not set. Skipping Google Fact Check.")
+            return None
+
+        q = self._normalize_query(query)
+        if len(q) < 3:
             return None
 
         try:
-            logger.info(f"[Google FC] Querying: '{query[:100]}...' (lang={lang})")
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    self.BASE_URL,
-                    params={
-                        "query": query,
-                        "key": self.api_key,
-                        "languageCode": lang,
-                        "pageSize": 1
-                    },
-                    timeout=10.0
-                )
-                response.raise_for_status()
-                data = response.json()
+            lang_norm = (lang or "").strip()
+            logger.info("[Google FC] Querying: '%s...' (lang=%s)", q[:100], lang_norm or "none")
+
+            base_params = {
+                "query": q,
+                "key": self.api_key,
+                "pageSize": 5,
+            }
+
+            # First try: respect language filter if provided; then fallback to global search.
+            params = dict(base_params)
+            if lang_norm:
+                params["languageCode"] = lang_norm
+
+            Trace.event("google_fact_check.request", {"url": self.BASE_URL, "params": params})
+            response = await self.client.get(self.BASE_URL, params=params)
+            Trace.event(
+                "google_fact_check.response",
+                {
+                    "status_code": response.status_code,
+                    "text": response.text,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
                 
             logger.info(f"[Google FC] Response status: {response.status_code}")
             claims = data.get("claims", [])
             logger.info(f"[Google FC] Found {len(claims)} claim(s)")
             
+            if not claims and lang_norm:
+                logger.info("[Google FC] No results for lang=%s, retrying without language filter", lang_norm)
+                Trace.event("google_fact_check.request", {"url": self.BASE_URL, "params": base_params})
+                response2 = await self.client.get(self.BASE_URL, params=base_params)
+                Trace.event(
+                    "google_fact_check.response",
+                    {
+                        "status_code": response2.status_code,
+                        "text": response2.text,
+                    },
+                )
+                response2.raise_for_status()
+                data = response2.json()
+                claims = data.get("claims", [])
+                logger.info("[Google FC] Found %d claim(s) in global search", len(claims))
+
             if not claims:
                 return None
 
@@ -126,8 +173,17 @@ class GoogleFactCheckTool:
                 "rgba": [danger_score, verified_score, 1.0, 1.0]
             }
 
+        except httpx.HTTPStatusError as e:
+            status = getattr(e.response, "status_code", None)
+            body = ""
+            try:
+                body = (e.response.text or "")[:300]
+            except Exception:
+                body = ""
+            logger.error("[Google FC] ✗ HTTP status error: %s (%s) body=%s", e, status, body)
+            return None
         except httpx.HTTPError as e:
-            logger.error(f"[Google FC] ✗ HTTP error: {e}")
+            logger.error("[Google FC] ✗ HTTP error: %s", e)
             return None
         except Exception as e:
             logger.exception(f"[Google FC] ✗ Unexpected error: {e}")

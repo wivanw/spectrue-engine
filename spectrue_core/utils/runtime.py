@@ -15,16 +15,22 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Spectrue Engine. If not, see <https://www.gnu.org/licenses/>.
 
-"""
-Spectrue Core Engine
-====================
+import os
 
-The open-source AI fact-checking core.
-"""
 
-__version__ = "1.2.0"
+def is_local_run() -> bool:
+    """
+    Best-effort detection of local/dev runs without requiring extra configuration.
+    Prefer emulator flags because they are already part of local setup.
+    """
+    if os.getenv("FIREBASE_AUTH_EMULATOR_HOST"):
+        return True
+    if os.getenv("FIRESTORE_EMULATOR_HOST"):
+        return True
 
-# Versioning for saved checks (SaaS-friendly reproducibility).
-# When changing prompts/strategy, bump these strings.
-PROMPT_VERSION = "fc_agent_v3"
-SEARCH_STRATEGY_VERSION = "waterfall_v2"
+    env = (os.getenv("SPECTRUE_ENV") or os.getenv("ENV") or "").strip().lower()
+    if env in ("local", "dev", "development"):
+        return True
+
+    return False
+

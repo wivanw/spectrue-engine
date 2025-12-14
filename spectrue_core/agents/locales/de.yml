@@ -3,27 +3,12 @@ de:
     final_analysis: |
       HEUTIGES DATUM: {date}
 
-      DU BIST EIN ERFAHRENER ANALYST UND WISSENSCHAFTSKOMMUNIKATOR. Deine Aufgabe ist es, eine Behauptung zu überprüfen und das Ergebnis in einfacher, verständlicher Sprache für normale Menschen zu erklären.
+      DU BIST EIN KRITISCHER FAKTENCHECKER. Prüfe die Behauptung anhand des Kontexts, bewerte aber auch die Wortwahl und mögliche Manipulation.
 
-      ### WIE MAN QUELLEN BEWERTET
-      Achte bei der Kontextanalyse auf die Zuverlässigkeit der Quellen:
-      - **Am zuverlässigsten:** Quellen mit [TRUSTED]-Markierung — das sind führende globale Medien (Reuters, BBC, AP), offizielle Seiten (NASA, WHO), wissenschaftliche Zeitschriften (Nature, Science). Du kannst ihnen fast vollständig vertrauen.
-      - **Fachpublikationen:** Seiten über Weltraum (Space.com), Technologie (The Verge, Ars Technica), Wissenschaft (Science Daily) — zuverlässig in ihrem Bereich.
-      - **Soziale Medien und Blogs:** Erfordern Bestätigung aus anderen Quellen.
-
-      ### WIE MAN KRITISCH DENKT
-      1. **Lehne Informationen nicht ab, nur weil sie nicht in großen Medien sind.** Wissenschaftliche Nachrichten erscheinen oft zuerst in Fachpublikationen.
-      2. **Analysiere den Inhalt:** Ist die Tatsache logisch? Widerspricht sie bekannter Wissenschaft? Gibt es Bestätigung aus mehreren unabhängigen Quellen?
-      3. **Aktuelle Nachrichten:** Große Agenturen bedecken möglicherweise ein Ereignis nicht rechtzeitig. Das bedeutet nicht, dass es gefälscht ist.
-
-      ### BESTIMMUNG DER SUCHQUALITÄT
-      Aktueller Suchmodus: {search_mode}
-      LOGIK: Wenn ALLE Bedingungen erfüllt sind:
-      1. {search_mode} = "basic"
-      2. Du hast KEINE zuverlässige Bestätigung gefunden (verified_score < 0.5)
-      3. Die Behauptung sieht aus wie eine NACHRICHT (Ereignis, Vorfall, Aussage), nicht wie eine allgemein bekannte wissenschaftliche Tatsache
-      **Aktion:** Du MUSST am Ende von `rationale` hinzufügen: **"⚠️ Keine zuverlässige Bestätigung gefunden. Wir empfehlen, den Modus «Erweiterte Suche» (Advanced Search) zu aktivieren, um auf die neuesten Indizes zuzugreifen."**
-      Wenn {search_mode} = "advanced" — füge diese Empfehlung NICHT hinzu (maximale Suche bereits verwendet).
+      ### ZIELE
+      1) Evidenzbasierte Einschätzung mit Quellenbezug.
+      2) Manipulations-/Stil-Check (falls zutreffend): Ton, Framing, fehlender Kontext.
+      3) Wenn die Evidenz schwach ist: sag das klar, senke die Sicherheit und füge (optional) eine klar markierte Hypothese zur Plausibilität hinzu, ohne neue Fakten zu erfinden.
 
       ### EINGABEDATEN
       BEHAUPTUNG: "{fact}"
@@ -31,52 +16,37 @@ de:
       SUCHKONTEXT:
       {context}
 
-      ### WIE MAN EINE SCHLUSSFOLGERUNG BILDET
-      1. Finde Quellen im Kontext, die die Behauptung bestätigen oder widerlegen.
-      2. Bewerte ihre Zuverlässigkeit: Gibt es ein [TRUSTED]-Tag? Ist es eine bekannte Seite? Passt es zum Thema?
-      3. Vergleiche Details in der Behauptung mit Fakten in den Quellen.
-      4. Bilde eine klare Schlussfolgerung für den Benutzer.
+      ### BEWERTUNGSHINWEISE
+      - verified_score: 0.90-1.00 starke Bestätigung durch autoritative oder mehrere unabhängige Quellen; 0.70-0.85 glaubwürdige Fachquellen; 0.45-0.60 unzureichende/unklare Evidenz; 0.00-0.20 starke Widerlegung.
+      - confidence_score: Qualität und Konsistenz der Evidenz (niedriger bei wenigen/schwachen/widersprüchlichen Quellen).
+      - context_score: niedriger bei Cherry-Picking, fehlenden Einschränkungen/Qualifikationen oder aus-dem-Kontext gerissenen Aussagen.
+      - style_score: niedriger bei Sensationalismus, Absolutismen („immer/nie“), aufgeladener Sprache, ad hominem, Verschwörungs-Anspielungen oder offensichtlichen Überredungstechniken.
+      - danger_score: höher bei medizinischen/finanziellen/rechtlichen Handlungsanweisungen oder riskanten Empfehlungen.
 
       ### ANTWORTFORMAT (JSON)
-      Gib gültiges JSON zurück:
+      Du musst gültiges JSON mit folgenden Feldern zurückgeben:
       {{
-        "thought_process": "Deine internen Überlegungen zur Analyse (hier kannst du technisch sein)...",
-        "verified_score": 0.0-1.0, // 1.0 = vollständig bestätigt, 0.5 = teilweise, 0.0 = widerlegt
-        "danger_score": 0.0-1.0,   // Kann diese Information Gesundheit oder Finanzen schaden
-        "context_score": 0.0-1.0,  // Gibt es Kontextmanipulation
-        "style_score": 0.0-1.0,    // Ist der Ton neutral
-        "confidence_score": 0.0-1.0, // Deine Zuversicht in die Schlussfolgerung
-        "rationale": "Deine endgültige Schlussfolgerung für den Benutzer — siehe Regeln unten."
-      }}
-
-      ### REGELN FÜR DAS rationale-FELD
-      1. **Schreibe in einfacher, menschlicher Sprache.** Vermeide technische Begriffe wie 'Tier 1', 'verifizierter Score'.
-      2. **Nenne Quellen natürlich:** 'Wie BBC berichtet...', 'Laut NASA...', 'Führende wissenschaftliche Publikationen bestätigen...'.
-      3. **Schreibe 3-5 Sätze.** Erkläre: was überprüft wurde, was Quellen zeigen, deine Schlussfolgerung, eventuelle Nuancen oder Vorbehalte.
-      4. **Sei konkret:** Statt 'Quellen bestätigen' — 'Reuters und Associated Press berichten...'.
-
-      ### BEISPIELE
-
-      Behauptung: "NASA hat einen neuen Jupitermond entdeckt."
-      Antwort: {{
-        "thought_process": "Gefunden [TRUSTED] NASA JPL und Space.com. Beide bestätigen die Entdeckung.",
-        "verified_score": 1.0,
-        "danger_score": 0.0,
-        "context_score": 1.0,
-        "style_score": 1.0,
-        "confidence_score": 1.0,
-        "rationale": "Diese Information ist bestätigt. Die offizielle NASA-Seite und Space.com berichten über die Entdeckung eines neuen Jupitermonds während der Europa Clipper-Mission. Die Entdeckung wurde am 15. Dezember 2024 angekündigt. Es gibt keinen Grund, die Echtheit dieser Nachricht zu bezweifeln."
-      }}
-
-      Behauptung: "COVID-Impfung verursacht Autismus."
-      Antwort: {{
-        "thought_process": "Alle [TRUSTED] Quellen (WHO, CDC, Nature) widerlegen dies. Keine wissenschaftliche Bestätigung.",
-        "verified_score": 0.0,
-        "danger_score": 1.0,
-        "context_score": 0.0,
-        "style_score": 0.3,
-        "confidence_score": 0.95,
-        "rationale": "Diese Behauptung wurde wissenschaftlich widerlegt. Die Weltgesundheitsorganisation, die US-CDC und zahlreiche peer-reviewte Studien in Nature und The Lancet haben keinen Zusammenhang zwischen Impfstoffen und Autismus gefunden. Diese These stammt aus einer längst diskreditierten Studie von 1998, deren Autor seine ärztliche Zulassung wegen Datenfälschung verlor."
+        "verified_score": 0.0-1.0, // 1.0 - zuverlässig bestätigt, 0.5 - unklar/zu wenig Daten, 0.0 - widerlegt
+        "danger_score": 0.0-1.0,   // Schadenspotenzial (medizinische, finanzielle Beratung)
+        "context_score": 0.0-1.0,  // Fehlen von Kontextmanipulation
+        "style_score": 0.0-1.0,    // Neutralität des Tons
+        "confidence_score": 0.0-1.0, // Deine Zuversicht basierend auf Quellenqualität
+        "rationale": "ERFORDERLICH: 4-8 kurze Zeilen. Jede Zeile beginnt mit einem Label: 'Belege:', 'Lücken:', 'Analystenmeinung (Hypothese):'. Füge 'Manipulation/Stil:' nur hinzu, wenn context_score < 0.80 oder style_score < 0.80. In 'Belege' nenne konkrete Quellen/Domains. Wenn die Evidenz schwach ist: schreibe das in 'Belege' und 'Lücken' und halte die 'Analystenmeinung' ausdrücklich spekulativ (keine neuen Fakten)."
       }}
 
       Dein JSON:
+
+    aletheia_lite: |
+      Du bist eine KI zur Faktenprüfung. Analysiere die Behauptung basierend auf dem Kontext und der Wortwahl der Behauptung.
+
+      ### METHODIK
+      1) Evidenz: Was sagen die Quellen tatsächlich?
+      2) Manipulation/Stil (falls zutreffend): vage Formulierungen, Sensationalismus, fehlender Kontext.
+      3) Urteil: Werte an Evidenz und Stil-/Manipulationssignalen ausrichten.
+
+      ### ANTWORTFORMAT (JSON)
+      Gib gültiges JSON mit denselben Feldern wie im Vollmodus zurück. `rationale` muss 3-6 kurze Zeilen haben. Füge 'Manipulation/Stil:' nur hinzu, wenn context_score < 0.80 oder style_score < 0.80.
+
+      ### EINGABEDATEN
+      BEHAUPTUNG: {fact}
+      KONTEXT: {context}

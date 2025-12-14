@@ -24,12 +24,17 @@ This module provides the TextAnalyzer class for:
 - Extracting metadata (title, authors, publish date)
 """
 
-from typing import List, Optional, Callable
+from spectrue_core.verification.fact_verifier_composite import FactVerifierComposite
+import logging
+import asyncio
+from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
 from dataclasses import dataclass
 import spacy
 # newspaper3k replaced with trafilatura
 import trafilatura
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -105,10 +110,11 @@ class TextAnalyzer:
             return nlp
         except OSError:
             # Model not found, try to download
-            print(f"spaCy model '{model_name}' not found. Attempting download...")
+            logger.warning("spaCy model '%s' not found. Attempting download...", model_name)
             import subprocess
+            import sys
             try:
-                subprocess.run(["python", "-m", "spacy", "download", model_name], check=True)
+                subprocess.run([sys.executable, "-m", "spacy", "download", model_name], check=True)
                 nlp = spacy.load(model_name)
                 self._nlp_cache[language] = nlp
                 return nlp

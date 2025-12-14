@@ -27,12 +27,17 @@ Categories:
 - global_news_agencies: Wire services with strict editorial standards
 - general_news_western: Major Western broadcasters and newspapers
 - ukraine_imi_whitelist: Ukrainian independent media (IMI validated)
+- general_news_ukraine_broad: Ukrainian mainstream (broad, audited)
 - europe_tier1: Quality European national media
 - asia_pacific: Reliable Asia-Pacific sources
 - science_and_health: Scientific journals and health authorities
 - technology: Tech news with editorial standards
 - fact_checking_ifcn: IFCN-certified fact-checkers
 - russia_independent_exiled: Independent Russian media (exiled, for counter-propaganda)
+- international_public_bodies: International public bodies (primary statements/data)
+- finance_tier1: Finance / markets (topic-gated)
+- education_tier1: Education / higher-ed (topic-gated)
+- law_tier1: Legal / courts / legislation (topic-gated)
 """
 
 TRUSTED_SOURCES: dict[str, list[str]] = {
@@ -45,7 +50,8 @@ TRUSTED_SOURCES: dict[str, list[str]] = {
         "euronews.com", "france24.com", "rfi.fr", "guardian.co.uk",
         "theguardian.com", "wsj.com", "ft.com", "economist.com",
         "cnbc.com", "usatoday.com", "axios.com", "politico.com",
-        "washingtonpost.com", "nytimes.com", "csmonitor.com"
+        "washingtonpost.com", "nytimes.com", "csmonitor.com",
+        "cbc.ca", "aljazeera.com", "latimes.com", "time.com", "theatlantic.com"
     ],
     "ukraine_imi_whitelist": [
         "suspilne.media", "radiosvoboda.org", "pravda.com.ua", "babel.ua",
@@ -53,11 +59,21 @@ TRUSTED_SOURCES: dict[str, list[str]] = {
         "slovoidilo.ua", "tyzhden.ua", "hromadske.radio", "ukrinform.ua",
         "interfax.com.ua", "gwaramedia.com", "lb.ua", "liga.net"
     ],
+    "general_news_ukraine_broad": [
+        "nv.ua",
+        "unian.ua",
+        "rbc.ua",
+        "24tv.ua",
+        "zaxid.net",
+        "glavcom.ua",
+    ],
     "europe_tier1": [
         "tagesschau.de", "sueddeutsche.de", "faz.net", "spiegel.de",
         "zeit.de", "lemonde.fr", "lefigaro.fr", "elpais.com",
         "elmundo.es", "corriere.it", "repubblica.it", "ansa.it",
-        "svt.se", "nrk.no", "yle.fi", "dr.dk", "swissinfo.ch"
+        "svt.se", "nrk.no", "yle.fi", "dr.dk", "swissinfo.ch",
+        "nos.nl", "lesoir.be", "derstandard.at", "wyborcza.pl",
+        "kathimerini.gr", "lastampa.it", "lavanguardia.com", "ouest-france.fr",
     ],
     "asia_pacific": [
         "channelnewsasia.com", "straitstimes.com", "scmp.com",
@@ -70,35 +86,80 @@ TRUSTED_SOURCES: dict[str, list[str]] = {
         "sciencenews.org", "newscientist.com", "phys.org",
         "thelancet.com", "nejm.org", "bmj.com", "jama.jamanetwork.com",
         "who.int", "cdc.gov", "nih.gov", "nasa.gov", "esa.int",
-        # Popular science & space
         "space.com", "livescience.com", "sciencedaily.com", "sciencealert.com",
-        "popsci.com", "discovermagazine.com", "smithsonianmag.com", "nationalgeographic.com"
+        "popsci.com", "discovermagazine.com", "smithsonianmag.com", "nationalgeographic.com",
+        "ipcc.ch",
     ],
     "technology": [
         "arstechnica.com", "wired.com", "theverge.com", "techcrunch.com",
         "venturebeat.com", "recode.net", "engadget.com",
-        "bleepingcomputer.com", "theregister.com", "zdnet.com"
+        "bleepingcomputer.com", "theregister.com", "zdnet.com",
+        "cnet.com", "technologyreview.com",
     ],
     "fact_checking_ifcn": [
         "politifact.com", "snopes.com", "factcheck.org", "fullfact.org",
         "stopfake.org", "voxukraine.org", "maldita.es", "newtral.es",
         "pagellapolitica.it", "correctiv.org", "africacheck.org",
         "chequeado.com", "tfc-taiwan.org.tw", "mygopen.com",
-        "factchecklab.org", "sciencefeedback.co"
+        "factchecklab.org", "sciencefeedback.co",
+        "leadstories.com",
     ],
     "russia_independent_exiled": [
         "meduza.io", "theins.ru", "zona.media", "ovd.info",
         "novayagazeta.eu", "thebell.io", "proekt.media",
-        "istories.media", "holod.media"
-    ]
+        "istories.media", "holod.media",
+        "tvrain.tv", "agentstvo.media", "verstka.media",
+    ],
+    "international_public_bodies": [
+        "ec.europa.eu",
+        "un.org",
+        "worldbank.org",
+        "oecd.org",
+        "imf.org",
+    ],
+    "finance_tier1": [
+        "wsj.com",
+        "ft.com",
+        "bloomberg.com",
+        "economist.com",
+        "cnbc.com",
+        "fortune.com",
+        "marketwatch.com",
+        "forbes.com",
+    ],
+    "education_tier1": [
+        "chronicle.com",
+        "insidehighered.com",
+        "edweek.org",
+        "chalkbeat.org",
+        "hechingerreport.org",
+        "timeshighereducation.com",
+        "universityworldnews.com",
+        "the74million.org",
+    ],
+    "law_tier1": [
+        "scotusblog.com",
+        "jurist.org",
+        "lawfaremedia.org",
+        "justsecurity.org",
+        "themarshallproject.org",
+        "abajournal.com",
+        "thecrimereport.org",
+    ],
 }
 
-# Helper to flatten all domains for broad searches
-ALL_TRUSTED_DOMAINS: list[str] = [
-    domain 
-    for category in TRUSTED_SOURCES.values() 
-    for domain in category
+# Helper to flatten all domains for broad searches (deduped, order-preserving).
+_ALL_TRUSTED_DOMAINS_RAW: list[str] = [
+    domain for category in TRUSTED_SOURCES.values() for domain in category
 ]
+_seen = set()
+ALL_TRUSTED_DOMAINS: list[str] = []
+for _d in _ALL_TRUSTED_DOMAINS_RAW:
+    if _d in _seen:
+        continue
+    _seen.add(_d)
+    ALL_TRUSTED_DOMAINS.append(_d)
+del _ALL_TRUSTED_DOMAINS_RAW, _seen, _d
 
 
 def get_trusted_domains_by_lang(lang: str) -> list[str]:
@@ -111,40 +172,44 @@ def get_trusted_domains_by_lang(lang: str) -> list[str]:
     Returns:
         List of domain strings prioritized for that language
     """
-    # Universal knowledge (Science & Tech) - relevant for all languages as they are primary sources
-    universal = TRUSTED_SOURCES["science_and_health"] + TRUSTED_SOURCES["technology"]
-    
-    base = TRUSTED_SOURCES["global_news_agencies"] + TRUSTED_SOURCES["fact_checking_ifcn"] + universal
-    
+    lang = (lang or "en").lower()
+    supported = {
+        "en", "uk", "ru", "de", "fr", "es", "it", "pl", "nl", "pt", "sv", "no", "da", "fi",
+        "cs", "ro", "hu", "tr", "ar", "he", "ja", "ko", "zh",
+    }
+    if lang not in supported:
+        lang = "en"
+
+    base = (
+        TRUSTED_SOURCES["global_news_agencies"]
+        + TRUSTED_SOURCES["fact_checking_ifcn"]
+        + TRUSTED_SOURCES["science_and_health"]
+        + TRUSTED_SOURCES["technology"]
+        + TRUSTED_SOURCES["international_public_bodies"]
+    )
+
+    # Language-group routing (Spec Kit).
     if lang == "uk":
-        # Ukrainian users: Ukrainian media first, then base, then Western
-        return (
-            TRUSTED_SOURCES["ukraine_imi_whitelist"] + 
-            base + 
-            TRUSTED_SOURCES["general_news_western"]
-        )
-    elif lang == "ru":
-        # Russian users: Independent exiled media first (counter-propaganda)
-        return (
-            TRUSTED_SOURCES["russia_independent_exiled"] + 
-            base + 
-            TRUSTED_SOURCES["general_news_western"]
-        )
-    elif lang == "de":
-        # German users: European Tier 1 first
+        return TRUSTED_SOURCES["ukraine_imi_whitelist"] + TRUSTED_SOURCES["general_news_ukraine_broad"] + base
+    if lang == "ru":
+        return TRUSTED_SOURCES["russia_independent_exiled"] + base
+
+    eu_base_langs = {"de", "nl", "sv", "no", "da", "fi", "pl", "cs", "ro", "hu"}
+    if lang in eu_base_langs:
         return TRUSTED_SOURCES["europe_tier1"] + base
-    elif lang in ("fr", "es", "it"):
-        # Other European languages
+
+    eu_plus_western = {"fr", "es", "it", "pt", "tr"}
+    if lang in eu_plus_western:
         return TRUSTED_SOURCES["europe_tier1"] + base + TRUSTED_SOURCES["general_news_western"]
-    elif lang in ("ja", "zh", "ko"):
-        # Asian languages
+
+    if lang in {"ja", "zh", "ko"}:
         return TRUSTED_SOURCES["asia_pacific"] + base
-    else:
-        # Default mix for English/others
-        return (
-            base + 
-            TRUSTED_SOURCES["general_news_western"]
-        )
+
+    if lang in {"ar", "he"}:
+        return base + TRUSTED_SOURCES["general_news_western"]
+
+    # Default / en
+    return base + TRUSTED_SOURCES["general_news_western"]
 
 
 # Backward compatibility alias
@@ -165,22 +230,38 @@ def get_domains_for_topic(keywords: list[str]) -> list[str]:
     """
     topic_keywords = {
         "technology": [
-            "apple", "google", "microsoft", "ai", "software", "app", "tech", 
+            "apple", "google", "microsoft", "ai", "software", "app", "tech",
             "cyber", "hack", "computer", "phone", "iphone", "android", "tesla",
-            "openai", "chatgpt", "nvidia", "meta", "facebook"
+            "openai", "chatgpt", "nvidia", "meta",
         ],
         "science_and_health": [
             "vaccine", "virus", "covid", "health", "doctor", "study",
-            "research", "cancer", "drug", "fda", "cdc", "nasa", "space",
-            "climate", "science", "medical", "hospital", "disease"
+            "research", "cancer", "drug", "fda", "cdc", "nih", "who", "ipcc",
+            "climate", "science", "medical", "hospital", "disease", "space",
+        ],
+        "finance_tier1": [
+            "stock", "stocks", "market", "markets", "shares", "equity", "equities",
+            "earnings", "revenue", "profit", "dividend", "bond", "bonds", "yield", "yields",
+            "rates", "interest", "inflation", "gdp", "imf", "oecd", "world bank", "worldbank",
+            "forex", "fx", "crypto", "bitcoin", "ethereum", "bank", "banking",
+        ],
+        "education_tier1": [
+            "school", "schools", "university", "universities", "college", "student", "students",
+            "exam", "exams", "curriculum", "teacher", "teachers", "higher ed", "higher education",
+            "campus", "admissions", "scholarship",
+        ],
+        "law_tier1": [
+            "court", "courts", "judge", "judges", "lawsuit", "sued", "legal", "legislation",
+            "bill", "statute", "regulation", "attorney", "lawyer", "prosecutor", "supreme court",
+            "constitutional", "scotus", "criminal", "trial", "sentenced",
         ],
         "ukraine_imi_whitelist": [
             "ukraine", "kyiv", "zelensky", "war", "crimea",
-            "donbas", "kharkiv", "odesa", "ukrainian", "україна"
+            "donbas", "kharkiv", "odesa", "ukrainian", "україна",
         ],
         "russia_independent_exiled": [
             "russia", "putin", "moscow", "kremlin", "russian",
-            "navalny", "росія", "путін"
+            "navalny", "росія", "путін",
         ],
     }
     
@@ -195,9 +276,18 @@ def get_domains_for_topic(keywords: list[str]) -> list[str]:
     
     if not matched_categories:
         return []
-    
-    result = []
+
+    result: list[str] = []
     for cat in matched_categories:
+        # Topic-gated: only include specialized domains if the topic bucket matched.
         result.extend(TRUSTED_SOURCES.get(cat, []))
-    
-    return result
+
+    # Deduplicate while preserving order.
+    seen = set()
+    out: list[str] = []
+    for d in result:
+        if d in seen:
+            continue
+        seen.add(d)
+        out.append(d)
+    return out
