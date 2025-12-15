@@ -31,7 +31,7 @@ de:
         "context_score": 0.0-1.0,  // Fehlen von Kontextmanipulation
         "style_score": 0.0-1.0,    // Neutralität des Tons
         "confidence_score": 0.0-1.0, // Deine Zuversicht basierend auf Quellenqualität
-        "rationale": "ERFORDERLICH: 4-8 kurze Zeilen. Jede Zeile beginnt mit einem Label: 'Belege:', 'Lücken:', 'Analystenmeinung (Hypothese):'. Füge 'Manipulation/Stil:' nur hinzu, wenn context_score < 0.80 oder style_score < 0.80. In 'Belege' nenne konkrete Quellen/Domains. Wenn die Evidenz schwach ist: schreibe das in 'Belege' und 'Lücken' und halte die 'Analystenmeinung' ausdrücklich spekulativ (keine neuen Fakten)."
+        "rationale": "ERFORDERLICH: 4-8 kurze Zeilen. Jede Zeile beginnt mit einem Label: 'Belege:', 'Lücken:', 'Analystenmeinung (Hypothese):'. Füge 'Stil und Kontext:' nur hinzu, wenn context_score < 0.80 oder style_score < 0.80. In 'Belege' nenne konkrete Quellen/Domains. Wenn die Evidenz schwach ist: schreibe das in 'Belege' und 'Lücken' und halte die 'Analystenmeinung' ausdrücklich spekulativ (keine neuen Fakten)."
       }}
 
       Dein JSON:
@@ -41,11 +41,11 @@ de:
 
       ### METHODIK
       1) Evidenz: Was sagen die Quellen tatsächlich?
-      2) Manipulation/Stil (falls zutreffend): vage Formulierungen, Sensationalismus, fehlender Kontext.
+      2) Stil und Kontext (falls zutreffend): vage Formulierungen, Sensationalismus, fehlender Kontext.
       3) Urteil: Werte an Evidenz und Stil-/Manipulationssignalen ausrichten.
 
       ### ANTWORTFORMAT (JSON)
-      Gib gültiges JSON mit denselben Feldern wie im Vollmodus zurück. `rationale` muss 3-6 kurze Zeilen haben. Füge 'Manipulation/Stil:' nur hinzu, wenn context_score < 0.80 oder style_score < 0.80.
+      Gib gültiges JSON mit denselben Feldern wie im Vollmodus zurück. `rationale` muss 3-6 kurze Zeilen haben. Füge 'Stil und Kontext:' nur hinzu, wenn context_score < 0.80 oder style_score < 0.80.
 
       ### EINGABEDATEN
       BEHAUPTUNG: {fact}

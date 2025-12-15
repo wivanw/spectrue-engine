@@ -31,7 +31,7 @@ es:
         "context_score": 0.0-1.0,  // Ausencia de manipulación de contexto
         "style_score": 0.0-1.0,    // Neutralidad del tono
         "confidence_score": 0.0-1.0, // Tu confianza basada en la calidad de las fuentes
-        "rationale": "REQUERIDO: 4-8 líneas cortas. Cada línea empieza con una etiqueta: 'Evidencia:', 'Lagunas:', 'Opinión del analista (hipótesis):'. Añade 'Manipulación/Estilo:' solo si context_score < 0.80 o style_score < 0.80. En 'Evidencia' cita fuentes/dominios concretos. Si la evidencia es débil, dilo en 'Evidencia' y 'Lagunas' y mantén la 'Opinión' como hipótesis (sin hechos nuevos)."
+        "rationale": "REQUERIDO: 4-8 líneas cortas. Cada línea empieza con una etiqueta: 'Evidencia:', 'Lagunas:', 'Opinión del analista (hipótesis):'. Añade 'Estilo y Contexto:' solo si context_score < 0.80 o style_score < 0.80. En 'Evidencia' cita fuentes/dominios concretos. Si la evidencia es débil, dilo en 'Evidencia' y 'Lagunas' y mantén la 'Opinión' como hipótesis (sin hechos nuevos)."
       }}
 
       ### EJEMPLO (Few-Shot)
@@ -54,11 +54,11 @@ es:
 
       ### METODOLOGÍA
       1) Evidencia: ¿qué dicen realmente las fuentes?
-      2) Manipulación/Estilo (cuando aplique): formulaciones vagas, sensacionalismo, contexto omitido.
+      2) Estilo y Contexto (cuando aplique): formulaciones vagas, sensacionalismo, contexto omitido.
       3) Veredicto: ajusta puntuaciones a la evidencia y a las señales de estilo/manipulación.
 
       ### FORMATO DE RESPUESTA (JSON)
-      Devuelve JSON válido con los mismos campos que en el modo completo. `rationale` debe tener 3-6 líneas cortas. Añade 'Manipulación/Estilo:' solo si context_score < 0.80 o style_score < 0.80.
+      Devuelve JSON válido con los mismos campos que en el modo completo. `rationale` debe tener 3-6 líneas cortas. Añade 'Estilo y Contexto:' solo si context_score < 0.80 o style_score < 0.80.
 
       ### DATOS DE ENTRADA
       AFIRMACIÓN: {fact}

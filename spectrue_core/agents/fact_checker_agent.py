@@ -15,7 +15,6 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Spectrue Engine. If not, see <https://www.gnu.org/licenses/>.
 
-import os
 import json
 import logging
 import re
@@ -23,40 +22,26 @@ from openai import AsyncOpenAI
 from spectrue_core.agents.prompts import get_prompt
 from spectrue_core.utils.security import sanitize_input
 from spectrue_core.config import SpectrueConfig
+from spectrue_core.runtime_config import EngineRuntimeConfig
 import asyncio
 from datetime import datetime
-from spectrue_core.utils.runtime import is_local_run
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.trusted_sources import AVAILABLE_TOPICS
 
 logger = logging.getLogger(__name__)
-
-def _env_flag(name: str) -> bool:
-    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "y", "on")
-
-ENGINE_DEBUG = _env_flag("SPECTRUE_ENGINE_DEBUG")
-LOG_PROMPTS = _env_flag("SPECTRUE_ENGINE_LOG_PROMPTS")
-
 
 class FactCheckerAgent:
     def __init__(self, config: SpectrueConfig = None):
         self.config = config
-        api_key = config.openai_api_key if config else os.getenv("OPENAI_API_KEY")
+        self.runtime = (config.runtime if config else None) or EngineRuntimeConfig.load_from_env()
+        api_key = config.openai_api_key if config else None
         
         self.client = AsyncOpenAI(api_key=api_key)
         
-        try:
-            t = float(os.getenv("OPENAI_TIMEOUT", "60"))
-            if not (5 <= t <= 300):
-                t = 60.0
-        except Exception:
-            t = 60.0
-        self.timeout = t
-        try:
-            c = int(os.getenv("OPENAI_CONCURRENCY", "6"))
-        except Exception:
-            c = 6
-        c = max(1, min(c, 16))
-        self._sem = asyncio.Semaphore(c)
+        self.timeout = float(self.runtime.llm.timeout_sec)
+        self._sem = asyncio.Semaphore(int(self.runtime.llm.concurrency))
+        # Keep lightweight nano query generation from queuing behind heavy final-analysis calls.
+        self._sem_nano = asyncio.Semaphore(int(self.runtime.llm.nano_concurrency))
         self.last_query_meta: dict = {}
 
     def _canonicalize_action(self, action: str | None) -> str:
@@ -161,7 +146,13 @@ class FactCheckerAgent:
         Provide a compact action anchor term for the given language.
         """
         lc = (lang_code or "en").lower()
-        a = self._canonicalize_action(canonical_action)
+        # Never use the literal "claim" as an action anchor in queries.
+        a_raw = (canonical_action or "").strip()
+        if not a_raw or a_raw.lower() == "claim":
+            return ""
+        a = self._canonicalize_action(a_raw)
+        if not a or a.lower() == "claim":
+            return ""
         if a not in ("ban", "prohibit", "forbid", "restrict"):
             return a
 
@@ -178,70 +169,85 @@ class FactCheckerAgent:
         }
         return map_by_lang.get(lc, map_by_lang["en"]).get(a, a)
 
-    def _probe_phrases(self, *, lang_code: str, missing: list[str]) -> list[str]:
+    def _collapse_ws(self, s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "")).strip()
+
+    def _security_tokens(self) -> list[str]:
+        # Must match the prompt's security ban equivalents.
+        return ["security", "guard", "guards", "sicherheit", "seguridad", "sécurité", "охорона", "безопасность", "警備", "保安"]
+
+    def _contains_security_token(self, s: str) -> bool:
+        t = (s or "").lower()
+        for token in self._security_tokens():
+            tok = token.lower()
+            if any(ord(c) > 127 for c in tok):
+                if tok in t:
+                    return True
+            else:
+                if re.search(rf"\b{re.escape(tok)}\b", t, flags=re.IGNORECASE):
+                    return True
+        return False
+
+    def _probe_lexicon(self, *, lang_code: str) -> list[str]:
         """
-        Deterministic context probes used when claim attributes are missing.
-        These are intentionally short to avoid bloating queries.
+        Neutral probe phrases allowed for the given language code.
+        This is used for deterministic validation only.
         """
         lc = (lang_code or "en").lower()
-        probes_by_lang = {
-            "en": {
-                "where": ["venue security", "concert venue"],
-                "when": ["when did it happen", "date"],
-                "by_whom": ["organizers said", "venue said"],
-            },
-            "uk": {
-                "where": ["охорона майданчика", "концертний майданчик"],
-                "when": ["коли це сталося", "дата"],
-                "by_whom": ["організатори сказали", "заява майданчика"],
-            },
-            "ru": {
-                "where": ["охрана площадки", "концертная площадка"],
-                "when": ["когда это было", "дата"],
-                "by_whom": ["организаторы сказали", "заявление площадки"],
-            },
-            "de": {
-                "where": ["Veranstaltungsort", "Sicherheitsdienst"],
-                "when": ["wann passiert", "Datum"],
-                "by_whom": ["Veranstalter sagten", "Aussage des Ortes"],
-            },
-            "es": {
-                "where": ["lugar del concierto", "seguridad del recinto"],
-                "when": ["cuándo ocurrió", "fecha"],
-                "by_whom": ["organizadores dijeron", "el recinto dijo"],
-            },
-            "fr": {
-                "where": ["lieu du concert", "sécurité du lieu"],
-                "when": ["quand cela s'est produit", "date"],
-                "by_whom": ["les organisateurs ont dit", "le lieu a dit"],
-            },
-            "ja": {
-                "where": ["会場警備", "コンサート会場"],
-                "when": ["いつ起きた", "日付"],
-                "by_whom": ["主催者の声明", "会場の声明"],
-            },
-            "zh": {
-                "where": ["场馆安保", "演唱会场馆"],
-                "when": ["发生时间", "日期"],
-                "by_whom": ["主办方称", "场馆方称"],
-            },
-        }
-        table = probes_by_lang.get(lc, probes_by_lang["en"])
-        out: list[str] = []
-        for k in ("where", "when", "by_whom"):
-            if k in missing:
-                out.extend(table.get(k, []))
-        # Bound and dedupe
-        seen = set()
-        uniq: list[str] = []
-        for p in out:
-            p = (p or "").strip()
+        return {
+            "en": ["where", "when", "who said", "official statement"],
+            "uk": ["де", "коли", "хто заявив", "офіційна заява"],
+            "ru": ["где", "когда", "кто заявил", "официальное заявление"],
+            "de": ["wo", "wann", "wer sagte", "offizielle erklärung"],
+            "es": ["dónde", "cuándo", "quién dijo", "declaración oficial"],
+            "fr": ["où", "quand", "qui a déclaré", "déclaration officielle"],
+            "ja": ["どこ", "いつ", "誰が述べた", "公式声明"],
+            "zh": ["哪里", "何时", "谁表示", "官方声明"],
+        }.get(lc, ["where", "when", "who said", "official statement"])
+
+    def _count_probe_occurrences(self, *, query: str, lang_code: str) -> int:
+        """
+        Return neutral probe phrase occurrences for the given query/lang.
+        """
+        q = self._collapse_ws(query).lower()
+        neutral = self._probe_lexicon(lang_code=lang_code)
+
+        def _occurrences(phrase: str) -> int:
+            p = self._collapse_ws(phrase).lower()
             if not p:
+                return 0
+            if any(ord(c) > 127 for c in p):
+                return q.count(p)
+            pat = r"(?<!\w)" + re.escape(p).replace(r"\ ", r"\s+") + r"(?!\w)"
+            return len(re.findall(pat, q, flags=re.IGNORECASE))
+
+        return sum(_occurrences(p) for p in neutral)
+
+    def _strip_security_tokens(self, *, query: str) -> str:
+        q = self._collapse_ws(query)
+        if not q:
+            return q
+        out = q
+        for token in self._security_tokens():
+            tok = token.lower()
+            if any(ord(c) > 127 for c in tok):
+                out = out.replace(token, "").replace(tok, "")
+            else:
+                out = re.sub(rf"\b{re.escape(tok)}\b", "", out, flags=re.IGNORECASE)
+        return self._collapse_ws(out)
+
+    def _ensure_query_anchors(self, *, query: str, claim: dict, lang_code: str) -> str:
+        q = self._collapse_ws(query)
+        subject = (claim.get("subject") or "").strip()
+        obj_text = (claim.get("object") or "").strip()
+        action_anchor = self._action_anchor_for_lang(claim.get("action") or "", lang_code)
+        for a in (subject, action_anchor, obj_text):
+            a = (a or "").strip()
+            if not a:
                 continue
-            if p not in seen:
-                seen.add(p)
-                uniq.append(p)
-        return uniq[:4]
+            if a.lower() not in q.lower():
+                q = (q + " " + a).strip()
+        return self._collapse_ws(q)
 
     def build_strict_queries(self, claim_decomposition: dict | None, *, lang: str, content_lang: str | None) -> list[str]:
         """
@@ -254,8 +260,6 @@ class FactCheckerAgent:
 
         def _build_for(code: str) -> str:
             action_anchor = self._action_anchor_for_lang(claim.get("action"), code)
-            missing = [k for k in ("where", "when", "by_whom") if claim.get(k) in (None, "")]
-            probes = self._probe_phrases(lang_code=code, missing=missing)
 
             parts = [claim.get("subject") or "", action_anchor or "", claim.get("object") or ""]
             # Include available specifics to tighten the search.
@@ -263,8 +267,7 @@ class FactCheckerAgent:
                 v = claim.get(k)
                 if isinstance(v, str) and v.strip():
                     parts.append(v.strip())
-            # If key specifics are missing, force probes to avoid context-poor "headline-only" queries.
-            parts.extend(probes[:2])
+            # Don't add probe phrases - they add noise and reduce relevance.
 
             q = " ".join([p for p in parts if p]).strip()
             q = re.sub(r"\s+", " ", q).strip()
@@ -305,21 +308,21 @@ class FactCheckerAgent:
         labels: list[str]
         lc = (lang or "").lower()
         if lc == "uk":
-            labels = ["Маніпуляції/Стиль:"]
+            labels = ["Стиль та контекст:"]
         elif lc == "ru":
-            labels = ["Манипуляции/Стиль:"]
+            labels = ["Стиль и контекст:"]
         elif lc == "es":
-            labels = ["Manipulación/Estilo:"]
+            labels = ["Estilo y Contexto:"]
         elif lc == "de":
-            labels = ["Manipulation/Stil:", "Manipulations-/Stil:"]
+            labels = ["Stil und Kontext:"]
         elif lc == "fr":
-            labels = ["Manipulation/Style:"]
+            labels = ["Style et Contexte:"]
         elif lc == "ja":
-            labels = ["操作/文体:"]
+            labels = ["文体と文脈:"]
         elif lc == "zh":
-            labels = ["操纵/文风:"]
+            labels = ["风格与语境:"]
         else:
-            labels = ["Manipulation/Style:"]
+            labels = ["Style and Context:"]
 
         s = rationale
         for label in labels:
@@ -354,6 +357,11 @@ class FactCheckerAgent:
             "uk": "ВАЖЛИВО: Не згадуй у відповіді службові мітки джерел на кшталт [TRUSTED], [REL=…], [RAW].",
             "ru": "ВАЖНО: Не упоминай в ответе служебные метки источников вроде [TRUSTED], [REL=…], [RAW].",
             "en": "IMPORTANT: Do not mention internal source tags like [TRUSTED], [REL=…], [RAW] in your output.",
+            "de": "WICHTIG: Erwähne in deiner Antwort keine internen Quellen-Tags wie [TRUSTED], [REL=…], [RAW].",
+            "es": "IMPORTANTE: No menciones etiquetas de fuente internas como [TRUSTED], [REL=…], [RAW] en tu respuesta.",
+            "fr": "IMPORTANT : Ne mentionne pas les balises de source internes comme [TRUSTED], [REL=…], [RAW] dans ta réponse.",
+            "ja": "重要：出力に [TRUSTED]、[REL=…]、[RAW] のような内部ソースタグを含めないでください。",
+            "zh": "重要：请勿在输出中提及 [TRUSTED]、[REL=…]、[RAW] 等内部来源标签。",
         }
         prompt += "\n\n" + no_tag_note_by_lang.get((lang or "").lower(), no_tag_note_by_lang["en"])
         Trace.event(
@@ -368,27 +376,19 @@ class FactCheckerAgent:
             },
         )
 
-        if LOG_PROMPTS:
+        if self.runtime.debug.log_prompts:
             logger.debug("--- Prompt for %s (%s) ---\n%s\n--- End Prompt ---", gpt_model, lang, prompt)
-        elif ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
+        elif self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
             logger.debug("Built prompt for %s (%s): %d chars", gpt_model, lang, len(prompt))
         
         messages = [{"role": "user", "content": prompt}]
 
         def _max_output_tokens_for_mode(mode: str) -> int:
-            key = "SPECTRUE_LLM_MAX_OUTPUT_TOKENS_GENERAL"
-            default = 900
             if mode == "lite":
-                key = "SPECTRUE_LLM_MAX_OUTPUT_TOKENS_LITE"
-                default = 500
-            elif mode == "deep":
-                key = "SPECTRUE_LLM_MAX_OUTPUT_TOKENS_DEEP"
-                default = 1100
-            try:
-                v = int(os.getenv(key, str(default)))
-            except Exception:
-                v = default
-            return max(200, min(v, 4000))
+                return int(self.runtime.llm.max_output_tokens_lite)
+            if mode == "deep":
+                return int(self.runtime.llm.max_output_tokens_deep)
+            return int(self.runtime.llm.max_output_tokens_general)
 
         max_out = _max_output_tokens_for_mode(analysis_mode)
 
@@ -422,173 +422,172 @@ class FactCheckerAgent:
         if use_temperature:
             api_params["temperature"] = 0  # Deterministic for fact-checking
 
-        try:
-            if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                logger.debug("[GPT] Calling %s with %d chars prompt...", gpt_model, len(prompt))
-            async with self._sem:
-                response = await self.client.chat.completions.create(**api_params)
-            
-            raw_content = response.choices[0].message.content
-            Trace.event(
-                "llm.response",
-                {
-                    "kind": "analysis",
-                    "model": gpt_model,
-                    "content_chars": len(raw_content or ""),
-                    "content": raw_content,
-                },
-            )
-            if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                logger.debug("[GPT] Got response: %d chars", len(raw_content))
-                logger.debug("[GPT] Response preview: %s...", raw_content[:300])
-            
-            # Parse the JSON response
-            result = json.loads(raw_content)
-            Trace.event(
-                "llm.parsed",
-                {
-                    "kind": "analysis",
-                    "model": gpt_model,
-                    "keys": list(result.keys()),
-                },
-            )
-            if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                logger.debug("[GPT] ✓ JSON parsed successfully. Keys: %s", list(result.keys()))
-            
-            # Handle Chain-of-Thought filtering (support both keys)
-            thought_process = result.pop("thought_process", None) or result.pop("_thought_process", None)
-            if thought_process and ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                logger.debug("[Aletheia-X Thought]: %s", thought_process)
-            
-            # Fix rationale if it's an object (Radical Candor prompt side-effect)
-            if "rationale" in result and isinstance(result["rationale"], (dict, list)):
-                if isinstance(result["rationale"], dict):
-                    # Convert dict to formatted string
-                    lines = []
-                    for k, v in result["rationale"].items():
-                        # Capitalize key for better display
-                        key_display = k.replace('_', ' ').title()
-                        lines.append(f"**{key_display}:** {v}")
-                    result["rationale"] = "\n\n".join(lines)
-                elif isinstance(result["rationale"], list):
-                     result["rationale"] = "\n".join([str(item) for item in result["rationale"]])
+        last_exception = None
+        result = {}
 
-            # Never leak internal source tags into user-facing strings.
-            if "rationale" in result:
-                result["rationale"] = self._strip_internal_source_markers(str(result["rationale"] or ""))
-                try:
-                    context_score = float(result.get("context_score", 0.5))
-                    style_score = float(result.get("style_score", 0.5))
-                    honesty = (max(0.0, min(1.0, context_score)) + max(0.0, min(1.0, style_score))) / 2.0
-                except Exception:
-                    honesty = None
-                result["rationale"] = self._maybe_drop_style_section(
-                    result["rationale"], honesty_score=honesty, lang=lang
+        for attempt in range(2):  # Try once, then retry once
+            try:
+                if self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("[GPT] Calling %s (attempt %d/2) with %d chars prompt...", gpt_model, attempt + 1, len(prompt))
+                async with self._sem:
+                    response = await self.client.chat.completions.create(**api_params)
+                
+                raw_content = response.choices[0].message.content
+                Trace.event(
+                    "llm.response",
+                    {
+                        "kind": "analysis",
+                        "model": gpt_model,
+                        "attempt": attempt + 1,
+                        "content_chars": len(raw_content or ""),
+                        "content": raw_content,
+                    },
                 )
-            if "analysis" in result and isinstance(result["analysis"], str):
-                result["analysis"] = self._strip_internal_source_markers(result["analysis"])
-            
-            if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "[GPT] Scores: V=%.2f, D=%.2f, Conf=%.2f",
-                    float(result.get("verified_score", 0) or 0),
-                    float(result.get("danger_score", 0) or 0),
-                    float(result.get("confidence_score", 0) or 0),
+                
+                if not raw_content or not raw_content.strip():
+                    raise ValueError("Empty response from LLM")
+
+                if self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("[GPT] Got response: %d chars", len(raw_content))
+                    logger.debug("[GPT] Response preview: %s...", raw_content[:300])
+                
+                # Parse the JSON response
+                result = json.loads(raw_content)
+                Trace.event(
+                    "llm.parsed",
+                    {
+                        "kind": "analysis",
+                        "model": gpt_model,
+                        "keys": list(result.keys()),
+                    },
                 )
-            return result
-        except json.JSONDecodeError as e:
-            logger.warning("[GPT] ✗ JSON parse error: %s", e)
-            Trace.event("llm.parse_error", {"kind": "analysis", "model": gpt_model, "error": str(e)})
-            if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "[GPT] Raw content was: %s",
-                    raw_content[:500] if 'raw_content' in locals() else 'N/A',
-                )
-            return {
-                "verified_score": 0.5,
-                "context_score": 0.5,
-                "danger_score": 0.0,
-                "style_score": 0.5,
-                "confidence_score": 0.2,
-                "rationale_key": "errors.agent_call_failed"
-            }
-        except Exception as e:
-            logger.exception("[GPT] ✗ Error calling %s: %s", gpt_model, e)
-            Trace.event("llm.error", {"kind": "analysis", "model": gpt_model, "error": str(e)})
-            # Возвращаем дефолтные значения, включая низкую уверенность
-            return {
-                "verified_score": 0.5,
-                "context_score": 0.5,
-                "danger_score": 0.0,
-                "style_score": 0.5,
-                "confidence_score": 0.2, # <-- Низкая уверенность при ошибке
-                "rationale_key": "errors.agent_call_failed"
-            }
+                # Success - break loop
+                break
+            except Exception as e:
+                last_exception = e
+                logger.warning("[GPT] Attempt %d failed for %s: %s", attempt + 1, gpt_model, e)
+                if attempt == 1: # Last attempt failed
+                    logger.exception("[GPT] ✗ Error calling %s after retries: %s", gpt_model, e)
+                    Trace.event("llm.error", {"kind": "analysis", "model": gpt_model, "error": str(e)})
+                    return {
+                        "verified_score": 0.5,
+                        "context_score": 0.5,
+                        "danger_score": 0.0,
+                        "style_score": 0.5,
+                        "confidence_score": 0.2,
+                        "rationale_key": "errors.agent_call_failed"
+                    }
+                continue # Retry
+
+        # Post-processing (outside loop)
+        if self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("[GPT] ✓ JSON parsed successfully. Keys: %s", list(result.keys()))
+        
+        # Handle Chain-of-Thought filtering (support both keys)
+        thought_process = result.pop("thought_process", None) or result.pop("_thought_process", None)
+        if thought_process and self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("[Aletheia-X Thought]: %s", thought_process)
+        
+        # Fix rationale if it's an object (Radical Candor prompt side-effect)
+        if "rationale" in result and isinstance(result["rationale"], (dict, list)):
+            if isinstance(result["rationale"], dict):
+                # Convert dict to formatted string
+                lines = []
+                for k, v in result["rationale"].items():
+                    # Capitalize key for better display
+                    key_display = k.replace('_', ' ').title()
+                    lines.append(f"**{key_display}:** {v}")
+                result["rationale"] = "\n\n".join(lines)
+            elif isinstance(result["rationale"], list):
+                    result["rationale"] = "\n".join([str(item) for item in result["rationale"]])
+
+        # Never leak internal source tags into user-facing strings.
+        if "rationale" in result:
+            result["rationale"] = self._strip_internal_source_markers(str(result["rationale"] or ""))
+            try:
+                context_score = float(result.get("context_score", 0.5))
+                style_score = float(result.get("style_score", 0.5))
+                honesty = (max(0.0, min(1.0, context_score)) + max(0.0, min(1.0, style_score))) / 2.0
+            except Exception:
+                honesty = None
+            result["rationale"] = self._maybe_drop_style_section(
+                result["rationale"], honesty_score=honesty, lang=lang
+            )
+        if "analysis" in result and isinstance(result["analysis"], str):
+            result["analysis"] = self._strip_internal_source_markers(result["analysis"])
+        
+        if self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[GPT] Scores: V=%.2f, D=%.2f, Conf=%.2f",
+                float(result.get("verified_score", 0) or 0),
+                float(result.get("danger_score", 0) or 0),
+                float(result.get("confidence_score", 0) or 0),
+            )
+        return result
 
     async def generate_search_queries(
-        self, 
-        fact: str, 
-        context: str = "", 
+        self,
+        fact: str,
+        context: str = "",
         lang: str = "en",
-        content_lang: str = None  # M31: Content language from detection
+        content_lang: str = None,  # M31: Content language from detection
+        *,
+        allow_short_llm: bool = False,
     ) -> list[str]:
         """
         Generate search queries using GPT-5 Nano.
-        
-        M31: 3-tier query generation:
-        - Query 1: Always English (global coverage)
-        - Query 2: Content language if != EN (source language)
-        - Query 3: UI language if != EN and != content_lang (user preference)
-        
-        Returns:
-            List of 2-3 queries depending on language overlap
+
+        Updated: always send the full STATEMENT verbatim; generate exactly 2 queries (EN, then UK).
         """
         import json
-        import re
+
+        # Determine target language dynamically
+        target_lang_code = (content_lang or lang or "en").lower()
+        lang_names = {
+            "en": "English",
+            "uk": "Ukrainian",
+            "ru": "Russian",
+            "de": "German",
+            "es": "Spanish",
+            "fr": "French",
+            "ja": "Japanese",
+            "zh": "Chinese",
+        }
+        target_lang_name = lang_names.get(target_lang_code, "English")
+
+        # Always generate exactly 2 queries: [EN global, Target content].
+        # If target is EN, we just ask for English twice (or similar), effectively getting 2 variations.
+        languages_needed = [("en", "English", "global"), (target_lang_code, target_lang_name, "content")]
+
+        if self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("[M31] Generating queries for languages: %s", [l[0] for l in languages_needed])
         
-        # M31: Determine which languages to generate
-        content_lang = content_lang or lang  # Fallback to UI lang
+        # No manual truncation/compression: the nano prompt receives the full statement/context verbatim.
+        full_statement = fact if isinstance(fact, str) else str(fact)
+        if context is None:
+            full_context_or_None = "None"
+        else:
+            full_context_or_None = context if isinstance(context, str) else str(context)
+            if not full_context_or_None:
+                full_context_or_None = "None"
         
-        languages_needed = []
-        
-        # Always include English
-        languages_needed.append(("en", "English", "global"))
-        
-        # Add content language if different from English
-        if content_lang != "en":
-            lang_names = {
-                "en": "English", "uk": "Ukrainian", "ru": "Russian",
-                "de": "German", "es": "Spanish", "fr": "French",
-                "ja": "Japanese", "zh": "Chinese"
+        # Build prompt dynamically
+        language_instructions = f"1) English\n2) {target_lang_name} (if translation fails, repeat English)"
+
+        def _sanitize_prompt_for_trace(prompt_text: str) -> dict:
+            """Sanitize long prompts for trace (len/sha256/head/tail format)."""
+            import hashlib
+            if len(prompt_text) <= 500:
+                return prompt_text
+            head_len = min(200, len(prompt_text) // 2)
+            tail_len = min(200, len(prompt_text) // 2)
+            return {
+                "len": len(prompt_text),
+                "sha256": hashlib.sha256(prompt_text.encode("utf-8")).hexdigest(),
+                "head": prompt_text[:head_len],
+                "tail": prompt_text[-tail_len:] if tail_len else "",
             }
-            lang_name = lang_names.get(content_lang, content_lang.title())
-            languages_needed.append((content_lang, lang_name, "content"))
-        
-        # Add UI language if different from both
-        if lang not in ["en", content_lang]:
-            lang_names = {
-                "en": "English", "uk": "Ukrainian", "ru": "Russian",
-                "de": "German", "es": "Spanish", "fr": "French",
-                "ja": "Japanese", "zh": "Chinese"
-            }
-            lang_name = lang_names.get(lang, lang.title())
-            languages_needed.append((lang, lang_name, "ui"))
-        
-        # Limit to 3 queries max
-        languages_needed = languages_needed[:3]
-        if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-            logger.debug("[M31] Generating %d queries for languages: %s", len(languages_needed), [l[0] for l in languages_needed])
-        
-        # Clean input
-        clean_fact = re.sub(r'http\S+', '', fact[:800]).replace("\n", " ").strip()
-        clean_context = context[:500].replace("\n", " ").strip() if context else ""
-        
-        # Build prompt for multi-language generation
-        language_instructions = "\n".join([
-            f"{i+1}. {name} ({code}) - {purpose} search"
-            for i, (code, name, purpose) in enumerate(languages_needed)
-        ])
-        
+
         async def _call_query_llm(prompt_text: str, *, kind: str) -> dict:
             Trace.event(
                 "llm.prompt",
@@ -598,16 +597,25 @@ class FactCheckerAgent:
                     "lang": lang,
                     "content_lang": content_lang,
                     "prompt_chars": len(prompt_text),
-                    "prompt": prompt_text,
+                    "prompt": _sanitize_prompt_for_trace(prompt_text),
                 },
             )
-            async with self._sem:
-                response = await self.client.chat.completions.create(
-                    model="gpt-5-nano",
-                    messages=[{"role": "user", "content": prompt_text}],
-                    response_format={"type": "json_object"},
-                    timeout=30,
-                )
+            # Query generation should be fast and bounded.
+            # Use a dedicated semaphore so nano doesn't wait behind analysis calls.
+            api_params = {
+                "model": "gpt-5-nano",
+                "messages": [{"role": "user", "content": prompt_text}],
+                "response_format": {"type": "json_object"},
+                "timeout": float(self.runtime.llm.nano_timeout_sec),
+            }
+            # Query generation uses JSON format - no need for token limit.
+            # GPT-5 reasoning models need these parameters for efficiency.
+            if "gpt-5" in api_params["model"] or api_params["model"].startswith("o1-") or "o1" in api_params["model"]:
+                api_params["reasoning_effort"] = "low"
+                api_params["verbosity"] = "low"
+
+            async with self._sem_nano:
+                response = await self.client.chat.completions.create(**api_params)
             raw = response.choices[0].message.content
             Trace.event(
                 "llm.response",
@@ -618,7 +626,39 @@ class FactCheckerAgent:
                     "content": raw,
                 },
             )
-            result = json.loads(raw)
+            # Diagnostic: log response shape when content is empty
+            if not isinstance(raw, str) or not raw.strip():
+                finish_reason = getattr(response.choices[0], "finish_reason", None) if response.choices else None
+                usage_obj = getattr(response, "usage", None)
+                usage_dict = None
+                if usage_obj:
+                    try:
+                        usage_dict = {
+                            "prompt_tokens": getattr(usage_obj, "prompt_tokens", None),
+                            "completion_tokens": getattr(usage_obj, "completion_tokens", None),
+                            "total_tokens": getattr(usage_obj, "total_tokens", None),
+                        }
+                    except Exception:
+                        usage_dict = str(usage_obj)
+                Trace.event(
+                    "llm.empty_response",
+                    {
+                        "kind": kind,
+                        "model": "gpt-5-nano",
+                        "finish_reason": finish_reason,
+                        "usage": usage_dict,
+                        "choices_count": len(response.choices) if response.choices else 0,
+                    },
+                )
+                logger.warning(
+                    "[GPT-5-Nano] Empty response for %s (finish_reason=%s, usage=%s)",
+                    kind, finish_reason, usage_dict
+                )
+                return {}
+            try:
+                result = json.loads(raw)
+            except Exception:
+                return {}
             Trace.event(
                 "llm.parsed",
                 {
@@ -629,102 +669,119 @@ class FactCheckerAgent:
             )
             return result
 
-        # Single LLM call: queries + claim decomposition.
-        prompt_queries = f"""Decompose the claim into a structured object and generate exactly {len(languages_needed)} search queries to fact-check it.
+        # Build topics list string for prompt
+        topics_list_str = ", ".join(AVAILABLE_TOPICS)
 
-Rules:
-1) Output MUST be valid JSON (no markdown).
-2) Claim decomposition MUST include these keys exactly:
-   subject, action, object, where, when, by_whom
-   - subject/action/object are strings (can be empty, but should be best-effort).
-   - where/when/by_whom are either strings or null.
-3) action MUST be normalized to a verb anchor (prefer: ban / prohibit / forbid / restrict; otherwise a short verb).
-4) Each query MUST include explicit anchors derived from decomposition:
-   - subject
-   - action (as a verb anchor)
-   - object
-5) If where/when/by_whom are null, queries MUST include contextual probes (e.g., "venue security", "organizers said", "when did it happen").
-6) 5-12 words per query, no URLs.
+        prompt_queries = f"""Generate web search queries for fact-checking.
 
-LANGUAGES NEEDED:
-{language_instructions}
+Requirements:
+- Output valid JSON (no markdown) with keys: "claim", "queries", and "topics".
+- "claim" MUST have exactly: subject, action, object, where, when, by_whom (strings or null).
+  - "where": geographic location ONLY (country, city, region). Use null for space/sky events or if not specified.
+  - "when": specific date/period if mentioned, otherwise null.
+  - "by_whom": source/author/organization that made the claim (e.g. "Daily Galaxy", "NASA"). Extract from text if mentioned.
+  - Include verifiable specifics in action/object: distances, magnitudes, scientific terms (e.g. "white dwarf", "supernova", "10,000 light-years").
+- Produce EXACTLY 2 queries in order: 1) English, 2) Ukrainian. If Ukrainian is impossible, repeat the English query.
+- Each query: concise (6–14 words), no URLs/hashtags/quotes, neutral wording. Do NOT add probe phrases or domain-specific markers.
+- Do NOT introduce security/guard terms unless they already appear in STATEMENT or CONTEXT.
+- "topics": select ALL matching topics from this list: [{topics_list_str}]. Empty list if none match.
 
-Output JSON only:
-{{
-  "claim": {{
-    "subject": "…",
-    "action": "ban",
-    "object": "…",
-    "where": null,
-    "when": null,
-    "by_whom": null
-  }},
-  "queries": [{", ".join([f'"{lang[1].lower()} query"' for lang in languages_needed])}]
-}}
+STATEMENT (verbatim):
+{full_statement}
 
-CLAIM: {clean_fact}
-CONTEXT: {clean_context if clean_context else "None"}"""
+CONTEXT (optional, verbatim or "None"):
+{full_context_or_None}
+"""
+
+        prompt_queries_retry = f"""Return JSON with "claim" + "queries" + "topics".
+- queries: 2 items (English then Ukrainian; repeat EN if needed), 6–14 words, neutral.
+- topics: select from [{topics_list_str}] or empty list.
+STATEMENT:
+{full_statement}
+CONTEXT:
+{full_context_or_None}
+"""
 
         try:
-            if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                logger.debug("[GPT-5-Nano] Generating %d queries for: %s...", len(languages_needed), clean_fact[:80])
+            if self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
+                logger.debug("[GPT-5-Nano] Generating %d queries for: %s...", len(languages_needed), (full_statement or "")[:80])
 
             result_queries = await _call_query_llm(prompt_queries, kind="query_generation")
+            if not result_queries:
+                # One retry without CONTEXT if nano returned empty or invalid JSON.
+                result_queries = await _call_query_llm(prompt_queries_retry, kind="query_generation.retry")
+            if not isinstance(result_queries, dict) or not result_queries:
+                raise ValueError("query_generation: empty/invalid response")
 
-            queries = result_queries.get("queries", [])
+            # Contract validation: top-level keys.
+            expected_keys = {"claim", "queries", "topics"}
+            actual_keys = set(result_queries.keys())
+            # Accept with or without topics for backward compatibility
+            if "claim" not in actual_keys or "queries" not in actual_keys:
+                raise ValueError("query_generation: missing claim or queries keys")
+
             claim_decomp_raw = result_queries.get("claim")
-            claim_decomp = self._normalize_claim_decomposition(claim_decomp_raw, fact=fact)
-            self.last_query_meta = {"claim_decomposition": claim_decomp}
-            
-            if queries and len(queries) >= 1:
-                # Filter out URLs and too-short queries
-                valid = [q for q in queries if isinstance(q, str) and 5 < len(q) < 150 and "http" not in q.lower()]
-                if valid:
-                    # Pad with duplicates if needed
-                    while len(valid) < len(languages_needed):
-                        valid.append(valid[0])
+            if not isinstance(claim_decomp_raw, dict) or set(claim_decomp_raw.keys()) != {
+                "subject",
+                "action",
+                "object",
+                "where",
+                "when",
+                "by_whom",
+            }:
+                raise ValueError("query_generation: invalid claim keys")
 
-                    # Enforce anchoring deterministically (defense-in-depth: the LLM can miss anchors).
-                    missing_fields = [k for k in ("where", "when", "by_whom") if claim_decomp.get(k) is None]
-                    anchored: list[str] = []
-                    for (lang_code, _, _purpose), q in zip(languages_needed, valid):
-                        q2 = q.strip()
-                        anchors = [
-                            claim_decomp.get("subject") or "",
-                            self._action_anchor_for_lang(claim_decomp.get("action") or "", lang_code),
-                            claim_decomp.get("object") or "",
-                        ]
-                        # Append missing-context probes when key attributes are missing.
-                        probes = self._probe_phrases(lang_code=lang_code, missing=missing_fields)
-                        # Keep the query compact; append only if the anchor isn't already present.
-                        for a in anchors:
-                            a = (a or "").strip()
-                            if a and a.lower() not in q2.lower():
-                                q2 = (q2 + " " + a).strip()
-                        if probes:
-                            # Ensure at least one probe is present when missing attributes exist.
-                            probe = probes[0]
-                            if probe and probe.lower() not in q2.lower():
-                                q2 = (q2 + " " + probe).strip()
-                        q2 = re.sub(r"\s+", " ", q2).strip()
-                        if len(q2) > 150:
-                            q2 = q2[:150].rstrip()
-                        anchored.append(q2)
-                    
-                    # Log with language tags
-                    for (lang_code, _, purpose), query in zip(languages_needed, anchored):
-                        if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                            logger.debug("[M31] Generated %s query (%s): %s", purpose, lang_code, query[:80])
-                    
-                    if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-                        logger.debug("[GPT-5-Nano] ✓ Generated %d queries (anchored)", len(anchored[:len(languages_needed)]))
-                        logger.debug("[M31] Claim decomposition: %s", claim_decomp)
-                    return anchored[:len(languages_needed)]
+            claim_decomp = self._normalize_claim_decomposition(claim_decomp_raw, fact=fact)
             
-            logger.warning("[GPT-5-Nano] No valid queries in response, using fallback")
-            self.last_query_meta = {"claim_decomposition": self._normalize_claim_decomposition(None, fact=fact)}
-            return self._smart_fallback(fact, lang, content_lang)
+            # M45: Extract topics from LLM response
+            raw_topics = result_queries.get("topics", [])
+            if not isinstance(raw_topics, list):
+                raw_topics = []
+            # Validate topics against AVAILABLE_TOPICS
+            valid_topics = [t for t in raw_topics if isinstance(t, str) and t.lower().strip() in [at.lower() for at in AVAILABLE_TOPICS]]
             
+            self.last_query_meta = {"claim_decomposition": claim_decomp, "topics": valid_topics}
+
+            missing_fields = [k for k in ("where", "when", "by_whom") if claim_decomp.get(k) is None]
+            statement_has_security = self._contains_security_token(full_statement or "")
+
+            raw_queries = result_queries.get("queries")
+            if not isinstance(raw_queries, list):
+                raw_queries = []
+            raw_queries = [q for q in raw_queries if isinstance(q, str) and q.strip()]
+
+            # Enforce exactly 2 queries, EN then UK; repeat EN if missing.
+            if len(raw_queries) < 1:
+                raise ValueError("query_generation: empty queries")
+            if len(raw_queries) < 2:
+                raw_queries.append(raw_queries[0])
+            raw_queries = raw_queries[:2]
+
+            anchored: list[str] = []
+            for (lang_code, _, _purpose), q in zip(languages_needed, raw_queries):
+                q2 = self._collapse_ws(q)
+
+                # Security ban (generic): remove security tokens unless explicitly present in the statement.
+                if not statement_has_security and self._contains_security_token(q2):
+                    q2 = self._strip_security_tokens(query=q2)
+
+                # Enforce length rule: 6–14 words.
+                word_count = len(q2.split())
+                if word_count < 6 or word_count > 14:
+                    raise ValueError("query_generation: invalid word count")
+
+                # Enforce max query length 150 chars (safety, not input truncation).
+                q2 = q2[:150] if len(q2) > 150 else q2
+                anchored.append(q2)
+
+            if self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
+                for (lang_code, _, purpose), query in zip(languages_needed, anchored):
+                    logger.debug("[M31] Generated %s query (%s): %s", purpose, lang_code, query[:80])
+                logger.debug("[GPT-5-Nano] ✓ Generated %d queries (validated)", len(anchored))
+                logger.debug("[M31] Claim decomposition: %s", claim_decomp)
+
+            return anchored
+
         except Exception as e:
             logger.warning("[GPT-5-Nano] ✗ Query generation error: %s", e)
             self.last_query_meta = {"claim_decomposition": self._normalize_claim_decomposition(None, fact=fact)}
@@ -732,90 +789,62 @@ CONTEXT: {clean_context if clean_context else "None"}"""
     
     def _smart_fallback(self, fact: str, lang: str = "en", content_lang: str = None) -> list[str]:
         """
-        Smart fallback: Extract keywords from claim.
-        M31: Returns 2-3 queries based on language overlap.
+        Deterministic fallback: extract key terms and build 2 concise queries (EN, UK).
+        Avoids truncating words mid-way.
         """
         import re
-        
         content_lang = content_lang or lang
-        
-        # Find numbers
-        numbers = re.findall(r'\b\d+(?:\.\d+)?\b', fact)
-        
-        # Find Latin words (potential English/scientific terms)
-        latin_words = re.findall(r'\b[A-Za-z]{3,}\b', fact)
-        
-        keywords = []
-        
-        # Add acronyms (like NIST, NASA, GPS)
-        acronyms = [w for w in latin_words if w.isupper() and len(w) >= 2]
-        keywords.extend(acronyms[:3])
-        
-        # Add other Latin words
-        other_latin = [w for w in latin_words if not w.isupper() and len(w) >= 4]
-        keywords.extend(other_latin[:5])
-        
-        # Add key numbers
-        keywords.extend(numbers[:2])
-        
-        # Build a deterministic minimal claim decomposition for anchoring (used when LLM query generation is unavailable).
-        first_words = " ".join(re.findall(r"[^\s]+", (fact or "").strip())[:5]).strip()
-        heur_claim = self._normalize_claim_decomposition(
-            {
-                "subject": first_words,
-                "action": "claim",
-                "object": " ".join([k for k in keywords if k])[:120] or first_words,
-                "where": None,
-                "when": None,
-                "by_whom": None,
-            },
-            fact=fact,
-        )
+
+        raw_fact = (fact or "").strip()
+        if not raw_fact:
+            self.last_query_meta = {"claim_decomposition": self._normalize_claim_decomposition(None, fact="")}
+            return ["", ""]
+
+        # Extract proper nouns (Latin: capitalized words)
+        proper_nouns_latin = re.findall(r'\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\b', raw_fact)
+        # Extract proper nouns (Cyrillic: capitalized words)
+        proper_nouns_cyrillic = re.findall(r'\b[А-ЯІЇЄҐ][а-яіїєґ]+(?:\s+[А-ЯІЇЄҐ][а-яіїєґ]+)*\b', raw_fact)
+        # Extract numbers (dates, amounts, distances)
+        numbers = re.findall(r'\b\d[\d\s,.]*\d?\b', raw_fact)
+        # Clean numbers (remove internal spaces)
+        numbers = [re.sub(r'\s+', '', n).strip() for n in numbers if n.strip()]
+
+        # Build key terms list (prioritize proper nouns, then numbers)
+        key_terms = []
+        seen = set()
+        for term in proper_nouns_latin[:4] + proper_nouns_cyrillic[:3] + numbers[:2]:
+            term_clean = term.strip()
+            if term_clean and term_clean.lower() not in seen:
+                seen.add(term_clean.lower())
+                key_terms.append(term_clean)
+
+        # If no proper nouns found, use first sentence (max 10 words)
+        if not key_terms:
+            first_sentence = re.split(r'[.!?\n]', raw_fact)[0].strip()
+            words = first_sentence.split()[:10]
+            key_terms = [" ".join(words)] if words else [raw_fact[:100]]
+
+        base_query = " ".join(key_terms).strip()
+        base_query = re.sub(r'\s+', ' ', base_query)
+
+        # Ensure word boundary (don't cut mid-word) - max 150 chars
+        if len(base_query) > 150:
+            base_query = base_query[:150].rsplit(' ', 1)[0]
+
+        heur_claim = {
+            "subject": key_terms[0] if key_terms else "",
+            "action": self._canonicalize_action(raw_fact) or "claim",
+            "object": " ".join(key_terms[1:3]) if len(key_terms) > 1 else base_query[:120],
+            "where": None,
+            "when": None,
+            "by_whom": None,
+        }
         self.last_query_meta = {"claim_decomposition": heur_claim}
 
-        queries = []
-        
-        # Query 1: English keywords
-        en_query = " ".join(keywords[:8]) if keywords else fact[:50].strip()
-        queries.append(en_query)
-        
-        # Query 2: Content language (if != EN)
-        if content_lang != "en":
-            queries.append(fact[:100].strip())
-        
-        # Query 3: UI language (if different from both)
-        if lang not in ["en", content_lang]:
-            queries.append(fact[:100].strip())
+        # EN and UK queries are the same in fallback (key terms are language-agnostic)
+        en_query = base_query
+        uk_query = base_query
 
-        # Enforce anchors (subject/action/object + at least one probe) deterministically.
-        anchored: list[str] = []
-        lang_slots = ["en"]
-        if content_lang != "en":
-            lang_slots.append(content_lang)
-        if lang not in ("en", content_lang):
-            lang_slots.append(lang)
-        missing = ["where", "when", "by_whom"]
-        for code, q in zip(lang_slots, queries):
-            q2 = (q or "").strip()
-            anchors = [
-                heur_claim.get("subject") or "",
-                self._action_anchor_for_lang(heur_claim.get("action") or "", code),
-                heur_claim.get("object") or "",
-            ]
-            probes = self._probe_phrases(lang_code=code, missing=missing)
-            for a in anchors:
-                a = (a or "").strip()
-                if a and a.lower() not in q2.lower():
-                    q2 = (q2 + " " + a).strip()
-            if probes:
-                p = probes[0]
-                if p and p.lower() not in q2.lower():
-                    q2 = (q2 + " " + p).strip()
-            q2 = re.sub(r"\s+", " ", q2).strip()
-            if len(q2) > 150:
-                q2 = q2[:150].rstrip()
-            anchored.append(q2)
-        
-        if ENGINE_DEBUG and logger.isEnabledFor(logging.DEBUG):
-            logger.debug("[M31] Smart fallback: %d queries for langs: en, %s, %s", len(queries), content_lang, lang)
-        return anchored
+        if self.runtime.debug.engine_debug and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("[M44] Smart fallback: EN='%s', UK='%s'", en_query[:80], uk_query[:80])
+        return [en_query, uk_query]

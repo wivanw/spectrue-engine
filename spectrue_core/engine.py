@@ -1,9 +1,9 @@
 # Simplified engine.py without TextAnalyzer dependency
 
-import os
 import logging
+import json
 from typing import Dict, Any, Optional
-from langdetect import detect, detect_langs, DetectorFactory, LangDetectException
+from langdetect import detect_langs, DetectorFactory, LangDetectException
 import re
 
 from spectrue_core.config import SpectrueConfig
@@ -52,6 +52,14 @@ class SpectrueEngine:
     def __init__(self, config: SpectrueConfig):
         self.config = config
         self.verifier = FactVerifierComposite(config)
+        try:
+            logger.info("Effective config: %s", json.dumps(self.config.runtime.to_safe_log_dict(), ensure_ascii=False))
+        except Exception:
+            pass
+
+    async def fetch_url_content(self, url: str) -> str | None:
+        """Fetch URL content securely via configured search provider (no local requests)."""
+        return await self.verifier.fetch_url_content(url)
 
     async def analyze_text(
         self, 
@@ -83,10 +91,7 @@ class SpectrueEngine:
         
         # Detect content language
         detected_lang, detected_prob = detect_content_language(text, fallback=lang)
-        try:
-            min_prob = float(os.getenv("SPECTRUE_LANGDETECT_MIN_PROB", "0.80"))
-        except Exception:
-            min_prob = 0.80
+        min_prob = float(getattr(self.config.runtime.tunables, "langdetect_min_prob", 0.80) or 0.80)
         content_lang = detected_lang if detected_prob >= min_prob else lang
 
         def extract_claims(raw: str, max_claims: int = 2) -> list[str]:
@@ -135,10 +140,7 @@ class SpectrueEngine:
                 await progress_callback("extracting_claims")
 
             # Cost-aware: cap number of separate claim analyses.
-            try:
-                max_claims = int(re.sub(r"\D", "", (os.getenv("SPECTRUE_MAX_CLAIMS", "") or "2")) or "2")
-            except Exception:
-                max_claims = 2
+            max_claims = int(getattr(self.config.runtime.tunables, "max_claims_deep", 2) or 2)
             max_claims = max(1, min(max_claims, 3))
 
             claims = extract_claims(text, max_claims=max_claims)

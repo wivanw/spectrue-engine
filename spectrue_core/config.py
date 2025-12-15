@@ -1,11 +1,16 @@
 from typing import Optional
+
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
+
+from spectrue_core.runtime_config import EngineRuntimeConfig
 
 class SpectrueConfig(BaseModel):
     """
     Configuration for the Spectrue Core Engine.
     Decouples the engine from environment variables.
     """
+    model_config = ConfigDict(arbitrary_types_allowed=True, env_prefix="SPECTRUE_")
     
     # LLM Configuration
     openai_api_key: Optional[str] = Field(None, description="OpenAI API Key for LLM operations")
@@ -23,6 +28,6 @@ class SpectrueConfig(BaseModel):
 
     # Local LLM (Optional)
     local_llm_url: Optional[str] = Field(None, description="URL for local LLM (e.g., Llama 3 via llama-cpp-python)")
-    
-    class Config:
-        env_prefix = "SPECTRUE_"
+
+    # Runtime configuration (loaded from env once; excludes secrets)
+    runtime: EngineRuntimeConfig = Field(default_factory=EngineRuntimeConfig.load_from_env)

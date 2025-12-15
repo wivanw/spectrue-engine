@@ -15,7 +15,6 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Spectrue Engine. If not, see <https://www.gnu.org/licenses/>.
 
-import os
 import asyncio
 import httpx
 import logging
@@ -25,7 +24,6 @@ import diskcache
 from typing import Tuple
 from urllib.parse import urlparse
 from spectrue_core.config import SpectrueConfig
-from spectrue_core.utils.runtime import is_local_run
 from spectrue_core.utils.trace import Trace
 
 # M29: Import from centralized trusted sources registry
@@ -37,19 +35,7 @@ logger = logging.getLogger(__name__)
 class WebSearchTool:
     def __init__(self, config: SpectrueConfig = None):
         self.config = config
-        api_key = config.tavily_api_key if config else os.getenv("TAVILY_API_KEY")
-        
-        if not api_key:
-            # Fallback to env var if config is missing (legacy)
-            api_key = os.getenv("TAVILY_API_KEY")
-            
-        if not api_key:
-            # Only raise if truly missing
-            # In library mode, user might want to initialize tool but set key later?
-            # But search won't work.
-            pass 
-            
-        self.api_key = api_key
+        self.api_key = config.tavily_api_key if config else None
 
         self.client = httpx.AsyncClient(
             timeout=12.0,
@@ -72,10 +58,7 @@ class WebSearchTool:
         self.page_cache = diskcache.Cache(str(page_cache_dir))
         self.page_ttl = 86400 * 7
 
-        try:
-            conc = int(os.getenv("TAVILY_CONCURRENCY", "8"))
-        except Exception:
-            conc = 8
+        conc = int(getattr((config.runtime.search if config else None), "tavily_concurrency", 8) or 8)
         self._sem = asyncio.Semaphore(max(1, min(conc, 16)))
         self.last_cache_hit: bool = False
         self.last_search_meta: dict = {}
@@ -229,14 +212,30 @@ class WebSearchTool:
         except Exception:
             pass
 
-        base = max(0.0, min(1.0, hit_ratio))
+        lexical_score = max(0.0, min(1.0, hit_ratio))
+        
+        # Start with lexical score
+        final_score = lexical_score
+
         if tavily_score is not None:
             try:
-                base = max(base, float(tavily_score))
+                ts = float(tavily_score)
+                # M45: Do not blindly trust Tavily score if lexical overlap is poor.
+                # Often Tavily returns irrelevant "trending news" with ambiguous scores.
+                if lexical_score < 0.1:
+                    # If keywords don't match well, only accept Tavily score if it's very high (semantic match?)
+                    # Otherwise, downgrade it significantly.
+                    if ts > 0.85:
+                        final_score = max(lexical_score, ts)
+                    else:
+                        final_score = max(lexical_score, ts * 0.3)
+                else:
+                    # We have some keywords, so we trust the max of both mechanisms
+                    final_score = max(lexical_score, ts)
             except Exception:
                 pass
 
-        return max(0.0, min(1.0, base + num_bonus + trusted_bonus - length_penalty))
+        return max(0.0, min(1.0, final_score + num_bonus + trusted_bonus - length_penalty))
 
     def _rank_and_filter(self, query: str, results: list[dict]) -> list[dict]:
         scored: list[dict] = []
@@ -260,60 +259,16 @@ class WebSearchTool:
             kept = scored[:6]
         return kept[:10]
 
-    def _detect_topic(self, query: str) -> str:
-        combined = (query or "").lower()
-
-        finance_keywords = [
-            "stock", "stocks", "market", "shares", "earnings", "ipo", "fund",
-            "bitcoin", "btc", "ethereum", "eth", "crypto", "price", "trading",
-            "usd", "eur", "uah", "inflation", "rate", "interest",
-        ]
-        news_keywords = [
-            "today", "yesterday", "this week", "breaking", "latest", "new", "recent", "now",
-            "сьогодні", "вчора", "щойно", "останні", "терміново", "зараз",
-            "сегодня", "вчера", "только что", "срочно", "сейчас",
-        ]
-        science_keywords = [
-            "comet", "asteroid", "nasa", "astronomy", "planet", "space",
-            "research", "study", "scientists", "discovery", "arxiv", "nature",
-            "екзопланет", "комет", "астероїд", "космос", "дослідженн",
-            "комета", "астероид", "космос", "исследован",
-        ]
-
-        # Tavily's `topic` enum is not stable across API versions; keep values conservative.
-        if any(k in combined for k in finance_keywords):
-            return "general"
-        if any(k in combined for k in news_keywords):
-            return "news"
-        if any(k in combined for k in science_keywords):
-            # Science claims are often about recent discoveries; bias towards news.
-            return "news"
-        return "general"
-
     def _detect_time_filters(self, *, ttl: int | None, query: str) -> dict:
-        # If cache TTL is very short, this is likely a time-sensitive check.
-        # Use a narrow window to avoid irrelevant/old SEO content.
-        is_time_sensitive = bool(ttl is not None and ttl <= 1800)
-        if not is_time_sensitive:
-            return {}
-
-        # Tavily supports `time_range` but not all deployments accept extra fields like `days`.
-        # Keep payload conservative to avoid 400 Bad Request.
-        return {"time_range": "week"}
+        # Disabled: time_range="week" kills science/historical cases.
+        # Tavily returns fresher results by default anyway.
+        return {}
 
     def _get_exclude_domains(self) -> list[str]:
-        raw = os.getenv("SPECTRUE_TAVILY_EXCLUDE_DOMAINS", "").strip()
-        if not raw:
-            return []
-        parts = [p.strip().lower() for p in re.split(r"[,\n]", raw) if p.strip()]
-        # Bound to avoid oversized payloads.
-        out: list[str] = []
-        for d in parts:
-            d = d.lstrip(".")
-            if d and d not in out:
-                out.append(d)
-            if len(out) >= 150:
-                break
+        try:
+            out = list((self.config.runtime.search.tavily_exclude_domains or []) if self.config else [])
+        except Exception:
+            out = []
         return out
 
     def _raw_content_mode(self, *, depth: str, domains: list[str] | None) -> bool:
@@ -321,20 +276,23 @@ class WebSearchTool:
         Tavily param `include_raw_content`: bool.
         Default is cost-aware: enabled only for non-domain-filtered advanced searches (deep dive).
         """
-        val = os.getenv("SPECTRUE_TAVILY_INCLUDE_RAW_CONTENT", "auto").strip().lower()
-        if val in ("0", "false", "no", "off"):
-            return False
-        if val in ("1", "true", "yes", "on"):
+        try:
+            forced = self.config.runtime.search.tavily_include_raw_content if self.config else None
+        except Exception:
+            forced = None
+        if forced is True:
             return True
+        if forced is False:
+            return False
 
-        # auto
+        # auto:
         if depth == "advanced" and not domains:
             return True
         return False
 
     def _raw_max_results(self) -> int:
         try:
-            n = int(os.getenv("SPECTRUE_TAVILY_RAW_MAX_RESULTS", "4"))
+            n = int(self.config.runtime.search.tavily_raw_max_results if self.config else 4)
         except Exception:
             n = 4
         return max(1, min(n, 10))
@@ -358,19 +316,20 @@ class WebSearchTool:
         }
 
     def _should_fulltext_enrich(self, *, quality: str, depth: str) -> bool:
-        val = os.getenv("SPECTRUE_FULLTEXT_FETCH", "").strip().lower()
-        if val in ("1", "true", "yes", "on"):
-            return True
-        if val in ("0", "false", "no", "off"):
+        try:
+            return bool(self.config.runtime.features.fulltext_fetch if self.config else False)
+        except Exception:
             return False
-        # Default OFF to avoid server-side crawling / IP reputation issues.
-        return False
 
     async def _fetch_extract_text(self, url: str) -> str | None:
-        if not self._is_valid_url(url):
+        """
+        Securely fetch/extract text from a URL using Tavily Extract API.
+        No local HTTP requests to the target URL are made from this server.
+        """
+        if not self._is_valid_url(url) or not self.api_key:
             return None
 
-        cache_key = f"page|{url}"
+        cache_key = f"page_tavily|{url}"
         try:
             if cache_key in self.page_cache:
                 cached = self.page_cache[cache_key]
@@ -378,45 +337,54 @@ class WebSearchTool:
                     return cached
         except Exception:
             pass
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; SpectrueBot/1.0; +https://spectrue.net)",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        
+        # Tavily Extract API
+        endpoint = "https://api.tavily.com/extract"
+        payload = {
+            "urls": [url],
+            # extracting from specific URL doesn't need detailed search params
         }
-
+        
         try:
-            resp = await self.client.get(url, headers=headers)
-            resp.raise_for_status()
-            content_type = (resp.headers.get("content-type") or "").lower()
-            if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
+            async with self._sem:
+                Trace.event("tavily.extract.request", {"url": endpoint, "target": url})
+                r = await self.client.post(endpoint, json=payload)
+                r.raise_for_status()
+                data = r.json()
+                
+            # Response format: {"results": [{"url": "...", "raw_content": "..."}]}
+            results = data.get("results", [])
+            if not results:
+                return None
+                
+            # Find our URL result (or first one)
+            extracted_text = ""
+            for item in results:
+                # Basic matching or take first valid
+                content = item.get("raw_content") or item.get("content") or ""
+                if content:
+                    extracted_text = content
+                    break
+            
+            if not extracted_text:
                 return None
 
-            raw = resp.content
-            if raw and len(raw) > 2_000_000:
-                raw = raw[:2_000_000]
-
-            html = raw.decode(resp.encoding or "utf-8", errors="ignore")
-            if not html.strip():
+            cleaned = re.sub(r"\s+", " ", extracted_text).strip()
+            if len(cleaned) < 50: # Minimum useful content
                 return None
 
-            # Import lazily (keeps engine lightweight if not needed)
-            import trafilatura
-
-            extracted = trafilatura.extract(html, include_comments=False, include_tables=False)
-            if not extracted:
-                return None
-
-            cleaned = re.sub(r"\s+", " ", extracted).strip()
-            if len(cleaned) < 200:
-                return None
-
-            cleaned = cleaned[:3000]
+            # Cache the result
             try:
                 self.page_cache.set(cache_key, cleaned, expire=self.page_ttl)
             except Exception:
                 pass
+            
+            Trace.event("tavily.extract.success", {"url": url, "chars": len(cleaned)})
             return cleaned
-        except Exception:
+
+        except Exception as e:
+            logger.warning("[Tavily] Extract failed for %s: %s", url, e)
+            Trace.event("tavily.extract.error", {"url": url, "error": str(e)})
             return None
 
     async def _enrich_with_fulltext(self, query: str, ranked: list[dict], *, limit: int = 3) -> tuple[list[dict], int]:
@@ -480,7 +448,7 @@ class WebSearchTool:
             if filtered:
                 payload["exclude_domains"] = filtered
 
-        payload["topic"] = self._detect_topic(q)
+        payload["topic"] = "general"
         payload.update(self._detect_time_filters(ttl=ttl, query=q))
         if raw_mode:
             payload["include_raw_content"] = True
@@ -696,7 +664,7 @@ class WebSearchTool:
                 "domains_filtered": bool(domains),
                 "cache_hit": bool(self.last_cache_hit),
                 "page_fetches": fulltext_fetches,
-                "topic": self._detect_topic(q),
+                "topic": "general",
                 **self._detect_time_filters(ttl=ttl, query=q),
                 "raw_content_mode": raw_mode,
                 "raw_max_results": self._raw_max_results() if raw_mode else None,

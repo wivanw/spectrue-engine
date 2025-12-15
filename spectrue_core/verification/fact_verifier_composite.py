@@ -1,11 +1,10 @@
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
-from spectrue_core.tools.search_tool import WebSearchTool, TRUSTED_DOMAINS
+from spectrue_core.tools.search_tool import WebSearchTool
 from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
-from spectrue_core.verification.trusted_sources import get_domains_for_language, get_trusted_domains_by_lang
+from spectrue_core.verification.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.config import SpectrueConfig
 import asyncio
-import os
 import re
 import math
 import logging
@@ -46,19 +45,18 @@ class FactVerifierComposite:
         has_cyr = re.search(r"[А-Яа-яІіЇїЄєҐґ]", s) is not None
         return has_latin and has_cyr
 
-    def _env_true(self, name: str, default: bool = True) -> bool:
-        raw = os.getenv(name)
-        if raw is None:
-            return default
-        return raw.strip().lower() in ("1", "true", "yes", "y", "on")
-
     def _is_time_sensitive(self, fact: str, lang: str) -> bool:
         """Check if fact requires recent data using simple heuristics."""
         time_keywords = [
             "today", "yesterday", "this week", "this month", "breaking",
             "just announced", "latest", "new", "recent", "now",
             "сьогодні", "вчора", "щойно", "новий", "останній",
-            "сегодня", "вчера", "только что", "новый", "последний"
+            "сегодня", "вчера", "только что", "новый", "последний",
+            "heute", "gestern", "diese woche", "diesen monat", "aktuell", "neu",  # de
+            "hoy", "ayer", "esta semana", "este mes", "reciente", "nuevo",        # es
+            "aujourd'hui", "hier", "cette semaine", "ce mois", "récent",          # fr
+            "今日", "昨日", "今週", "今月", "最新", "速報", "直近",                    # ja
+            "今天", "昨天", "本周", "本月", "最新", "刚刚", "突发",                    # zh
         ]
         fact_lower = fact.lower()
         return any(kw in fact_lower for kw in time_keywords)
@@ -262,7 +260,7 @@ class FactVerifierComposite:
             if "when" in missing:
                 parts.append("не вказано дату/період")
             if "by_whom" in missing:
-                parts.append("неясно, хто саме встановив заборону (гурт/організатори/майданчик/влада)")
+                parts.append("не вказано, хто є автором заяви/першоджерелом (by_whom)")
             if max_tier <= 2:
                 parts.append("частина джерел може бути переказами/соцмережами без офіційного підтвердження")
             gap = f"{label} " + "; ".join(parts) + "."
@@ -274,10 +272,70 @@ class FactVerifierComposite:
             if "when" in missing:
                 parts.append("не указана дата/период")
             if "by_whom" in missing:
-                parts.append("неясно, кто именно ввёл запрет (группа/организаторы/площадка/власти)")
+                parts.append("не указано, кто является автором заявления/первичным источником (by_whom)")
             if max_tier <= 2:
                 parts.append("часть источников может быть пересказами/соцсетями без официального подтверждения")
             gap = f"{label} " + "; ".join(parts) + "."
+        elif lc == "de":
+            label = "Lücken:"
+            parts = []
+            if "where" in missing:
+                parts.append("kein klarer Ort/Land angegeben")
+            if "when" in missing:
+                parts.append("kein klares Datum/Zeitraum angegeben")
+            if "by_whom" in missing:
+                parts.append("nicht angegeben, wer Urheber der Aussage/Quelle ist (by_whom)")
+            if max_tier <= 2:
+                parts.append("Teil der Quellen könnten Sekundärquellen/Soziale Medien ohne offizielle Bestätigung sein")
+            gap = f"{label} " + "; ".join(parts) + "."
+        elif lc == "es":
+            label = "Lagunas:"
+            parts = []
+            if "where" in missing:
+                parts.append("no se indica lugar/país claro")
+            if "when" in missing:
+                parts.append("no se indica fecha/período claro")
+            if "by_whom" in missing:
+                parts.append("no se especifica quién es el autor de la declaración/fuente (by_whom)")
+            if max_tier <= 2:
+                parts.append("parte de las fuentes pueden ser secundarias o redes sociales sin declaración oficial")
+            gap = f"{label} " + "; ".join(parts) + "."
+        elif lc == "fr":
+            label = "Lacunes:"
+            parts = []
+            if "where" in missing:
+                parts.append("pas de lieu/pays clair indiqué")
+            if "when" in missing:
+                parts.append("pas de date/période claire indiquée")
+            if "by_whom" in missing:
+                parts.append("non précisé qui est l'auteur de la déclaration/source (by_whom)")
+            if max_tier <= 2:
+                parts.append("certaines sources peuvent être secondaires ou issues des réseaux sociaux sans confirmation officielle")
+            gap = f"{label} " + "; ".join(parts) + "."
+        elif lc == "ja":
+            label = "不足点:"
+            parts = []
+            if "where" in missing:
+                parts.append("場所/国が明確でない")
+            if "when" in missing:
+                parts.append("日付/期間が明確でない")
+            if "by_whom" in missing:
+                parts.append("誰が声明/情報源の作成者か不明記 (by_whom)")
+            if max_tier <= 2:
+                parts.append("一部の情報源は公式確認のない二次情報やSNSの可能性がある")
+            gap = f"{label} " + "".join(parts) + "。"
+        elif lc == "zh":
+            label = "缺口:"
+            parts = []
+            if "where" in missing:
+                parts.append("未注明明确地点/国家")
+            if "when" in missing:
+                parts.append("未注明明确日期/时间段")
+            if "by_whom" in missing:
+                parts.append("未说明谁是声明/来源的作者 (by_whom)")
+            if max_tier <= 2:
+                parts.append("部分来源可能是未经官方确认的二手来源或社交媒体")
+            gap = f"{label} " + "；".join(parts) + "。"
         else:
             label = "Gaps:"
             parts = []
@@ -286,7 +344,7 @@ class FactVerifierComposite:
             if "when" in missing:
                 parts.append("no clear date/timeframe")
             if "by_whom" in missing:
-                parts.append("unclear who imposed the restriction (band vs organizers/venue/authorities)")
+                parts.append("unspecified who authored the statement/source (by_whom)")
             if max_tier <= 2:
                 parts.append("some sources may be secondary or social without an official statement")
             gap = f"{label} " + "; ".join(parts) + "."
@@ -435,6 +493,19 @@ class FactVerifierComposite:
             markers = [" ми ", " наш", " на наш", " під час наш", " на нашому", " на нашому концерті"]
         elif lc == "ru":
             markers = [" мы ", " наш", " на наш", " во время наш", " на нашем", " на нашем концерте"]
+        elif lc == "de":
+            markers = [" wir ", " unser", " uns ", " bei uns", " auf unserem", " bei unserem Konzert", " in unserer Show"]
+        elif lc == "es":
+            markers = [" nosotros ", " nuestro", " nuestra", " nos ", " en nuestro", " en nuestro concierto", " en nuestro show"]
+        elif lc == "fr":
+            markers = [" nous ", " notre ", " nos ", " à notre ", " lors de notre ", " à notre concert", " dans notre spectacle"]
+        elif lc == "ja":
+            # For CJK, we use tighter markers since space padding is less relevant, but the check uses padded text.
+            # We includes spaces in markers only if we expect them, or use unique chars.
+            # Since the check is `m in padded`, and padded has spaces at ends, simple substrings work fine if no spaces form boundaries.
+            markers = ["私たち", "我々", "我々の", "私たちの", "当バンド", "当公演", "公式発表"]
+        elif lc == "zh":
+            markers = ["我们", "咱们", "我们的", "我方", "本次演唱会", "本次演出", "官方声明"]
         else:
             markers = [" we ", " our ", " us ", " on our ", " at our ", " at our concert", " on our show"]
 
@@ -463,6 +534,10 @@ class FactVerifierComposite:
             platform_markers += ["інстаграм", "фейсбук", "твіттер", "ютуб", "ікс"]
         elif lc == "ru":
             platform_markers += ["инстаграм", "фейсбук", "твиттер", "ютуб", "икс"]
+        elif lc == "ja":
+            platform_markers += ["インスタ", "フェイスブック", "ツイッター", "ユーチューブ", "エックス"]
+        elif lc == "zh":
+            platform_markers += ["ins", "fb", "推特", "脸书", "油管"]
 
         for t in (non_social_texts or []):
             if not isinstance(t, str) or not t.strip():
@@ -570,6 +645,12 @@ class FactVerifierComposite:
             uniq.append(t)
         return uniq[:5]
 
+    async def fetch_url_content(self, url: str) -> str | None:
+        """Securely fetch URL content via Search Provider (Tavily)."""
+        if not url:
+            return None
+        return await self.web_search_tool._fetch_extract_text(url)
+
     def _extract_date_markers(self, text: str) -> list[str]:
         """
         Extract coarse date markers (years / numeric dates / relative time keywords).
@@ -586,6 +667,11 @@ class FactVerifierComposite:
             "today", "yesterday", "this week", "this month",
             "сьогодні", "вчора", "цього тижня", "цього місяця",
             "сегодня", "вчера", "на этой неделе", "в этом месяце",
+            "heute", "gestern", "diese woche", "diesen monat",      # de
+            "hoy", "ayer", "esta semana", "este mes",               # es
+            "aujourd'hui", "hier", "cette semaine", "ce mois",      # fr
+            "今日", "昨日", "今週", "今月",                            # ja
+            "今天", "昨天", "本周", "本月",                            # zh
         ]
         sl = s.lower()
         for k in rel:
@@ -687,6 +773,71 @@ class FactVerifierComposite:
             if has_b or has_c:
                 return "Есть упоминания в нескольких источниках, но без первичного подтверждения в предоставленных материалах."
             return "Есть частичные сигналы, но деталей недостаточно для уверенного вывода о правдоподобности."
+
+        if lc == "de":
+            if only_d:
+                return "Quellen sind meist soziale Reposts, daher ist das Szenario möglich, aber schwach belegt."
+            if has_a:
+                return "Es gibt Verweise auf primäre/offizielle Quellen, das Szenario wirkt plausibel, aber das ist keine Verifizierung."
+            if has_a_prime:
+                return "Es gibt eine direkte Aussage eines offiziellen Social-Media-Accounts, aber das ersetzt keine offiziellen Dokumente."
+            if (has_b or has_c) and independent >= 2 and not has_by_whom:
+                return "Mehrere unabhängige Quellen erwähnen es, aber es ist unklar, wer die Entscheidung/Aussage getroffen hat."
+            if has_b or has_c:
+                return "Mehrere Quellen erwähnen es, aber in den Materialien ist keine primäre Bestätigung ersichtlich."
+            return "Es gibt Teilsignale, aber nicht genug konsistente Details, um die Plausibilität sicher zu beurteilen."
+
+        if lc == "es":
+            if only_d:
+                return "Las fuentes son mayormente reposts sociales, por lo que el escenario es posible pero con poco respaldo."
+            if has_a:
+                return "Hay referencias a fuentes primarias/oficiales, el escenario parece plausible, pero esto no equivale a verificación."
+            if has_a_prime:
+                return "Hay una declaración directa de una cuenta social oficial, pero no reemplaza documentos oficiales."
+            if (has_b or has_c) and independent >= 2 and not has_by_whom:
+                return "Varias fuentes independientes lo mencionan, pero no está claro quién tomó la decisión/declaración explícitamente."
+            if has_b or has_c:
+                return "Varias fuentes lo mencionan, pero no se ve confirmación primaria en los materiales."
+            return "Hay señales parciales, pero no suficiente detalle consistente para juzgar la plausibilidad con confianza."
+
+        if lc == "fr":
+            if only_d:
+                return "Les sources sont surtout des reposts sociaux, le scénario est possible mais faiblement étayé."
+            if has_a:
+                return "Il y a des références à des sources primaires/officielles, le scénario semble plausible, mais ce n'est pas une vérification."
+            if has_a_prime:
+                return "Il y a une déclaration directe d'un compte social officiel, mais cela ne remplace pas des documents officiels."
+            if (has_b or has_c) and independent >= 2 and not has_by_whom:
+                return "Plusieurs sources indépendantes le mentionnent, mais l'auteur de la décision/déclaration n'est pas clair."
+            if has_b or has_c:
+                return "Plusieurs sources le mentionnent, mais aucune confirmation primaire n'est visible dans les matériaux."
+            return "Il y a des signaux partiels, mais pas assez de détails cohérents pour juger la plausibilité avec confiance."
+
+        if lc == "ja":
+            if only_d:
+                return "情報源は主にSNSの転載であり、シナリオはあり得るが裏付けは弱い。"
+            if has_a:
+                return "一次/公式情報源への言及があり、シナリオはもっともらしく見えるが、これは検証と同義ではない。"
+            if has_a_prime:
+                return "公式SNSアカウントからの直接の声明があるが、これは公式文書や主催者の声明を代替するものではない。"
+            if (has_b or has_c) and independent >= 2 and not has_by_whom:
+                return "複数の独立した情報源が言及しているが、誰が決定/発言をしたかが不明確である。"
+            if has_b or has_c:
+                return "複数の情報源が言及しているが、提供された資料の中に一次確認が見当たらない。"
+            return "部分的なシグナルはあるが、妥当性を自信を持って判断するには一貫した詳細が不足している。"
+
+        if lc == "zh":
+            if only_d:
+                return "来源主要是社交转载，因此该情况可能是真的，但支持力度较弱。"
+            if has_a:
+                return "存在对主要/官方来源的引用，该情况看起来合理，但这两者不等于核实。"
+            if has_a_prime:
+                return "有来自官方社交账号的直接声明，但这不能替代官方文件或组织者声明。"
+            if (has_b or has_c) and independent >= 2 and not has_by_whom:
+                return "多个独立来源提及此事，但尚不清楚是谁明确做出了决定/声明。"
+            if has_b or has_c:
+                return "多个来源提及此事，但在提供的材料中未见主要确认。"
+            return "存在部分信号，但缺乏足够的一致细节来自信地判断合理性。"
 
         # en default
         if only_d:
@@ -1200,7 +1351,7 @@ class FactVerifierComposite:
         Strategy: Oracle -> Tier 1 -> Deep Dive
         """
         trace_id = str(uuid4())
-        Trace.start(trace_id)
+        Trace.start(trace_id, runtime=self.config.runtime)
         Trace.event(
             "verify.start",
             {
@@ -1228,10 +1379,7 @@ class FactVerifierComposite:
         # Budget-aware gating: keep total cost for this fact within `max_cost` (credits).
         model_cost = int(MODEL_COSTS.get(gpt_model, 20) or 0)
         per_search_cost = int(SEARCH_COSTS.get(search_type, 80) or 0)
-        try:
-            google_cse_cost = int(os.getenv("SPECTRUE_GOOGLE_CSE_COST", "0") or 0)
-        except Exception:
-            google_cse_cost = 0
+        google_cse_cost = int(getattr(self.config.runtime.search, "google_cse_cost", 0) or 0)
         # Default: do not charge extra for Google CSE fallback to keep costs predictable.
         google_cse_cost = max(0, min(int(google_cse_cost), int(per_search_cost)))
         try:
@@ -1328,45 +1476,24 @@ class FactVerifierComposite:
         if progress_callback:
             await progress_callback("generating_queries")
         
-        SHORT_TEXT_THRESHOLD = 300
         search_queries = [fact, fact]
-        
+        is_short_fact = len(fact) < 300
+        # Always use LLM query generation with full statement; no truncation or probe rewrites.
         try:
-            if len(fact) < SHORT_TEXT_THRESHOLD:
-                logger.debug("[Waterfall] Short text (%d chars). Using fast query strategy.", len(fact))
-                # Avoid duplicate queries and try to keep an English-ish query in slot 0 for better global coverage.
-                # Keep at least 2 queries because deep dive expects EN + Native.
-                fallback_queries = self.agent._smart_fallback(fact, lang=lang, content_lang=content_lang or lang)
-                if len(fallback_queries) < 2:
-                    fallback_queries.append(fallback_queries[0])
-                search_queries = fallback_queries[:2]
-
-                # Optional: use LLM to rewrite/clean short queries (helps with typos like "Image Dragons").
-                # Keep it opt-out to preserve the previous fast path.
-                if self._env_true("SPECTRUE_LLM_QUERY_REWRITE_SHORT", True):
-                    try:
-                        llm_queries = await self.agent.generate_search_queries(
-                            fact, context=context_text, lang=lang, content_lang=content_lang
-                        )
-                        if llm_queries:
-                            logger.debug("[Waterfall] Short text: LLM rewrote queries: %s", llm_queries[:2])
-                            # Preserve structure: slot 0 is global/EN, slot 1 is content language when available.
-                            search_queries[0] = llm_queries[0]
-                            if len(llm_queries) > 1:
-                                search_queries[1] = llm_queries[1]
-                    except Exception as e:
-                        logger.debug("[Waterfall] Short text: LLM rewrite failed, keeping fallback. %s", e)
+            queries_list = await self.agent.generate_search_queries(
+                fact, context=context_text, lang=lang, content_lang=content_lang, allow_short_llm=True
+            )
+            if queries_list and len(queries_list) > 0:
+                search_queries = queries_list[:2]
+                logger.debug("[Waterfall] Generated %d queries (LLM): %s", len(queries_list), search_queries)
             else:
-                queries_list = await self.agent.generate_search_queries(
-                    fact, context=context_text, lang=lang, content_lang=content_lang
-                )
-                if queries_list and len(queries_list) > 0:
-                    search_queries = queries_list[:2]
-                    logger.debug("[Waterfall] Generated %d queries (LLM): %s", len(queries_list), search_queries)
-                else:
-                    logger.debug("[Waterfall] GPT-5 Nano returned empty, using fallback.")
+                logger.debug("[Waterfall] GPT-5 Nano returned empty, using fallback.")
         except Exception as e:
             logger.warning("[Waterfall] Failed to generate queries: %s. Using fallback.", e)
+            Trace.event(
+                "query.rewrite_used",
+                {"enabled": False, "reason": "query_generation_error", "fact_len": len(fact)},
+            )
 
         claim_decomposition = None
         try:
@@ -1571,47 +1698,81 @@ class FactVerifierComposite:
             or (avg_rel is not None and avg_rel < 0.30)
         )
         if needs_anchor_refine and tier1_provider == "tavily":
-            strict_queries = self.agent.build_strict_queries(
-                claim_decomposition, lang=lang, content_lang=content_lang
-            )
-            strict_queries = [self._normalize_search_query(q) for q in (strict_queries or [])]
-            strict_query = (
-                strict_queries[1]
-                if (content_lang and len(strict_queries) > 1)
-                else (strict_queries[0] if strict_queries else "")
-            )
-            strict_query = self._normalize_search_query(strict_query) or tier1_query
+            # Default: deterministic anchored refinement.
+            refine_query = ""
+            refine_pass = "anchored_refine"
+            refine_event_key = "anchored_refine"
+
+            # For short claims, avoid an extra pre-search LLM call by default.
+            # Only attempt LLM query regeneration when it's likely to pay off (deep/advanced),
+            # and only after we already observed low relevance from Tier-1 search.
+            try:
+                allow_llm_refine = is_short_fact and (analysis_mode == "deep" or search_type == "advanced")
+            except Exception:
+                allow_llm_refine = False
+
+            if allow_llm_refine:
+                try:
+                    llm_queries = await self.agent.generate_search_queries(
+                        fact,
+                        context=context_text,
+                        lang=lang,
+                        content_lang=content_lang,
+                        allow_short_llm=True,
+                    )
+                    if llm_queries:
+                        refine_query = llm_queries[1] if (content_lang and len(llm_queries) > 1) else llm_queries[0]
+                        refine_query = self._normalize_search_query(refine_query)
+                        if refine_query:
+                            refine_pass = "llm_query_regen"
+                            refine_event_key = "llm_query_regen"
+                except Exception as e:
+                    logger.debug("[Waterfall] LLM query regeneration failed; falling back to deterministic refine. %s", e)
+
+            if not refine_query:
+                strict_queries = self.agent.build_strict_queries(
+                    claim_decomposition, lang=lang, content_lang=content_lang
+                )
+                strict_queries = [self._normalize_search_query(q) for q in (strict_queries or [])]
+                refine_query = (
+                    strict_queries[1]
+                    if (content_lang and len(strict_queries) > 1)
+                    else (strict_queries[0] if strict_queries else "")
+                )
+                refine_query = self._normalize_search_query(refine_query) or tier1_query
 
             if _can_add_tavily_calls(1):
                 if progress_callback:
                     await progress_callback("searching_deep")
                 if is_local_run():
                     logger.info(
-                        "[Waterfall] Low relevance (best=%s avg_top5=%s). Anchored refine: %s",
+                        "[Waterfall] Low relevance (best=%s avg_top5=%s). %s: %s",
                         best_rel,
                         avg_rel,
-                        strict_query[:100],
+                        refine_pass,
+                        refine_query[:100],
                     )
                 else:
                     logger.debug(
-                        "[Waterfall] Low relevance (best=%s avg_top5=%s). Anchored refine: %s",
+                        "[Waterfall] Low relevance (best=%s avg_top5=%s). %s: %s",
                         best_rel,
                         avg_rel,
-                        strict_query[:100],
+                        refine_pass,
+                        refine_query[:100],
                     )
                 Trace.event(
                     "search.tavily.start",
                     {
-                        "query": strict_query,
+                        "query": refine_query,
                         "lang": search_lang,
                         "depth": search_type,
                         "ttl": ttl,
                         "domains_count": len(tier1_domains or []),
-                        "anchored_refine": True,
+                        refine_event_key: True,
                     },
                 )
                 refine_context, refine_sources = await self.web_search_tool.search(
-                    strict_query,
+                    refine_query,
                     search_depth=search_type,
                     ttl=ttl,
                     domains=tier1_domains,
@@ -1624,7 +1785,7 @@ class FactVerifierComposite:
                         "sources_count": len(refine_sources or []),
                         "meta": self.web_search_tool.last_search_meta,
                         "cache_hit": bool(self.web_search_tool.last_cache_hit),
-                        "anchored_refine": True,
+                        refine_event_key: True,
                     },
                 )
                 tavily_calls += 1
@@ -1632,16 +1793,16 @@ class FactVerifierComposite:
                 page_fetches += int((self.web_search_tool.last_search_meta or {}).get("page_fetches") or 0)
 
                 fallback_used = True
-                fallback_provider = "anchored_refine"
-                passes.append("anchored_refine")
+                fallback_provider = refine_pass
+                passes.append(refine_pass)
                 tier1_sources = _dedupe_sources(tier1_sources, refine_sources, limit=10)
                 tier1_context = f"{tier1_context}\n{refine_context}".strip()
                 tier1_tool_meta = dict(self.web_search_tool.last_search_meta or {})
                 passes_detail.append(
                     {
-                        "pass": "anchored_refine",
+                        "pass": refine_pass,
                         "provider": "tavily",
-                        "queries": [strict_query],
+                        "queries": [refine_query],
                         "domains_count": len(tier1_domains or []),
                         "lang": search_lang,
                         "meta": {

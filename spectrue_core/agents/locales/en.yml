@@ -31,7 +31,7 @@ en:
         "context_score": 0.0-1.0,  // Absence of context manipulation
         "style_score": 0.0-1.0,    // Tone neutrality
         "confidence_score": 0.0-1.0, // Your confidence based on source quality
-        "rationale": "REQUIRED: 4-8 short lines. Start each line with one of these labels: 'Evidence:', 'Gaps:', 'Analyst view (hypothesis):'. Only add 'Manipulation/Style:' if context_score < 0.80 or style_score < 0.80. In 'Evidence', cite specific source names/domains when available. If evidence is weak, say so in 'Evidence' and 'Gaps', and keep 'Analyst view' clearly speculative (no new facts)."
+        "rationale": "REQUIRED: 4-8 short lines. Start each line with one of these labels: 'Evidence:', 'Gaps:', 'Analyst view (hypothesis):'. Only add 'Style and Context:' if context_score < 0.80 or style_score < 0.80. In 'Evidence', cite specific source names/domains when available. If evidence is weak, say so in 'Evidence' and 'Gaps', and keep 'Analyst view' clearly speculative (no new facts)."
       }}
 
       Your JSON:
@@ -41,11 +41,11 @@ en:
 
       ### METHODOLOGY
       1) Evidence check: what do sources actually say?
-      2) Manipulation/style check (when applicable): vague wording, sensational tone, missing context, absolutist claims.
+      2) Style and Context (when applicable): vague wording, sensational tone, missing context, absolutist claims.
       3) Verdict: set scores to match the evidence and style/manipulation signals.
 
       ### RESPONSE FORMAT (JSON)
-      Return valid JSON with the same fields as in the full mode. The `rationale` must have 3-6 short lines. Only add a 'Manipulation/Style:' line if context_score < 0.80 or style_score < 0.80.
+      Return valid JSON with the same fields as in the full mode. The `rationale` must have 3-6 short lines. Only add a 'Style and Context:' line if context_score < 0.80 or style_score < 0.80.
 
       ### INPUT DATA
       CLAIM: {fact}

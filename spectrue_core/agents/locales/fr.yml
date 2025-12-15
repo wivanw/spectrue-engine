@@ -31,7 +31,7 @@ fr:
         "context_score": 0.0-1.0,  // Absence de manipulation du contexte
         "style_score": 0.0-1.0,    // Neutralité du ton
         "confidence_score": 0.0-1.0, // Ta confiance basée sur la qualité des sources
-        "rationale": "REQUIS : 4-8 lignes courtes. Chaque ligne commence par un libellé : 'Preuves:', 'Lacunes:', 'Avis d’analyste (hypothèse):'. Ajoute 'Manipulation/Style:' seulement si context_score < 0.80 ou style_score < 0.80. Dans 'Preuves', cite des sources/domaines précis. Si les preuves sont faibles, dis-le dans 'Preuves' et 'Lacunes' et garde l'‘Avis’ clairement hypothétique (sans nouveaux faits)."
+        "rationale": "REQUIS : 4-8 lignes courtes. Chaque ligne commence par un libellé : 'Preuves:', 'Lacunes:', 'Avis d’analyste (hypothèse):'. Ajoute 'Style et Contexte:' seulement si context_score < 0.80 ou style_score < 0.80. Dans 'Preuves', cite des sources/domaines précis. Si les preuves sont faibles, dis-le dans 'Preuves' et 'Lacunes' et garde l'‘Avis’ clairement hypothétique (sans nouveaux faits)."
       }}
 
       ### EXEMPLE (Few-Shot)
@@ -54,11 +54,11 @@ fr:
 
       ### MÉTHODOLOGIE
       1) Preuves : que disent réellement les sources ?
-      2) Manipulation/Style (si pertinent) : formulations vagues, sensationnalisme, contexte manquant.
+      2) Style et Contexte (si pertinent) : formulations vagues, sensationnalisme, contexte manquant.
       3) Verdict : aligne les scores sur les preuves et les signaux de manipulation/style.
 
       ### FORMAT DE RÉPONSE (JSON)
-      Retourne un JSON valide avec les mêmes champs que le mode complet. `rationale` doit contenir 3-6 lignes courtes. Ajoute 'Manipulation/Style:' seulement si context_score < 0.80 ou style_score < 0.80.
+      Retourne un JSON valide avec les mêmes champs que le mode complet. `rationale` doit contenir 3-6 lignes courtes. Ajoute 'Style et Contexte:' seulement si context_score < 0.80 ou style_score < 0.80.
 
       ### DONNÉES D'ENTRÉE
       AFFIRMATION : {fact}

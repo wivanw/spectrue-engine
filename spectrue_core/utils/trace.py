@@ -19,14 +19,15 @@ from __future__ import annotations
 
 import contextvars
 import json
-import os
 import re
 import time
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Any
 
 from spectrue_core.utils.runtime import is_local_run
+from spectrue_core.runtime_config import EngineRuntimeConfig
 
 _trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("spectrue_trace_id", default=None)
 _trace_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_enabled", default=False)
@@ -59,9 +60,15 @@ def _sanitize(obj: Any, *, max_str: int = 4000, max_list: int = 100, max_dict: i
         return obj
     if isinstance(obj, str):
         s = _redact_text(obj)
-        if len(s) > max_str:
-            return s[:max_str] + "…"
-        return s
+        if len(s) <= max_str:
+            return s
+        head_tail_len = min(300, max_str // 2)
+        return {
+            "len": len(s),
+            "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest(),
+            "head": s[:head_tail_len],
+            "tail": s[-head_tail_len:] if head_tail_len else "",
+        }
     if isinstance(obj, bytes):
         return f"<bytes:{len(obj)}>"
     if isinstance(obj, (list, tuple)):
@@ -112,13 +119,10 @@ class Trace:
     """
 
     @staticmethod
-    def start(trace_id: str) -> TraceContext:
-        enabled = is_local_run() and os.getenv("SPECTRUE_TRACE_DISABLE", "").strip().lower() not in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
+    def start(trace_id: str, *, runtime: EngineRuntimeConfig | None = None) -> TraceContext:
+        # Centralized config: trace is local-only and can be disabled via runtime.features.trace_enabled.
+        runtime = runtime or EngineRuntimeConfig.load_from_env()
+        enabled = bool(is_local_run() and runtime.features.trace_enabled)
         _trace_id_var.set(trace_id)
         _trace_enabled_var.set(enabled)
         if enabled:
@@ -154,4 +158,3 @@ class Trace:
         except Exception:
             # Tracing must never break the main flow.
             return
-

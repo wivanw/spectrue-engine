@@ -63,19 +63,14 @@ class GoogleFactCheckTool:
             return None
 
         try:
-            lang_norm = (lang or "").strip()
-            logger.info("[Google FC] Querying: '%s...' (lang=%s)", q[:100], lang_norm or "none")
-
+            # Don't filter by language - fact-checks are mostly in English regardless of claim language.
             base_params = {
                 "query": q,
                 "key": self.api_key,
                 "pageSize": 5,
             }
 
-            # First try: respect language filter if provided; then fallback to global search.
             params = dict(base_params)
-            if lang_norm:
-                params["languageCode"] = lang_norm
 
             Trace.event("google_fact_check.request", {"url": self.BASE_URL, "params": params})
             response = await self.client.get(self.BASE_URL, params=params)
@@ -88,26 +83,7 @@ class GoogleFactCheckTool:
             )
             response.raise_for_status()
             data = response.json()
-                
-            logger.info(f"[Google FC] Response status: {response.status_code}")
             claims = data.get("claims", [])
-            logger.info(f"[Google FC] Found {len(claims)} claim(s)")
-            
-            if not claims and lang_norm:
-                logger.info("[Google FC] No results for lang=%s, retrying without language filter", lang_norm)
-                Trace.event("google_fact_check.request", {"url": self.BASE_URL, "params": base_params})
-                response2 = await self.client.get(self.BASE_URL, params=base_params)
-                Trace.event(
-                    "google_fact_check.response",
-                    {
-                        "status_code": response2.status_code,
-                        "text": response2.text,
-                    },
-                )
-                response2.raise_for_status()
-                data = response2.json()
-                claims = data.get("claims", [])
-                logger.info("[Google FC] Found %d claim(s) in global search", len(claims))
 
             if not claims:
                 return None
@@ -123,8 +99,6 @@ class GoogleFactCheckTool:
             url = review.get("url", "")
             title = review.get("title", claim.get("text", ""))
             rating = review.get("textualRating", "Unknown")
-            
-            logger.info(f"[Google FC] Publisher: {publisher}, Rating: {rating}")
             
             # Determine scores based on rating (heuristic)
             # This is a simplified mapping. Real-world mapping might need more robust NLP or specific string matching.
@@ -155,8 +129,6 @@ class GoogleFactCheckTool:
                 }
             ]
 
-            logger.info(f"[Google FC] ✓ Matched! Returning verified_score={verified_score}")
-            
             # Construct rationale for user display
             rationale = f"Fact check by {publisher}: Rated as '{rating}'. {title}"
             

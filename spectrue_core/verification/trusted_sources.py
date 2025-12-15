@@ -90,6 +90,39 @@ TRUSTED_SOURCES: dict[str, list[str]] = {
         "popsci.com", "discovermagazine.com", "smithsonianmag.com", "nationalgeographic.com",
         "ipcc.ch",
     ],
+    # M44: Astronomy & Astrophysics — tiered for evidence scoring
+    # Tier A: Professional journals/databases (can raise verified_score)
+    "astronomy_tier_a": [
+        "arxiv.org",  # Preprints (astro-ph) — ok for "hypothesis exists"
+        "ui.adsabs.harvard.edu",  # NASA ADS — gold standard
+        "astronomerstelegram.org",  # ATel — transient alerts, critical
+        "simbad.u-strasbg.fr",  # SIMBAD database
+        "vizier.u-strasbg.fr",  # VizieR catalogs
+        "iopscience.iop.org",  # IOP Science (ApJ, MNRAS)
+        "aanda.org",  # Astronomy & Astrophysics journal
+        "academic.oup.com",  # Oxford (MNRAS)
+        # Official space agencies & observatories
+        "science.nasa.gov",  # NASA Science
+        "hubblesite.org",  # Hubble / STScI
+        "stsci.edu",  # Space Telescope Science Institute
+        "eso.org",  # European Southern Observatory
+        "mpifr-bonn.mpg.de",  # Max Planck Radio Astronomy
+        "mpia.de",  # Max Planck Astronomy
+        "aas.org",  # American Astronomical Society
+    ],
+    # Tier B: Semi-professional/curated (supportive, capped weight)
+    "astronomy_tier_b": [
+        "aasnova.org",  # AAS Nova digests
+        "skyandtelescope.org",  # Respected science journalism
+        "earthsky.org",  # Science communication
+    ],
+    # Tier C: Science-popular (context/plausibility only, not proof)
+    "astronomy_tier_c": [
+        "universetoday.com",
+        "centauri-dreams.org",
+        "astronomy.com",
+        "astrobites.org",  # Grad student summaries
+    ],
     "technology": [
         "arstechnica.com", "wired.com", "theverge.com", "techcrunch.com",
         "venturebeat.com", "recode.net", "engadget.com",
@@ -218,71 +251,51 @@ def get_domains_for_language(lang: str) -> list[str]:
     return get_trusted_domains_by_lang(lang)
 
 
-def get_domains_for_topic(keywords: list[str]) -> list[str]:
+# M45: LLM-based topic detection
+# Available topics for LLM to choose from during query generation.
+# LLM receives this list and selects ALL matching topics for the claim.
+AVAILABLE_TOPICS: list[str] = [
+    "astronomy",       # Scientific: stars, planets, space, telescopes, cosmic events
+    "technology",      # Tech: AI, software, hardware, cyber, companies
+    "science_health",  # Health/medicine: vaccines, diseases, research, FDA/CDC/WHO
+    "finance",         # Markets, stocks, banking, crypto, IMF/OECD
+    "education",       # Schools, universities, students, exams
+    "law",             # Courts, lawsuits, legislation, trials
+]
+
+
+# Topic → TRUSTED_SOURCES category mapping
+_TOPIC_TO_CATEGORIES: dict[str, list[str]] = {
+    "astronomy": ["astronomy_tier_a", "astronomy_tier_b", "astronomy_tier_c"],
+    "technology": ["technology"],
+    "science_health": ["science_and_health"],
+    "finance": ["finance_tier1"],
+    "education": ["education_tier1"],
+    "law": ["law_tier1"],
+}
+
+
+def get_domains_by_topics(topics: list[str]) -> list[str]:
     """
-    Get relevant trusted domains based on detected topic keywords.
-    
+    Get trusted domains for LLM-selected topics.
+
     Args:
-        keywords: List of keywords from the claim
-    
+        topics: List of topic strings selected by LLM (from AVAILABLE_TOPICS)
+
     Returns:
-        List of domain strings relevant to the topic
+        Deduplicated list of domain strings for the selected topics
     """
-    topic_keywords = {
-        "technology": [
-            "apple", "google", "microsoft", "ai", "software", "app", "tech",
-            "cyber", "hack", "computer", "phone", "iphone", "android", "tesla",
-            "openai", "chatgpt", "nvidia", "meta",
-        ],
-        "science_and_health": [
-            "vaccine", "virus", "covid", "health", "doctor", "study",
-            "research", "cancer", "drug", "fda", "cdc", "nih", "who", "ipcc",
-            "climate", "science", "medical", "hospital", "disease", "space",
-        ],
-        "finance_tier1": [
-            "stock", "stocks", "market", "markets", "shares", "equity", "equities",
-            "earnings", "revenue", "profit", "dividend", "bond", "bonds", "yield", "yields",
-            "rates", "interest", "inflation", "gdp", "imf", "oecd", "world bank", "worldbank",
-            "forex", "fx", "crypto", "bitcoin", "ethereum", "bank", "banking",
-        ],
-        "education_tier1": [
-            "school", "schools", "university", "universities", "college", "student", "students",
-            "exam", "exams", "curriculum", "teacher", "teachers", "higher ed", "higher education",
-            "campus", "admissions", "scholarship",
-        ],
-        "law_tier1": [
-            "court", "courts", "judge", "judges", "lawsuit", "sued", "legal", "legislation",
-            "bill", "statute", "regulation", "attorney", "lawyer", "prosecutor", "supreme court",
-            "constitutional", "scotus", "criminal", "trial", "sentenced",
-        ],
-        "ukraine_imi_whitelist": [
-            "ukraine", "kyiv", "zelensky", "war", "crimea",
-            "donbas", "kharkiv", "odesa", "ukrainian", "україна",
-        ],
-        "russia_independent_exiled": [
-            "russia", "putin", "moscow", "kremlin", "russian",
-            "navalny", "росія", "путін",
-        ],
-    }
-    
-    keywords_lower = [k.lower() for k in keywords]
-    matched_categories = set()
-    
-    for category, triggers in topic_keywords.items():
-        for trigger in triggers:
-            if any(trigger in kw for kw in keywords_lower):
-                matched_categories.add(category)
-                break
-    
-    if not matched_categories:
+    if not topics:
         return []
 
     result: list[str] = []
-    for cat in matched_categories:
-        # Topic-gated: only include specialized domains if the topic bucket matched.
-        result.extend(TRUSTED_SOURCES.get(cat, []))
+    for topic in topics:
+        topic_lower = topic.lower().strip()
+        categories = _TOPIC_TO_CATEGORIES.get(topic_lower, [])
+        for cat in categories:
+            result.extend(TRUSTED_SOURCES.get(cat, []))
 
-    # Deduplicate while preserving order.
+    # Deduplicate while preserving order
     seen = set()
     out: list[str] = []
     for d in result:
@@ -291,3 +304,4 @@ def get_domains_for_topic(keywords: list[str]) -> list[str]:
         seen.add(d)
         out.append(d)
     return out
+
