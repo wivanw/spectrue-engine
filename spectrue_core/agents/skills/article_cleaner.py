@@ -81,10 +81,7 @@ class ArticleCleanerSkill:
         prompt = ARTICLE_CLEAN_PROMPT.format(text=truncated)
         
         try:
-            Trace.event("article_clean.prompt", {
-                "model": "gpt-5-nano",
-                "input_chars": len(truncated),
-            })
+
             
             result = await self.llm_client.call(
                 model="gpt-5-nano",
@@ -97,9 +94,7 @@ class ArticleCleanerSkill:
             
             response = result.get("content", "") if isinstance(result, dict) else result
             
-            Trace.event("article_clean.response", {
-                "output_chars": len(response) if response else 0,
-            })
+
             
             if response and len(response.strip()) > 100:
                 logger.info("[ArticleCleaner] Cleaned: %d -> %d chars", len(raw_text), len(response))

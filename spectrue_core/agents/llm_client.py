@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 ReasoningEffort = Literal["low", "medium", "high"]
-CacheRetention = Literal["in-memory", "24h"]
+CacheRetention = Literal["in_memory", "24h"]
 
 
 class LLMClient:
@@ -71,7 +71,7 @@ class LLMClient:
         openai_api_key: str | None = None,
         default_timeout: float = 30.0,
         max_retries: int = 3,
-        cache_retention: CacheRetention = "24h",
+        cache_retention: CacheRetention = "in_memory", # M56: Fix default
     ):
         """
         Initialize LLM client.
@@ -80,7 +80,7 @@ class LLMClient:
             openai_api_key: OpenAI API key (uses OPENAI_API_KEY env var if not provided)
             default_timeout: Default timeout for API calls in seconds
             max_retries: Maximum retry attempts on failure
-            cache_retention: Prompt cache retention ("in-memory" or "24h")
+            cache_retention: Prompt cache retention ("in_memory" or "24h")
         """
         self.client = AsyncOpenAI(api_key=openai_api_key)
         self.default_timeout = default_timeout
@@ -152,12 +152,21 @@ class LLMClient:
         # Prompt caching
         if cache_key:
             params["prompt_cache_key"] = cache_key
+            # M56: Fix retention literal (in_memory vs in-memory)
+            # CAUTION: gpt-5-nano throws 400 "invalid_parameter" for this.
             # params["prompt_cache_retention"] = self.cache_retention
         
+        # Calculate payload hash for debug correlation (M55)
+        # Hash includes input + instructions to match exactly what went into the prompt
+        import hashlib
+        payload_str = (instructions or "") + "||" + input
+        payload_hash = hashlib.md5(payload_str.encode()).hexdigest()
+
         Trace.event(f"{trace_kind}.prompt", {
             "model": model,
             "input_chars": len(input),
             "instructions_chars": len(instructions or ""),
+            "payload_hash": payload_hash,
             "json_output": json_output,
             "cache_key": cache_key,
         })
@@ -204,26 +213,54 @@ class LLMClient:
                 
                 # Extract usage info
                 usage = None
+                cache_status = "NONE" # Default if no cache_key
+                
                 if response.usage:
+                    # M56: Extract detailed cache hits via prompt_tokens_details
+                    cached_tokens = 0
+                    if hasattr(response.usage, "prompt_tokens_details"):
+                        ptd = response.usage.prompt_tokens_details
+                        # Support both object access and dict access depending on library version
+                        if isinstance(ptd, dict):
+                            cached_tokens = ptd.get("cached_tokens", 0)
+                        else:
+                            cached_tokens = getattr(ptd, "cached_tokens", 0)
+                    
                     usage = {
                         "input_tokens": response.usage.input_tokens,
                         "output_tokens": response.usage.output_tokens,
                         "total_tokens": response.usage.total_tokens,
+                        "cached_tokens": cached_tokens
                     }
+
+                    if cache_key:
+                        if cached_tokens > 0:
+                            cache_status = "HIT"
+                        elif response.usage.input_tokens > 0:
+                             cache_status = "MISS"
+                        else:
+                             cache_status = "UNKNOWN"
+                    else:
+                        cache_status = "NONE"
+
+                else:
+                     # Fallback if usage absent
+                     cache_status = "KEY_PROVIDED" if cache_key else "NONE"
                 
                 result = {
                     "content": content,
                     "parsed": parsed,
                     "model": response.model,
-                    "cached": bool(cache_key),
+                    "cache_status": cache_status, 
                     "usage": usage,
                 }
                 
                 Trace.event(f"{trace_kind}.response", {
                     "model": response.model,
                     "content_chars": len(content),
-                    "cached": bool(cache_key),
+                    "cache_status": cache_status,
                     "attempt": attempt + 1,
+                    "payload_hash": payload_hash
                 })
                 
                 return result
@@ -235,6 +272,7 @@ class LLMClient:
                     "model": model,
                     "attempt": attempt + 1,
                     "error": str(e)[:200],
+                    "payload_hash": payload_hash
                 })
         
         # All retries exhausted

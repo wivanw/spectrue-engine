@@ -57,3 +57,49 @@ class FactCheckerAgent:
     async def clean_article(self, raw_text: str) -> str:
         """Clean article text using LLM Nano."""
         return await self.article_cleaner.clean_article(raw_text)
+
+    async def verify_oracle_relevance(self, user_fact: str, oracle_claim: str, oracle_rating: str) -> bool:
+        """
+        Check if the Oracle result is semantically relevant to the user's fact.
+        Prevents false positives where keywords match but the topic differs (e.g. comet news vs comet alien fake).
+        """
+        # Quick length check
+        if not user_fact or not oracle_claim:
+            return False
+            
+        prompt = f"""Compare the User Query with the Fact-Check Result.
+        
+User Query: "{user_fact[:1000]}"
+Fact-Check Claim: "{oracle_claim[:1000]}" (Rated: {oracle_rating})
+
+Task:
+Determine if the Fact-Check is discussing the SAME specific claim or event as the User Query.
+- If the User Query is about a normal event (e.g. "comet approaching Earth") and the Fact-Check is debunking a wild/fake story about it (e.g. "aliens found on comet"), they are DIFFERENT (Relevance: NO).
+- If the User Query IS the fake story (e.g. "aliens on comet?"), then it IS RELEVANT (Relevance: YES).
+- If the User Query is vague, but the Fact-Check is the primary context, it's relevant.
+
+Output JSON: {{ "is_relevant": true/false, "reason": "..." }}
+"""
+        try:
+            from spectrue_core.utils.trace import Trace
+            result = await self.llm_client.call_json(
+                model="gpt-5-nano",
+                input=prompt,
+                instructions="You are a relevance checking assistant.",
+                reasoning_effort="low",
+                timeout=10.0,
+                trace_kind="oracle_verification"
+            )
+            is_relevant = bool(result.get("is_relevant", False))
+            Trace.event("oracle.verification", {
+                "user_fact": user_fact[:50], 
+                "oracle_claim": oracle_claim[:50], 
+                "is_relevant": is_relevant
+            })
+            if not is_relevant:
+                 logger.info("[Agent] Oracle hit rejected by LLM: %s", result.get("reason"))
+            return is_relevant
+            
+        except Exception as e:
+            logger.warning("[Agent] Oracle verification failed: %s. Assuming relevant.", e)
+            return True

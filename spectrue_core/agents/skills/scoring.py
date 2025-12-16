@@ -75,8 +75,21 @@ Output valid JSON:
         
         # FIX: Cache key must depend on content, not just language!
         import hashlib
-        content_hash = hashlib.md5((prompt + str(global_cap)).encode()).hexdigest()
-        cache_key = f"evidence_score_{lang}_{content_hash}"
+        import json
+        
+        # M54: Hash canonical content to avoid false hits
+        hash_payload = {
+            "fact": pack.get("original_fact"),
+            "evidence": sources_by_claim,
+            "constraints": {"global_cap": global_cap, "reasons": cap_reasons},
+            "lang": lang,
+        }
+        canonical = json.dumps(hash_payload, sort_keys=True, default=str)
+        content_hash = hashlib.md5(canonical.encode()).hexdigest()
+        cache_key = f"evidence_score_v2_{lang}_{content_hash}"
+        
+        # M54: Debug trace for cache verification
+        # M55: Debug trace for cache verification is now handled by LLMClient payload logging.
 
         try:
             # Determine appropriate model (use config or passed arg)

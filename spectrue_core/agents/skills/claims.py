@@ -1,5 +1,7 @@
 from spectrue_core.verification.evidence_pack import Claim, EvidenceRequirement
 from .base_skill import BaseSkill, logger
+import hashlib
+from spectrue_core.utils.trace import Trace
 
 class ClaimExtractionSkill(BaseSkill):
     
@@ -8,7 +10,7 @@ class ClaimExtractionSkill(BaseSkill):
         text: str,
         *,
         lang: str = "en",
-        max_claims: int = 7,
+        max_claims: int = 5, # M56: Reduced from 7 to 5 for speed
     ) -> list[Claim]:
         """
         Extract atomic verifiable claims from article text.
@@ -23,35 +25,23 @@ class ClaimExtractionSkill(BaseSkill):
         prompt = f"""Extract 3-{max_claims} atomic verifiable claims from this article.
 Rules:
 1. Each claim must be independently verifiable (a single fact, not an opinion).
-2. Use neutral, indicative phrasing (e.g. "Event X date is Y", not "Event X will happen"). Avoid future tense predictions.
-3. Preserve EXACT numbers, dates, names, and quotes from the original.
-4. Classify each claim by type:
-   - "core": Main factual assertion of the article
-   - "numeric": Claims with specific numbers/statistics (amounts, percentages, distances)
-   - "timeline": Claims about dates, deadlines, sequences, or timing
-   - "attribution": Claims about who said or did something (quotes, statements)
-   - "sidefact": Secondary supporting facts (background info, context)
-4. Assign importance (0.0-1.0): core claims = 0.9-1.0, sidefacts = 0.3-0.5
-5. For claims requiring strong evidence, set evidence_req fields:
-   - needs_primary: true if claim needs official/primary source
-   - needs_2_independent: true if claim needs 2+ independent sources
-   - needs_quote: true if claim involves a specific quote
-   - needs_recent: true if claim is time-sensitive news
-6. Generate 2 optimal Google search queries for verifying THIS claim (in the same language).
+2. Use neutral, indicative phrasing (e.g. "Event X date is Y").
+3. Preserve EXACT numbers, dates, names.
+4. Classify type: "core", "numeric", "timeline", "attribution", "sidefact".
+5. Importance: 0.9-1.0 for core, 0.4 for side.
+6. Generate 2 search queries for verification.
 
-Output valid JSON with key "claims" (array of objects):
+Output valid JSON key "claims":
 {{
   "claims": [
     {{
-      "text": "claim text here",
-      "type": "core|numeric|timeline|attribution|sidefact",
+      "text": "claim text",
+      "type": "core",
       "importance": 0.9,
-      "search_queries": ["query 1", "query 2"],
+      "search_queries": ["query1", "query2"],
       "evidence_req": {{
-        "needs_primary": false,
-        "needs_2_independent": true,
-        "needs_quote": false,
-        "needs_recent": true
+        "needs_primary": true,
+        "needs_2_independent": true
       }}
     }}
   ]
@@ -61,13 +51,20 @@ ARTICLE:
 {text_excerpt}
 """
         try:
+            # M54: Debug trace for cache verification
+            text_hash = hashlib.md5(text_excerpt.encode()).hexdigest()
+            cache_key = f"claim_extract_v2_{lang}_{text_hash}"
+            
+            # M55: Debug trace for cache verification is now handled by LLMClient payload logging.
+
+
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
                 input=prompt,
                 instructions="You are a claim extraction assistant. Extract verifiable claims from articles.",
                 reasoning_effort="low",
-                cache_key="claim_extract_v1",
-                timeout=25.0,
+                cache_key=cache_key,
+                timeout=45.0,
                 trace_kind="claim_extraction",
             )
             

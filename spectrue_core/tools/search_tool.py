@@ -300,7 +300,38 @@ class WebSearchTool:
         if not kept:
             # Fallback for borderline items, but never return pure junk (0.0)
             kept = [r for r in scored if r.get("relevance_score", 0.0) >= 0.05]
-        return kept[:10]
+        
+        # M54: Enforce domain diversity
+        # Select best result per domain first, then fill rest
+        selected: list[dict] = []
+        seen_domains: set[str] = set()
+        backlog: list[dict] = []
+        
+        for r in kept:
+            try:
+                domain = urlparse(r.get("url", "")).netloc.lower()
+                # strip www.
+                if domain.startswith("www."):
+                    domain = domain[4:]
+            except Exception:
+                domain = "unknown"
+                
+            if domain not in seen_domains:
+                selected.append(r)
+                seen_domains.add(domain)
+            else:
+                # Add to backlog but preserve order (since it was sorted by score)
+                backlog.append(r)
+        
+        # If we have space left, fill with best from backlog (duplicates)
+        target_count = 10
+        if len(selected) < target_count:
+            needed = target_count - len(selected)
+            # Re-sort backlog by score just in case, though it should be sorted
+            backlog.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)
+            selected.extend(backlog[:needed])
+            
+        return selected[:target_count]
 
     def _detect_time_filters(self, *, ttl: int | None, query: str) -> dict:
         # Disabled: time_range="week" kills science/historical cases.
