@@ -89,7 +89,7 @@ class EngineLLMConfig:
     max_output_tokens_deep: int = 1100
 
     # M49: Responses API configuration
-    cluster_timeout_sec: float = 30.0
+    cluster_timeout_sec: float = 60.0
 
 
 
@@ -141,7 +141,6 @@ class EngineRuntimeConfig:
         max_out_deep = _parse_int(
             os.getenv("SPECTRUE_LLM_MAX_OUTPUT_TOKENS_DEEP"), default=1100, min_v=200, max_v=4000
         )
-
 
         debug = EngineDebugFlags(
             engine_debug=_parse_bool(os.getenv("SPECTRUE_ENGINE_DEBUG"), default=False),

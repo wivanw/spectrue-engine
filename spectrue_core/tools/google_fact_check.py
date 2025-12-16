@@ -88,7 +88,30 @@ class GoogleFactCheckTool:
             if not claims:
                 return None
 
-            claim = claims[0]
+            # Find most relevant claim (not just first!)
+            # Google may return unrelated claims matching just some keywords
+            query_words = set(w.lower() for w in re.findall(r'\b\w{4,}\b', q))
+            
+            best_claim = None
+            best_overlap = 0
+            
+            for claim in claims:
+                claim_text = claim.get("text", "")
+                claim_words = set(w.lower() for w in re.findall(r'\b\w{4,}\b', claim_text))
+                
+                # Count overlapping significant words
+                overlap = len(query_words & claim_words)
+                
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_claim = claim
+            
+            # Require at least 2 matching words to consider it relevant
+            if best_overlap < 2 or not best_claim:
+                logger.info("[Google FC] No relevant claim found (best overlap: %d words)", best_overlap)
+                return None
+            
+            claim = best_claim
             claim_review = claim.get("claimReview", [])
             if not claim_review:
                 logger.warning("[Google FC] Claim found but no reviews available")

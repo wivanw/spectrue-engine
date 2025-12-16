@@ -166,7 +166,9 @@ class Trace:
             "data": _sanitize(data),
         }
         try:
-            path = _trace_dir() / f"{tid}.jsonl"
+            # M53: Sanitize trace_id for filename safety (e.g. replace ':' with '_')
+            safe_tid = "".join(c if c.isalnum() or c in "._-" else "_" for c in tid)
+            path = _trace_dir() / f"{safe_tid}.jsonl"
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         except Exception:

@@ -5,12 +5,13 @@ from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.verification.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.verification.evidence_pack import (
     ArticleContext, Claim, ClaimMetrics, ConfidenceConstraints,
-    EvidenceMetrics, EvidencePack, SearchResult, compute_confidence_cap,
+    EvidenceMetrics, EvidencePack, SearchResult,
 )
 from spectrue_core.config import SpectrueConfig
 import asyncio
 import re
 import logging
+from datetime import datetime
 from spectrue_core.utils.runtime import is_local_run
 from spectrue_core.utils.trace import Trace
 from uuid import uuid4
@@ -38,6 +39,9 @@ class FactVerifierComposite:
         q = q.strip("“”„«»\"'`")
         q = q.replace("…", " ").strip()
         q = re.sub(r"\s+", " ", q).strip()
+        # FIX 3.2: Remove trailing "date" or "time" if query is long enough
+        if len(q) > 20:
+             q = re.sub(r"\s+(date|time|when)$", "", q, flags=re.IGNORECASE).strip()
         if len(q) > 256:
             q = q[:256].strip()
         return q
@@ -365,21 +369,13 @@ class FactVerifierComposite:
             source_type_distribution=type_dist,
         )
         
-        # 5. Compute confidence constraints
-        cap_per_claim: dict[str, float] = {}
-        cap_reasons: list[str] = []
-        global_cap = 1.0
-        
-        for cid, metrics in claim_metrics.items():
-            cap, reason = compute_confidence_cap(metrics)
-            cap_per_claim[cid] = cap
-            cap_reasons.append(f"{cid}: {reason}")
-            global_cap = min(global_cap, cap)
-        
+        # 5. Initialize confidence constraints (now handled by LLM)
+        # We set global_cap to 1.0 and provide no reasons for capping,
+        # trusting the LLM to make nuanced judgments on evidence sufficiency.
         constraints = ConfidenceConstraints(
-            cap_per_claim=cap_per_claim,
-            global_cap=global_cap,
-            cap_reasons=cap_reasons,
+            cap_per_claim={},
+            global_cap=1.0,
+            cap_reasons=["Confidence capping is now determined by LLM discretion."],
         )
         
         # 6. Build final Evidence Pack
@@ -395,6 +391,7 @@ class FactVerifierComposite:
         Trace.event("evidence_pack.built", {
             "total_sources": total_sources,
             "unique_domains": unique_domains,
+            "domains": list(seen_domains),
             "duplicate_ratio": round(duplicate_ratio, 2),
             "global_cap": round(global_cap, 2),
             "cap_reasons": cap_reasons,
@@ -457,16 +454,18 @@ class FactVerifierComposite:
         score_result["search_meta"] = search_meta
         score_result["sources"] = self._enrich_sources_with_trust(sources_list)
 
-        # CRITICAL: Cap enforcement (T165) - LLM must respect evidence quality caps
+        # CRITICAL: Cap enforcement REMOVED (User request).
+        # We trust the LLM to judge evidence sufficiency.
+        # The 'constraints' in pack are now just advisory guidelines.
+        
         global_cap = pack.get("constraints", {}).get("global_cap", 1.0)
         raw_verified = score_result.get("verified_score", 0.5)
+        
         if raw_verified > global_cap:
-            logger.info("[Cap] Clamping verified_score from %.2f to %.2f (evidence quality cap)", raw_verified, global_cap)
-            score_result["verified_score"] = global_cap
-            score_result["verified_score_raw"] = raw_verified
-            score_result["cap_applied"] = True
-        else:
-            score_result["cap_applied"] = False
+            logger.info("[Cap] LLM score %.2f exceeds suggested cap %.2f, but ALLOWING it (LLM discretion).", raw_verified, global_cap)
+        
+        score_result["verified_score_raw"] = raw_verified
+        score_result["cap_applied"] = False
 
         # RGBA Mapping
         r = self._clamp(score_result.get("danger_score", 0.0))
@@ -501,11 +500,14 @@ class FactVerifierComposite:
         Web-only verification (no RAG).
         Strategy: Oracle -> Tier 1 -> Deep Dive
         """
-        trace_id = str(uuid4())
-        Trace.start(trace_id, runtime=self.config.runtime)
+        trace_id = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{str(uuid4())[:6]}" # Trace ID is now created at a higher level (engine.py)
+        # Trace.start(trace_id, runtime=self.config.runtime) # Removed: tracing initiated at SpectrueEngine.analyze_text
+        # Use current trace ID if available, otherwise fallback to generated one (should not happen for top-level call)
+        current_tid = Trace.current_trace_id() or trace_id
         Trace.event(
             "verify.start",
             {
+                "trace_id": current_tid, # Add current trace_id to event
                 "fact": fact,
                 "search_type": search_type,
                 "gpt_model": gpt_model,
@@ -521,7 +523,7 @@ class FactVerifierComposite:
             },
         )
         if is_local_run():
-            logger.info("[Trace] verify_fact trace_id=%s (file: data/trace/%s.jsonl)", trace_id, trace_id)
+            logger.info("[Trace] verify_fact trace_id=%s (file: data/trace/%s.jsonl)", current_tid, current_tid)
         
         search_provider = (search_provider or "auto").lower()
         if search_provider not in ("auto", "tavily", "google_cse"):
@@ -844,19 +846,21 @@ class FactVerifierComposite:
                     }
                 )
             else:
+                # FIX 3.1: Always start with basic depth
+                tier1_depth = "basic"
                 Trace.event(
                     "search.tavily.start",
                     {
                         "query": tier1_query,
                         "lang": search_lang,
-                        "depth": search_type,
+                        "depth": tier1_depth,
                         "ttl": ttl,
                         "domains_count": len(tier1_domains or []),
                     },
                 )
                 tier1_context, tier1_sources = await self.search_tool.search(
                     tier1_query,
-                    search_depth=search_type,
+                    search_depth=tier1_depth,
                     ttl=ttl,
                     domains=tier1_domains,
                     lang=search_lang,

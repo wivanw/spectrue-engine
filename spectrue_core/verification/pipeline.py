@@ -46,8 +46,10 @@ class ValidationPipeline:
         if self._is_url(fact) and not preloaded_context:
             fetched_text = await self._resolve_url_content(fact)
             if fetched_text:
-                fact = fetched_text  # Update fact to be the content of the page
-                final_context = fetched_text
+                # Clean article using LLM (removes nav, footer, ads, related articles)
+                cleaned_article = await self.agent.clean_article(fetched_text)
+                fact = cleaned_article or fetched_text  # Fallback to raw if LLM fails
+                final_context = fact
 
         # 3. Claims Extraction
         if progress_callback: await progress_callback("extracting_claims")
@@ -144,7 +146,9 @@ class ValidationPipeline:
         
         # Finalize
         result["cost"] = current_cost
-        result["text"] = original_fact
+        # Use extracted article text for display
+        # With format='text' from Tavily, `fact` contains plain text (no markdown)
+        result["text"] = fact
         result["search_meta"] = self.search_mgr.get_search_meta()
         result["sources"] = enrich_sources_with_trust(final_sources)
         
@@ -161,12 +165,20 @@ class ValidationPipeline:
         return text and ("http://" in text or "https://" in text) and len(text) < 500
 
     async def _resolve_url_content(self, url: str) -> str | None:
+        """Fetch URL content via Tavily Extract. Cleaning happens in claim extraction."""
+        from spectrue_core.utils.trace import Trace
+        
         try:
-             # Basic cleanup similar to original
-             text = await self.search_mgr.fetch_url_content(url)
-             # ... cleanup logic ...
-             return text
-        except Exception:
+            raw_text = await self.search_mgr.fetch_url_content(url)
+            if not raw_text or len(raw_text) < 50:
+                return None
+            
+            logger.info("[Pipeline] URL resolved: %d chars", len(raw_text))
+            Trace.event("pipeline.url_resolved", {"original": url, "chars": len(raw_text)})
+            return raw_text
+                
+        except Exception as e:
+            logger.warning("[Pipeline] Failed to resolve URL: %s", e)
             return None
 
     def _generate_initial_queries(self, claims: list, fact: str) -> list[str]:

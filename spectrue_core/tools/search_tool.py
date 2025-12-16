@@ -407,7 +407,8 @@ class WebSearchTool:
         endpoint = "https://api.tavily.com/extract"
         payload = {
             "urls": [url],
-            # extracting from specific URL doesn't need detailed search params
+            # Use text format - smaller input (5.6k vs 13.9k), LLM cleans equally well
+            "format": "text",
         }
         
         try:
@@ -674,8 +675,10 @@ class WebSearchTool:
         
         exclude_key = ""
         if exclude_domains:
-             exclude_key = ",".join(sorted(set(exclude_domains)))[:2000]
-             
+            # Hash of all unique exclude domains for cache key (M48)
+            # M53: Ensure no None in exclude_domains list (can come from call-site)
+            clean_exclude_domains = [d for d in exclude_domains if d is not None]
+            exclude_key = ",".join(sorted(set(clean_exclude_domains)))[:2000]
         cache_key = f"{q}|{depth}|{effective_limit}|{int(bool(raw_mode))}|{domains_key}|{exclude_key}"
 
         effective_ttl = ttl if ttl is not None else self.ttl

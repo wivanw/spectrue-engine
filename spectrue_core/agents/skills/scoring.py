@@ -58,6 +58,7 @@ Task:
 4. Assign `explainability_score` (0.0-1.0): How well the evidence explains the verdict (Alpha).
 5. provide `rationale`: Clear explanation of the verdict, citing strong/weak evidence.
    - Mention if score was limited by evidence gaps (independent sources, primary sources).
+   - If all sources repeat the same fact without independent confirmation, lower confidence.
    - Use language: {lang}.
 
 Output valid JSON:
@@ -71,7 +72,11 @@ Output valid JSON:
 """
         # Select reasoning effort
         effort = "medium" # T185 requirement
-        cache_key = f"evidence_score_{lang}"
+        
+        # FIX: Cache key must depend on content, not just language!
+        import hashlib
+        content_hash = hashlib.md5((prompt + str(global_cap)).encode()).hexdigest()
+        cache_key = f"evidence_score_{lang}_{content_hash}"
 
         try:
             # Determine appropriate model (use config or passed arg)

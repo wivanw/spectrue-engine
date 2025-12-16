@@ -152,7 +152,7 @@ class LLMClient:
         # Prompt caching
         if cache_key:
             params["prompt_cache_key"] = cache_key
-            params["prompt_cache_retention"] = self.cache_retention
+            # params["prompt_cache_retention"] = self.cache_retention
         
         Trace.event(f"{trace_kind}.prompt", {
             "model": model,

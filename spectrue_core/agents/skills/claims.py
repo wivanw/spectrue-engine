@@ -23,8 +23,9 @@ class ClaimExtractionSkill(BaseSkill):
         prompt = f"""Extract 3-{max_claims} atomic verifiable claims from this article.
 Rules:
 1. Each claim must be independently verifiable (a single fact, not an opinion).
-2. Preserve EXACT numbers, dates, names, and quotes from the original.
-3. Classify each claim by type:
+2. Use neutral, indicative phrasing (e.g. "Event X date is Y", not "Event X will happen"). Avoid future tense predictions.
+3. Preserve EXACT numbers, dates, names, and quotes from the original.
+4. Classify each claim by type:
    - "core": Main factual assertion of the article
    - "numeric": Claims with specific numbers/statistics (amounts, percentages, distances)
    - "timeline": Claims about dates, deadlines, sequences, or timing

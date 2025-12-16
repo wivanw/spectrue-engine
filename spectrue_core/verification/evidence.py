@@ -1,6 +1,6 @@
 from spectrue_core.verification.evidence_pack import (
     ArticleContext, Claim, ClaimMetrics, ConfidenceConstraints,
-    EvidenceMetrics, EvidencePack, SearchResult, compute_confidence_cap,
+    EvidenceMetrics, EvidencePack, SearchResult
 )
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trace import Trace
@@ -53,6 +53,9 @@ def build_evidence_pack(
         for r in search_results:
             d = r.get("domain") or get_registrable_domain(r.get("url") or "")
             if d:
+                # FIX 3: Detect duplicates for clustered results too
+                is_dup = d in seen_domains
+                r["is_duplicate"] = is_dup
                 r["domain"] = d
                 seen_domains.add(d)
     else:
@@ -166,19 +169,14 @@ def build_evidence_pack(
         source_type_distribution=type_dist,
     )
     
-    # 5. Compute confidence constraints
-    cap_per_claim: dict[str, float] = {}
-    cap_reasons: list[str] = []
+    # 5. Initialize confidence constraints (now handled by LLM)
+    # We set global_cap to 1.0 and provide no reasons for capping,
+    # trusting the LLM to make nuanced judgments on evidence sufficiency.
     global_cap = 1.0
-    
-    for cid, metrics in claim_metrics.items():
-        cap, reason = compute_confidence_cap(metrics)
-        cap_per_claim[cid] = cap
-        cap_reasons.append(f"{cid}: {reason}")
-        global_cap = min(global_cap, cap)
+    cap_reasons = ["Confidence capping is now determined by LLM discretion."]
     
     constraints = ConfidenceConstraints(
-        cap_per_claim=cap_per_claim,
+        cap_per_claim={},
         global_cap=global_cap,
         cap_reasons=cap_reasons,
     )

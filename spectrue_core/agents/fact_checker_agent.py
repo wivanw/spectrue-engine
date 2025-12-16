@@ -6,6 +6,7 @@ from spectrue_core.agents.skills.claims import ClaimExtractionSkill
 from spectrue_core.agents.skills.clustering import ClusteringSkill
 from spectrue_core.agents.skills.scoring import ScoringSkill
 from spectrue_core.agents.skills.query import QuerySkill
+from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
 import logging
 import asyncio
 
@@ -30,6 +31,7 @@ class FactCheckerAgent:
         self.clustering_skill = ClusteringSkill(self.config, self.llm_client)
         self.scoring_skill = ScoringSkill(self.config, self.llm_client)
         self.query_skill = QuerySkill(self.config, self.llm_client)
+        self.article_cleaner = ArticleCleanerSkill(self.config, self.llm_client)
 
     async def extract_claims(self, text: str, *, lang: str = "en", max_claims: int = 7) -> list[Claim]:
         return await self.claims_skill.extract_claims(text, lang=lang, max_claims=max_claims)
@@ -51,3 +53,7 @@ class FactCheckerAgent:
         return await self.query_skill.generate_search_queries(
             fact, context, lang, content_lang, allow_short_llm=allow_short_llm
         )
+    
+    async def clean_article(self, raw_text: str) -> str:
+        """Clean article text using LLM Nano."""
+        return await self.article_cleaner.clean_article(raw_text)
