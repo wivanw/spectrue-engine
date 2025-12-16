@@ -34,3 +34,8 @@ def test_generate_search_queries_short_fact_does_not_call_llm(monkeypatch):
     res = asyncio.run(agent.generate_search_queries("Short claim.", lang="en", content_lang="en"))
     assert isinstance(res, list)
     assert len(res) >= 1
+
+
+def test_m49_responses_api_defaults():
+    cfg = EngineRuntimeConfig.load_from_env()
+    assert cfg.llm.cluster_timeout_sec == 30.0

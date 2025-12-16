@@ -82,11 +82,16 @@ class EngineDebugFlags:
 class EngineLLMConfig:
     timeout_sec: float = 60.0
     concurrency: int = 6
-    nano_timeout_sec: float = 15.0
+    nano_timeout_sec: float = 20.0
     nano_max_output_tokens: int = 700  # M45: increased for topics field
     max_output_tokens_general: int = 900
     max_output_tokens_lite: int = 500
     max_output_tokens_deep: int = 1100
+
+    # M49: Responses API configuration
+    cluster_timeout_sec: float = 30.0
+
+
 
     @property
     def nano_concurrency(self) -> int:
@@ -124,7 +129,7 @@ class EngineRuntimeConfig:
         llm_conc = _parse_int(os.getenv("OPENAI_CONCURRENCY"), default=6, min_v=1, max_v=16)
 
         # Query generation (nano) should be tighter than general analysis.
-        nano_timeout = _parse_float(os.getenv("SPECTRUE_NANO_TIMEOUT"), default=15.0, min_v=5.0, max_v=30.0)
+        nano_timeout = _parse_float(os.getenv("SPECTRUE_NANO_TIMEOUT"), default=20.0, min_v=5.0, max_v=30.0)
         nano_max_out = _parse_int(os.getenv("SPECTRUE_NANO_MAX_OUTPUT_TOKENS"), default=700, min_v=120, max_v=1000)
 
         max_out_general = _parse_int(
@@ -136,6 +141,7 @@ class EngineRuntimeConfig:
         max_out_deep = _parse_int(
             os.getenv("SPECTRUE_LLM_MAX_OUTPUT_TOKENS_DEEP"), default=1100, min_v=200, max_v=4000
         )
+
 
         debug = EngineDebugFlags(
             engine_debug=_parse_bool(os.getenv("SPECTRUE_ENGINE_DEBUG"), default=False),
@@ -207,6 +213,7 @@ class EngineRuntimeConfig:
                 "max_output_tokens_general": int(self.llm.max_output_tokens_general),
                 "max_output_tokens_lite": int(self.llm.max_output_tokens_lite),
                 "max_output_tokens_deep": int(self.llm.max_output_tokens_deep),
+                "cluster_timeout_sec": float(self.llm.cluster_timeout_sec),
             },
             "search": {
                 "google_cse_cost": int(self.search.google_cse_cost),

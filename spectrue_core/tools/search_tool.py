@@ -26,8 +26,12 @@ from urllib.parse import urlparse
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.utils.trace import Trace
 
-# M29: Import from centralized trusted sources registry
 from spectrue_core.verification.trusted_sources import ALL_TRUSTED_DOMAINS as TRUSTED_DOMAINS
+
+try:
+    import trafilatura
+except ImportError:
+    trafilatura = None
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +71,7 @@ class WebSearchTool:
         depth = (search_depth or "basic").lower()
         if depth not in ("basic", "advanced"):
             depth = "basic"
-        m = int(max_results) if max_results else 10  # M29: Increased to 10 for deeper context
+        m = int(max_results) if max_results else 5  # M46: Reduced to 5 for better relevance
         return depth, max(1, min(m, 15))
 
     def _is_valid_url(self, url: str) -> bool:
@@ -152,6 +156,32 @@ class WebSearchTool:
 
         return [t for t in tokens if t]
 
+    def _is_trusted_host(self, host: str) -> bool:
+        """Centralized trusted host check with subdomain walking."""
+        if not host: 
+            return False
+        h = host.lower()
+        if h.startswith("www."):
+            h = h[4:]
+        
+        # Exact match
+        if h in TRUSTED_DOMAINS:
+            return True
+        
+        # Safety net: Do not trust known public suffixes during parent walk
+        # to prevent accidental whitelisting of "co.uk" or similar.
+        forbidden_suffixes = {"co.uk", "com.au", "co.jp", "com.br", "co.id", "co.in", "com.cn", "org.uk"}
+
+        # Parent walk
+        parts = h.split(".")
+        for i in range(len(parts) - 1):
+            candidate = ".".join(parts[i:])
+            if candidate in forbidden_suffixes:
+                continue
+            if candidate in TRUSTED_DOMAINS:
+                return True
+        return False
+
     def _relevance_score(self, query: str, title: str, content: str, url: str, *, tavily_score: float | None) -> float:
         """
         Lightweight lexical relevance scoring to drop obviously off-topic results.
@@ -191,11 +221,7 @@ class WebSearchTool:
 
         # Prefer sources that mention key numerals from query (dates, amounts)
         q_nums = {t for t in tokens if t.isdigit()}
-        num_bonus = 0.0
-        if q_nums:
-            c_nums = {t for t in content_tokens if t.isdigit()}
-            num_bonus = 0.15 if (q_nums & c_nums) else 0.0
-
+        
         # Penalize extremely short snippets (often random/empty)
         length_penalty = 0.0
         if content and len(content) < 80:
@@ -204,10 +230,8 @@ class WebSearchTool:
         # Small bonus for trusted domains (stability)
         trusted_bonus = 0.0
         try:
-            host = urlparse(url).netloc.lower()
-            if host.startswith("www."):
-                host = host[4:]
-            if host in TRUSTED_DOMAINS:
+            host = urlparse(url).netloc
+            if self._is_trusted_host(host):
                 trusted_bonus = 0.10
         except Exception:
             pass
@@ -220,22 +244,39 @@ class WebSearchTool:
         if tavily_score is not None:
             try:
                 ts = float(tavily_score)
-                # M45: Do not blindly trust Tavily score if lexical overlap is poor.
-                # Often Tavily returns irrelevant "trending news" with ambiguous scores.
-                if lexical_score < 0.1:
-                    # If keywords don't match well, only accept Tavily score if it's very high (semantic match?)
-                    # Otherwise, downgrade it significantly.
-                    if ts > 0.85:
-                        final_score = max(lexical_score, ts)
+                # M46/M47: Hardened gate.
+                # If keywords don't match (lexical < 0.15), we distrust Tavily 
+                # UNLESS it's extremely confident (ts >= 0.90), which suggests strong semantic match.
+                if lexical_score < 0.15:
+                    if ts >= 0.90:
+                         final_score = max(lexical_score, ts * 0.70) # Reduced trust in pure semantic match
                     else:
-                        final_score = max(lexical_score, ts * 0.3)
+                         final_score = lexical_score * 0.5  # Heavy penalty
                 else:
-                    # We have some keywords, so we trust the max of both mechanisms
-                    final_score = max(lexical_score, ts)
+                    # Blend: allow TS to boost, but cap the gain to avoid Tavily hallucination dominance.
+                    # M47: Fix "Tavily King" problem.
+                    blended = max(lexical_score, ts)
+                    cap = lexical_score + 0.35
+                    final_score = min(blended, cap)
             except Exception:
                 pass
+        
+        final_score += trusted_bonus
+        final_score -= length_penalty
+        
+        # M47: Must-have tokens penalty (Numbers)
+        # If query has numbers (10000, 2026) but content doesn't, it's likely irrelevant.
+        if q_nums:
+            c_nums = {t for t in content_tokens if t.isdigit()}
+            if not (q_nums & c_nums):
+                final_score *= 0.5 # Heavy penalty
+        
+        # M36: Hard penalize specific forum patterns in known domains
+        low_url = (url or "").lower()
+        if "forum.nasaspaceflight.com" in low_url:
+             final_score = 0.0
 
-        return max(0.0, min(1.0, final_score + num_bonus + trusted_bonus - length_penalty))
+        return max(0.0, min(1.0, final_score))
 
     def _rank_and_filter(self, query: str, results: list[dict]) -> list[dict]:
         scored: list[dict] = []
@@ -254,9 +295,11 @@ class WebSearchTool:
         scored.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)
 
         # Keep best results; drop clearly off-topic tail.
-        kept = [r for r in scored if r.get("relevance_score", 0.0) >= 0.12]
+        # M46: Increased threshold slightly
+        kept = [r for r in scored if r.get("relevance_score", 0.0) >= 0.15]
         if not kept:
-            kept = scored[:6]
+            # Fallback for borderline items, but never return pure junk (0.0)
+            kept = [r for r in scored if r.get("relevance_score", 0.0) >= 0.05]
         return kept[:10]
 
     def _detect_time_filters(self, *, ttl: int | None, query: str) -> dict:
@@ -321,6 +364,26 @@ class WebSearchTool:
         except Exception:
             return False
 
+    def _clean_url_key(self, url: str) -> str:
+        """Strip tracking params/fragments for cache key reuse."""
+        try:
+            u = urlparse(url)
+            # Filter query params
+            q = []
+            if u.query:
+                # remove common tracking garbage
+                ignored = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"}
+                pairs = u.query.split('&')
+                valid_pairs = [p for p in pairs if p.split('=')[0].lower() not in ignored]
+                q = "&".join(sorted(valid_pairs))
+            
+            # Reconstruct without fragment
+            # scheme://netloc/path;params?query
+            qs = f"?{q}" if q else ""
+            return f"{u.scheme}://{u.netloc}{u.path}{qs}"
+        except Exception:
+            return url
+
     async def _fetch_extract_text(self, url: str) -> str | None:
         """
         Securely fetch/extract text from a URL using Tavily Extract API.
@@ -329,7 +392,9 @@ class WebSearchTool:
         if not self._is_valid_url(url) or not self.api_key:
             return None
 
-        cache_key = f"page_tavily|{url}"
+        # Clean URL for cache key to improve hit rate and reduce duplication
+        clean_url = self._clean_url_key(url)
+        cache_key = f"page_tavily|{clean_url}"
         try:
             if cache_key in self.page_cache:
                 cached = self.page_cache[cache_key]
@@ -357,19 +422,37 @@ class WebSearchTool:
             if not results:
                 return None
                 
-            # Find our URL result (or first one)
+            # Find matching result
             extracted_text = ""
             for item in results:
-                # Basic matching or take first valid
-                content = item.get("raw_content") or item.get("content") or ""
-                if content:
-                    extracted_text = content
+                if item.get("url") == url:
+                    extracted_text = item.get("raw_content") or item.get("content") or ""
                     break
+            
+            # Fallback to first if no explicit URL match (Tavily sometimes normalizes input URL)
+            if not extracted_text and results:
+                extracted_text = results[0].get("raw_content") or results[0].get("content") or ""
             
             if not extracted_text:
                 return None
 
-            cleaned = re.sub(r"\s+", " ", extracted_text).strip()
+            cleaned = ""
+            # M47: Use trafilatura for robust HTML extraction (removes navbar/footer/ads)
+            if trafilatura and ("<html" in extracted_text or "<body" in extracted_text or "<div" in extracted_text):
+                try:
+                    # include_links=True to keep sources for verification
+                    cleaned = trafilatura.extract(extracted_text, include_links=True, include_images=False, include_comments=False)
+                except Exception as e:
+                    logger.warning("[Tavily] Trafilatura extraction failed: %s", e)
+            
+            if not cleaned:
+                # Fallback to simple cleaning if trafilatura failed or not HTML
+                cleaned = extracted_text
+            
+            # Normalize: just strip, DON'T flatten whitespace (re.sub \s+ " ")
+            # We want to keep paragraphs/newlines if trafilatura preserved them.
+            cleaned = cleaned.strip()
+            
             if len(cleaned) < 50: # Minimum useful content
                 return None
 
@@ -387,38 +470,40 @@ class WebSearchTool:
             Trace.event("tavily.extract.error", {"url": url, "error": str(e)})
             return None
 
+
     async def _enrich_with_fulltext(self, query: str, ranked: list[dict], *, limit: int = 3) -> tuple[list[dict], int]:
-        urls = [r.get("url") for r in (ranked or []) if r.get("url")]
-        urls = urls[: max(0, int(limit))]
-        if not urls:
+        target_urls = [r.get("url") for r in (ranked or []) if r.get("url")]
+        target_urls = target_urls[: max(0, int(limit))]
+        if not target_urls:
             return ranked, 0
 
         fetched = 0
-        tasks = [self._fetch_extract_text(u) for u in urls]
+        tasks = [self._fetch_extract_text(u) for u in target_urls]
         texts = await asyncio.gather(*tasks)
+        
+        # Map URL -> extracted text (O(1) lookup)
+        url_map = {u: t for u, t in zip(target_urls, texts) if t}
 
         updated: list[dict] = []
         for item in ranked:
             url = item.get("url")
-            if url in urls:
-                idx = urls.index(url)
-                full = texts[idx]
-                if full:
-                    new_item = dict(item)
-                    new_item["content"] = full
-                    # Recompute relevance with richer content.
-                    new_item["relevance_score"] = self._relevance_score(
-                        query,
-                        new_item.get("title", ""),
-                        full,
-                        url,
-                        tavily_score=new_item.get("score"),
-                    )
-                    new_item["fulltext"] = True
-                    updated.append(new_item)
-                    fetched += 1
-                    continue
-            updated.append(item)
+            if url in url_map:
+                full = url_map[url]
+                new_item = dict(item)
+                new_item["content"] = full
+                # Recompute relevance with richer content.
+                new_item["relevance_score"] = self._relevance_score(
+                    query,
+                    new_item.get("title", ""),
+                    full,
+                    url,
+                    tavily_score=new_item.get("score"),
+                )
+                new_item["fulltext"] = True
+                updated.append(new_item)
+                fetched += 1
+            else:
+                updated.append(item)
 
         updated = self._rank_and_filter(query, updated)
         return updated, fetched
@@ -431,6 +516,7 @@ class WebSearchTool:
         *,
         ttl: int | None,
         domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
     ) -> dict:
         raw_mode = self._raw_content_mode(depth=depth, domains=domains)
         effective_limit = min(limit, self._raw_max_results()) if raw_mode else limit
@@ -440,11 +526,19 @@ class WebSearchTool:
         if domains:
             payload["include_domains"] = domains
 
-        exclude_domains = self._get_exclude_domains()
+        # Merge config exclusions with method-level exclusions
+        global_exclude = self._get_exclude_domains()
+        merged_exclude = set(global_exclude)
         if exclude_domains:
+            merged_exclude.update(exclude_domains)
+        
+        # Determine final exclusion list
+        final_exclude = list(merged_exclude)
+        
+        if final_exclude:
             # Do not exclude domains that are explicitly included (Tier 1).
             include_set = {d.lower().lstrip(".") for d in (domains or [])}
-            filtered = [d for d in exclude_domains if d not in include_set]
+            filtered = [d for d in final_exclude if d not in include_set]
             if filtered:
                 payload["exclude_domains"] = filtered
 
@@ -530,9 +624,10 @@ class WebSearchTool:
         self,
         query: str,
         search_depth: str = "advanced",
-        max_results: int = 10,
+        max_results: int = 5,
         ttl: int | None = None,
         domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
         lang: str | None = None,
     ) -> tuple[str, list[dict]]:
         """Search with Tavily and return both context text and structured sources.
@@ -542,7 +637,9 @@ class WebSearchTool:
             search_depth: "basic" or "advanced"
             max_results: Maximum number of results (default 7 for M20)
             ttl: Cache TTL in seconds
+            ttl: Cache TTL in seconds
             domains: Optional list of domains to restrict search to (M20: for Tier 1 searches)
+            exclude_domains: Optional list of domains to exclude (e.g. for Tier 2)
         
         Returns:
             tuple: (context_str, sources_list) where sources_list contains dicts with title/url/content
@@ -574,7 +671,12 @@ class WebSearchTool:
         if domains:
             # Cache key must reflect domain filtering; keep it stable & bounded.
             domains_key = ",".join(sorted(set(domains)))[:2000]
-        cache_key = f"{q}|{depth}|{effective_limit}|{int(bool(raw_mode))}|{domains_key}"
+        
+        exclude_key = ""
+        if exclude_domains:
+             exclude_key = ",".join(sorted(set(exclude_domains)))[:2000]
+             
+        cache_key = f"{q}|{depth}|{effective_limit}|{int(bool(raw_mode))}|{domains_key}|{exclude_key}"
 
         effective_ttl = ttl if ttl is not None else self.ttl
         self.last_cache_hit = False
@@ -641,6 +743,7 @@ class WebSearchTool:
                 effective_limit,
                 ttl=ttl,
                 domains=domains,
+                exclude_domains=exclude_domains,
             )
             results_raw = response.get('results', [])
             logger.debug("[Tavily] Got %d raw results", len(results_raw))
@@ -671,40 +774,26 @@ class WebSearchTool:
                 **quality,
             }
             
-            # M29: Check if URL is from a trusted domain
-            def is_trusted_url(url: str) -> bool:
-                try:
-                    host = urlparse(url).netloc.lower()
-                    if host.startswith("www."):
-                        host = host[4:]
-                    # Check direct match or parent domain
-                    if host in TRUSTED_DOMAINS:
-                        return True
-                    parts = host.split(".")
-                    for i in range(len(parts) - 1):
-                        if ".".join(parts[i:]) in TRUSTED_DOMAINS:
-                            return True
-                except Exception:
-                    pass
-                return False
-            
-            # Generate context text for LLM with trust markers
+            # Generate context text for LLM WITHOUT trusted/rel/raw tags in the content
             def format_source(obj: dict) -> str:
-                trust_tag = "[TRUSTED] " if is_trusted_url(obj['url']) else ""
-                rel = obj.get("relevance_score")
-                rel_tag = f"[REL={rel:.2f}] " if isinstance(rel, (int, float)) else ""
-                raw_tag = "[RAW] " if obj.get("raw_content_used") else ""
-                return f"Source: {trust_tag}{raw_tag}{rel_tag}{obj['title']}\nURL: {obj['url']}\nContent: {obj['content']}\n---"
+                return f"Source: {obj['title']}\nURL: {obj['url']}\nContent: {obj['content']}\n---"
             
             context = "\n".join([format_source(obj) for obj in ranked])
             
             # Create structured sources for frontend
+            def safe_is_trusted(u: str) -> bool:
+                try:
+                    return self._is_trusted_host(urlparse(u).netloc)
+                except Exception:
+                    return False
+
             sources_list = [
                 {
                     "title": obj["title"],
                     "link": obj["url"],
                     "snippet": obj["content"],
                     "relevance_score": obj.get("relevance_score"),
+                    "is_trusted": safe_is_trusted(obj.get("url", "")),
                     "origin": "WEB"
                 }
                 for obj in ranked
@@ -763,3 +852,12 @@ class WebSearchTool:
                 "quality": "poor",
             }
             return ("", [])
+
+    async def close(self):
+        """Cleanup resources."""
+        if self.client:
+            await self.client.aclose()
+        if self.cache:
+            self.cache.close()
+        if self.page_cache:
+            self.page_cache.close()

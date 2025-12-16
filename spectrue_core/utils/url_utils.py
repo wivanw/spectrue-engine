@@ -1,0 +1,52 @@
+from urllib.parse import urlparse
+import re
+
+def get_registrable_domain(url: str) -> str | None:
+    """
+    Best-effort registrable domain extraction without external deps.
+    This is intentionally approximate and conservative.
+    """
+    if not url or not isinstance(url, str):
+        return None
+    try:
+        host = (urlparse(url).netloc or "").lower().strip()
+    except Exception:
+        return None
+    if not host:
+        return None
+    if host.startswith("www."):
+        host = host[4:]
+    # Drop port if present.
+    host = host.split(":")[0].strip()
+    if not host or "." not in host:
+        return None
+
+    parts = [p for p in host.split(".") if p]
+    if len(parts) < 2:
+        return None
+
+    # Minimal set of common 2-level public suffixes seen in our traffic.
+    # Heuristic for 2-level TLDs (e.g. co.uk, com.ua):
+    if len(parts) >= 3:
+        last = parts[-1]
+        second_last = parts[-2]
+        if len(last) == 2 and len(second_last) <= 3:
+            return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+def is_mixed_script(text: str) -> bool:
+    """Detect if text contains both Latin and Cyrillic characters (potential evasion)."""
+    s = text or ""
+    has_latin = re.search(r"[A-Za-z]", s) is not None
+    has_cyr = re.search(r"[А-Яа-яІіЇїЄєҐґ]", s) is not None
+    return has_latin and has_cyr
+
+def extract_content_from_url(url: str) -> str | None:
+    """
+    Simulated extraction logic (placeholder for actual Tavily/Browser logic).
+    In real usage, this might be handled by the SearchTool, but common URL parsing
+    utilities can live here.
+    """
+    # This might be expanded later if we move the cleaning logic here
+    # Currently _clean_article_text is in text_processing.py
+    return None

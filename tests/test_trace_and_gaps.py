@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from spectrue_core.utils import trace as trace_mod
-from spectrue_core.verification.fact_verifier_composite import FactVerifierComposite
 
 
 def test_trace_keeps_tail_snippet_and_hash(monkeypatch, tmp_path):
@@ -47,15 +46,16 @@ def test_trace_keeps_tail_snippet_and_hash(monkeypatch, tmp_path):
     ],
 )
 def test_gap_text_is_domain_neutral(lang, label):
-    verifier = FactVerifierComposite.__new__(FactVerifierComposite)
-    rationale = "Базове пояснення"
-    augmented = verifier._augment_rationale_with_gaps(
-        rationale, lang=lang, missing=["by_whom"], max_tier=3
-    )
+    pytest.skip("Method _augment_rationale_with_gaps removed in T164 (LLM-based scoring).")
+    # verifier = FactVerifierComposite.__new__(FactVerifierComposite)
+    # rationale = "Базове пояснення"
+    # augmented = verifier._augment_rationale_with_gaps(
+    #     rationale, lang=lang, missing=["by_whom"], max_tier=3
+    # )
 
-    banned = ["гурт", "організатори", "майданчик", "влада", "venue", "organizers", "police", "league"]
-    lower_augmented = augmented.lower()
+    # banned = ["гурт", "організатори", "майданчик", "влада", "venue", "organizers", "police", "league"]
+    # lower_augmented = augmented.lower()
 
-    assert label in lower_augmented
-    for word in banned:
-        assert word not in lower_augmented
+    # assert label in lower_augmented
+    # for word in banned:
+    #     assert word not in lower_augmented

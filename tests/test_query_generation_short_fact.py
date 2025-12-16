@@ -18,7 +18,7 @@ def test_short_fact_llm_called_and_fallback_works(monkeypatch):
 
     called = {"llm": False, "llm_failed": False}
 
-    async def _mock_generate_search_queries(*args, **kwargs):
+    async def _mock_extract_claims(*args, **kwargs):
         called["llm"] = True
         # Simulate LLM failure -> should trigger fallback
         called["llm_failed"] = True
@@ -26,9 +26,9 @@ def test_short_fact_llm_called_and_fallback_works(monkeypatch):
 
     async def _oracle_hit(_query, _lang):
         # Stop early so the test does not need external search providers.
-        return {"verified_score": 0.5, "cost": 0, "sources": [], "analysis": "ok"}
+        return {"verified_score": 0.5, "cost": 0, "sources": [], "analysis": "ok", "rgba": [0,0,0,0]}
 
-    monkeypatch.setattr(verifier.agent, "generate_search_queries", _mock_generate_search_queries)
+    monkeypatch.setattr(verifier.agent, "extract_claims", _mock_extract_claims)
     monkeypatch.setattr(verifier.google_tool, "search", _oracle_hit)
 
     short_fact = "Mars has two moons."

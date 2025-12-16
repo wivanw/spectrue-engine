@@ -126,7 +126,21 @@ class Trace:
         _trace_id_var.set(trace_id)
         _trace_enabled_var.set(enabled)
         if enabled:
-            Trace.event("trace.start", {"trace_id": trace_id})
+            # M47: Clean up old traces, keep only the latest one
+            try:
+                trace_dir = _trace_dir()
+                for old_file in trace_dir.glob("*.jsonl"):
+                    try:
+                        old_file.unlink()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            
+            Trace.event("trace.start", {
+                "trace_id": trace_id,
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            })
         return TraceContext(trace_id=trace_id, enabled=enabled)
 
     @staticmethod

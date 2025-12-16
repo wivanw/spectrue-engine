@@ -1,0 +1,280 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2024-2025 Spectrue Contributors
+"""
+Evidence Pack data structures for LLM-centric scoring.
+
+The Evidence Pack is the structured input to the LLM scorer.
+Code collects evidence and computes quality metrics; LLM produces verdict.
+
+Philosophy:
+- Code = controller of evidence quality (metrics, caps)
+- LLM = judge with constraints (verdict, explanation)
+"""
+
+from typing import Literal, TypedDict
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Claim Types
+# ─────────────────────────────────────────────────────────────────────────────
+
+ClaimType = Literal["core", "numeric", "timeline", "attribution", "sidefact"]
+"""
+Claim types for multi-claim extraction:
+- core: Main factual assertion
+- numeric: Claims with specific numbers/statistics
+- timeline: Claims about dates, deadlines, sequences
+- attribution: Claims about who said/did something
+- sidefact: Secondary supporting facts
+"""
+
+Stance = Literal["support", "contradict", "neutral", "unclear"]
+"""Position of a source relative to a claim."""
+
+SourceType = Literal[
+    "primary",        # Original source (official website, press release)
+    "official",       # Official statement (gov, company, org)
+    "independent_media",  # Independent news outlet
+    "aggregator",     # News aggregator, syndication
+    "social",         # Social media post
+    "unknown",        # Cannot determine
+]
+"""Classification of source authority."""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Article Context
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ArticleContext(TypedDict, total=False):
+    """Context about the article being verified."""
+    url: str | None
+    title: str | None
+    publisher: str | None
+    published_at: str | None
+    content_lang: str | None
+    text_excerpt: str  # First ~500 chars for LLM context
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Claim Structure
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EvidenceRequirement(TypedDict, total=False):
+    """What evidence is required to verify this claim."""
+    needs_primary_source: bool      # Needs official/primary confirmation
+    needs_independent_2x: bool      # Needs 2+ independent sources
+    needs_exact_quote: bool         # Needs verbatim quote match
+    needs_recent_source: bool       # Needs source from last N days
+    max_age_days: int | None        # Max acceptable source age
+
+
+class Claim(TypedDict, total=False):
+    """A single atomic claim extracted from the article."""
+    id: str                         # Unique claim ID (c1, c2, ...)
+    text: str                       # The claim text
+    type: ClaimType                 # Claim classification
+    importance: float               # 0-1, how critical to main thesis
+    evidence_requirement: EvidenceRequirement
+    search_queries: list[str]       # Generated queries for this claim
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Search Result Structure
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SearchResult(TypedDict, total=False):
+    """A single search result with stance and quality annotations."""
+    claim_id: str                   # Which claim this result pertains to
+    url: str
+    domain: str                     # Registrable domain (example.com)
+    title: str
+    snippet: str                    # Search result snippet
+    content_excerpt: str | None     # Extracted content (if fetched)
+    published_at: str | None
+    source_type: SourceType
+    stance: Stance                  # Position relative to claim
+    relevance_score: float          # 0-1, how relevant to claim
+    key_snippet: str | None         # Most relevant quote from content
+    quote_matches: list[str]        # Exact quotes that match claim
+    is_trusted: bool                # From trusted sources registry
+    is_duplicate: bool              # Content duplicate of another result
+    duplicate_of: str | None        # URL of original if duplicate
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Evidence Quality Metrics
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ClaimMetrics(TypedDict, total=False):
+    """Metrics for a single claim's evidence quality."""
+    independent_domains: int        # Number of unique domains
+    primary_present: bool           # Is there a primary source?
+    official_present: bool          # Is there an official source?
+    stance_distribution: dict[str, int]  # {"support": 3, "contradict": 1, ...}
+    coverage: float                 # 0-1, how well is claim covered?
+    freshness_days_median: int | None
+
+
+class EvidenceGap(TypedDict, total=False):
+    """A detected gap in evidence for a claim."""
+    claim_id: str                   # Which claim has the gap
+    gap_type: str                   # missing_primary, insufficient_sources, no_contradiction, etc.
+    description: str                # Human-readable description
+    severity: float                 # 0-1, how critical is this gap
+    suggested_queries: list[str]    # Queries to fill the gap
+
+
+class EvidenceMetrics(TypedDict, total=False):
+    """Aggregate metrics across all claims."""
+    total_sources: int
+    unique_domains: int
+    duplicate_ratio: float          # % of sources that are duplicates
+    per_claim: dict[str, ClaimMetrics]  # claim_id -> metrics
+    overall_coverage: float         # Average coverage across claims
+    freshness_days_median: int | None
+    source_type_distribution: dict[str, int]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Confidence Constraints (Code-Enforced Caps)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ConfidenceConstraints(TypedDict, total=False):
+    """
+    Code-enforced caps on LLM's confidence.
+
+    These caps are based on evidence quality, not tier math.
+    LLM must respect these caps; code enforces post-LLM.
+    """
+    # Per-claim caps
+    cap_per_claim: dict[str, float]  # claim_id -> max confidence
+
+    # Global cap (minimum of all claim caps)
+    global_cap: float
+
+    # Reasons for capping (for explainability)
+    cap_reasons: list[str]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Complete Evidence Pack
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EvidencePack(TypedDict, total=False):
+    """
+    Complete evidence package for LLM scoring.
+
+    This is the contract between code (evidence collector) and LLM (judge).
+    Code computes all metrics and caps; LLM produces verdict within caps.
+    """
+    # Context
+    article: ArticleContext
+    original_fact: str              # Original text submitted for verification
+
+    # Claims (multi-claim extraction)
+    claims: list[Claim]
+
+    # Evidence
+    search_results: list[SearchResult]
+
+    # Metrics (code-computed)
+    metrics: EvidenceMetrics
+
+    # Constraints (code-enforced)
+    constraints: ConfidenceConstraints
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM Scoring Output
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ClaimVerdict(TypedDict, total=False):
+    """Verdict for a single claim from LLM."""
+    claim_id: str
+    verdict: Literal["verified", "refuted", "unverified", "partially_verified"]
+    evidence_strength: float        # 0-1, how well supported
+    source_independence: float      # 0-1, are sources independent?
+    attribution_integrity: float    # 0-1, is attribution correct?
+    confidence: float               # 0-1, overall confidence (must respect cap)
+    rationale: str                  # Explanation with source citations
+    key_evidence: list[str]         # URLs of key supporting sources
+
+
+class LLMScoringOutput(TypedDict, total=False):
+    """
+    Complete output from LLM scorer.
+
+    LLM produces per-claim verdicts and overall confidence.
+    Code validates that confidence respects constraints.
+    """
+    # Per-claim verdicts
+    claim_verdicts: list[ClaimVerdict]
+
+    # Overall scores (0-1)
+    overall_confidence: float       # Must be <= constraints.global_cap
+    evidence_strength: float        # Aggregate evidence strength
+    source_independence: float      # Aggregate source independence
+    attribution_integrity: float    # Aggregate attribution integrity
+
+    # Human-readable output
+    rationale: str                  # Overall explanation
+    evidence_gaps: list[str]        # What evidence is missing?
+
+    # Mapping to existing RGBA (for backward compatibility)
+    verified_score: float           # G channel (0-1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Confidence Cap Logic (Deterministic)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Evidence-based caps (not tier-based).
+# Used by build_evidence_pack() to compute constraints.
+CONFIDENCE_CAPS = {
+    "no_sources": 0.25,                 # No evidence found at all
+    "social_only": 0.35,                # Only social media sources
+    "aggregators_only": 0.50,           # Only aggregators/duplicates
+    "one_independent": 0.65,            # 1 independent source
+    "two_independent": 0.80,            # 2+ independent sources
+    "primary_plus_two": 0.95,           # Primary + 2 independent
+}
+
+
+def compute_confidence_cap(metrics: ClaimMetrics) -> tuple[float, str]:
+    """
+    Compute confidence cap for a claim based on evidence metrics.
+
+    Returns (cap, reason) tuple.
+    """
+    independent = metrics.get("independent_domains", 0)
+    primary = metrics.get("primary_present", False)
+    official = metrics.get("official_present", False)
+
+    # Check from highest to lowest quality
+    if (primary or official) and independent >= 2:
+        return (CONFIDENCE_CAPS["primary_plus_two"], "primary/official + 2 independent")
+
+    if independent >= 2:
+        return (CONFIDENCE_CAPS["two_independent"], "2+ independent sources")
+
+    if independent >= 1:
+        return (CONFIDENCE_CAPS["one_independent"], "1 independent source")
+
+    # Check source type distribution
+    type_dist = metrics.get("source_type_distribution", {})
+    total = sum(type_dist.values()) if type_dist else 0
+
+    if total == 0:
+        return (CONFIDENCE_CAPS["no_sources"], "no sources found")
+
+    social_count = type_dist.get("social", 0)
+    if social_count == total:
+        return (CONFIDENCE_CAPS["social_only"], "social media only")
+
+    aggregator_count = type_dist.get("aggregator", 0)
+    if social_count + aggregator_count == total:
+        return (CONFIDENCE_CAPS["aggregators_only"], "aggregators/social only")
+
+    # Fallback to aggregators_only cap
+    return (CONFIDENCE_CAPS["aggregators_only"], "insufficient independent sources")
