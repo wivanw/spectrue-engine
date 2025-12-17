@@ -25,7 +25,7 @@ REMOVE completely:
 - "Read also", "See also", "Читайте також" sections
 - Related articles, recommended content
 - Advertisements, sidebars
-- Social media links ("ТСН у соціальних мережах")
+- Social media sharing buttons and "follow us" links
 - News ticker ("Стрічка новин")
 - Footer (address, phone, legal text)
 - Cookie consent notices
@@ -34,10 +34,12 @@ REMOVE completely:
 - Image captions like "Фото ілюстративне / © ..."
 - "Читати публікацію повністю" links
 
-KEEP only:
+KEEP (important!):
 - Article title
 - Article body text
 - Important quotes and facts
+- Source links and references (URLs to official sources, press releases, reports)
+- Attribution links ("як повідомили в...", "за даними...", "according to...")
 
 Return ONLY the cleaned article. No explanations, no comments.
 

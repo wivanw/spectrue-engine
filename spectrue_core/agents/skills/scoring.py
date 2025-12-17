@@ -194,8 +194,10 @@ Reasons: {cap_reasons}
 
         s = rationale
         for label in labels:
+            # Try to remove from label to end of string mostly
+            s = re.sub(rf"\s*{re.escape(label)}.*$", "", s, flags=re.IGNORECASE | re.DOTALL)
+            # Fallback cleanup if label was inline somehow (unlikely if at end)
             s = re.sub(rf"(?:^|\n)\s*{re.escape(label)}.*(?:\n|$)", "\n", s, flags=re.IGNORECASE)
-            s = re.sub(rf"\s*{re.escape(label)}.*$", "", s, flags=re.IGNORECASE)
         s = re.sub(r"\n{3,}", "\n\n", s).strip()
         return s
 

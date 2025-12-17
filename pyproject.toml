@@ -46,3 +46,12 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["spectrue_core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --strict-markers"
+markers = [
+    "unit: proper unit tests (fast, no io)",
+    "integration: end-to-end integration tests (slow, needs api keys)"
+]
