@@ -49,18 +49,19 @@ class ScoringSkill(BaseSkill):
 Task:
 1. Assign `verified_score` (0.0-1.0): Truthfulness probability. MUST BE <= global_cap.
 2. Assign `danger_score` (0.0-1.0): Harmfulness/toxicity.
-3. Assign `style_score` (0.0-1.0): Level of manipulative language in original fact.
+3. Assign `style_score` (0.0-1.0): Neutrality and Objectivity. 1.0 = Highly Neutral. 0.0 = Manipulative/Clickbait.
 4. Assign `explainability_score` (0.0-1.0): How well the evidence explains the verdict (Alpha).
 5. provide `rationale`: Clear explanation of the verdict, citing strong/weak evidence.
    - Mention if score was limited by evidence gaps (independent sources, primary sources).
    - If all sources repeat the same fact without independent confirmation, lower confidence.
+   - POLICY: If a claim attributes an action/statement to an official body (e.g. "NASA said", "UN reports", "Government announced"), you MUST require at least one PRIMARY source (official website/release/paper). If missing and only secondary media sources exist, the maximum `verified_score` is 0.6 (Partially Supported), citing "lack of primary source verification".
    - CRITICAL: Write the rationale ENTIRELY in {lang_name} ({lang}). Do NOT use English unless lang=en.
 
 Output valid JSON:
 {{
   "verified_score": 0.8,
   "danger_score": 0.1,
-  "style_score": 0.2,
+  "style_score": 0.9,
   "explainability_score": 0.9,
   "rationale": "..."
 }}

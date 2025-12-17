@@ -9,8 +9,6 @@ from spectrue_core.config import SpectrueConfig
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 import logging
 import asyncio
-import re
-from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +32,11 @@ class ValidationPipeline:
         progress_callback=None,
         preloaded_context: str | None = None,
         preloaded_sources: list | None = None,
-        include_internal: bool = False,
     ) -> dict:
         
         # 1. Initialize
-        if progress_callback: await progress_callback("analyzing_input")
+        if progress_callback:
+            await progress_callback("analyzing_input")
         
         self.search_mgr.reset_metrics()
         final_context = preloaded_context or ""
@@ -69,70 +67,73 @@ class ValidationPipeline:
         # Simple heuristic: Split by . and take first if lengthy enough, else take first line.
         blob = fact_first_line if len(fact_first_line) > 20 else fact[:200]
         # Further trim to ~150 chars at last space
-        if len(blob) > 150:
-             blob = blob[:150].rsplit(' ', 1)[0]
-             
-        fast_query = normalize_search_query(blob)
-        task_oracle = asyncio.create_task(self.search_mgr.check_oracle(fast_query, content_lang or lang))
-        
         # Start Claims Extraction (CPU/LLM intensive)
         cleaned_fact = clean_article_text(fact)
         task_claims = asyncio.create_task(self.agent.extract_claims(cleaned_fact[:4000], lang=lang))
         
-        # Wait for Oracle first (it's faster usually)
-        # We don't cancel claims yet, we wait to see if Oracle hits AND is verified.
-        # But to be truly parallel, we await Oracle, then decide.
-        
-        oracle_res = await task_oracle
-        
-        if oracle_res:
-             # Verify Semantic Relevance (M54: Critical Fix)
-             # Extract the claim text from oracle result for comparison
-             # Oracle res structure: see google_fact_check.py (has 'sources' list, 'rationale')
-             # It doesn't strictly have a 'claim' field in the root usually (it's in sources[0]['title'] or similar).
-             # But our tool returns a dict with 'rationale' which contains the claim.
-             
-             oracle_claim_text = oracle_res.get("rationale", "")
-             oracle_rating = "Unknown" # Extracted in rationale mostly
-             
-             is_relevant = await self.agent.verify_oracle_relevance(original_fact, oracle_claim_text, oracle_rating)
-             
-             if is_relevant:
-                 logger.info("[Pipeline] Oracle hit VERIFIED. Stopping.")
-                 # Cancel claims extraction to save resources
-                 task_claims.cancel()
-                 try:
-                     await task_claims
-                 except asyncio.CancelledError:
-                     pass
-                 return self._finalize_oracle(oracle_res, original_fact, max_cost, include_internal)
-             else:
-                 logger.info("[Pipeline] Oracle hit REJECTED (irrelevant). Continuing to Waterfall.")
+        # Determine fast query for potential Oracle use
+        if len(blob) > 150:
+             blob = blob[:150].rsplit(' ', 1)[0]
+        fast_query = normalize_search_query(blob)
 
-        # If we are here, Oracle missed or was irrelevant.
-        # Wait for claims
-        if progress_callback: await progress_callback("extracting_claims")
+        # Wait for claims to determine if we need Oracle
+        if progress_callback:
+            await progress_callback("extracting_claims")
         try:
-            claims = await task_claims
+            claims_result = await task_claims
+            if isinstance(claims_result, tuple):
+                claims, should_check_oracle = claims_result
+            else:
+                claims, should_check_oracle = claims_result, False # Safety fallback
         except asyncio.CancelledError:
-            # Should not happen unless we cancelled it
             claims = []
+            should_check_oracle = False
+        
+        # M58: Oracle Optimization (T8)
+        # Only run Oracle if LLM detected viral/fake markers
+        if should_check_oracle:
+            if progress_callback:
+                await progress_callback("checking_oracle")
+            
+            oracle_res = await self.search_mgr.check_oracle(fast_query)
+            
+            if oracle_res:
+                 # Verify Semantic Relevance
+                 oracle_claim_text = oracle_res.get("rationale", "")
+                 oracle_rating = "Unknown" 
+                 
+                 is_relevant = await self.agent.verify_oracle_relevance(original_fact, oracle_claim_text, oracle_rating)
+                 
+                 if is_relevant:
+                     logger.info("[Pipeline] Oracle hit VERIFIED. Stopping.")
+                     return self._finalize_oracle(oracle_res, original_fact)
+                 else:
+                     logger.info("[Pipeline] Oracle hit REJECTED (irrelevant). Continuing.")
+        else:
+             logger.info("[Pipeline] Skipping Oracle (no viral markers detected).")
 
         # Generate Queries
         search_queries = self._generate_initial_queries(claims, fact)
         
         # 5. Parallel Waterfall Search (Tier 1 + Tier 2)
         if not preloaded_context:
-            if progress_callback: await progress_callback("searching_web")
+            if progress_callback:
+                await progress_callback("searching_tier1")
             
             search_lang = content_lang or lang
             tier1_domains = get_trusted_domains_by_lang(search_lang)
             
             # Select queries
-            # T1 uses content-lang specific query if possible
-            t1_query = search_queries[1] if len(search_queries) > 1 else search_queries[0]
-            # T2 (General) uses broad query
-            t2_query = search_queries[0]
+            # T1 (Trusted) uses Parametric query (Index 0) for precision in trusted domains
+            t1_query = search_queries[0]
+            # T2 (General) uses Local query (Index 2) if available, else Official (Index 1), else Parametric
+            # We prefer Local for T2 to capture local context/language coverage.
+            if len(search_queries) > 2:
+                t2_query = search_queries[2]
+            elif len(search_queries) > 1:
+                t2_query = search_queries[1]
+            else:
+                t2_query = search_queries[0]
             
             # Determine if we run Tier 2
             # For parallel execution, the logic "run T2 if T1 yields weak results" is hard purely in parallel
@@ -145,7 +146,6 @@ class ValidationPipeline:
             # T1: include_domains=TRUSTED
             # T2: exclude_domains=TRUSTED
             
-            should_run_tier2 = (search_type in ["advanced", "deep"]) or (len(tier1_domains) < 5) # If few trusted domains, assume we need general search
             
             # Correction: Waterfall logic "Tier 1 -> if bad -> Tier 2" is better for cost/relevance usually.
             # But latency-wise, parallel is king.
@@ -182,7 +182,8 @@ class ValidationPipeline:
             
             # Waterfall Fallback (if T2 didn't run parallel AND T1 was weak)
             if not run_t2_parallel and len(final_sources) < 2 and self._can_add_search(gpt_model, search_type, max_cost):
-                if progress_callback: await progress_callback("searching_tier2_fallback")
+                if progress_callback:
+                    await progress_callback("searching_tier2_fallback")
                 # Now we know T1 domains, but we can just exclude the predefined TRUSTED list to be safe/consistent
                 ctx2, srcs2 = await self.search_mgr.search_tier2(t2_query, exclude_domains=tier1_domains)
                 if srcs2:
@@ -191,9 +192,12 @@ class ValidationPipeline:
                 else:
                     # CSE Fallback (Tier 3)
                      if self.search_mgr.tavily_calls > 0:
-                         if progress_callback: await progress_callback("searching_cse")
-                         cse_results = await self.search_mgr.search_google_cse(t1_query, lang=lang)
-                         for res in cse_results:
+                         if progress_callback:
+                             await progress_callback("searching_deep")
+                         cse_ctx, cse_srcs = await self.search_mgr.search_google_cse(t1_query, lang=lang)
+                         if cse_ctx:
+                             final_context += "\n\n=== CSE SEARCH ===\n" + cse_ctx
+                         for res in cse_srcs:
                                 final_sources.append({
                                     "url": res.get("link"),
                                     "domain": get_registrable_domain(res.get("link")),
@@ -204,14 +208,15 @@ class ValidationPipeline:
                                 })
 
         # 6. Analysis and Scoring
-        if progress_callback: await progress_callback("ai_analysis")
+        if progress_callback:
+            await progress_callback("ai_analysis")
         
         current_cost = self.search_mgr.calculate_cost(gpt_model, search_type)
         
         # Cluster (T168)
         clustered_results = None
         if claims and final_sources:
-             clustered_results = await self.agent.cluster_evidence(claims, final_sources, lang=lang)
+             clustered_results = await self.agent.cluster_evidence(claims, final_sources)
 
         # Build Pack
         pack = build_evidence_pack(
@@ -281,7 +286,7 @@ class ValidationPipeline:
             if q not in seen:
                 seen.add(q)
                 final.append(q)
-        return final[:2]
+        return final[:3]
 
     def _can_add_search(self, model, search_type, max_cost):
         # Speculative cost check
@@ -290,8 +295,8 @@ class ValidationPipeline:
         step_cost = int(SEARCH_COSTS.get(search_type, 80))
         return self.search_mgr.can_afford(current + step_cost, max_cost)
 
-    def _finalize_oracle(self, oracle_res, fact, max_cost, include_internal):
-        # ... logic to format oracle result ...
+    def _finalize_oracle(self, oracle_res: dict, fact: str) -> dict:
+        """Format oracle result for return."""
         oracle_res["text"] = fact
         oracle_res["search_meta"] = self.search_mgr.get_search_meta()
         return oracle_res

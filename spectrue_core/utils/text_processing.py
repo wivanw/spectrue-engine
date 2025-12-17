@@ -1,5 +1,4 @@
 import re
-import math
 
 def normalize_search_query(query: str) -> str:
     """Normalize a search query for consistent caching and search engine behavior."""

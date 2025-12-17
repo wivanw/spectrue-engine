@@ -40,13 +40,3 @@ def is_mixed_script(text: str) -> bool:
     has_latin = re.search(r"[A-Za-z]", s) is not None
     has_cyr = re.search(r"[А-Яа-яІіЇїЄєҐґ]", s) is not None
     return has_latin and has_cyr
-
-def extract_content_from_url(url: str) -> str | None:
-    """
-    Simulated extraction logic (placeholder for actual Tavily/Browser logic).
-    In real usage, this might be handled by the SearchTool, but common URL parsing
-    utilities can live here.
-    """
-    # This might be expanded later if we move the cleaning logic here
-    # Currently _clean_article_text is in text_processing.py
-    return None

@@ -333,10 +333,7 @@ class WebSearchTool:
             
         return selected[:target_count]
 
-    def _detect_time_filters(self, *, ttl: int | None, query: str) -> dict:
-        # Disabled: time_range="week" kills science/historical cases.
-        # Tavily returns fresher results by default anyway.
-        return {}
+    # M58: _detect_time_filters removed - was disabled and always returned {}
 
     def _get_exclude_domains(self) -> list[str]:
         try:
@@ -389,7 +386,8 @@ class WebSearchTool:
             "quality": "poor" if poor else "good",
         }
 
-    def _should_fulltext_enrich(self, *, quality: str, depth: str) -> bool:
+    def _should_fulltext_enrich(self) -> bool:
+        """Check if fulltext enrichment is enabled in config."""
         try:
             return bool(self.config.runtime.features.fulltext_fetch if self.config else False)
         except Exception:
@@ -575,7 +573,6 @@ class WebSearchTool:
                 payload["exclude_domains"] = filtered
 
         payload["topic"] = "general"
-        payload.update(self._detect_time_filters(ttl=ttl, query=q))
         if raw_mode:
             payload["include_raw_content"] = True
 
@@ -710,7 +707,11 @@ class WebSearchTool:
             # M53: Ensure no None in exclude_domains list (can come from call-site)
             clean_exclude_domains = [d for d in exclude_domains if d is not None]
             exclude_key = ",".join(sorted(set(clean_exclude_domains)))[:2000]
-        cache_key = f"{q}|{depth}|{effective_limit}|{int(bool(raw_mode))}|{domains_key}|{exclude_key}"
+        
+        # M58: Normalize cache key with lowercase for better hit rate
+        # "Kyiv population" and "kyiv Population" should hit the same cache entry
+        q_cache = q.lower()
+        cache_key = f"{q_cache}|{depth}|{effective_limit}|{int(bool(raw_mode))}|{domains_key}|{exclude_key}"
 
         effective_ttl = ttl if ttl is not None else self.ttl
         self.last_cache_hit = False
@@ -789,7 +790,7 @@ class WebSearchTool:
 
             quality = self._quality_from_ranked(ranked)
             fulltext_fetches = 0
-            if self._should_fulltext_enrich(quality=quality["quality"], depth=depth):
+            if self._should_fulltext_enrich():
                 ranked, fulltext_fetches = await self._enrich_with_fulltext(q, ranked, limit=3)
                 quality = self._quality_from_ranked(ranked)
                 logger.debug("[Tavily] Fulltext enrichment: %d pages", fulltext_fetches)
@@ -802,7 +803,6 @@ class WebSearchTool:
                 "cache_hit": bool(self.last_cache_hit),
                 "page_fetches": fulltext_fetches,
                 "topic": "general",
-                **self._detect_time_filters(ttl=ttl, query=q),
                 "raw_content_mode": raw_mode,
                 "raw_max_results": self._raw_max_results() if raw_mode else None,
                 **quality,

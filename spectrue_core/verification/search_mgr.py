@@ -2,7 +2,6 @@ from spectrue_core.tools.search_tool import WebSearchTool
 from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
-from spectrue_core.utils.trace import Trace
 import logging
 
 logger = logging.getLogger(__name__)
@@ -56,9 +55,9 @@ class SearchManager:
             self.page_fetches += 1
         return content
 
-    async def check_oracle(self, query: str, lang: str) -> dict | None:
+    async def check_oracle(self, query: str) -> dict | None:
         """Check Google Fact Check API."""
-        return await self.oracle_tool.search(query, lang)
+        return await self.oracle_tool.search(query)
 
     async def search_tier1(self, query: str, domains: list[str]) -> tuple[str, list[dict]]:
         """Perform Tier 1 search on trusted domains."""

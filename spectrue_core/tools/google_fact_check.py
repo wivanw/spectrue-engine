@@ -49,7 +49,7 @@ class GoogleFactCheckTool:
             q = q[:256].strip()
         return q
 
-    async def search(self, query: str, lang: str = "en") -> Optional[Dict[str, Any]]:
+    async def search(self, query: str) -> Optional[Dict[str, Any]]:
         """
         Searches for fact checks using Google Fact Check Tools API.
         Returns a FactVerificationResult-compatible dictionary if a high-confidence match is found.

@@ -8,8 +8,6 @@ class ClusteringSkill(BaseSkill):
         self,
         claims: list[Claim],
         search_results: list[dict],
-        *,
-        lang: str = "en",
     ) -> list[SearchResult]:
         """
         Cluster search results against claims using GPT-5 Nano.

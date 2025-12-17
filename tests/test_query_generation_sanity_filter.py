@@ -1,7 +1,5 @@
 import asyncio
 import inspect
-import json
-import pytest
 
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 from spectrue_core.config import SpectrueConfig
@@ -50,7 +48,6 @@ def test_query_generation_prompt_has_no_probe_policy(monkeypatch):
             "NASA reported a new moon.",
             lang="en",
             content_lang="en",
-            allow_short_llm=True,
         )
     )
     assert isinstance(res, list)
@@ -97,7 +94,7 @@ def test_prompt_contains_full_statement_tail_no_truncation(monkeypatch):
 
     monkeypatch.setattr(agent.llm_client, "call_json", _fake_call_json)
 
-    res = asyncio.run(agent.generate_search_queries(statement, context=context, lang="en", content_lang="en", allow_short_llm=True))
+    res = asyncio.run(agent.generate_search_queries(statement, context=context, lang="en", content_lang="en"))
     # M44: Now returns 2 queries (EN, UK)
     assert len(res) == 2
     assert captured["prompt"] is not None
@@ -127,7 +124,7 @@ def test_prompt_has_no_domain_marker_instructions(monkeypatch):
         }
 
     monkeypatch.setattr(agent.llm_client, "call_json", _fake_call_json)
-    asyncio.run(agent.generate_search_queries("NASA reported a new moon.", lang="en", content_lang="en", allow_short_llm=True))
+    asyncio.run(agent.generate_search_queries("NASA reported a new moon.", lang="en", content_lang="en"))
 
     p = (captured["prompt"] or "").lower()
     assert "venue" not in p
@@ -157,7 +154,7 @@ def test_exactly_one_probe_required_when_missing_fields(monkeypatch):
 
     monkeypatch.setattr(agent.llm_client, "call_json", _fake_call_json)
 
-    res = asyncio.run(agent.generate_search_queries("NASA reported a new moon.", lang="en", content_lang="en", allow_short_llm=True))
+    res = asyncio.run(agent.generate_search_queries("NASA reported a new moon.", lang="en", content_lang="en"))
     # M44: Now returns 2 queries
     assert len(res) == 2
     q = res[0].lower()
@@ -189,7 +186,7 @@ def test_accepts_exactly_one_probe_when_missing_fields(monkeypatch):
 
     monkeypatch.setattr(agent.llm_client, "call_json", _fake_call_json)
 
-    res = asyncio.run(agent.generate_search_queries("NASA reported a new moon.", lang="en", content_lang="en", allow_short_llm=True))
+    res = asyncio.run(agent.generate_search_queries("NASA reported a new moon.", lang="en", content_lang="en"))
     # M44: Now returns 2 queries
     assert len(res) == 2
     assert "nasa" in res[0].lower()

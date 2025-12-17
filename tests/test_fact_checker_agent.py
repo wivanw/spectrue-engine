@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 from spectrue_core.config import SpectrueConfig
 

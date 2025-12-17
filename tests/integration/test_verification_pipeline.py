@@ -1,8 +1,6 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from spectrue_core.verification.fact_verifier_composite import FactVerifierComposite
-from spectrue_core.config import SpectrueConfig
-from spectrue_core.agents.llm_client import LLMClient
+from unittest.mock import AsyncMock, MagicMock
+from spectrue_core.verification.verifier import FactVerifier
 
 @pytest.fixture
 def mock_config():
@@ -40,7 +38,7 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     import logging
     caplog.set_level(logging.DEBUG)
 
-    verifier = FactVerifierComposite(mock_config)
+    verifier = FactVerifier(mock_config)
     
     # Mock search tools to return immediate results
     # Return 3+ sources to be considered "good" and avoid Google CSE fallback

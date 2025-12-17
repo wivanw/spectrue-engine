@@ -11,7 +11,7 @@ class ClaimExtractionSkill(BaseSkill):
         *,
         lang: str = "en",
         max_claims: int = 5, # M56: Reduced from 7 to 5 for speed
-    ) -> list[Claim]:
+    ) -> tuple[list[Claim], bool]:
         """
         Extract atomic verifiable claims from article text.
         """
@@ -34,10 +34,11 @@ Rules:
 3. Preserve EXACT numbers, dates, names.
 4. Classify type: "core", "numeric", "timeline", "attribution", "sidefact".
 5. Importance: 0.9-1.0 for core, 0.4 for side.
-6. Generate EXACTLY 2 search queries for each claim:
-   - Query 1: MUST be in ENGLISH (for international sources).
-   - Query 2: MUST be in {lang_name} ({lang}) (for local sources).
-   - Both queries should be factual and specific.
+6. Generate EXACTLY 3 search queries for each claim:
+   - Query 1 (Parametric): STRICTLY include exact numbers, dates, and named entities. Use quotes (e.g. "December 19", "270 million km"). Key detail focus.
+   - Query 2 (Official): If an official body (NASA, UN) is cited, use 'site:domain' (e.g. site:nasa.gov) + keywords. Else use broad English keywords.
+   - Query 3 (Local): Search in {lang_name} ({lang}) for local coverage.
+7. Set "check_oracle_db": true if the text discusses rumors, hoaxes, debunking, conspiracy theories, or popular viral myths (e.g. "aliens", "flat earth", "fact check", "fake"). Otherwise false.
 
 Output valid JSON key "claims":
 {{
@@ -46,13 +47,14 @@ Output valid JSON key "claims":
       "text": "claim text",
       "type": "core",
       "importance": 0.9,
-      "search_queries": ["query1", "query2"],
+      "search_queries": ["parametric query", "official query", "local query"],
       "evidence_req": {{
         "needs_primary": true,
         "needs_2_independent": true
       }}
     }}
-  ]
+  ],
+  "check_oracle_db": false
 }}
 
 You MUST respond in valid JSON.
@@ -105,7 +107,8 @@ ARTICLE:
                 )
                 claims.append(c)
                 
-            return claims
+            check_oracle = bool(result.get("check_oracle_db", False))
+            return claims, check_oracle
             
         except Exception as e:
             logger.warning("[M48] Claim extraction failed: %s. Using fallback.", e)
@@ -123,4 +126,4 @@ ARTICLE:
                     ),
                     search_queries=[],
                 )
-            ]
+            ], False

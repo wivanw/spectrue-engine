@@ -2,7 +2,6 @@ import json
 from uuid import uuid4
 from pathlib import Path
 
-import pytest
 
 from spectrue_core.utils import trace as trace_mod
 
@@ -35,27 +34,3 @@ def test_trace_keeps_tail_snippet_and_hash(monkeypatch, tmp_path):
         assert prompt_payload.get("len") == len(long_text)
         assert "TAIL_MARKER" in prompt_payload.get("tail", "")
         assert prompt_payload.get("sha256")
-
-
-@pytest.mark.parametrize(
-    "lang,label",
-    [
-        ("uk", "прогалини"),
-        ("ru", "пробелы"),
-        ("en", "gaps"),
-    ],
-)
-def test_gap_text_is_domain_neutral(lang, label):
-    pytest.skip("Method _augment_rationale_with_gaps removed in T164 (LLM-based scoring).")
-    # verifier = FactVerifierComposite.__new__(FactVerifierComposite)
-    # rationale = "Базове пояснення"
-    # augmented = verifier._augment_rationale_with_gaps(
-    #     rationale, lang=lang, missing=["by_whom"], max_tier=3
-    # )
-
-    # banned = ["гурт", "організатори", "майданчик", "влада", "venue", "organizers", "police", "league"]
-    # lower_augmented = augmented.lower()
-
-    # assert label in lower_augmented
-    # for word in banned:
-    #     assert word not in lower_augmented

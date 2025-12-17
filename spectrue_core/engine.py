@@ -9,7 +9,8 @@ from uuid import uuid4
 from datetime import datetime
 
 from spectrue_core.config import SpectrueConfig
-from spectrue_core.verification.fact_verifier_composite import FactVerifierComposite, MODEL_COSTS
+from spectrue_core.verification.verifier import FactVerifier
+from spectrue_core.verification.costs import MODEL_COSTS
 from spectrue_core.utils.trace import Trace
 
 # Make language detection deterministic
@@ -36,14 +37,8 @@ def detect_content_language(text: str, fallback: str = "en") -> tuple[str, float
         if detected_lang in supported:
             return detected_lang, confidence
         
-        lang_mapping = {
-            "pt": "es", "it": "es", "ca": "es",
-            "nl": "de", "pl": "uk", "cs": "uk", "sk": "uk", "be": "uk",
-            "bg": "ru", "sr": "ru",
-            "ko": "ja", "vi": "zh", "th": "zh",
-        }
-        
-        return lang_mapping.get(detected_lang, fallback), confidence
+        # Unsupported language → fallback to English
+        return fallback, confidence
         
     except LangDetectException:
         return fallback, 0.0
@@ -54,7 +49,7 @@ class SpectrueEngine:
     
     def __init__(self, config: SpectrueConfig):
         self.config = config
-        self.verifier = FactVerifierComposite(config)
+        self.verifier = FactVerifier(config)
         try:
             logger.info("Effective config: %s", json.dumps(self.config.runtime.to_safe_log_dict(), ensure_ascii=False))
         except Exception:
@@ -71,7 +66,6 @@ class SpectrueEngine:
         analysis_mode: str = "general",
         gpt_model: str = None,
         search_type: str = "advanced",
-        search_provider: str = "auto",
         progress_callback = None,
         max_credits: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -162,7 +156,6 @@ class SpectrueEngine:
                     lang=lang,
                     progress_callback=progress_callback,
                     content_lang=content_lang,
-                    include_internal=True,
                     max_cost=max_credits,
                 )
 
@@ -209,7 +202,6 @@ class SpectrueEngine:
                         preloaded_context=shared_context,
                         preloaded_sources=shared_sources,
                         content_lang=content_lang,
-                        include_internal=False,
                         max_cost=per_claim_model_cost if max_credits is not None else None,
                     )
                     total_cost += int(claim_result.get("cost", 0) or 0)
@@ -257,7 +249,6 @@ class SpectrueEngine:
                 lang=lang,
                 progress_callback=progress_callback,
                 content_lang=content_lang,
-                include_internal=False,
                 max_cost=max_credits,
             )
             result.pop("_internal", None)

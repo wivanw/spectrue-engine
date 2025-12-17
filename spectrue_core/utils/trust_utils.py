@@ -1,5 +1,4 @@
 from spectrue_core.verification.trusted_sources import TRUSTED_SOURCES
-from spectrue_core.utils.url_utils import get_registrable_domain
 from urllib.parse import urlparse
 
 def enrich_sources_with_trust(sources_list: list) -> list:

@@ -160,13 +160,12 @@ class TextAnalyzer:
         pattern = r'<a\s+[^>]*href=[^>]+>[^<]*</a>'
         return re.sub(pattern, replace_link, html_content, flags=re.IGNORECASE)
     
-    def parse_html(self, html_content: str, language: str = "en") -> ParsedText:
+    def parse_html(self, html_content: str) -> ParsedText:
         """
         Parse HTML content into clean text using trafilatura.
         
         Args:
             html_content: Raw HTML string
-            language: ISO language code
             
         Returns:
             ParsedText object with extracted text and metadata
@@ -248,7 +247,7 @@ class TextAnalyzer:
                 raise ValueError(f"Failed to download URL: {url}")
             
             # Parse the downloaded content
-            return self.parse_html(downloaded, language=language)
+            return self.parse_html(downloaded)
         except ValueError:
             raise
         except Exception as e:
@@ -300,7 +299,7 @@ class TextAnalyzer:
         Returns:
             Tuple of (ParsedText, List[SentenceSegment])
         """
-        parsed = self.parse_html(html_content, language)
+        parsed = self.parse_html(html_content)
         segments = self.segment_sentences(parsed.text, language)
         return parsed, segments
 
