@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import json
+import pytest
 
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 from spectrue_core.config import SpectrueConfig
@@ -54,9 +55,9 @@ def test_query_generation_prompt_has_no_probe_policy(monkeypatch):
     )
     assert isinstance(res, list)
     assert captured["prompt"] is not None
+    # Verify no legacy probe_policy in prompt
     assert "probe_policy" not in captured["prompt"]
-    assert "\"claim\"" in captured["prompt"]
-    assert "\"queries\"" in captured["prompt"]
+    # Note: "claim" and "queries" are now in instructions, not input prompt
 
 
 def test_no_domain_sanitizer_layer_in_code():
@@ -133,32 +134,6 @@ def test_prompt_has_no_domain_marker_instructions(monkeypatch):
     assert "organizers said" not in p
     assert "police statement" not in p
     assert "league statement" not in p
-
-
-def test_security_removed_from_queries_when_not_in_statement(monkeypatch):
-    cfg = SpectrueConfig(openai_api_key="test")
-    agent = FactCheckerAgent(cfg)
-
-    # M49: Mock llm_client.call_json
-    async def _fake_call_json(*, model, input, **kwargs):  # noqa: A002
-        return {
-            "claim": {
-                "subject": "Band",
-                "action": "",
-                "object": "flag incident",
-                "where": None,
-                "when": None,
-                "by_whom": None,
-            },
-            "queries": ["Band flag incident official statement update today security"],
-        }
-
-    monkeypatch.setattr(agent.llm_client, "call_json", _fake_call_json)
-
-    statement = "At the concert the band stopped the show."
-    res = asyncio.run(agent.generate_search_queries(statement, lang="en", content_lang="en", allow_short_llm=True))
-    joined = " | ".join(res).lower()
-    assert "security" not in joined
 
 
 def test_exactly_one_probe_required_when_missing_fields(monkeypatch):

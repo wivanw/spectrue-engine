@@ -26,16 +26,16 @@ def test_generate_search_queries_short_fact_does_not_call_llm(monkeypatch):
     config = SpectrueConfig(openai_api_key="test", tavily_api_key="test", google_fact_check_key="test", runtime=runtime)
     agent = FactCheckerAgent(config)
 
-    async def _fail_create(**_kwargs):
+    async def _fail_call_json(**_kwargs):
         raise AssertionError("nano LLM should not be called for short facts by default")
 
-    monkeypatch.setattr(agent.client.chat.completions, "create", _fail_create)
+    monkeypatch.setattr(agent.llm_client, "call_json", _fail_call_json)
 
     res = asyncio.run(agent.generate_search_queries("Short claim.", lang="en", content_lang="en"))
     assert isinstance(res, list)
     assert len(res) >= 1
 
 
-def test_m49_responses_api_defaults():
+def test_responses_api_defaults():
     cfg = EngineRuntimeConfig.load_from_env()
-    assert cfg.llm.cluster_timeout_sec == 30.0
+    assert cfg.llm.cluster_timeout_sec == 60.0

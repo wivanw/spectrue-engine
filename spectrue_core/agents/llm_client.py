@@ -159,13 +159,20 @@ class LLMClient:
         # Calculate payload hash for debug correlation (M55)
         # Hash includes input + instructions to match exactly what went into the prompt
         import hashlib
+        import time
         payload_str = (instructions or "") + "||" + input
         payload_hash = hashlib.md5(payload_str.encode()).hexdigest()
+
+        # Token estimation (rough: 1.3 tokens per word, slightly higher for code/json)
+        est_input_tokens = int(len(input.split()) * 1.3)
+        est_instr_tokens = int(len((instructions or "").split()) * 1.3)
 
         Trace.event(f"{trace_kind}.prompt", {
             "model": model,
             "input_chars": len(input),
             "instructions_chars": len(instructions or ""),
+            "est_input_tokens": est_input_tokens,
+            "est_instr_tokens": est_instr_tokens,
             "payload_hash": payload_hash,
             "json_output": json_output,
             "cache_key": cache_key,
@@ -174,6 +181,7 @@ class LLMClient:
         last_error: Exception | None = None
         
         for attempt in range(self.max_retries):
+            start_time = time.time()
             try:
                 async with self._sem:
                     if attempt > 0:
@@ -182,6 +190,8 @@ class LLMClient:
                     
                     response = await self.client.responses.create(**params)
                 
+                latency_ms = int((time.time() - start_time) * 1000)
+
                 # Extract text content
                 content = response.output_text
                 
@@ -214,6 +224,7 @@ class LLMClient:
                 # Extract usage info
                 usage = None
                 cache_status = "NONE" # Default if no cache_key
+                request_id = getattr(response, "id", "unknown")
                 
                 if response.usage:
                     # M56: Extract detailed cache hits via prompt_tokens_details
@@ -230,7 +241,11 @@ class LLMClient:
                         "input_tokens": response.usage.input_tokens,
                         "output_tokens": response.usage.output_tokens,
                         "total_tokens": response.usage.total_tokens,
-                        "cached_tokens": cached_tokens
+                        "cached_tokens": cached_tokens,
+                        "latency_ms": latency_ms,
+                        "request_id": request_id, 
+                        # M56: Log raw usage for debugging SDK mapping issues
+                        "raw": response.usage.model_dump() if hasattr(response.usage, "model_dump") else response.usage.to_dict() if hasattr(response.usage, "to_dict") else str(response.usage)
                     }
 
                     if cache_key:
@@ -246,6 +261,7 @@ class LLMClient:
                 else:
                      # Fallback if usage absent
                      cache_status = "KEY_PROVIDED" if cache_key else "NONE"
+                     usage = {"latency_ms": latency_ms, "request_id": request_id}
                 
                 result = {
                     "content": content,

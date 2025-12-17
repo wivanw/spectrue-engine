@@ -2,7 +2,9 @@ from spectrue_core.verification.evidence_pack import EvidencePack
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.trace import Trace
 from spectrue_core.agents.prompts import get_prompt
+from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from spectrue_core.utils.security import sanitize_input
+from spectrue_core.constants import SUPPORTED_LANGUAGES
 from datetime import datetime
 import re
 
@@ -18,6 +20,8 @@ class ScoringSkill(BaseSkill):
         """
         Produce Final Verdict using Evidence Pack (M48).
         """
+        # M57: Resolve language name for explicit rationale localization
+        lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
         
         # Group search results by claim for the prompt
         sources_by_claim = {}
@@ -39,6 +43,34 @@ class ScoringSkill(BaseSkill):
         cap_reasons = constraints.get("cap_reasons", [])
 
         # Construct prompt
+        # Construct instructions (static prefix)
+        instructions = f"""You are the Spectrue Verdict Engine. Strictly evaluate claims against evidence.
+
+Task:
+1. Assign `verified_score` (0.0-1.0): Truthfulness probability. MUST BE <= global_cap.
+2. Assign `danger_score` (0.0-1.0): Harmfulness/toxicity.
+3. Assign `style_score` (0.0-1.0): Level of manipulative language in original fact.
+4. Assign `explainability_score` (0.0-1.0): How well the evidence explains the verdict (Alpha).
+5. provide `rationale`: Clear explanation of the verdict, citing strong/weak evidence.
+   - Mention if score was limited by evidence gaps (independent sources, primary sources).
+   - If all sources repeat the same fact without independent confirmation, lower confidence.
+   - CRITICAL: Write the rationale ENTIRELY in {lang_name} ({lang}). Do NOT use English unless lang=en.
+
+Output valid JSON:
+{{
+  "verified_score": 0.8,
+  "danger_score": 0.1,
+  "style_score": 0.2,
+  "explainability_score": 0.9,
+  "rationale": "..."
+}}
+
+You MUST respond in valid JSON.
+
+{UNIVERSAL_METHODOLOGY_APPENDIX}
+"""
+
+        # Construct prompt (variable content)
         prompt = f"""Evaluate the Truthfulness of the Original Fact based strictly on the provided Evidence.
 
 Original Fact:
@@ -50,46 +82,12 @@ Claims & Evidence:
 Constraints (Caps):
 Global Confidence Cap: {global_cap} (You CANNOT exceed this score).
 Reasons: {cap_reasons}
-
-Task:
-1. Assign `verified_score` (0.0-1.0): Truthfulness probability. MUST BE <= {global_cap}.
-2. Assign `danger_score` (0.0-1.0): Harmfulness/toxicity.
-3. Assign `style_score` (0.0-1.0): Level of manipulative language in original fact.
-4. Assign `explainability_score` (0.0-1.0): How well the evidence explains the verdict (Alpha).
-5. provide `rationale`: Clear explanation of the verdict, citing strong/weak evidence.
-   - Mention if score was limited by evidence gaps (independent sources, primary sources).
-   - If all sources repeat the same fact without independent confirmation, lower confidence.
-   - Use language: {lang}.
-
-Output valid JSON:
-{{
-  "verified_score": 0.8,
-  "danger_score": 0.1,
-  "style_score": 0.2,
-  "explainability_score": 0.9,
-  "rationale": "..."
-}}
 """
         # Select reasoning effort
         effort = "medium" # T185 requirement
         
-        # FIX: Cache key must depend on content, not just language!
-        import hashlib
-        import json
-        
-        # M54: Hash canonical content to avoid false hits
-        hash_payload = {
-            "fact": pack.get("original_fact"),
-            "evidence": sources_by_claim,
-            "constraints": {"global_cap": global_cap, "reasons": cap_reasons},
-            "lang": lang,
-        }
-        canonical = json.dumps(hash_payload, sort_keys=True, default=str)
-        content_hash = hashlib.md5(canonical.encode()).hexdigest()
-        cache_key = f"evidence_score_v2_{lang}_{content_hash}"
-        
-        # M54: Debug trace for cache verification
-        # M55: Debug trace for cache verification is now handled by LLMClient payload logging.
+        # Cache key identifies static instructions for prefix caching
+        cache_key = f"evidence_score_v3_{lang}"
 
         try:
             # Determine appropriate model (use config or passed arg)
@@ -97,10 +95,14 @@ Output valid JSON:
             if "gpt-5" not in m and "o1" not in m:
                 m = "gpt-5.2"
 
+            # M56: Fix for OpenAI 400 "Response input messages must contain the word 'json'"
+            # REQUIRED: The word "JSON" must appear in the INPUT message, not just system instructions.
+            prompt += "\n\nReturn the result in JSON format."
+
             result = await self.llm_client.call_json(
                 model=m,
                 input=prompt,
-                instructions="You are the Spectrue Verdict Engine. Strictly evaluate claims against evidence.",
+                instructions=instructions,
                 reasoning_effort=effort,
                 cache_key=cache_key,
                 timeout=float(self.runtime.llm.timeout_sec),
@@ -213,8 +215,13 @@ Output valid JSON:
 
         no_tag_note_by_lang = {
             "uk": "ВАЖЛИВО: Не згадуй у відповіді службові мітки джерел на кшталт [TRUSTED], [REL=…], [RAW].",
-            "ru": "ВАЖНО: Не упоминай в ответе служебные метки источников вроде [TRUSTED], [REL=…], [RAW].",
             "en": "IMPORTANT: Do not mention internal source tags like [TRUSTED], [REL=…], [RAW] in your output.",
+            "ru": "ВАЖНО: Не упоминай в ответе служебные метки источников вроде [TRUSTED], [REL=…], [RAW].",
+            "de": "WICHTIG: Erwähne keine internen Quellenmarkierungen wie [TRUSTED], [REL=…], [RAW] in deiner Antwort.",
+            "es": "IMPORTANTE: No menciones etiquetas internas de fuentes como [TRUSTED], [REL=…], [RAW] en tu respuesta.",
+            "fr": "IMPORTANT: Ne mentionne pas les balises internes de sources comme [TRUSTED], [REL=…], [RAW] dans ta réponse.",
+            "ja": "重要: 出力に[TRUSTED]、[REL=…]、[RAW]などの内部ソースタグを含めないでください。",
+            "zh": "重要：请勿在输出中提及内部来源标签，如 [TRUSTED]、[REL=…]、[RAW]。",
         }
         prompt += "\n\n" + no_tag_note_by_lang.get((lang or "").lower(), no_tag_note_by_lang["en"])
         

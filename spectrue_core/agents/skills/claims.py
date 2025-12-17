@@ -1,7 +1,7 @@
 from spectrue_core.verification.evidence_pack import Claim, EvidenceRequirement
 from .base_skill import BaseSkill, logger
-import hashlib
-from spectrue_core.utils.trace import Trace
+from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
+from spectrue_core.constants import SUPPORTED_LANGUAGES
 
 class ClaimExtractionSkill(BaseSkill):
     
@@ -21,15 +21,23 @@ class ClaimExtractionSkill(BaseSkill):
 
         # Limit input to prevent token overflow
         text_excerpt = text[:8000] if len(text) > 8000 else text
+        
+        # M57: Resolve language name for bilingual query generation
+        lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
 
-        prompt = f"""Extract 3-{max_claims} atomic verifiable claims from this article.
+        # Move static rules to instructions for prefix caching (M56)
+        # We append the UNIVERSAL_METHODOLOGY_APPENDIX to ensure the prefix is heavy (>1024 tokens) and consistent.
+        instructions = f"""You are a claim extraction assistant.
 Rules:
 1. Each claim must be independently verifiable (a single fact, not an opinion).
 2. Use neutral, indicative phrasing (e.g. "Event X date is Y").
 3. Preserve EXACT numbers, dates, names.
 4. Classify type: "core", "numeric", "timeline", "attribution", "sidefact".
 5. Importance: 0.9-1.0 for core, 0.4 for side.
-6. Generate 2 search queries for verification.
+6. Generate EXACTLY 2 search queries for each claim:
+   - Query 1: MUST be in ENGLISH (for international sources).
+   - Query 2: MUST be in {lang_name} ({lang}) (for local sources).
+   - Both queries should be factual and specific.
 
 Output valid JSON key "claims":
 {{
@@ -47,21 +55,25 @@ Output valid JSON key "claims":
   ]
 }}
 
+You MUST respond in valid JSON.
+
+{UNIVERSAL_METHODOLOGY_APPENDIX}
+"""
+        prompt = f"""Extract 3-{max_claims} atomic verifiable claims from this article.
+
 ARTICLE:
 {text_excerpt}
 """
         try:
-            # M54: Debug trace for cache verification
-            text_hash = hashlib.md5(text_excerpt.encode()).hexdigest()
-            cache_key = f"claim_extract_v2_{lang}_{text_hash}"
+            cache_key = f"claim_extract_v3_{lang}"
             
-            # M55: Debug trace for cache verification is now handled by LLMClient payload logging.
-
+            # Ensure "JSON" appears in input (OpenAI Responses API requirement)
+            prompt += "\n\nReturn the result in JSON format."
 
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
                 input=prompt,
-                instructions="You are a claim extraction assistant. Extract verifiable claims from articles.",
+                instructions=instructions,
                 reasoning_effort="low",
                 cache_key=cache_key,
                 timeout=45.0,

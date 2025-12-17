@@ -15,7 +15,6 @@ import logging
 from spectrue_core.agents.llm_client import LLMClient
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
-from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
 

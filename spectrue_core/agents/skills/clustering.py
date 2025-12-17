@@ -1,4 +1,5 @@
 from spectrue_core.verification.evidence_pack import Claim, SearchResult
+from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from .base_skill import BaseSkill, logger
 
 class ClusteringSkill(BaseSkill):
@@ -28,12 +29,9 @@ class ClusteringSkill(BaseSkill):
                 "text": text_preview[:600] # Truncate for token efficiency
             })
         
-        prompt = f"""Analyze the search results and match them to the most relevant CLAIM.
-Claims:
-{claims_lite}
-
-Search Results:
-{results_lite}
+        # Move static task rules to instructions (M56 Refactor)
+        # We use the UNIVERSAL_METHODOLOGY_APPENDIX to pad the prefix >1024 tokens.
+        instructions = f"""You are a stance clustering assistant. Group search results by claim relevance and stance.
 
 Task:
 For each search result, determine:
@@ -49,18 +47,34 @@ Output valid JSON with key "mappings" (array of objects):
     ...
   ]
 }}
+
+You MUST respond in valid JSON.
+
+{UNIVERSAL_METHODOLOGY_APPENDIX}
+"""
+        prompt = f"""Analyze the search results and match them to the most relevant CLAIM.
+Claims:
+{claims_lite}
+
+Search Results:
+{results_lite}
 """
         # M49/T184: Use LLMClient with Responses API + 30s timeout
         cluster_timeout = float(getattr(self.runtime.llm, "cluster_timeout_sec", 30.0) or 30.0)
         # Ensure timeout is at least 30s as per T184 requirement
         cluster_timeout = max(30.0, cluster_timeout)
 
+        # M56: Fix for OpenAI 400 "Response input messages must contain the word 'json'"
+        # REQUIRED: The word "JSON" must appear in the INPUT message, not just system instructions.
+        prompt += "\n\nReturn the result in JSON format."
+
         try:
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
                 input=prompt,
-                instructions="You are a stance clustering assistant. Group search results by claim relevance and stance.",
+                instructions=instructions,
                 reasoning_effort="low",
+                cache_key="stance_clustering_v3",
                 timeout=cluster_timeout,
                 trace_kind="stance_clustering",
             )

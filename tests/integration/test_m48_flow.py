@@ -31,10 +31,10 @@ def mock_config():
     return config
 
 @pytest.mark.asyncio
-async def test_m48_flow_uses_score_evidence(mock_config, caplog):
+async def test_verification_uses_score_evidence(mock_config, caplog):
     """
-    Verifies that verify_fact uses M48 logic (score_evidence via LLMClient)
-    instead of legacy analyze.
+    Verifies that verify_fact uses the score_evidence pipeline
+    with claim extraction, clustering, and LLM-based scoring.
     """
     # Enable visibility of logs
     import logging
@@ -123,8 +123,8 @@ async def test_m48_flow_uses_score_evidence(mock_config, caplog):
     result = await verifier.verify_fact("The sky is blue", "advanced", "gpt-5.2", "en")
     
     # Assert result
-    # Cap of 0.8 applied due to one-sided support gap (severity 0.2)
-    assert result["verified_score"] == 0.8, f"Expected 0.8, got {result.get('verified_score')}. Logs:\n" + "\n".join(caplog.messages)
+    # M50: Cap logic removed - LLM now has full discretion. Score should match mock response (0.9).
+    assert result["verified_score"] == 0.9, f"Expected 0.9, got {result.get('verified_score')}. Logs:\n" + "\n".join(caplog.messages)
     assert result["rationale"] == "M48 logic working."
     assert "cost" in result
     
