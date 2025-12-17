@@ -239,6 +239,22 @@ class ValidationPipeline:
         result["search_meta"] = self.search_mgr.get_search_meta()
         result["sources"] = enrich_sources_with_trust(final_sources)
         
+        # T1.2: Extract anchor claim (the main claim being verified)
+        anchor_claim = None
+        if claims:
+            # Find the highest importance "core" claim, fallback to first claim
+            core_claims = [c for c in claims if c.get("type") == "core"]
+            if core_claims:
+                anchor_claim = max(core_claims, key=lambda c: c.get("importance", 0))
+            else:
+                anchor_claim = claims[0]
+        if anchor_claim:
+            result["anchor_claim"] = {
+                "text": anchor_claim.get("text", ""),
+                "type": anchor_claim.get("type", "core"),
+                "importance": anchor_claim.get("importance", 1.0),
+            }
+        
         # Cap enforcement
         global_cap = pack.get("constraints", {}).get("global_cap", 1.0)
         verified = result.get("verified_score", 0.5)
