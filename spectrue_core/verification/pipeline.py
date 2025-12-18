@@ -367,6 +367,10 @@ class ValidationPipeline:
             article_context={"text_excerpt": fact[:500]} if fact != original_fact else None
         )
         
+        # M61: Signal finalizing before long LLM call to prevent UI freeze appearance
+        if progress_callback:
+            await progress_callback("finalizing")
+        
         # Score (T164)
         result = await self.agent.score_evidence(pack, model=gpt_model, lang=lang)
         
