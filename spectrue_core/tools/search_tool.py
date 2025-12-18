@@ -91,7 +91,7 @@ class WebSearchTool:
     def _clean_results(self, results: list[dict]) -> list[dict]:
         """Filter Tavily results: drop invalid/localhost/empty links, dedupe, and ensure title fallback."""
         cleaned: list[dict] = []
-        seen: set[tuple[str, str]] = set()
+        seen: set[str] = set()
         for obj in (results or []):
             title = (obj.get("title") or "").strip()
             url = (obj.get("url") or "").strip()
@@ -110,11 +110,17 @@ class WebSearchTool:
                 except Exception:
                     title = url
 
-            key = (title.lower(), url.lower())
-            if key in seen:
-                logger.debug("[Search] Discarded duplicate: %s", url)
+            # Improved deduplication by canonical URL (Step 287 fix)
+            # Remove protocol, www, query params, and fragment
+            u = urlparse(url)
+            clean_url = re.sub(r'^(www\.)?', '', (u.netloc or "").lower()) + (u.path or "").rstrip('/')
+            
+            if clean_url in seen:
+                # If we've seen this URL, keep the one with better title/content?
+                # For simplicity, keep first encountered (usually higher rank from Tavily)
+                logger.debug("[Search] Discarded URL duplicate: %s", url)
                 continue
-            seen.add(key)
+            seen.add(clean_url)
 
             use_raw = False
             chosen = content
@@ -300,26 +306,47 @@ class WebSearchTool:
         # M46: Increased threshold slightly
         # Keep best results; drop clearly off-topic tail.
         # M46: Increased threshold slightly
+        # Keep best results; drop clearly off-topic tail.
+        # M60: Advanced Noise Filtering to remove "poisonous" archives (UN, legal PDFs)
         kept = []
-        discarded_low_score = []
-        
+        discarded_reasons = []
+
+        # Domains that often return historic/legal noise for "blockade" queries
+        ARCHIVE_DOMAINS = {"legal.un.org", "docs.un.org", "press.un.org", "undocs.org", "history.state.gov", "oecd.org"}
+        # Keywords that MUST be present to redeem an archive/PDF document
+        MUST_HAVE_KEYWORDS = {"trump", "truth social", "biden", "zelensky", "putin", "breaking", "news", "2024", "2025"}
+
         for r in scored:
             score = r.get("relevance_score", 0.0)
+            url = r.get("url", "").lower()
+            domain = urlparse(url).netloc
+            content_lower = (r.get("content") or "").lower()
+            
+            # Check for generic PDF/Archive junk
+            is_noise_domain = domain in ARCHIVE_DOMAINS or "legal.un.org" in url
+            is_pdf = ".pdf" in url
+
+            if is_noise_domain or is_pdf:
+                # Only keep if strongly relevant to current news events
+                has_news_keyword = any(k in content_lower for k in MUST_HAVE_KEYWORDS)
+                if not has_news_keyword:
+                    discarded_reasons.append(f"{r.get('url')} (archive_garbage)")
+                    continue
+
             if score >= 0.15:
                 kept.append(r)
             elif score >= 0.05 and not kept:
-                # Fallback for borderline items if we have nothing better
-                 kept.append(r)
+                # Fallback for borderline items
+                kept.append(r)
             else:
-                 discarded_low_score.append(f"{r.get('url')} ({score:.2f})")
+                discarded_reasons.append(f"{r.get('url')} (low_score={score:.2f})")
 
-        if discarded_low_score:
-            logger.debug("[Search] Discarded %d low score results: %s", len(discarded_low_score), "; ".join(discarded_low_score[:5]))
-            
+        if discarded_reasons:
+            logger.debug("[Search] Discarded %d results: %s", len(discarded_reasons), "; ".join(discarded_reasons[:5]))
         if not kept and scored:
-             # Last resort fallback to avoid empty result if we had candidates
-             logger.info("[Search] All results below 0.15, keeping top 2 borderline results as fallback")
-             kept = scored[:2]
+            # Last resort fallback to avoid empty result if we had candidates
+            logger.info("[Search] All results below 0.15, keeping top 2 borderline results as fallback")
+            kept = scored[:2]
         
         # M54: Enforce domain diversity
         # Select best result per domain first, then fill rest
@@ -562,16 +589,13 @@ class WebSearchTool:
         self,
         q: str,
         depth: str,
-        limit: int,
+        max_results: int,
         *,
-        ttl: int | None,
         domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
+        raw_mode: bool = False,
     ) -> dict:
-        raw_mode = self._raw_content_mode(depth=depth, domains=domains)
-        effective_limit = min(limit, self._raw_max_results()) if raw_mode else limit
-
-        payload = {"query": q, "search_depth": depth, "max_results": effective_limit}
+        payload = {"query": q, "search_depth": depth, "max_results": max_results}
         # M20: Add trusted domains filter for Tier 1 searches
         if domains:
             payload["include_domains"] = domains
@@ -582,13 +606,16 @@ class WebSearchTool:
         if exclude_domains:
             merged_exclude.update(exclude_domains)
         
-        # Determine final exclusion list
-        final_exclude = list(merged_exclude)
+        # Determine final exclusion list (sorted for deterministic behavior)
+        final_exclude = sorted({d.lower().lstrip(".") for d in merged_exclude if d})
         
         if final_exclude:
             # Do not exclude domains that are explicitly included (Tier 1).
             include_set = {d.lower().lstrip(".") for d in (domains or [])}
             filtered = [d for d in final_exclude if d not in include_set]
+            # Cap to 32 domains to prevent payload size issues with Tavily API
+            if len(filtered) > 32:
+                filtered = filtered[:32]
             if filtered:
                 payload["exclude_domains"] = filtered
 
@@ -631,15 +658,27 @@ class WebSearchTool:
                     minimal = {
                         "query": q,
                         "search_depth": depth,
-                        "max_results": effective_limit,
+                        "max_results": max_results,
                     }
                     if domains:
                         minimal["include_domains"] = domains
-                    if exclude_domains:
+                    
+                    # NOTE: For minimal retry we intentionally DO NOT include method-level exclude_domains
+                    # (these often cause schema/size issues and lead to the same 400 again).
+                    # But we DO keep config-level global excludes to preserve project policy.
+                    try:
+                        retry_exclude = list(self._get_exclude_domains() or [])
+                    except Exception:
+                        retry_exclude = []
+                    
+                    if retry_exclude:
                         include_set = {d.lower().lstrip(".") for d in (domains or [])}
-                        filtered = [d for d in exclude_domains if d not in include_set]
-                        if filtered:
-                            minimal["exclude_domains"] = filtered
+                        ex = sorted({d.lower().lstrip(".") for d in retry_exclude if d})
+                        ex = [d for d in ex if d not in include_set]
+                        if ex:
+                            minimal["exclude_domains"] = ex[:32]
+                    
+                    logger.debug("[Tavily] Minimal retry exclude_domains=%d", len(minimal.get("exclude_domains") or []))
                     Trace.event("tavily.request.retry_minimal", {"url": url, "payload": minimal})
                     r2 = await self.client.post(url, json=minimal)
                     try:
@@ -672,22 +711,20 @@ class WebSearchTool:
     async def search(
         self,
         query: str,
-        search_depth: str = "advanced",
-        max_results: int = 5,
-        ttl: int | None = None,
-        domains: list[str] | None = None,
+        num_results: int = 5,
+        depth: str = "basic",
+        raw_content: bool = False,
+        include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
-        lang: str | None = None,
     ) -> tuple[str, list[dict]]:
         """Search with Tavily and return both context text and structured sources.
         
         Args:
             query: Search query string
-            search_depth: "basic" or "advanced"
-            max_results: Maximum number of results (default 7 for M20)
-            ttl: Cache TTL in seconds
-            ttl: Cache TTL in seconds
-            domains: Optional list of domains to restrict search to (M20: for Tier 1 searches)
+            num_results: Maximum number of results (default 5)
+            depth: "basic" or "advanced"
+            raw_content: Force raw content mode
+            include_domains: Optional list of domains to restrict search to (Tier 1 searches)
             exclude_domains: Optional list of domains to exclude (e.g. for Tier 2)
         
         Returns:
@@ -702,10 +739,53 @@ class WebSearchTool:
             logger.debug("[Tavily] Query too short or empty, skipping search")
             return ("", [])
 
-        q = " ".join(query.split()).strip()
-        depth, limit = self._normalize_params(search_depth, max_results)
-        raw_mode = self._raw_content_mode(depth=depth, domains=domains)
+        # Normalize params once here, pass already-normalized to internal
+        _d, _l = self._normalize_params(depth, num_results)
+        
+        # Delegate to internal implementation
+        return await self._search_internal(
+            query=query,
+            num_results=_l,
+            depth=_d,
+            raw_content=raw_content,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains
+        )
+
+    async def _search_internal(
+        self,
+        query: str,
+        num_results: int = 5,
+        depth: str = "basic",
+        raw_content: bool = False,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+        ttl: int | None = None, 
+    ) -> tuple[str, list[dict]]: 
+        from spectrue_core.utils.text_processing import normalize_search_query
+        q = normalize_search_query(query)
+        
+        # Params already normalized by caller, use directly
+        limit = num_results
+        
+        # Normalize include_domains FIRST (before raw_mode calculation)
+        normalized_include: list[str] | None = None
+        if include_domains:
+            seen_inc: set[str] = set()
+            temp_inc: list[str] = []
+            for d in include_domains:
+                if not d:
+                    continue
+                dd = d.lower().lstrip(".")
+                if dd not in seen_inc:
+                    seen_inc.add(dd)
+                    temp_inc.append(dd)
+            normalized_include = temp_inc
+        
+        # raw_content param can force raw mode, otherwise use heuristic (with normalized domains)
+        raw_mode = bool(raw_content) or self._raw_content_mode(depth=depth, domains=normalized_include)
         effective_limit = min(limit, self._raw_max_results()) if raw_mode else limit
+        
         Trace.event(
             "tavily.search.start",
             {
@@ -713,20 +793,34 @@ class WebSearchTool:
                 "depth": depth,
                 "limit": effective_limit,
                 "raw_content_mode": bool(raw_mode),
-                "domains_count": len(domains or []),
+                "domains_count": len(normalized_include or []),
             },
         )
+        
         domains_key = ""
-        if domains:
+        if normalized_include:
             # Cache key must reflect domain filtering; keep it stable & bounded.
-            domains_key = ",".join(sorted(set(domains)))[:2000]
+            domains_key = ",".join(sorted(normalized_include))[:2000]
+        
+        # Normalize and cap exclude_domains to match what actually goes to API
+        normalized_exclude: list[str] | None = None
+        if exclude_domains:
+            seen_ex: set[str] = set()
+            temp_ex: list[str] = []
+            for d in exclude_domains:
+                if not d:
+                    continue
+                dd = d.lower().lstrip(".")
+                if dd not in seen_ex:
+                    seen_ex.add(dd)
+                    temp_ex.append(dd)
+            # Cap to 32 and sort for deterministic behavior
+            temp_ex_sorted = sorted(temp_ex)
+            normalized_exclude = temp_ex_sorted[:32] if len(temp_ex_sorted) > 32 else temp_ex_sorted
         
         exclude_key = ""
-        if exclude_domains:
-            # Hash of all unique exclude domains for cache key (M48)
-            # M53: Ensure no None in exclude_domains list (can come from call-site)
-            clean_exclude_domains = [d for d in exclude_domains if d is not None]
-            exclude_key = ",".join(sorted(set(clean_exclude_domains)))[:2000]
+        if normalized_exclude:
+            exclude_key = ",".join(normalized_exclude)  # already sorted
         
         # M58: Normalize cache key with lowercase for better hit rate
         # "Kyiv population" and "kyiv Population" should hit the same cache entry
@@ -749,7 +843,7 @@ class WebSearchTool:
                         "depth": depth,
                         "limit": effective_limit,
                         "raw_content_mode": bool(raw_mode),
-                        "domains_count": len(domains or []),
+                        "domains_count": len(normalized_include or []),
                         "context_chars": len(context_str or ""),
                         "sources_count": len(sources_list or []),
                     },
@@ -761,7 +855,7 @@ class WebSearchTool:
                         "depth": depth,
                         "limit": effective_limit,
                         "raw_content_mode": bool(raw_mode),
-                        "domains_count": len(domains or []),
+                        "domains_count": len(normalized_include or []),
                         "cache_hit": True,
                         "context_chars": len(context_str or ""),
                         "sources_count": len(sources_list or []),
@@ -785,20 +879,20 @@ class WebSearchTool:
                 "depth": depth,
                 "limit": effective_limit,
                 "raw_content_mode": bool(raw_mode),
-                "domains_count": len(domains or []),
+                "domains_count": len(normalized_include or []),
             },
         )
 
         try:
-            domain_info = f", domains={len(domains)}" if domains else ""
-            logger.debug("[Tavily] Searching: '%s...' (depth=%s, limit=%s%s)", q[:100], depth, limit, domain_info)
+            domain_info = f", domains={len(normalized_include or [])}" if normalized_include else ""
+            logger.debug("[Tavily] Searching: '%s...' (depth=%s, limit=%s%s)", q[:100], depth, effective_limit, domain_info)
             response = await self._request_search(
                 q,
                 depth,
                 effective_limit,
-                ttl=ttl,
-                domains=domains,
-                exclude_domains=exclude_domains,
+                domains=normalized_include,
+                exclude_domains=normalized_exclude,
+                raw_mode=raw_mode,
             )
             results_raw = response.get('results', [])
             logger.debug("[Tavily] Got %d raw results", len(results_raw))
@@ -819,7 +913,7 @@ class WebSearchTool:
                 "provider": "tavily",
                 "query": q,
                 "depth": depth,
-                "domains_filtered": bool(domains),
+                "domains_filtered": bool(normalized_include),
                 "cache_hit": bool(self.last_cache_hit),
                 "page_fetches": fulltext_fetches,
                 "topic": "general",
@@ -868,7 +962,7 @@ class WebSearchTool:
                     "depth": depth,
                     "limit": effective_limit,
                     "raw_content_mode": bool(raw_mode),
-                    "domains_count": len(domains or []),
+                    "domains_count": len(normalized_include or []),
                     "cache_hit": bool(self.last_cache_hit),
                     "context_chars": len(context),
                     "sources_count": len(sources_list),
@@ -881,7 +975,10 @@ class WebSearchTool:
             
             return (context, sources_list)
         except Exception as e:
-            logger.warning("[Tavily] ✗ Error during search (%s): %s", depth, e)
+            # Log with exception type for better debugging (str(e) can be empty)
+            err_type = type(e).__name__
+            err_msg = str(e) or repr(e)
+            logger.warning("[Tavily] ✗ Error %s during search (%s): %r", err_type, depth, e)
             Trace.event(
                 "tavily.search.error",
                 {
@@ -889,15 +986,16 @@ class WebSearchTool:
                     "depth": depth,
                     "limit": effective_limit if "effective_limit" in locals() else None,
                     "raw_content_mode": bool(raw_mode) if "raw_mode" in locals() else None,
-                    "domains_count": len(domains or []),
-                    "error": str(e),
+                    "domains_count": len(normalized_include or []),
+                    "error_type": err_type,
+                    "error": err_msg,
                 },
             )
             self.last_search_meta = {
                 "provider": "tavily",
                 "query": q if "q" in locals() else "",
-                "depth": search_depth,
-                "domains_filtered": bool(domains),
+                "depth": depth,
+                "domains_filtered": bool(normalized_include),
                 "cache_hit": False,
                 "page_fetches": 0,
                 "sources_count": 0,

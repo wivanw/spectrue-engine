@@ -64,8 +64,8 @@ class SearchManager:
         self.tavily_calls += 1
         return await self.web_tool.search(
             query, 
-            search_depth="advanced", 
-            domains=domains
+            depth="advanced", 
+            include_domains=domains
         )
 
     async def search_tier2(self, query: str, exclude_domains: list[str] = None) -> tuple[str, list[dict]]:
@@ -73,7 +73,7 @@ class SearchManager:
         self.tavily_calls += 1
         return await self.web_tool.search(
             query,
-            search_depth="advanced",
+            depth="advanced",
             exclude_domains=exclude_domains
         )
     

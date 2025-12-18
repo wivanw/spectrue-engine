@@ -1,15 +1,36 @@
 import re
 
+def clean_search_query(query: str) -> str:
+    """
+    Sanitize LLM-generated search queries to prevent 'poisonous' searches.
+    Removes meta-phrases, fixes broken quotes, and normalizes grammar.
+    """
+    q = (query or "").strip()
+    
+    # 1. Quote normalization (safe structural fix)
+    # Replace smart quotes
+    q = q.replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'")
+    # Remove unbalanced double quotes
+    if q.count('"') % 2 != 0:
+        q = q.replace('"', '')
+
+    # 2. Basic whitespace cleanup
+    q = re.sub(r'\s+', ' ', q).strip()
+    
+    return q
+
 def normalize_search_query(query: str) -> str:
     """Normalize a search query for consistent caching and search engine behavior."""
-    q = (query or "").strip()
-    q = re.sub(r"\s+", " ", q).strip()
-    q = q.strip("“”„«»\"'`")
-    q = q.replace("…", " ").strip()
-    q = re.sub(r"\s+", " ", q).strip()
+    # Use the cleaner first
+    q = clean_search_query(query)
     if len(q) > 256:
-        q = q[:256].strip()
-    return q
+        # Graceful truncation at last space
+        truncated = q[:256]
+        if " " in truncated:
+            q = truncated.rsplit(" ", 1)[0]
+        else:
+            q = truncated
+    return q.strip()
 
 def clean_article_text(text: str) -> str:
     """
@@ -48,7 +69,7 @@ def clean_article_text(text: str) -> str:
     
     return result.strip()
 
-def extract_claims_heuristic(raw: str, max_claims: int = 2) -> list[str]:
+def extract_claims_heuristic(raw: str, max_claims: int = 4) -> list[str]:
     """Lightweight heuristic claim extraction (sentence splitting)."""
     s = re.sub(r"\s+", " ", (raw or "")).strip()
     if not s:
@@ -128,6 +149,28 @@ def canonicalize_action(action: str | None) -> str:
         "запретили": "ban",
         "запрещено": "ban",
         "запретить": "ban",
+        # DE
+        "verbot": "ban",
+        "verboten": "ban",
+        "untersagt": "ban",
+        "verbieten": "ban",
+        "beschränkung": "restrict",
+        # ES
+        "prohibición": "ban",
+        "prohibido": "ban",
+        "prohibir": "ban",
+        "restricción": "restrict",
+        # FR
+        "interdiction": "ban",
+        "interdit": "ban",
+        "interdire": "ban",
+        "restriction": "restrict",
+        # JA (Keywords)
+        "禁止": "ban",
+        "制限": "restrict",
+        # ZH
+        "禁止": "ban",
+        "限制": "restrict",
     }
     for k, v in strong_map.items():
         if k in a:

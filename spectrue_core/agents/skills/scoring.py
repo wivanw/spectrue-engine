@@ -43,27 +43,65 @@ class ScoringSkill(BaseSkill):
         cap_reasons = constraints.get("cap_reasons", [])
 
         # Construct prompt
+        # Prepare detailed claim info for the prompt
+        claims_info = []
+        for c in (pack.get("claims") or []):
+            cid = c.get("id")
+            # Get evidence specific to this claim (if mapped) or all relevant evidence
+            claim_evidence = sources_by_claim.get(cid, [])
+            
+            claims_info.append({
+                "id": cid,
+                "text": c.get("text"),
+                "type": c.get("type"),
+                "importance": c.get("importance", 0.5),
+                "matched_evidence_count": len(claim_evidence)
+            })
+
         # Construct instructions (static prefix)
         instructions = f"""You are the Spectrue Verdict Engine. Strictly evaluate claims against evidence.
 
 Task:
-1. Assign `verified_score` (0.0-1.0): Truthfulness probability. MUST BE <= global_cap.
-2. Assign `danger_score` (0.0-1.0): Harmfulness/toxicity.
-3. Assign `style_score` (0.0-1.0): Neutrality and Objectivity. 1.0 = Highly Neutral. 0.0 = Manipulative/Clickbait.
-4. Assign `explainability_score` (0.0-1.0): How well the evidence explains the verdict (Alpha).
-5. provide `rationale`: Clear explanation of the verdict, citing strong/weak evidence.
-   - Mention if score was limited by evidence gaps (independent sources, primary sources).
-   - If all sources repeat the same fact without independent confirmation, lower confidence.
-   - POLICY: If a claim attributes an action/statement to an official body (e.g. "NASA said", "UN reports", "Government announced"), you MUST require at least one PRIMARY source (official website/release/paper). If missing and only secondary media sources exist, the maximum `verified_score` is 0.6 (Partially Supported), citing "lack of primary source verification".
-   - CRITICAL: Write the rationale ENTIRELY in {lang_name} ({lang}). Do NOT use English unless lang=en.
+1. Analyze EACH claim individually against the provided evidence.
+2. For each claim, assign a `verdict_score` (0.0-1.0) and `verdict` (verified/refuted/unverified/partially_verified).
+3. Provide a global `danger_score` (0.0-1.0) and `style_score` (0.0-1.0).
+4. Explain the overall result in `rationale`.
+
+Scores:
+- 0.8-1.0: Verified (True)
+- 0.6-0.8: Plausible (Mostly True/Likely)
+- 0.4-0.6: Unverified (No clear evidence)
+- 0.2-0.4: Misleading (False context)
+- 0.0-0.2: Refuted (False)
+
+Requirements:
+- Aggregated `verified_score` will be calculated automatically from your claim scores, DO NOT output it manually.
+- POLICY: Primary source requirement applies to each claim individually.
+- CRITICAL: Write the `rationale` ENTIRELY in {lang_name} ({lang}).
+
+Rationale Style Guide (User-Facing):
+- Write for a general reader, NOT a system log. Use natural, simple language (1-2 paragraphs).
+- FOCUS: Can this be trusted? Why or why not?
+- FORBIDDEN: Do not use technical terms like "primary source", "independent domains", "score", "cap", "relevance", "deduplication", "JSON", "parameters".
+- Instead of "lack of primary sources", say "no official confirmation found".
+- Instead of "insufficient independent sources", say "verified by only one source".
+- BAD: "Score limited to 0.6 due to lack of primary source."
+- GOOD: "The claim is supported by Bloomberg, but there are no official statements confirming it yet. Therefore, it cannot be considered fully verified."
 
 Output valid JSON:
 {{
-  "verified_score": 0.8,
+  "claim_verdicts": [
+    {{
+      "claim_id": "c1",
+      "verdict_score": 0.9, 
+      "verdict": "verified",
+      "reason": "..." 
+    }}
+  ],
   "danger_score": 0.1,
   "style_score": 0.9,
   "explainability_score": 0.9,
-  "rationale": "..."
+  "rationale": "Overall summary..."
 }}
 
 You MUST respond in valid JSON.
@@ -72,32 +110,33 @@ You MUST respond in valid JSON.
 """
 
         # Construct prompt (variable content)
-        prompt = f"""Evaluate the Truthfulness of the Original Fact based strictly on the provided Evidence.
+        prompt = f"""Evaluate these claims based strictly on the Evidence.
 
 Original Fact:
 {pack.get("original_fact")}
 
-Claims & Evidence:
+Claims to Verify:
+{claims_info}
+
+Evidence (Grouped by Claim ID where possible):
 {sources_by_claim}
 
 Constraints (Caps):
-Global Confidence Cap: {global_cap} (You CANNOT exceed this score).
-Reasons: {cap_reasons}
+Global Confidence Cap: {global_cap}
 """
         # Select reasoning effort
-        effort = "medium" # T185 requirement
+        effort = "medium" 
         
         # Cache key identifies static instructions for prefix caching
-        cache_key = f"evidence_score_v3_{lang}"
+        cache_key = f"evidence_score_v4_{lang}"
 
         try:
-            # Determine appropriate model (use config or passed arg)
+            # Determine appropriate model
             m = model
             if "gpt-5" not in m and "o1" not in m:
                 m = "gpt-5.2"
 
-            # M56: Fix for OpenAI 400 "Response input messages must contain the word 'json'"
-            # REQUIRED: The word "JSON" must appear in the INPUT message, not just system instructions.
+            # REQUIRED: The word "JSON" must appear in the INPUT message
             prompt += "\n\nReturn the result in JSON format."
 
             result = await self.llm_client.call_json(
@@ -110,11 +149,53 @@ Reasons: {cap_reasons}
                 trace_kind="score_evidence",
             )
             
+            # --- Aggregation Logic (T3) ---
+            claim_verdicts = result.get("claim_verdicts", [])
+            
+            # 1. Map scores to claims to get importance
+            weighted_sum = 0.0
+            total_importance = 0.0
+            core_refuted = False
+            
+            # Lookup map for claims
+            claims_map = {c["id"]: c for c in (pack.get("claims") or [])}
+            
+            for cv in claim_verdicts:
+                cid = cv.get("claim_id")
+                score = float(cv.get("verdict_score", 0.5))
+                claim_obj = claims_map.get(cid)
+                
+                if claim_obj:
+                    imp = float(claim_obj.get("importance", 0.5))
+                    weighted_sum += score * imp
+                    total_importance += imp
+                    
+                    # Veto: If a CORE claim is REFUTED (<0.2), global can't be true
+                    if claim_obj.get("type") == "core" and score < 0.25:
+                        core_refuted = True
+                else:
+                    # Fallback if ID mismatch
+                    weighted_sum += score * 0.5
+                    total_importance += 0.5
+
+            # Calculate Global Verified Score
+            if total_importance > 0:
+                final_v_score = weighted_sum / total_importance
+            else:
+                final_v_score = 0.5
+                
+            # Apply Core Veto
+            if core_refuted and final_v_score > 0.3:
+                logger.info("[Scoring] Core claim refuted. Dragging score down to 0.25")
+                final_v_score = 0.25
+                result["rationale"] = f"[Core Claim Refuted] {result.get('rationale', '')}"
+
+            result["verified_score"] = final_v_score
+            
             # Post-clamp to ensure LLM respected the cap (T165)
-            # This is also done in pipeline/verifier, but good to have here too.
             v_score = float(result.get("verified_score", 0.5))
             if v_score > global_cap:
-                logger.info(f"[Scoring] LLM returned {v_score} > cap {global_cap}. Clamping.")
+                logger.info(f"[Scoring] Aggregated {v_score} > cap {global_cap}. Clamping.")
                 result["verified_score"] = global_cap
                 result["cap_enforced"] = True
             

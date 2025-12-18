@@ -267,14 +267,18 @@ class ValidationPipeline:
             tier1_domains = get_trusted_domains_by_lang(search_lang)
             
             # Select queries
-            # T1 (Trusted) uses Parametric query (Index 0) for precision in trusted domains
-            t1_query = search_queries[0]
-            # T2 (General) uses Local query (Index 2) if available, else Official (Index 1), else Parametric
-            # We prefer Local for T2 to capture local context/language coverage.
+            # Select queries
+            # T1 (Trusted) prefers Event-Based (Index 1) for broader context in trusted sources
+            # Fallback to Specific (Index 0) if only 1 query exists
+            if len(search_queries) > 1:
+                t1_query = search_queries[1]
+            else:
+                t1_query = search_queries[0]
+            
+            # T2 (General) uses Local query (Index 2) if available to capture local context
+            # Fallback to Specific (Index 0)
             if len(search_queries) > 2:
                 t2_query = search_queries[2]
-            elif len(search_queries) > 1:
-                t2_query = search_queries[1]
             else:
                 t2_query = search_queries[0]
             

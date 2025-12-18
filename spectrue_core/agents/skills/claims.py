@@ -17,14 +17,14 @@ class ClaimExtractionSkill(BaseSkill):
         """
         text = (text or "").strip()
         if not text:
-            return []
+            return [], False
 
         # Limit input to prevent token overflow
         text_excerpt = text[:8000] if len(text) > 8000 else text
         
         # M57: Resolve language name for bilingual query generation
         lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
-
+        
         # Move static rules to instructions for prefix caching (M56)
         # We append the UNIVERSAL_METHODOLOGY_APPENDIX to ensure the prefix is heavy (>1024 tokens) and consistent.
         instructions = f"""You are a claim extraction assistant.
@@ -35,9 +35,9 @@ Rules:
 4. Classify type: "core", "numeric", "timeline", "attribution", "sidefact".
 5. Importance: 0.9-1.0 for core, 0.4 for side.
 6. Generate EXACTLY 3 search queries for each claim:
-   - Query 1 (Specific/Quote): STRICTLY include exact numbers, dates, or specific quote fragments. Use quotes (e.g. "December 19", "270 million km"). Great for verification of specific claims.
-   - Query 2 (Event-Based): Use broad keywords describing the underlying event or topic WITHOUT quotes (e.g. asteroid approach earth december). Great for finding general coverage.
-   - Query 3 (Local): Search in {lang_name} ({lang}) for local coverage and independent verification.
+   - Query 1 (Specific/Quote): ONLY generate if the claim contains a specific verifiable quote. Format: "exact quote fragment" entity keyword. If no quote exists, fallback to Query 2 style.
+   - Query 2 (Event-Based): The MAIN search query. STRICTLY follow the format: Subject Action Object Date/Context. Do NOT use quotes. Do NOT use meta-phrases like "full and final" or "insufficient evidence". Example: Trump orders blockade sanctioned oil tankers Venezuela December 2025.
+   - Query 3 (Local): Search in {lang_name} ({lang}) keywords for local coverage.
 7. For EACH claim, set "check_oracle": true IF AND ONLY IF the claim discusses rumors, hoaxes, debunking, conspiracy theories, or popular viral myths (e.g. "aliens", "flat earth", "fact check", "fake"). Otherwise false.
 
 Output valid JSON key "claims":
@@ -109,7 +109,7 @@ ARTICLE:
                 claims.append(c)
                 
             # M60 Oracle Optimization: Check if ANY claim needs oracle
-            check_oracle = any(c.get("check_oracle", False) for c in claims)
+            check_oracle = any(c["check_oracle"] for c in claims)
             return claims, check_oracle
             
         except Exception as e:

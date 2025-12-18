@@ -13,16 +13,23 @@ class TestScoringSkill:
 
     @pytest.mark.asyncio
     async def test_score_evidence_basic(self, skill, mock_llm_client):
-        # Mock LLM response
+        # Mock LLM response with claim verdicts
         mock_llm_client.call_json.return_value = {
-            "verified_score": 0.8,
+            "claim_verdicts": [
+                {"claim_id": "c1", "verdict_score": 0.8}
+            ],
             "danger_score": 0.1,
             "style_score": 0.9,
             "explainability_score": 0.9,
             "rationale": "Solid evidence."
         }
         
-        pack = {"original_fact": "Test", "search_results": []}
+        # Provide claim in pack so importance weighting works
+        pack = {
+            "original_fact": "Test", 
+            "search_results": [],
+            "claims": [{"id": "c1", "importance": 1.0, "type": "core"}]
+        }
         result = await skill.score_evidence(pack)
         
         assert result["verified_score"] == 0.8
@@ -34,12 +41,15 @@ class TestScoringSkill:
         pack = {
             "original_fact": "Test", 
             "constraints": {"global_cap": 0.6},
-            "search_results": []
+            "search_results": [],
+            "claims": [{"id": "c1", "importance": 1.0, "type": "core"}]
         }
         
-        # LLM tries to give 0.9
+        # LLM tries to give 0.9 via claim verdict
         mock_llm_client.call_json.return_value = {
-            "verified_score": 0.9,
+            "claim_verdicts": [
+                {"claim_id": "c1", "verdict_score": 0.9}
+            ],
             "rationale": "It is true."
         }
         
