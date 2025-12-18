@@ -215,12 +215,16 @@ def get_trusted_domains_by_lang(lang: str) -> list[str]:
     if lang not in supported:
         lang = "en"
 
+    # M61: Removed "international_public_bodies" from base list.
+    # IGO sites (un.org, imf.org, oecd.org, worldbank.org, ec.europa.eu) return legal PDFs,
+    # historical documents, and archives — NOT breaking news.
+    # They remain in TRUSTED_SOURCES for topic-gated searches (e.g., claim mentions UN resolution).
     base = (
         TRUSTED_SOURCES["global_news_agencies"]
         + TRUSTED_SOURCES["fact_checking_ifcn"]
         + TRUSTED_SOURCES["science_and_health"]
         + TRUSTED_SOURCES["technology"]
-        + TRUSTED_SOURCES["international_public_bodies"]
+        # + TRUSTED_SOURCES["international_public_bodies"]  # M61: removed for news queries
     )
 
     # Language-group routing (Spec Kit).

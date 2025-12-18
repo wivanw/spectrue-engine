@@ -26,7 +26,12 @@ from urllib.parse import urlparse
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.utils.trace import Trace
 
-from spectrue_core.verification.trusted_sources import ALL_TRUSTED_DOMAINS as TRUSTED_DOMAINS
+
+# M61: Import scoring functions from separate module
+from spectrue_core.tools.search_scoring import (
+    is_trusted_host,
+    rank_and_filter,
+)
 
 try:
     import trafilatura
@@ -142,243 +147,21 @@ class WebSearchTool:
             )
         return cleaned
 
-    def _tokenize(self, text: str) -> list[str]:
-        if not text:
-            return []
-        lower = text.lower()
-
-        # For CJK languages (zh/ja), whitespace tokenization is weak; use character bigrams.
-        def contains_cjk(s: str) -> bool:
-            # Han + Hiragana + Katakana + Hangul
-            return re.search(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]", s) is not None
-
-        tokens: list[str] = []
-
-        # Unicode-friendly word extraction (supports Cyrillic/Latin, etc.)
-        tokens.extend(re.findall(r"[\w']+", lower))
-
-        if contains_cjk(lower):
-            cjk_only = re.sub(r"[^\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]", "", lower)
-            # Bigrams give a cheap signal for overlap without a full tokenizer.
-            tokens.extend([cjk_only[i:i+2] for i in range(max(0, len(cjk_only) - 1))])
-
-        return [t for t in tokens if t]
-
+    # M61: Delegate to search_scoring module
     def _is_trusted_host(self, host: str) -> bool:
-        """Centralized trusted host check with subdomain walking."""
-        if not host: 
-            return False
-        h = host.lower()
-        if h.startswith("www."):
-            h = h[4:]
-        
-        # Exact match
-        if h in TRUSTED_DOMAINS:
-            return True
-        
-        # Safety net: Do not trust known public suffixes during parent walk
-        # to prevent accidental whitelisting of "co.uk" or similar.
-        forbidden_suffixes = {"co.uk", "com.au", "co.jp", "com.br", "co.id", "co.in", "com.cn", "org.uk"}
+        """Delegate to search_scoring.is_trusted_host."""
+        return is_trusted_host(host)
 
-        # Parent walk
-        parts = h.split(".")
-        for i in range(len(parts) - 1):
-            candidate = ".".join(parts[i:])
-            if candidate in forbidden_suffixes:
-                continue
-            if candidate in TRUSTED_DOMAINS:
-                return True
-        return False
-
-    def _relevance_score(self, query: str, title: str, content: str, url: str, *, tavily_score: float | None) -> float:
-        """
-        Lightweight lexical relevance scoring to drop obviously off-topic results.
-        Keeps behavior deterministic and cheap (no LLM calls).
-        """
-        query_tokens = self._tokenize(query)
-        if not query_tokens:
-            return 0.0
-
-        stop = {
-            # EN
-            "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "by", "from", "as",
-            "is", "are", "was", "were", "be", "been", "being", "it", "this", "that", "these", "those",
-            # UA/RU common
-            "і", "й", "та", "але", "або", "що", "це", "як", "в", "у", "на", "до", "з", "із", "за",
-            "и", "й", "да", "но", "или", "что", "это", "как", "в", "на", "до", "с", "из", "за",
-            # DE
-            "der", "die", "das", "ein", "eine", "und", "oder", "zu", "von", "mit", "für", "im", "in", "am",
-            "ist", "sind", "war", "waren", "sein", "wurde", "werden", "als", "auch", "auf", "bei", "nicht",
-            # ES
-            "el", "la", "los", "las", "un", "una", "y", "o", "de", "del", "en", "con", "por", "para", "como",
-            "es", "son", "fue", "fueron", "ser", "al", "a", "que", "no", "se", "su", "sus",
-            # FR
-            "le", "la", "les", "un", "une", "et", "ou", "de", "des", "du", "en", "dans", "avec", "par", "pour",
-            "est", "sont", "été", "etre", "être", "au", "aux", "ce", "cet", "cette", "ces", "que", "qui", "ne", "pas",
-        }
-        tokens = [t for t in query_tokens if (len(t) >= 3 or t.isdigit()) and t not in stop]
-        if not tokens:
-            tokens = query_tokens[:8]
-
-        title_tokens = set(self._tokenize(title))
-        content_tokens = set(self._tokenize(content))
-
-        hits_title = sum(1 for t in tokens if t in title_tokens)
-        hits_content = sum(1 for t in tokens if t in content_tokens)
-        hit_ratio = (hits_title * 2 + hits_content) / max(1, len(tokens))
-
-        # Prefer sources that mention key numerals from query (dates, amounts)
-        q_nums = {t for t in tokens if t.isdigit()}
-        
-        # Penalize extremely short snippets (often random/empty)
-        length_penalty = 0.0
-        if content and len(content) < 80:
-            length_penalty = 0.08
-
-        # Small bonus for trusted domains (stability)
-        trusted_bonus = 0.0
-        try:
-            host = urlparse(url).netloc
-            if self._is_trusted_host(host):
-                trusted_bonus = 0.10
-        except Exception:
-            pass
-
-        lexical_score = max(0.0, min(1.0, hit_ratio))
-        
-        # Start with lexical score
-        final_score = lexical_score
-
-        if tavily_score is not None:
-            try:
-                ts = float(tavily_score)
-                # M46/M47: Hardened gate.
-                # If keywords don't match (lexical < 0.15), we distrust Tavily 
-                # UNLESS it's extremely confident (ts >= 0.90), which suggests strong semantic match.
-                if lexical_score < 0.15:
-                    if ts >= 0.90:
-                         final_score = max(lexical_score, ts * 0.70) # Reduced trust in pure semantic match
-                    else:
-                         final_score = lexical_score * 0.5  # Heavy penalty
-                else:
-                    # Blend: allow TS to boost, but cap the gain to avoid Tavily hallucination dominance.
-                    # M47: Fix "Tavily King" problem.
-                    blended = max(lexical_score, ts)
-                    cap = lexical_score + 0.35
-                    final_score = min(blended, cap)
-            except Exception:
-                pass
-        
-        final_score += trusted_bonus
-        final_score -= length_penalty
-        
-        # M47: Must-have tokens penalty (Numbers)
-        # If query has numbers (10000, 2026) but content doesn't, it's likely irrelevant.
-        if q_nums:
-            c_nums = {t for t in content_tokens if t.isdigit()}
-            if not (q_nums & c_nums):
-                final_score *= 0.5 # Heavy penalty
-        
-        # M36: Hard penalize specific forum patterns in known domains
-        low_url = (url or "").lower()
-        if "forum.nasaspaceflight.com" in low_url:
-             final_score = 0.0
-
-        return max(0.0, min(1.0, final_score))
+    def _relevance_score(
+        self, query: str, title: str, content: str, url: str, *, tavily_score: float | None = None
+    ) -> float:
+        """Delegate to search_scoring.relevance_score (backward compat)."""
+        from spectrue_core.tools.search_scoring import relevance_score
+        return relevance_score(query, title, content, url, tavily_score=tavily_score)
 
     def _rank_and_filter(self, query: str, results: list[dict]) -> list[dict]:
-        scored: list[dict] = []
-        for obj in results:
-            s = self._relevance_score(
-                query,
-                obj.get("title", ""),
-                obj.get("content", ""),
-                obj.get("url", ""),
-                tavily_score=obj.get("score"),
-            )
-            item = dict(obj)
-            item["relevance_score"] = s
-            scored.append(item)
-
-        scored.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)
-
-        # Keep best results; drop clearly off-topic tail.
-        # M46: Increased threshold slightly
-        # Keep best results; drop clearly off-topic tail.
-        # M46: Increased threshold slightly
-        # Keep best results; drop clearly off-topic tail.
-        # M60: Advanced Noise Filtering to remove "poisonous" archives (UN, legal PDFs)
-        kept = []
-        discarded_reasons = []
-
-        # Domains that often return historic/legal noise for "blockade" queries
-        ARCHIVE_DOMAINS = {"legal.un.org", "docs.un.org", "press.un.org", "undocs.org", "history.state.gov", "oecd.org"}
-        # Keywords that MUST be present to redeem an archive/PDF document
-        MUST_HAVE_KEYWORDS = {"trump", "truth social", "biden", "zelensky", "putin", "breaking", "news", "2024", "2025"}
-
-        for r in scored:
-            score = r.get("relevance_score", 0.0)
-            url = r.get("url", "").lower()
-            domain = urlparse(url).netloc
-            content_lower = (r.get("content") or "").lower()
-            
-            # Check for generic PDF/Archive junk
-            is_noise_domain = domain in ARCHIVE_DOMAINS or "legal.un.org" in url
-            is_pdf = ".pdf" in url
-
-            if is_noise_domain or is_pdf:
-                # Only keep if strongly relevant to current news events
-                has_news_keyword = any(k in content_lower for k in MUST_HAVE_KEYWORDS)
-                if not has_news_keyword:
-                    discarded_reasons.append(f"{r.get('url')} (archive_garbage)")
-                    continue
-
-            if score >= 0.15:
-                kept.append(r)
-            elif score >= 0.05 and not kept:
-                # Fallback for borderline items
-                kept.append(r)
-            else:
-                discarded_reasons.append(f"{r.get('url')} (low_score={score:.2f})")
-
-        if discarded_reasons:
-            logger.debug("[Search] Discarded %d results: %s", len(discarded_reasons), "; ".join(discarded_reasons[:5]))
-        if not kept and scored:
-            # Last resort fallback to avoid empty result if we had candidates
-            logger.info("[Search] All results below 0.15, keeping top 2 borderline results as fallback")
-            kept = scored[:2]
-        
-        # M54: Enforce domain diversity
-        # Select best result per domain first, then fill rest
-        selected: list[dict] = []
-        seen_domains: set[str] = set()
-        backlog: list[dict] = []
-        
-        for r in kept:
-            try:
-                domain = urlparse(r.get("url", "")).netloc.lower()
-                # strip www.
-                if domain.startswith("www."):
-                    domain = domain[4:]
-            except Exception:
-                domain = "unknown"
-                
-            if domain not in seen_domains:
-                selected.append(r)
-                seen_domains.add(domain)
-            else:
-                # Add to backlog but preserve order (since it was sorted by score)
-                backlog.append(r)
-        
-        # If we have space left, fill with best from backlog (duplicates)
-        target_count = 10
-        if len(selected) < target_count:
-            needed = target_count - len(selected)
-            # Re-sort backlog by score just in case, though it should be sorted
-            backlog.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)
-            selected.extend(backlog[:needed])
-            
-        return selected[:target_count]
+        """Delegate to search_scoring.rank_and_filter."""
+        return rank_and_filter(query, results)
 
     # M58: _detect_time_filters removed - was disabled and always returned {}
 
@@ -913,7 +696,12 @@ class WebSearchTool:
 
             uniq = {_domain(r.get("url", "")) for r in (ranked or []) if r.get("url")}
             uniq.discard("")
-            if len(uniq) < 3 and ranked:
+            
+            # M61: Quality gate - skip diversify if top result is junk
+            top_relevance = ranked[0].get("relevance_score", 0.0) if ranked else 0.0
+            DIVERSIFY_MIN_RELEVANCE = 0.25
+            
+            if len(uniq) < 3 and ranked and top_relevance >= DIVERSIFY_MIN_RELEVANCE:
                 # Dominant domain = domain of the top-ranked item
                 dom0 = _domain(ranked[0].get("url", ""))
                 dom0_normalized = dom0.lower().lstrip(".") if dom0 else ""
@@ -948,6 +736,11 @@ class WebSearchTool:
                         logger.debug("[Tavily] Diversify pass done: %d results", len(ranked))
                     except Exception as div_err:
                         logger.debug("[Tavily] Diversify pass failed: %s", div_err)
+            elif len(uniq) < 3 and ranked and top_relevance < DIVERSIFY_MIN_RELEVANCE:
+                logger.debug(
+                    "[Tavily] Diversify pass skipped: top_relevance=%.3f < %.2f (junk results)",
+                    top_relevance, DIVERSIFY_MIN_RELEVANCE
+                )
 
             quality = self._quality_from_ranked(ranked)
             fulltext_fetches = 0
