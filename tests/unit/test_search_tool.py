@@ -135,6 +135,97 @@ class TestWebSearchTool:
         )
         assert res2 > 0.9
 
+    # =============================================================================
+    # M61: New tests for Search Quality v2
+    # =============================================================================
+
+    def test_archive_domain_filtered(self, tool):
+        """T5: Archive domains like un.org PDFs should be filtered unless they have news keywords."""
+        results = [
+            {"title": "UN Document", "url": "https://digitallibrary.un.org/record/12345.pdf", "content": "Legal document about treaties"},
+            {"title": "Reuters News", "url": "https://reuters.com/news/article", "content": "Breaking news about treaties"},
+        ]
+        ranked = tool._rank_and_filter("treaties international law", results)
+        
+        # UN digital library PDF should be filtered (no news keywords)
+        urls = [r["url"] for r in ranked]
+        assert "https://digitallibrary.un.org/record/12345.pdf" not in urls
+        assert "https://reuters.com/news/article" in urls
+
+    def test_archive_domain_kept_with_news_keyword(self, tool):
+        """T5: Archive domains should be kept if they contain news keywords like '2025'."""
+        results = [
+            {"title": "UN Report 2025", "url": "https://docs.un.org/record/2025/report.pdf", "content": "Breaking 2025 report about sanctions"},
+        ]
+        ranked = tool._rank_and_filter("UN sanctions 2025", results)
+        
+        # Should be kept because content has "2025" and "breaking"
+        assert len(ranked) >= 1
+
+    def test_archive_url_pattern_filtered(self, tool):
+        """T5: URLs with archive patterns like /publications/ should be filtered."""
+        results = [
+            {"title": "Old Publication", "url": "https://example.org/publications/old-report", "content": "Historical data"},
+            {"title": "News Article", "url": "https://example.org/news/current", "content": "Historical data current events"},
+        ]
+        ranked = tool._rank_and_filter("historical data", results)
+        
+        # /publications/ URL should be filtered
+        urls = [r["url"] for r in ranked]
+        assert "https://example.org/publications/old-report" not in urls
+
+    def test_date_freshness_boost_current_year(self, tool):
+        """T5: URLs with current year should get +0.08 boost."""
+        import datetime
+        current_year = datetime.datetime.now().year
+        
+        # URL with current year
+        score_fresh = tool._relevance_score(
+            query="test news",
+            title="Test News",
+            content="Test news content here",
+            url=f"https://news.com/{current_year}/12/article",
+            tavily_score=None
+        )
+        
+        # URL without year
+        score_no_year = tool._relevance_score(
+            query="test news",
+            title="Test News",
+            content="Test news content here",
+            url="https://news.com/article",
+            tavily_score=None
+        )
+        
+        # Fresh URL should score higher
+        assert score_fresh > score_no_year
+
+    def test_date_freshness_penalty_old_year(self, tool):
+        """T5: URLs with old years (>2 years ago) should get -0.12 penalty."""
+        import datetime
+        old_year = datetime.datetime.now().year - 3
+        
+        # URL with old year
+        score_old = tool._relevance_score(
+            query="test news",
+            title="Test News",
+            content="Test news content here",
+            url=f"https://news.com/{old_year}/12/article",
+            tavily_score=None
+        )
+        
+        # URL without year
+        score_no_year = tool._relevance_score(
+            query="test news",
+            title="Test News",
+            content="Test news content here",
+            url="https://news.com/article",
+            tavily_score=None
+        )
+        
+        # Old URL should score lower
+        assert score_old < score_no_year
+
 @pytest.mark.unit
 class TestGoogleCSESearchTool:
 
