@@ -916,19 +916,30 @@ class WebSearchTool:
             if len(uniq) < 3 and ranked:
                 # Dominant domain = domain of the top-ranked item
                 dom0 = _domain(ranked[0].get("url", ""))
+                dom0_normalized = dom0.lower().lstrip(".") if dom0 else ""
+                
                 # Skip diversify if dominant domain is in include_domains (would result in same query)
                 include_set = {d.lower() for d in (normalized_include or [])}
-                if dom0 and dom0 in include_set:
-                    logger.debug("[Tavily] Diversify pass skipped: dominant domain=%s is in include_domains", dom0)
-                elif dom0:
-                    logger.debug("[Tavily] Diversify pass: excluding dominant domain=%s", dom0)
+                base_exclude = list(normalized_exclude or [])
+                
+                if dom0_normalized and dom0_normalized in include_set:
+                    logger.debug("[Tavily] Diversify pass skipped: dominant domain=%s is in include_domains", dom0_normalized)
+                elif dom0_normalized and dom0_normalized in base_exclude:
+                    logger.debug("[Tavily] Diversify pass skipped: %s already in exclude_domains", dom0_normalized)
+                elif dom0_normalized:
+                    logger.debug("[Tavily] Diversify pass: excluding dominant domain=%s", dom0_normalized)
                     try:
+                        # Guarantee room for dom0 (Tavily cap is 32, so use 31 + dom0)
+                        if len(base_exclude) >= 32:
+                            base_exclude = base_exclude[:31]
+                        diversify_exclude = base_exclude + [dom0_normalized]
+                        
                         response2 = await self._request_search(
                             q,
                             depth,
                             effective_limit,
                             domains=normalized_include,
-                            exclude_domains=(normalized_exclude or []) + [dom0],
+                            exclude_domains=diversify_exclude,
                             raw_mode=raw_mode,
                         )
                         results2 = self._clean_results(response2.get("results", []))
