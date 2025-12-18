@@ -916,7 +916,11 @@ class WebSearchTool:
             if len(uniq) < 3 and ranked:
                 # Dominant domain = domain of the top-ranked item
                 dom0 = _domain(ranked[0].get("url", ""))
-                if dom0:
+                # Skip diversify if dominant domain is in include_domains (would result in same query)
+                include_set = {d.lower() for d in (normalized_include or [])}
+                if dom0 and dom0 in include_set:
+                    logger.debug("[Tavily] Diversify pass skipped: dominant domain=%s is in include_domains", dom0)
+                elif dom0:
                     logger.debug("[Tavily] Diversify pass: excluding dominant domain=%s", dom0)
                     try:
                         response2 = await self._request_search(
