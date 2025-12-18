@@ -37,8 +37,8 @@ Rules:
 6. Generate EXACTLY 3 search queries for each claim:
    - Query 1 (Parametric): STRICTLY include exact numbers, dates, and named entities. Use quotes (e.g. "December 19", "270 million km"). Key detail focus.
    - Query 2 (Official): If an official body (NASA, UN) is cited, use 'site:domain' (e.g. site:nasa.gov) + keywords. Else use broad English keywords.
-   - Query 3 (Local): Search in {lang_name} ({lang}) for local coverage.
-7. Set "check_oracle_db": true if the text discusses rumors, hoaxes, debunking, conspiracy theories, or popular viral myths (e.g. "aliens", "flat earth", "fact check", "fake"). Otherwise false.
+    - Query 3 (Local): Search in {lang_name} ({lang}) for local coverage.
+7. For EACH claim, set "check_oracle": true IF AND ONLY IF the claim discusses rumors, hoaxes, debunking, conspiracy theories, or popular viral myths (e.g. "aliens", "flat earth", "fact check", "fake"). Otherwise false.
 
 Output valid JSON key "claims":
 {{
@@ -51,10 +51,10 @@ Output valid JSON key "claims":
       "evidence_req": {{
         "needs_primary": true,
         "needs_2_independent": true
-      }}
+      }},
+      "check_oracle": false
     }}
-  ],
-  "check_oracle_db": false
+  ]
 }}
 
 You MUST respond in valid JSON.
@@ -67,7 +67,7 @@ ARTICLE:
 {text_excerpt}
 """
         try:
-            cache_key = f"claim_extract_v3_{lang}"
+            cache_key = f"claim_extract_v4_{lang}"
             
             # Ensure "JSON" appears in input (OpenAI Responses API requirement)
             prompt += "\n\nReturn the result in JSON format."
@@ -104,10 +104,12 @@ ARTICLE:
                     importance=float(rc.get("importance", 0.5)),
                     evidence_requirement=req,
                     search_queries=rc.get("search_queries", []),
+                    check_oracle=bool(rc.get("check_oracle", False)),
                 )
                 claims.append(c)
                 
-            check_oracle = bool(result.get("check_oracle_db", False))
+            # M60 Oracle Optimization: Check if ANY claim needs oracle
+            check_oracle = any(c.get("check_oracle", False) for c in claims)
             return claims, check_oracle
             
         except Exception as e:

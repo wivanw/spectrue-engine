@@ -1,0 +1,117 @@
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from spectrue_core.verification.pipeline import ValidationPipeline
+
+@pytest.mark.unit
+class TestOracleOptimization:
+    
+    @pytest.fixture
+    def mock_agent(self):
+        agent = MagicMock()
+        agent.extract_claims = AsyncMock()
+        agent.clean_article = AsyncMock()
+        agent.cluster_evidence = AsyncMock()
+        agent.score_evidence = AsyncMock()
+        agent.verify_oracle_relevance = AsyncMock()
+        agent.verify_inline_source_relevance = AsyncMock()
+        return agent
+
+    @pytest.fixture
+    def mock_search_mgr(self):
+        mgr = MagicMock()
+        mgr.search_tier1 = AsyncMock(return_value=("", []))
+        mgr.search_tier2 = AsyncMock(return_value=("", []))
+        mgr.check_oracle = AsyncMock(return_value=None)
+        mgr.reset_metrics = MagicMock()
+        mgr.calculate_cost = MagicMock(return_value=0)
+        mgr.can_afford = MagicMock(return_value=True)
+        # Initialize counters as ints
+        mgr.tavily_calls = 0
+        mgr.google_cse_calls = 0
+        mgr.page_fetches = 0
+        return mgr
+
+    @pytest.fixture
+    def pipeline(self, mock_config, mock_agent, mock_search_mgr):
+        with patch("spectrue_core.verification.pipeline.SearchManager") as MockSearchManagerCls:
+            MockSearchManagerCls.return_value = mock_search_mgr
+            pipeline = ValidationPipeline(config=mock_config, agent=mock_agent)
+            return pipeline
+
+    @pytest.mark.asyncio
+    async def test_oracle_optimization_specific_claims(self, pipeline, mock_agent, mock_search_mgr):
+        """Test that Oracle checks are performed specifically on flagged claims."""
+        
+        # Claims extraction returns 3 claims, 2 marked for oracle check
+        claims = [
+            {"id": "c1", "text": "Claim One", "check_oracle": True},
+            {"id": "c2", "text": "Claim Two", "check_oracle": False},
+            {"id": "c3", "text": "Claim Three", "check_oracle": True},
+        ]
+        # should_check_oracle = True (because ANY claim is true)
+        mock_agent.extract_claims.return_value = (claims, True)
+        
+        # Oracle returns None (miss) so we can see all calls
+        mock_search_mgr.check_oracle.return_value = None
+        
+        # Helper to generate queries (mock)
+        mock_agent.generate_search_queries = AsyncMock(return_value=["q1", "q2", "q3"])
+        mock_agent.score_evidence = AsyncMock(return_value={"verified_score": 0.5, "rationale": "test"})
+        mock_agent.cluster_evidence = AsyncMock(return_value=[])
+
+        await pipeline.execute(fact="Test fact", search_type="smart", gpt_model="gpt-5-nano", lang="en")
+        
+        # Verify calls to check_oracle
+        # Should be called 2 times, for c1 and c3 text
+        assert mock_search_mgr.check_oracle.call_count == 2
+        
+        # Check actual queries
+        calls = mock_search_mgr.check_oracle.call_args_list
+        queries = [c[0][0] for c in calls]
+        
+        # Normalize logic lowercases queries usually
+        assert any("claim one" in q.lower() for q in queries)
+        assert any("claim three" in q.lower() for q in queries)
+        assert not any("claim two" in q.lower() for q in queries)
+
+    @pytest.mark.asyncio
+    async def test_oracle_limit_max_calls(self, pipeline, mock_agent, mock_search_mgr):
+        """Test that Oracle checks are limited to 2 calls max."""
+        
+        claims = [
+            {"id": "c1", "text": "Claim 1", "check_oracle": True},
+            {"id": "c2", "text": "Claim 2", "check_oracle": True},
+            {"id": "c3", "text": "Claim 3", "check_oracle": True},
+        ]
+        # All true
+        mock_agent.extract_claims.return_value = (claims, True)
+        mock_search_mgr.check_oracle.return_value = None
+        mock_agent.generate_search_queries = AsyncMock(return_value=["q1", "q2"])
+        mock_agent.score_evidence = AsyncMock(return_value={"verified_score": 0.5, "rationale": "test"})
+        mock_agent.cluster_evidence = AsyncMock(return_value=[])
+        
+        await pipeline.execute(fact="Limit test", search_type="smart", gpt_model="gpt-4", lang="en")
+        
+        assert mock_search_mgr.check_oracle.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_oracle_fallback(self, pipeline, mock_agent, mock_search_mgr):
+        """Test fallback to fast_query if flag is True but no logic claims."""
+        
+        claims = [
+            {"id": "c1", "text": "Claim 1", "check_oracle": False},
+        ]
+        # Flag True (edge case or heuristic override from legacy)
+        mock_agent.extract_claims.return_value = (claims, True)
+        mock_search_mgr.check_oracle.return_value = None
+        mock_agent.generate_search_queries = AsyncMock(return_value=["q1", "q2"])
+        mock_agent.score_evidence = AsyncMock(return_value={"verified_score": 0.5, "rationale": "test"})
+        mock_agent.cluster_evidence = AsyncMock(return_value=[])
+        
+        await pipeline.execute(fact="Fallback test", search_type="smart", gpt_model="gpt-4", lang="en")
+        
+        assert mock_search_mgr.check_oracle.call_count == 1
+        # Query should be normalized fact ("fallback test")
+        call_args = mock_search_mgr.check_oracle.call_args[0][0]
+        assert "fallback test" in call_args.lower()

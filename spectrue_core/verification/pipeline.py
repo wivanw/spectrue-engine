@@ -211,26 +211,47 @@ class ValidationPipeline:
                 src["is_relevant"] = True
             final_sources.extend(inline_sources)
         
-        # M58: Oracle Optimization (T8)
-        # Only run Oracle if LLM detected viral/fake markers
+        # M58: Oracle Optimization (T10)
+        # Only run Oracle if LLM detected viral/fake markers on SPECIFIC claims
         if should_check_oracle:
             if progress_callback:
                 await progress_callback("checking_oracle")
             
-            oracle_res = await self.search_mgr.check_oracle(fast_query)
+            # T10: Identify specific candidate claims to check
+            # Prioritize claims marked by LLM as needing oracle check
+            candidates = [c for c in claims if c.get("check_oracle")]
             
-            if oracle_res:
-                 # Verify Semantic Relevance
-                 oracle_claim_text = oracle_res.get("rationale", "")
-                 oracle_rating = "Unknown" 
-                 
-                 is_relevant = await self.agent.verify_oracle_relevance(original_fact, oracle_claim_text, oracle_rating)
-                 
-                 if is_relevant:
-                     logger.info("[Pipeline] Oracle hit VERIFIED. Stopping.")
-                     return self._finalize_oracle(oracle_res, original_fact)
-                 else:
-                     logger.info("[Pipeline] Oracle hit REJECTED (irrelevant). Continuing.")
+            # Fallback: If no claim specifically marked (but flag was true?), use fast_query on whole text
+            if not candidates:
+                # Mock a claim object for consistency
+                candidates = [{"text": fast_query}]
+            
+            # Limit to top 2 candidates to strictly preserve quota (1000/day hard limit)
+            candidates = candidates[:2]
+            
+            for i, cand in enumerate(candidates):
+                query_text = cand.get("text", "")
+                # Normalize query (strip quotes, extra spaces)
+                q = normalize_search_query(query_text)
+                
+                logger.info("[Pipeline] Oracle Check %d/%d: %s", i+1, len(candidates), q[:50])
+                oracle_res = await self.search_mgr.check_oracle(q)
+                
+                if oracle_res:
+                     # Verify Semantic Relevance
+                     oracle_claim_text = oracle_res.get("rationale", "")
+                     oracle_rating = "Unknown" 
+                     
+                     # Check relevance against the specific claim we queried, AND the original fact
+                     is_relevant = await self.agent.verify_oracle_relevance(original_fact, oracle_claim_text, oracle_rating)
+                     
+                     if is_relevant:
+                         logger.info("[Pipeline] Oracle hit VERIFIED. Stopping.")
+                         return self._finalize_oracle(oracle_res, original_fact)
+                     else:
+                         logger.info("[Pipeline] Oracle hit REJECTED (irrelevant). Continuing.")
+            
+            logger.info("[Pipeline] Oracle checks finished. No relevant hits found.")
         else:
              logger.info("[Pipeline] Skipping Oracle (no viral markers detected).")
 

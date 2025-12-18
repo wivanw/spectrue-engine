@@ -77,6 +77,7 @@ class Claim(TypedDict, total=False):
     importance: float               # 0-1, how critical to main thesis
     evidence_requirement: EvidenceRequirement
     search_queries: list[str]       # Generated queries for this claim
+    check_oracle: bool              # T10: Should this specific claim be checked against Oracle?
 
 
 # ─────────────────────────────────────────────────────────────────────────────
