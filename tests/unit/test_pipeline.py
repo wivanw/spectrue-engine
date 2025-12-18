@@ -123,15 +123,23 @@ class TestValidationPipeline:
         mock_search_mgr.search_tier2.assert_called()
 
     @pytest.mark.asyncio
-    async def test_parallel_execution(self, pipeline, mock_agent, mock_search_mgr):
+    async def test_smart_mode_waterfall(self, pipeline, mock_agent, mock_search_mgr):
+        """T9: Verify Smart Mode uses Waterfall (no parallel T2) even if 'advanced' is requested."""
         mock_agent.extract_claims.return_value = ([], False)
         mock_agent.score_evidence.return_value = {}
         
-        # search_type="advanced" -> triggers parallel T2
+        # Setup T1 to return GOOD results (> 2 sources) so T2 fallback is NOT triggered
+        mock_search_mgr.search_tier1.return_value = (
+            "Context T1", 
+            [{"url": "http://t1a.com"}, {"url": "http://t1b.com"}]
+        )
+        
+        # search_type="advanced" used to trigger parallel T2. Now it should be ignored (Smart Mode).
         await pipeline.execute(fact="X", search_type="advanced", gpt_model="gpt-4", lang="en")
         
         assert mock_search_mgr.search_tier1.called
-        assert mock_search_mgr.search_tier2.called
+        # T2 should NOT be called because T1 yielded results and parallel is disabled
+        assert not mock_search_mgr.search_tier2.called
 
     @pytest.mark.asyncio
     async def test_inline_source_verification_t7(self, pipeline, mock_agent, mock_search_mgr):

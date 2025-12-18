@@ -6,7 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SEARCH_COSTS = {"basic": 80, "advanced": 160}
+SEARCH_COSTS = {"smart": 100}
 MODEL_COSTS = {"gpt-5-nano": 5, "gpt-5-mini": 20, "gpt-5.2": 100}
 
 class SearchManager:
@@ -32,7 +32,7 @@ class SearchManager:
     def calculate_cost(self, model: str, search_type: str) -> int:
         """Calculate total billed cost based on operations performed."""
         model_cost = int(MODEL_COSTS.get(model, 20))
-        per_search_cost = int(SEARCH_COSTS.get(search_type, 80))
+        per_search_cost = int(SEARCH_COSTS.get(search_type, 100))
         cse_cost = int(getattr(self.config.runtime.search, "google_cse_cost", 0) or 0)
         # Cap CSE cost to avoiding surpassing search cost
         cse_cost = max(0, min(cse_cost, per_search_cost))

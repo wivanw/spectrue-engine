@@ -269,10 +269,9 @@ class ValidationPipeline:
             # T2: exclude_domains=TRUSTED
             
             
-            # Correction: Waterfall logic "Tier 1 -> if bad -> Tier 2" is better for cost/relevance usually.
-            # But latency-wise, parallel is king.
-            # Compromise: Always run T1. Run T2 parallel if "advanced" mode. 
-            # If "standard", run T1, wait, check quality, then T2.
+            # T9: Simplified "Smart" Mode - Waterfall Strategy
+            # Always run T1 first. If T1 results are insufficient (< 2), fall back to T2.
+            # Parallel execution removed to save quota and reduce noise.
             
             tasks = []
             
@@ -280,14 +279,7 @@ class ValidationPipeline:
             if self._can_add_search(gpt_model, search_type, max_cost):
                 tasks.append(self.search_mgr.search_tier1(t1_query, tier1_domains))
             
-            # Task T2 (if applicable)
-            # Parallel only if 'advanced' or explicitly requested. Default to waterfall for standard (to save cost/noise).
-            run_t2_parallel = (search_type in ["advanced", "deep"])
-            
-            if run_t2_parallel and self._can_add_search(gpt_model, search_type, max_cost):
-                tasks.append(self.search_mgr.search_tier2(t2_query, exclude_domains=tier1_domains))
-            
-            # Execute Parallel Tasks
+            # Execute T1
             results = await asyncio.gather(*tasks)
             
             # Process T1
@@ -296,11 +288,7 @@ class ValidationPipeline:
                 final_context += "\n" + ctx1
                 final_sources.extend(srcs1)
             
-            # Process T2 (if ran parallel)
-            if run_t2_parallel and len(results) > 1:
-                ctx2, srcs2 = results[1]
-                final_context += "\n\n=== GENERAL SEARCH ===\n" + ctx2
-                final_sources.extend(srcs2)
+            run_t2_parallel = False  # Always waterfall in smart mode
             
             # Waterfall Fallback (if T2 didn't run parallel AND T1 was weak)
             # M60: Count only search sources, not inline sources from article
