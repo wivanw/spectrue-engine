@@ -314,7 +314,9 @@ class ValidationPipeline:
             # Waterfall Fallback (if T2 didn't run parallel AND T1 was weak)
             # M60: Count only search sources, not inline sources from article
             search_sources_count = len([s for s in final_sources if s.get("source_type") != "inline"])
-            if not run_t2_parallel and search_sources_count < 2 and self._can_add_search(gpt_model, search_type, max_cost):
+            
+            # T8: Ensure minimum 3 unique domains for diversity (increased from 2)
+            if not run_t2_parallel and search_sources_count < 3 and self._can_add_search(gpt_model, search_type, max_cost):
                 if progress_callback:
                     await progress_callback("searching_tier2_fallback")
                 # Now we know T1 domains, but we can just exclude the predefined TRUSTED list to be safe/consistent

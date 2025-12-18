@@ -100,6 +100,7 @@ class WebSearchTool:
             score = obj.get("score")  # Tavily may provide relevance score
 
             if not self._is_valid_url(url):
+                logger.debug("[Search] Discarded invalid URL: %s", url)
                 continue
 
             # Fallback title to domain to avoid "Без заголовка"
@@ -111,6 +112,7 @@ class WebSearchTool:
 
             key = (title.lower(), url.lower())
             if key in seen:
+                logger.debug("[Search] Discarded duplicate: %s", url)
                 continue
             seen.add(key)
 
@@ -296,10 +298,28 @@ class WebSearchTool:
 
         # Keep best results; drop clearly off-topic tail.
         # M46: Increased threshold slightly
-        kept = [r for r in scored if r.get("relevance_score", 0.0) >= 0.15]
-        if not kept:
-            # Fallback for borderline items, but never return pure junk (0.0)
-            kept = [r for r in scored if r.get("relevance_score", 0.0) >= 0.05]
+        # Keep best results; drop clearly off-topic tail.
+        # M46: Increased threshold slightly
+        kept = []
+        discarded_low_score = []
+        
+        for r in scored:
+            score = r.get("relevance_score", 0.0)
+            if score >= 0.15:
+                kept.append(r)
+            elif score >= 0.05 and not kept:
+                # Fallback for borderline items if we have nothing better
+                 kept.append(r)
+            else:
+                 discarded_low_score.append(f"{r.get('url')} ({score:.2f})")
+
+        if discarded_low_score:
+            logger.debug("[Search] Discarded %d low score results: %s", len(discarded_low_score), "; ".join(discarded_low_score[:5]))
+            
+        if not kept and scored:
+             # Last resort fallback to avoid empty result if we had candidates
+             logger.info("[Search] All results below 0.15, keeping top 2 borderline results as fallback")
+             kept = scored[:2]
         
         # M54: Enforce domain diversity
         # Select best result per domain first, then fill rest

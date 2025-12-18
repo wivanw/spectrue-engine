@@ -35,9 +35,9 @@ Rules:
 4. Classify type: "core", "numeric", "timeline", "attribution", "sidefact".
 5. Importance: 0.9-1.0 for core, 0.4 for side.
 6. Generate EXACTLY 3 search queries for each claim:
-   - Query 1 (Parametric): STRICTLY include exact numbers, dates, and named entities. Use quotes (e.g. "December 19", "270 million km"). Key detail focus.
-   - Query 2 (Official): If an official body (NASA, UN) is cited, use 'site:domain' (e.g. site:nasa.gov) + keywords. Else use broad English keywords.
-    - Query 3 (Local): Search in {lang_name} ({lang}) for local coverage.
+   - Query 1 (Specific/Quote): STRICTLY include exact numbers, dates, or specific quote fragments. Use quotes (e.g. "December 19", "270 million km"). Great for verification of specific claims.
+   - Query 2 (Event-Based): Use broad keywords describing the underlying event or topic WITHOUT quotes (e.g. asteroid approach earth december). Great for finding general coverage.
+   - Query 3 (Local): Search in {lang_name} ({lang}) for local coverage and independent verification.
 7. For EACH claim, set "check_oracle": true IF AND ONLY IF the claim discusses rumors, hoaxes, debunking, conspiracy theories, or popular viral myths (e.g. "aliens", "flat earth", "fact check", "fake"). Otherwise false.
 
 Output valid JSON key "claims":

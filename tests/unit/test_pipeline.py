@@ -131,7 +131,7 @@ class TestValidationPipeline:
         # Setup T1 to return GOOD results (> 2 sources) so T2 fallback is NOT triggered
         mock_search_mgr.search_tier1.return_value = (
             "Context T1", 
-            [{"url": "http://t1a.com"}, {"url": "http://t1b.com"}]
+            [{"url": "http://t1a.com"}, {"url": "http://t1b.com"}, {"url": "http://t1c.com"}]
         )
         
         # search_type="advanced" used to trigger parallel T2. Now it should be ignored (Smart Mode).
