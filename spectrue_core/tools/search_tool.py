@@ -902,6 +902,38 @@ class WebSearchTool:
             logger.debug("[Tavily] After cleaning: %d results", len(cleaned))
             logger.debug("[Tavily] After ranking/filter: %d results", len(ranked))
 
+            # M61: Second-pass diversification if Tavily returns too many same-domain results.
+            # If we got <3 unique domains, try excluding the dominant domain once.
+            def _domain(u: str) -> str:
+                try:
+                    d = (urlparse(u).netloc or "").lower()
+                    return d[4:] if d.startswith("www.") else d
+                except Exception:
+                    return ""
+
+            uniq = {_domain(r.get("url", "")) for r in (ranked or []) if r.get("url")}
+            uniq.discard("")
+            if len(uniq) < 3 and ranked:
+                # Dominant domain = domain of the top-ranked item
+                dom0 = _domain(ranked[0].get("url", ""))
+                if dom0:
+                    logger.debug("[Tavily] Diversify pass: excluding dominant domain=%s", dom0)
+                    try:
+                        response2 = await self._request_search(
+                            q,
+                            depth,
+                            effective_limit,
+                            domains=normalized_include,
+                            exclude_domains=(normalized_exclude or []) + [dom0],
+                            raw_mode=raw_mode,
+                        )
+                        results2 = self._clean_results(response2.get("results", []))
+                        merged = cleaned + results2
+                        ranked = self._rank_and_filter(q, merged)
+                        logger.debug("[Tavily] Diversify pass done: %d results", len(ranked))
+                    except Exception as div_err:
+                        logger.debug("[Tavily] Diversify pass failed: %s", div_err)
+
             quality = self._quality_from_ranked(ranked)
             fulltext_fetches = 0
             if self._should_fulltext_enrich():

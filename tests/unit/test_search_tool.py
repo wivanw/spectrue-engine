@@ -31,16 +31,28 @@ class TestWebSearchTool:
             
     @pytest.mark.asyncio
     async def test_search_basic(self, tool):
-        # Prepare the Response object
+        # Prepare the Response object with 3 unique domains to avoid M61 diversification pass
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "results": [
                 {
-                    "title": "Test Result",
+                    "title": "Test Result 1",
                     "url": "https://example.com/test",
                     "content": "This is a test content snippet.",
                     "score": 0.9
+                },
+                {
+                    "title": "Test Result 2",
+                    "url": "https://another.org/page",
+                    "content": "Another test content snippet.",
+                    "score": 0.85
+                },
+                {
+                    "title": "Test Result 3",
+                    "url": "https://third-domain.net/article",
+                    "content": "Third test content snippet.",
+                    "score": 0.8
                 }
             ]
         }
@@ -49,8 +61,8 @@ class TestWebSearchTool:
 
         context, sources = await tool.search("test query")
         
-        assert len(sources) == 1
-        assert sources[0]["title"] == "Test Result"
+        assert len(sources) == 3
+        assert sources[0]["title"] == "Test Result 1"
         assert sources[0]["relevance_score"] > 0.0
         
         # Updated assertions to match actual transformation in search_tool.py
