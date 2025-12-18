@@ -9,6 +9,7 @@ from spectrue_core.config import SpectrueConfig
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 import logging
 import asyncio
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,8 @@ class ValidationPipeline:
         progress_callback=None,
         preloaded_context: str | None = None,
         preloaded_sources: list | None = None,
+        needs_cleaning: bool = False,  # M60: Text from extension needs LLM cleaning
+        source_url: str | None = None,  # M60: Original URL for inline source exclusion
     ) -> dict:
         
         # 1. Initialize
@@ -42,15 +45,80 @@ class ValidationPipeline:
         final_context = preloaded_context or ""
         final_sources = preloaded_sources or []
         
-        # 2. URL Pre-processing (M47)
+        # 2. URL Pre-processing (M47 + M60 improved)
         original_fact = fact
+        inline_sources = []  # M60: URLs extracted from article text
+        exclude_url = source_url  # For inline source exclusion
+        
+        # Case A: URL provided -> fetch via Tavily + clean
         if self._is_url(fact) and not preloaded_context:
+            exclude_url = fact
             fetched_text = await self._resolve_url_content(fact)
             if fetched_text:
-                # Restore LLM cleaning for UX quality (clean text in report)
+                # M60: Extract URL-anchor pairs BEFORE cleaning
+                url_anchors = self._extract_url_anchors(fetched_text, exclude_url=exclude_url)
+                if url_anchors:
+                    logger.info("[Pipeline] Found %d URL-anchor pairs in raw text", len(url_anchors))
+                
+                # LLM cleaning for UX quality
                 cleaned_article = await self.agent.clean_article(fetched_text)
                 fact = cleaned_article or fetched_text
                 final_context = fact
+                
+                # M60: Restore URLs for anchors that survived cleaning
+                # T7: Store as candidates, don't add to final_sources yet - will verify after claims extraction
+                if url_anchors and cleaned_article:
+                    inline_sources = self._restore_urls_from_anchors(cleaned_article, url_anchors)
+                    if inline_sources:
+                        logger.info("[Pipeline] Restored %d inline source candidates after cleaning", len(inline_sources))
+                        Trace.event("pipeline.inline_sources", {"count": len(inline_sources), "urls": [s["url"][:80] for s in inline_sources[:5]]})
+                        # T7: Mark as candidates, will be verified after claims extraction
+                        for src in inline_sources:
+                            src["is_primary_candidate"] = True
+        
+        # Case B: Text from extension (full page) needs cleaning (no Tavily fetch needed)
+        elif needs_cleaning and not self._is_url(fact):
+            logger.info("[Pipeline] Extension page mode: cleaning %d chars", len(fact))
+            
+            # M60: Extract URL-anchor pairs BEFORE cleaning
+            url_anchors = self._extract_url_anchors(fact, exclude_url=exclude_url)
+            if url_anchors:
+                logger.info("[Pipeline] Found %d URL-anchor pairs in extension text", len(url_anchors))
+            
+            # LLM cleaning
+            cleaned_article = await self.agent.clean_article(fact)
+            if cleaned_article:
+                # M60: Restore URLs for anchors that survived cleaning
+                # T7: Store as candidates, don't add to final_sources yet
+                if url_anchors:
+                    inline_sources = self._restore_urls_from_anchors(cleaned_article, url_anchors)
+                    if inline_sources:
+                        logger.info("[Pipeline] Restored %d inline source candidates after cleaning", len(inline_sources))
+                        Trace.event("pipeline.inline_sources", {"count": len(inline_sources), "urls": [s["url"][:80] for s in inline_sources[:5]]})
+                        for src in inline_sources:
+                            src["is_primary_candidate"] = True
+                
+                fact = cleaned_article
+                final_context = fact
+        
+        # Case C: Plain text (no cleaning needed) - just extract inline URLs
+        elif not self._is_url(fact) and not needs_cleaning:
+            # Still extract URLs from text (user pasted text with links)
+            url_anchors = self._extract_url_anchors(fact, exclude_url=exclude_url)
+            if url_anchors:
+                logger.info("[Pipeline] Found %d URL-anchor pairs in plain text", len(url_anchors))
+                # No cleaning needed, so all anchors survive - T7: mark as candidates
+                for item in url_anchors:
+                    inline_sources.append({
+                        "url": item["url"],
+                        "title": item["anchor"],
+                        "domain": item["domain"],
+                        "source_type": "inline",
+                        "is_trusted": False,
+                        "is_primary_candidate": True  # T7: Will verify after claims
+                    })
+                if inline_sources:
+                    Trace.event("pipeline.inline_sources", {"count": len(inline_sources), "urls": [s["url"][:80] for s in inline_sources[:5]]})
 
         # 3. Parallel Execution: Claims Extraction vs Oracle Check
         # Broadcast start of both
@@ -88,6 +156,60 @@ class ValidationPipeline:
         except asyncio.CancelledError:
             claims = []
             should_check_oracle = False
+        
+        # T7: Verify inline source relevance against extracted claims
+        if inline_sources and claims:
+            if progress_callback:
+                await progress_callback("verifying_sources")
+            
+            article_excerpt = fact[:500] if fact else ""
+            verified_inline_sources = []
+            
+            # Run verification for each inline source (parallel for speed)
+            verification_tasks = [
+                self.agent.verify_inline_source_relevance(claims, src, article_excerpt)
+                for src in inline_sources
+            ]
+            verification_results = await asyncio.gather(*verification_tasks, return_exceptions=True)
+            
+            for src, result in zip(inline_sources, verification_results):
+                if isinstance(result, Exception):
+                    logger.warning("[Pipeline] Inline source verification failed: %s", result)
+                    # On error, include as secondary source
+                    src["is_primary"] = False
+                    src["is_relevant"] = True
+                    verified_inline_sources.append(src)
+                else:
+                    is_relevant = result.get("is_relevant", True)
+                    is_primary = result.get("is_primary", False)
+                    
+                    if is_relevant:
+                        src["is_primary"] = is_primary
+                        src["is_relevant"] = True
+                        # T7: Primary sources should be protected from deduplication
+                        if is_primary:
+                            src["is_trusted"] = True  # Treat primary as trusted for scoring weight
+                        verified_inline_sources.append(src)
+                        logger.info("[Pipeline] Inline source %s: relevant=%s, primary=%s", 
+                                   src.get("domain"), is_relevant, is_primary)
+                    else:
+                        logger.info("[Pipeline] Inline source REJECTED: %s - %s", 
+                                   src.get("domain"), result.get("reason", "not relevant"))
+            
+            if verified_inline_sources:
+                Trace.event("pipeline.inline_sources_verified", {
+                    "total": len(inline_sources),
+                    "passed": len(verified_inline_sources),
+                    "primary": len([s for s in verified_inline_sources if s.get("is_primary")])
+                })
+                final_sources.extend(verified_inline_sources)
+        elif inline_sources:
+            # No claims extracted - add inline sources as-is (best effort)
+            logger.info("[Pipeline] No claims extracted, adding %d inline sources as secondary", len(inline_sources))
+            for src in inline_sources:
+                src["is_primary"] = False
+                src["is_relevant"] = True
+            final_sources.extend(inline_sources)
         
         # M58: Oracle Optimization (T8)
         # Only run Oracle if LLM detected viral/fake markers
@@ -181,7 +303,9 @@ class ValidationPipeline:
                 final_sources.extend(srcs2)
             
             # Waterfall Fallback (if T2 didn't run parallel AND T1 was weak)
-            if not run_t2_parallel and len(final_sources) < 2 and self._can_add_search(gpt_model, search_type, max_cost):
+            # M60: Count only search sources, not inline sources from article
+            search_sources_count = len([s for s in final_sources if s.get("source_type") != "inline"])
+            if not run_t2_parallel and search_sources_count < 2 and self._can_add_search(gpt_model, search_type, max_cost):
                 if progress_callback:
                     await progress_callback("searching_tier2_fallback")
                 # Now we know T1 domains, but we can just exclude the predefined TRUSTED list to be safe/consistent
@@ -264,8 +388,152 @@ class ValidationPipeline:
         
         return result
 
+    def _extract_url_anchors(self, text: str, exclude_url: str | None = None) -> list[dict]:
+        """Extract URL-anchor pairs from article text.
+        
+        Finds URLs with their surrounding context (anchor text) that can be
+        used to identify if the URL reference survives LLM cleaning.
+        
+        Args:
+            text: Raw article text with URLs
+            exclude_url: URL to exclude (e.g., the article's own URL)
+            
+        Returns:
+            List of dicts with 'url', 'anchor', and 'domain' keys
+        """
+        if not text:
+            return []
+        
+        anchors = []
+        exclude_domain = get_registrable_domain(exclude_url) if exclude_url else None
+        seen_domains = set()
+        
+        # Pattern 1: Markdown links [anchor](url)
+        md_pattern = r'\[([^\]]+)\]\((https?://[^\s\)]+)\)'
+        for match in re.finditer(md_pattern, text):
+            anchor, url = match.groups()
+            url = url.rstrip('.,;:!?')
+            domain = get_registrable_domain(url)
+            
+            if exclude_domain and domain == exclude_domain:
+                continue
+            if domain in seen_domains:
+                continue
+            
+            seen_domains.add(domain)
+            anchors.append({"url": url, "anchor": anchor.strip(), "domain": domain})
+        
+        # Pattern 2: Parenthesized URLs like "anchor text (https://url)"
+        # Common in plain text articles from extensions
+        paren_pattern = r'([^(\n]{3,50})\s*\((https?://[^\s\)]+)\)'
+        for match in re.finditer(paren_pattern, text):
+            anchor, url = match.groups()
+            url = url.rstrip('.,;:!?')
+            domain = get_registrable_domain(url)
+            
+            if exclude_domain and domain == exclude_domain:
+                continue
+            if domain in seen_domains:
+                continue
+            
+            # Clean anchor - remove leading punctuation and trailing whitespace
+            anchor = anchor.strip()
+            anchor = re.sub(r'^[^\w]*', '', anchor)
+            if len(anchor) < 3:
+                continue
+            
+            seen_domains.add(domain)
+            anchors.append({"url": url, "anchor": anchor[:50], "domain": domain})
+        
+        # Pattern 3: Plain URLs - extract ~50 chars before as anchor context
+        url_pattern = r'https?://[^\s\]\)\}>"\'<,]+'
+        for match in re.finditer(url_pattern, text):
+            url = match.group().rstrip('.,;:!?')
+            domain = get_registrable_domain(url)
+            
+            if exclude_domain and domain == exclude_domain:
+                continue
+            if domain in seen_domains:
+                continue
+            
+            # Get preceding text as anchor (up to 50 chars, stop at newline)
+            start = max(0, match.start() - 60)
+            prefix = text[start:match.start()]
+            # Take last line/sentence fragment
+            anchor = prefix.split('\n')[-1].strip()
+            # Clean up
+            anchor = re.sub(r'^[^\w]*', '', anchor)  # Remove leading punctuation
+            if len(anchor) < 5:
+                anchor = domain  # Fallback to domain name
+            
+            seen_domains.add(domain)
+            anchors.append({"url": url, "anchor": anchor[:50], "domain": domain})
+        
+        return anchors[:10]  # Limit to 10 URL-anchor pairs
+    
+    def _restore_urls_from_anchors(self, cleaned_text: str, url_anchors: list[dict]) -> list[dict]:
+        """Find which URL anchors survived cleaning and return them as sources.
+        
+        Args:
+            cleaned_text: LLM-cleaned article text
+            url_anchors: List of URL-anchor pairs from _extract_url_anchors
+            
+        Returns:
+            List of source dicts for anchors that survived in cleaned text
+        """
+        if not cleaned_text or not url_anchors:
+            return []
+        
+        sources = []
+        cleaned_lower = cleaned_text.lower()
+        
+        for item in url_anchors:
+            anchor = item.get("anchor", "")
+            url = item.get("url", "")
+            domain = item.get("domain", "")
+            
+            if not anchor or not url:
+                continue
+            
+            # Check if anchor text (or significant part) exists in cleaned text
+            anchor_lower = anchor.lower()
+            # Try exact match first
+            if anchor_lower in cleaned_lower:
+                # Use domain as title if anchor is too short
+                display_title = anchor if len(anchor) >= 10 else f"Джерело: {domain}"
+                sources.append({
+                    "url": url,
+                    "title": display_title,
+                    "domain": domain,
+                    "source_type": "inline",
+                    "is_trusted": False
+                })
+                continue
+            
+            # Try fuzzy: check if most words from anchor appear
+            anchor_words = [w for w in anchor_lower.split() if len(w) > 3]
+            if anchor_words:
+                matches = sum(1 for w in anchor_words if w in cleaned_lower)
+                if matches >= len(anchor_words) * 0.7:  # 70% word match
+                    display_title = anchor if len(anchor) >= 10 else f"Джерело: {domain}"
+                    sources.append({
+                        "url": url,
+                        "title": display_title,
+                        "domain": domain,
+                        "source_type": "inline",
+                        "is_trusted": False
+                    })
+        
+        return sources[:5]  # Limit to 5 inline sources
+
+
     def _is_url(self, text: str) -> bool:
-        return text and ("http://" in text or "https://" in text) and len(text) < 500
+        # Text must START with http:// or https:// to be treated as URL input
+        # This prevents text with inline URLs from being treated as URL input
+        if not text or len(text) > 500:
+            return False
+        stripped = text.strip()
+        return stripped.startswith("http://") or stripped.startswith("https://")
 
     async def _resolve_url_content(self, url: str) -> str | None:
         """Fetch URL content via Tavily Extract. Cleaning happens in claim extraction."""

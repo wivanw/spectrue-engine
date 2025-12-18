@@ -102,3 +102,103 @@ Output JSON: {{ "is_relevant": true/false, "reason": "..." }}
         except Exception as e:
             logger.warning("[Agent] Oracle verification failed: %s. Assuming relevant.", e)
             return True
+
+    async def verify_inline_source_relevance(
+        self, 
+        claims: list[dict], 
+        inline_source: dict,
+        article_excerpt: str = ""
+    ) -> dict:
+        """
+        Check if an inline source is relevant to the extracted claims.
+        
+        T7: Inline sources are URLs found in article text that reference external sources.
+        They may be primary sources (e.g., official statement being quoted) or just
+        contextual links (e.g., author's social media).
+        
+        Args:
+            claims: List of extracted claims from the article
+            inline_source: Source dict with 'url', 'title', 'domain' keys
+            article_excerpt: First ~500 chars of article for context
+            
+        Returns:
+            dict with 'is_relevant', 'is_primary', 'reason' keys
+        """
+        from spectrue_core.utils.trace import Trace
+        
+        if not claims or not inline_source:
+            return {"is_relevant": False, "is_primary": False, "reason": "empty_input"}
+        
+        url = inline_source.get("url", "")
+        domain = inline_source.get("domain", "")
+        anchor = inline_source.get("title", "") or inline_source.get("anchor", "")
+        
+        # Format claims for prompt
+        claims_text = "\n".join([
+            f"- {c.get('text', '')}" for c in claims[:5]
+        ])
+        
+        # Detect "X said/announced" pattern for auto-primary rule
+        # If claim mentions someone saying something and URL is their platform, it's primary
+        prompt = f"""Analyze if this source URL is relevant as PRIMARY EVIDENCE for the claims.
+
+Article Excerpt (for context):
+"{article_excerpt[:500]}"
+
+Extracted Claims:
+{claims_text}
+
+Inline Source Found:
+- URL: {url}
+- Domain: {domain}
+- Anchor text: "{anchor}"
+
+Task:
+1. Determine if this source is RELEVANT to any of the claims
+2. Determine if this is a PRIMARY SOURCE (the original source being quoted/referenced)
+
+Rules for PRIMARY source detection:
+- If a claim says "X announced/said/posted" and the URL is X's official platform (their official site, social media), it's PRIMARY
+- If the URL is the original document/statement being cited, it's PRIMARY
+- News articles about a topic are NOT primary (they are secondary coverage)
+- Social media of the article author is NOT primary (it's just metadata)
+
+Output JSON: {{ "is_relevant": true/false, "is_primary": true/false, "reason": "brief explanation" }}
+"""
+        
+        try:
+            result = await self.llm_client.call_json(
+                model="gpt-5-nano",
+                input=prompt,
+                instructions="You are a source relevance analyzer for fact-checking.",
+                reasoning_effort="low",
+                timeout=10.0,
+                trace_kind="inline_source_verification"
+            )
+            
+            is_relevant = bool(result.get("is_relevant", False))
+            is_primary = bool(result.get("is_primary", False))
+            reason = result.get("reason", "")
+            
+            Trace.event("inline_source.verification", {
+                "url": url[:60],
+                "domain": domain,
+                "is_relevant": is_relevant,
+                "is_primary": is_primary,
+                "reason": reason[:100]
+            })
+            
+            if is_primary:
+                logger.info("[Agent] Inline source marked PRIMARY: %s - %s", domain, reason)
+            elif not is_relevant:
+                logger.info("[Agent] Inline source rejected: %s - %s", domain, reason)
+            
+            return {
+                "is_relevant": is_relevant,
+                "is_primary": is_primary,
+                "reason": reason
+            }
+            
+        except Exception as e:
+            logger.warning("[Agent] Inline source verification failed: %s. Marking as secondary.", e)
+            return {"is_relevant": True, "is_primary": False, "reason": f"verification_error: {e}"}

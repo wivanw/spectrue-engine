@@ -40,6 +40,8 @@ class FactVerifier:
         preloaded_context: str | None = None,
         preloaded_sources: list | None = None,
         progress_callback=None,
+        needs_cleaning: bool = False,
+        source_url: str | None = None,
     ) -> dict:
         """
         Execute verification via ValidationPipeline.
@@ -54,4 +56,6 @@ class FactVerifier:
             progress_callback=progress_callback,
             preloaded_context=preloaded_context,
             preloaded_sources=preloaded_sources,
+            needs_cleaning=needs_cleaning,
+            source_url=source_url,
         )

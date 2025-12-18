@@ -30,11 +30,16 @@ def enrich_sources_with_trust(sources_list: list) -> list:
                         category = domain_to_category[parent]
                         break
             
-            source_copy["is_trusted"] = category is not None
+            # T7: Preserve is_trusted=True if already set (e.g., primary inline sources)
+            # Only apply registry-based trust if not already trusted
+            if not source.get("is_trusted"):
+                source_copy["is_trusted"] = category is not None
             source_copy["trust_category"] = category
             
         except Exception:
-            source_copy["is_trusted"] = False
+            # T7: Only override to False if not already trusted
+            if not source.get("is_trusted"):
+                source_copy["is_trusted"] = False
             source_copy["trust_category"] = None
         
         enriched.append(source_copy)

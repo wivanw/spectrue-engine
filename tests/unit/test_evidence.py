@@ -1,7 +1,7 @@
 
 import pytest
 from spectrue_core.verification.evidence import build_evidence_pack
-from spectrue_core.verification.evidence_pack import Claim, EvidencePack
+from spectrue_core.verification.evidence_pack import Claim
 
 @pytest.mark.unit
 class TestEvidenceBuilder:

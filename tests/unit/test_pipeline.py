@@ -2,7 +2,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from spectrue_core.verification.pipeline import ValidationPipeline
-from spectrue_core.verification.evidence_pack import Claim
 
 @pytest.mark.unit
 class TestValidationPipeline:
@@ -15,6 +14,7 @@ class TestValidationPipeline:
         agent.cluster_evidence = AsyncMock()
         agent.score_evidence = AsyncMock()
         agent.verify_oracle_relevance = AsyncMock()
+        agent.verify_inline_source_relevance = AsyncMock()  # T7
         return agent
 
     @pytest.fixture
@@ -132,3 +132,71 @@ class TestValidationPipeline:
         
         assert mock_search_mgr.search_tier1.called
         assert mock_search_mgr.search_tier2.called
+
+    @pytest.mark.asyncio
+    async def test_inline_source_verification_t7(self, pipeline, mock_agent, mock_search_mgr):
+        """T7: Test inline source relevance verification against claims."""
+        # Input text with inline URL (will be extracted as inline source)
+        # URL in parentheses format matches Pattern 2 in _extract_url_anchors
+        text_with_url = "Trump announced blockade (https://example.com/statement/12345) of Venezuela oil"
+        
+        # Mock claims extraction with a relevant claim
+        mock_agent.extract_claims.return_value = (
+            [{"id": "c1", "text": "Trump announced blockade of Venezuela", "type": "core", "search_queries": ["trump venezuela blockade"]}],
+            False
+        )
+        
+        # Mock inline source verification - return is_primary=True
+        mock_agent.verify_inline_source_relevance.return_value = {
+            "is_relevant": True,
+            "is_primary": True,  # Official statement source is primary
+            "reason": "Official statement from the person quoted in the claim"
+        }
+        
+        mock_agent.score_evidence.return_value = {"verified_score": 0.9}
+        
+        result = await pipeline.execute(
+            fact=text_with_url,
+            search_type="standard",
+            gpt_model="gpt-4",
+            lang="en"
+        )
+        
+        # Verify inline source verification was called (at least once for the URL found)
+        assert mock_agent.verify_inline_source_relevance.called
+        
+        # Check that inline source was added to sources with is_primary=True
+        inline_sources = [s for s in result["sources"] if s.get("source_type") == "inline"]
+        assert len(inline_sources) >= 1
+        assert inline_sources[0]["is_primary"] is True
+        assert inline_sources[0]["is_trusted"] is True  # Primary sources are trusted
+
+    @pytest.mark.asyncio
+    async def test_inline_source_rejected_when_not_relevant(self, pipeline, mock_agent, mock_search_mgr):
+        """T7: Test that irrelevant inline sources are excluded."""
+        text_with_url = "News article with author link (https://twitter.com/author123)"
+        
+        mock_agent.extract_claims.return_value = (
+            [{"id": "c1", "text": "Climate change accelerates", "type": "core"}],
+            False
+        )
+        
+        # Mock inline source verification - author's Twitter is NOT relevant to climate claim
+        mock_agent.verify_inline_source_relevance.return_value = {
+            "is_relevant": False,
+            "is_primary": False,
+            "reason": "This is the article author's social media, not related to the claim"
+        }
+        
+        mock_agent.score_evidence.return_value = {"verified_score": 0.5}
+        
+        result = await pipeline.execute(
+            fact=text_with_url,
+            search_type="standard",
+            gpt_model="gpt-4",
+            lang="en"
+        )
+        
+        # Verify inline source was rejected (not in sources)
+        inline_sources = [s for s in result["sources"] if s.get("source_type") == "inline"]
+        assert len(inline_sources) == 0

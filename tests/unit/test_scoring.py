@@ -1,8 +1,6 @@
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 from spectrue_core.agents.skills.scoring import ScoringSkill
-from spectrue_core.verification.evidence_pack import EvidencePack
 
 @pytest.mark.unit
 class TestScoringSkill:

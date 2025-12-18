@@ -436,8 +436,8 @@ class WebSearchTool:
         endpoint = "https://api.tavily.com/extract"
         payload = {
             "urls": [url],
-            # Use text format - smaller input (5.6k vs 13.9k), LLM cleans equally well
-            "format": "text",
+            # M60: Use markdown format to preserve inline URLs for source extraction
+            "format": "markdown",
         }
         
         try:
