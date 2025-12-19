@@ -406,8 +406,8 @@ class WebSearchTool:
                 payload["exclude_domains"] = filtered
 
         payload["topic"] = topic
-        if raw_mode:
-            payload["include_raw_content"] = True
+        # Force disable raw content (User Request)
+        payload["include_raw_content"] = False
 
         url = "https://api.tavily.com/search"
         async with self._sem:

@@ -1,8 +1,8 @@
-# Simplified engine.py without TextAnalyzer dependency
+# Spectrue Engine - main entry point
 
 import logging
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from langdetect import detect_langs, DetectorFactory, LangDetectException
 import re
 from uuid import uuid4
@@ -12,6 +12,7 @@ from spectrue_core.config import SpectrueConfig
 from spectrue_core.verification.verifier import FactVerifier
 from spectrue_core.verification.costs import MODEL_COSTS
 from spectrue_core.utils.trace import Trace
+from spectrue_core.analysis.text_analyzer import TextAnalyzer
 
 # Make language detection deterministic
 DetectorFactory.seed = 0
@@ -47,9 +48,10 @@ def detect_content_language(text: str, fallback: str = "en") -> tuple[str, float
 class SpectrueEngine:
     """The main entry point for the Spectrue Fact-Checking Engine."""
     
-    def __init__(self, config: SpectrueConfig):
+    def __init__(self, config: SpectrueConfig, translation_service=None):
         self.config = config
-        self.verifier = FactVerifier(config)
+        # M67: Optional translation_service for Oracle result localization
+        self.verifier = FactVerifier(config, translation_service=translation_service)
         try:
             logger.debug("Effective config: %s", json.dumps(self.config.runtime.to_safe_log_dict(), ensure_ascii=False))
         except Exception:
@@ -68,6 +70,7 @@ class SpectrueEngine:
         search_type: str = "advanced",
         progress_callback = None,
         max_credits: Optional[int] = None,
+        sentences: Optional[List[str]] = None,  # M67: Pre-segmented sentences (skip spaCy)
     ) -> Dict[str, Any]:
         """
         Analyze text with content detection and waterfall verification.
@@ -95,47 +98,6 @@ class SpectrueEngine:
             min_prob = float(getattr(self.config.runtime.tunables, "langdetect_min_prob", 0.80) or 0.80)
             content_lang = detected_lang if detected_prob >= min_prob else lang
 
-            def extract_claims(raw: str, max_claims: int = 2) -> list[str]:
-                s = re.sub(r"\s+", " ", (raw or "")).strip()
-                if not s:
-                    return []
-                if len(s) <= 260:
-                    return [s]
-
-                # Lightweight sentence splitting (no extra model calls).
-                parts = re.split(r"(?<=[.!?…])\s+", s)
-                candidates = []
-                for p in parts:
-                    p = p.strip()
-                    if 30 <= len(p) <= 260:
-                        candidates.append(p)
-
-                if not candidates:
-                    return [s[:260]]
-
-                def score(sent: str) -> float:
-                    t = sent
-                    sc = 0.0
-                    # Prefer numerals, percentages, dates — usually factual claims
-                    if re.search(r"\b\d{2,4}\b", t):
-                        sc += 2.0
-                    if "%" in t:
-                        sc += 1.0
-                    if re.search(r"[$€₴₽]|USD|EUR|UAH|RUB", t):
-                        sc += 0.5
-                    # Prefer longer but not too long
-                    sc += min(1.0, len(t) / 180.0)
-                    return sc
-
-                candidates.sort(key=score, reverse=True)
-                out: list[str] = []
-                for c in candidates:
-                    if c not in out:
-                        out.append(c)
-                    if len(out) >= max_claims:
-                        break
-                return out
-
             if analysis_mode == "deep":
                 if progress_callback:
                     await progress_callback("extracting_claims")
@@ -144,7 +106,14 @@ class SpectrueEngine:
                 max_claims = int(getattr(self.config.runtime.tunables, "max_claims_deep", 2) or 2)
                 max_claims = max(1, min(max_claims, 3))
 
-                claims = extract_claims(text, max_claims=max_claims)
+                # M67: Use pre-segmented sentences if provided, otherwise use spaCy
+                if sentences:
+                    claims = sentences[:max_claims]
+                else:
+                    # Use spaCy for proper sentence segmentation
+                    analyzer = TextAnalyzer()
+                    claims = analyzer.get_sentences(text, content_lang)[:max_claims]
+                
                 if not claims:
                     claims = [text.strip()]
 

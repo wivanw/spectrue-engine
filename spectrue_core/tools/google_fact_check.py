@@ -202,6 +202,9 @@ class GoogleFactCheckTool:
             relevance_score = validation.get("relevance_score", 0.0)
             status = validation.get("status", "MIXED")
             is_jackpot = validation.get("is_jackpot", False)
+            # M67: Get LLM-determined scores
+            verified_score = validation.get("verified_score", -1.0)
+            danger_score = validation.get("danger_score", -1.0)
             
             # Get the winning candidate
             if 0 <= best_idx < len(candidates):
@@ -212,11 +215,12 @@ class GoogleFactCheckTool:
                 return empty_result
             
             logger.info(
-                "[Google FC] Batch validation: best=%d, score=%.2f, status=%s, jackpot=%s",
-                best_idx, relevance_score, status, is_jackpot
+                "[Google FC] Batch validation: best=%d, score=%.2f, v=%.2f, status=%s, jackpot=%s",
+                best_idx, relevance_score, verified_score, status, is_jackpot
             )
         else:
             # Fallback: Pick by highest keyword overlap (no LLM)
+            # This path should NOT be used in production - LLM validator is required
             winner = max(candidates, key=lambda c: c.get("keyword_overlap", 0))
             overlap = winner.get("keyword_overlap", 0)
             
@@ -225,11 +229,13 @@ class GoogleFactCheckTool:
                 logger.info("[Google FC] No LLM validator and weak keyword match")
                 return empty_result
             
-            relevance_score = min(0.75, 0.2 + overlap * 0.15)
-            status = self._derive_status_from_rating(winner["rating"])
+            # No LLM = no proper scoring. Log BUG and use sentinel values.
+            logger.warning("[Google FC] ⚠️ No LLM validator! Using keyword heuristic. BUG - should not happen in prod!")
+            relevance_score = -1.0  # Sentinel - unknown
+            status = "UNKNOWN"      # Sentinel - LLM should determine this
             is_jackpot = False
-            
-            logger.warning("[Google FC] No LLM validator - using keyword heuristic (score=%.2f)", relevance_score)
+            verified_score = -1.0
+            danger_score = -1.0
         
         return {
             "status": status,
@@ -237,158 +243,10 @@ class GoogleFactCheckTool:
             "claim_reviewed": winner["claim_text"],
             "summary": winner["title"],
             "relevance_score": relevance_score,
+            "verified_score": verified_score,  # M67
+            "danger_score": danger_score,      # M67
             "is_jackpot": is_jackpot,
             "publisher": winner["publisher"],
             "rating": winner["rating"],
             "source_provider": winner.get("source_provider", f"{winner['publisher']} via Google Fact Check"),
         }
-
-    def _derive_status_from_rating(self, rating: str) -> str:
-        """Derive Oracle status from textual rating (fallback without LLM)."""
-        rating_lower = (rating or "").lower()
-        
-        if any(x in rating_lower for x in ["false", "fake", "incorrect", "debunked", "lie", "pants on fire"]):
-            return "REFUTED"
-        elif any(x in rating_lower for x in ["true", "correct", "accurate", "verified"]):
-            return "CONFIRMED"
-        elif any(x in rating_lower for x in ["misleading", "mixture", "half-true", "partly", "needs context"]):
-            return "MIXED"
-        
-        return "MIXED"
-
-    async def search(self, query: str) -> Optional[Dict[str, Any]]:
-        """
-        Searches for fact checks using Google Fact Check Tools API.
-        Returns a FactVerificationResult-compatible dictionary if a high-confidence match is found.
-        
-        NOTE: This is the LEGACY method. For M63 hybrid mode, use search_and_validate() instead.
-        """
-        if not self.api_key:
-            logger.warning("[Google FC] Key is not set. Skipping Google Fact Check.")
-            return None
-
-        q = self._normalize_query(query)
-        if len(q) < 3:
-            return None
-
-        try:
-            # Don't filter by language - fact-checks are mostly in English regardless of claim language.
-            base_params = {
-                "query": q,
-                "key": self.api_key,
-                "pageSize": 5,
-            }
-
-            params = dict(base_params)
-
-            Trace.event("google_fact_check.request", {"url": self.BASE_URL, "params": params})
-            response = await self.client.get(self.BASE_URL, params=params)
-            Trace.event(
-                "google_fact_check.response",
-                {
-                    "status_code": response.status_code,
-                    "text": response.text,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            claims = data.get("claims", [])
-
-            if not claims:
-                return None
-
-            # Find most relevant claim (not just first!)
-            # Google may return unrelated claims matching just some keywords
-            query_words = set(w.lower() for w in re.findall(r'\b\w{4,}\b', q))
-            
-            best_claim = None
-            best_overlap = 0
-            
-            for claim in claims:
-                claim_text = claim.get("text", "")
-                claim_words = set(w.lower() for w in re.findall(r'\b\w{4,}\b', claim_text))
-                
-                # Count overlapping significant words
-                overlap = len(query_words & claim_words)
-                
-                if overlap > best_overlap:
-                    best_overlap = overlap
-                    best_claim = claim
-            
-            # Require at least 2 matching words to consider it relevant
-            if best_overlap < 2 or not best_claim:
-                logger.info("[Google FC] No relevant claim found (best overlap: %d words)", best_overlap)
-                return None
-            
-            claim = best_claim
-            claim_review = claim.get("claimReview", [])
-            if not claim_review:
-                logger.warning("[Google FC] Claim found but no reviews available")
-                return None
-            
-            review = claim_review[0]
-            publisher = review.get("publisher", {}).get("name", "Unknown")
-            url = review.get("url", "")
-            title = review.get("title", claim.get("text", ""))
-            rating = review.get("textualRating", "Unknown")
-            
-            # Determine scores based on rating (heuristic)
-            # This is a simplified mapping. Real-world mapping might need more robust NLP or specific string matching.
-            verified_score = 0.5
-            danger_score = 0.5
-            
-            rating_lower = rating.lower()
-            if any(x in rating_lower for x in ["false", "fake", "incorrect", "debunked", "lie"]):
-                verified_score = 0.1
-                danger_score = 0.9
-            elif any(x in rating_lower for x in ["true", "correct", "accurate", "verified"]):
-                verified_score = 0.9
-                danger_score = 0.1
-            elif any(x in rating_lower for x in ["misleading", "mixture", "half-true", "partly false"]):
-                verified_score = 0.4
-                danger_score = 0.6
-
-            # Construct analysis text
-            analysis_text = f"According to {publisher}, this claim is rated as '{rating}'. {title}"
-
-            # Construct sources
-            sources = [
-                {
-                    "title": f"Fact Check by {publisher}",
-                    "link": url,
-                    "snippet": f"Rating: {rating}. {title}",
-                    "origin": "GOOGLE_FACT_CHECK"
-                }
-            ]
-
-            # Construct rationale for user display
-            rationale = f"Fact check by {publisher}: Rated as '{rating}'. {title}"
-            
-            return {
-                "verified_score": verified_score,
-                "confidence_score": 1.0,  # High confidence in the fact check existence
-                "danger_score": danger_score,
-                "context_score": 1.0,     # Trusted source
-                "style_score": 1.0,       # Professional content
-                "analysis": analysis_text,
-                "rationale": rationale,   # For frontend display
-                "sources": sources,
-                "cost": 0,
-                "rgba": [danger_score, verified_score, 1.0, 1.0]
-            }
-
-        except httpx.HTTPStatusError as e:
-            status = getattr(e.response, "status_code", None)
-            body = ""
-            try:
-                body = (e.response.text or "")[:300]
-            except Exception:
-                body = ""
-            logger.error("[Google FC] ✗ HTTP status error: %s (%s) body=%s", e, status, body)
-            return None
-        except httpx.HTTPError as e:
-            logger.error("[Google FC] ✗ HTTP error: %s", e)
-            return None
-        except Exception as e:
-            logger.exception(f"[Google FC] ✗ Unexpected error: {e}")
-            return None

@@ -1,6 +1,6 @@
 from spectrue_core.verification.search_mgr import SearchManager, SEARCH_COSTS
 from spectrue_core.verification.evidence import build_evidence_pack
-from spectrue_core.verification.trusted_sources import get_trusted_domains_by_lang
+from spectrue_core.verification.trusted_sources import is_social_platform
 from spectrue_core.utils.text_processing import clean_article_text, normalize_search_query
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trust_utils import enrich_sources_with_trust
@@ -24,11 +24,13 @@ class ValidationPipeline:
     """
     Orchestrates the fact-checking waterfall process.
     """
-    def __init__(self, config: SpectrueConfig, agent: FactCheckerAgent):
+    def __init__(self, config: SpectrueConfig, agent: FactCheckerAgent, translation_service=None):
         self.config = config
         self.agent = agent
         # M63: Pass oracle_skill to SearchManager for hybrid mode
         self.search_mgr = SearchManager(config, oracle_validator=agent.oracle_skill)
+        # M67: Optional translation service for Oracle result localization
+        self.translation_service = translation_service
 
     async def execute(
         self,
@@ -171,6 +173,11 @@ class ValidationPipeline:
             should_check_oracle = False
             article_intent = "news"
         
+        # M63: Assign IDs to claims EARLY (needed for Oracle mapping)
+        if claims:
+            for i, c in enumerate(claims):
+                c["id"] = f"c{i+1}"
+        
         # T7: Verify inline source relevance against extracted claims
         if inline_sources and claims:
             if progress_callback:
@@ -289,7 +296,14 @@ class ValidationPipeline:
                         "[Pipeline] 🎰 JACKPOT! Oracle hit (score=%.2f). Stopping pipeline.",
                         relevance
                     )
-                    return self._finalize_oracle_hybrid(oracle_result, original_fact)
+                    oracle_final = await self._finalize_oracle_hybrid(oracle_result, original_fact, lang=lang)
+                    Trace.event("pipeline.result", {
+                        "type": "oracle_jackpot",
+                        "verified_score": oracle_final.get("verified_score"),
+                        "status": status,
+                        "source": oracle_result.get("publisher"),
+                    })
+                    return oracle_final
                 
                 # SCENARIO B: EVIDENCE (0.5 < relevance <= 0.9)
                 elif relevance > EVIDENCE_THRESHOLD:
@@ -299,6 +313,8 @@ class ValidationPipeline:
                     )
                     # Create source from Oracle result for evidence pack
                     oracle_evidence_source = self._create_oracle_source(oracle_result)
+                    # Bind Oracle evidence to the specific claim it verifies
+                    oracle_evidence_source["claim_id"] = cand.get("id")
                     # Don't stop - continue to Tavily for more context
                 
                 # SCENARIO C: MISS (relevance <= 0.5)
@@ -349,34 +365,52 @@ class ValidationPipeline:
             has_results = False
             
             if primary_query and self._can_add_search(gpt_model, search_type, max_cost):
-                logger.info("[M65] Unified Search: %s (topic=%s)", primary_query[:50], tavily_topic)
+                current_topic = tavily_topic
                 
-                u_ctx, u_srcs = await self.search_mgr.search_unified(
-                    primary_query, 
-                    topic=tavily_topic,
-                    intent=article_intent
-                )
-                
-                if u_srcs:
-                    # M66: Semantic Gating - Verify results relevance before proceeding
+                # M67: Semantic Refinement Loop (Max 2 Attempts)
+                for attempt in range(2):
+                    logger.info("[M65/M67] Unified Search (Attempt %d): %s (topic=%s)", attempt+1, primary_query[:50], current_topic)
+                    
+                    u_ctx, u_srcs = await self.search_mgr.search_unified(
+                        primary_query, 
+                        topic=current_topic,
+                        intent=article_intent
+                    )
+                    
+                    if not u_srcs:
+                         # If no results, break to allow fallback to CSE
+                         break
+                         
+                    # Verify Relevance
                     gate_result = await self.agent.verify_search_relevance(claims, u_srcs)
-                    if not gate_result.get("is_relevant", True):
-                        logger.warning("[M66] Semantic Gating REJECTED results: %s", gate_result.get("reason"))
-                        # Early return with Missing Evidence status
-                        return {
-                            "verified_score": 0.0,
-                            "confidence_score": 0.0,
-                            "analysis": f"Search results were retrieved but found irrelevant to the specific claim. Reason: {gate_result.get('reason')}",
-                            "rationale": "Evidence retrieval failed semantic validation.",
-                            "sources": [],
-                            "search_meta": self.search_mgr.get_search_meta(),
-                            "cost": self.search_mgr.calculate_cost(gpt_model, search_type),
-                            "text": fact
-                        }
-
-                    final_context += "\n" + u_ctx
-                    final_sources.extend(u_srcs)
-                    has_results = True
+                    gate_status = gate_result.get("status", "RELEVANT")
+                    
+                    if gate_status == "RELEVANT":
+                        # Success
+                        final_context += "\n" + u_ctx
+                        final_sources.extend(u_srcs)
+                        has_results = True
+                        break
+                    else:
+                        logger.warning("[M67] Semantic Router: REJECTED results (%s). Reason: %s", gate_status, gate_result.get("reason"))
+                        # Refinement: Switch topic for next attempt
+                        if attempt == 0:
+                            new_topic = "general" if current_topic == "news" else "news"
+                            logger.info("[M67] Refining Search: Switching topic %s -> %s", current_topic, new_topic)
+                            current_topic = new_topic
+                            continue
+                        else:
+                             # Final failure after retry
+                             return {
+                                "verified_score": 0.0,
+                                "confidence_score": 0.0,
+                                "analysis": f"Search results rejected by Semantic Router ({gate_status}) after refinement. Reason: {gate_result.get('reason')}",
+                                "rationale": "Evidence retrieval failed semantic validation due to topic mismatch.",
+                                "sources": [],
+                                "search_meta": self.search_mgr.get_search_meta(),
+                                "cost": self.search_mgr.calculate_cost(gpt_model, search_type),
+                                "text": fact
+                            }
             
             # Fallback: Google CSE
             # If Unified Tavily search failed or returned 0 results (after filtering), try CSE.
@@ -410,6 +444,50 @@ class ValidationPipeline:
         if claims and final_sources:
              clustered_results = await self.agent.cluster_evidence(claims, final_sources)
 
+        # T1.2: Extract anchor claim (the main claim being verified) - moved up for Social Verification
+        anchor_claim = None
+        if claims:
+            # Find the highest importance "core" claim, fallback to first claim
+            core_claims = [c for c in claims if c.get("type") == "core"]
+            if core_claims:
+                anchor_claim = max(core_claims, key=lambda c: c.get("importance", 0))
+            else:
+                anchor_claim = claims[0]
+
+        # M67: Inline Social Verification (Tier A')
+        # Check social sources for official status + content support
+        if claims and final_sources:
+            # Parallel verification for social sources
+            verify_tasks = []
+            social_indices = []
+            
+            for i, src in enumerate(final_sources):
+                stype = src.get("source_type", "general")
+                domain = src.get("domain", "")
+                # Use centralized social platform registry
+                if stype == "social" or is_social_platform(domain):
+                    # Find relevant claim (anchor)
+                    anchor = anchor_claim if anchor_claim else claims[0]
+                    verify_tasks.append(self.agent.verify_social_statement(
+                        anchor, 
+                        src.get("content", "") or src.get("snippet", ""),
+                        src.get("url", "")
+                    ))
+                    social_indices.append(i)
+            
+            if verify_tasks:
+                if progress_callback:
+                    await progress_callback("verifying_social")
+                
+                # Run verifications
+                social_results = await asyncio.gather(*verify_tasks, return_exceptions=True)
+                
+                for idx, res in zip(social_indices, social_results):
+                    if isinstance(res, dict) and res.get("tier") == "A'":
+                        final_sources[idx]["evidence_tier"] = "A'"
+                        final_sources[idx]["source_type"] = "official" # Critical for evidence.py ceiling
+                        logger.info("[M67] Promoted Social Source %s to Tier A'", final_sources[idx].get("domain"))
+
         # Build Pack
         pack = build_evidence_pack(
             fact=original_fact, # Use original fact/url as the anchor
@@ -435,15 +513,7 @@ class ValidationPipeline:
         result["search_meta"] = self.search_mgr.get_search_meta()
         result["sources"] = enrich_sources_with_trust(final_sources)
         
-        # T1.2: Extract anchor claim (the main claim being verified)
-        anchor_claim = None
-        if claims:
-            # Find the highest importance "core" claim, fallback to first claim
-            core_claims = [c for c in claims if c.get("type") == "core"]
-            if core_claims:
-                anchor_claim = max(core_claims, key=lambda c: c.get("importance", 0))
-            else:
-                anchor_claim = claims[0]
+        # T1.2: Assign anchor_claim to result (initialization moved up)
         if anchor_claim:
             result["anchor_claim"] = {
                 "text": anchor_claim.get("text", ""),
@@ -453,7 +523,11 @@ class ValidationPipeline:
         
         # Cap enforcement
         global_cap = pack.get("constraints", {}).get("global_cap", 1.0)
-        verified = result.get("verified_score", 0.5)
+        verified = result.get("verified_score", -1.0)  # Sentinel: -1 means missing
+        if verified < 0:
+            logger.warning("[Pipeline] ⚠️ Missing verified_score in result - using 0.5")
+            verified = 0.5
+            result["verified_score"] = verified
         if verified > global_cap:
             result["verified_score"] = global_cap
             result["cap_applied"] = True
@@ -882,9 +956,10 @@ class ValidationPipeline:
         oracle_res["search_meta"] = self.search_mgr.get_search_meta()
         return oracle_res
 
-    def _finalize_oracle_hybrid(self, oracle_result: dict, fact: str) -> dict:
+    async def _finalize_oracle_hybrid(self, oracle_result: dict, fact: str, lang: str = "en") -> dict:
         """
         M63: Format Oracle JACKPOT result for immediate return.
+        M67: Added lang parameter for localization support.
         
         Converts OracleCheckResult to FactCheckResponse format.
         """
@@ -895,20 +970,26 @@ class ValidationPipeline:
         claim_reviewed = oracle_result.get("claim_reviewed", "")
         summary = oracle_result.get("summary", "")
         
-        # Map status to verified_score
-        if status == "CONFIRMED":
-            verified_score = 0.9
-            danger_score = 0.1
-        elif status == "REFUTED":
-            verified_score = 0.1
-            danger_score = 0.9
-        else:  # MIXED
-            verified_score = 0.4
-            danger_score = 0.6
+        # M67: Use LLM-determined scores from OracleValidationSkill (no heuristics!)
+        verified_score = float(oracle_result.get("verified_score", -1.0))
+        danger_score = float(oracle_result.get("danger_score", -1.0))
         
-        # Build response
+        # Warning only - no fallback! If -1, it's a bug and should be visible.
+        if verified_score < 0 or danger_score < 0:
+            logger.warning("[Pipeline] ⚠️ Oracle result missing LLM scores. BUG!")
+        
+        # Build response (English first)
         analysis = f"According to {publisher}, this claim is rated as '{rating}'. {summary}"
         rationale = f"Fact check by {publisher}: Rated as '{rating}'. {claim_reviewed}"
+        
+        # M67: Translate if non-English and translation_service available
+        if lang and lang.lower() not in ("en", "en-us") and self.translation_service:
+            try:
+                analysis = await self.translation_service.translate(analysis, target_lang=lang)
+                rationale = await self.translation_service.translate(rationale, target_lang=lang)
+            except Exception as e:
+                logger.warning("[Pipeline] Translation failed for Oracle result: %s", e)
+                # Keep English if translation fails
         
         sources = [{
             "title": f"Fact Check by {publisher}",

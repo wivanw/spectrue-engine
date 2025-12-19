@@ -176,6 +176,9 @@ class LLMClient:
             "payload_hash": payload_hash,
             "json_output": json_output,
             "cache_key": cache_key,
+            # M67: Log full prompts for debugging
+            "input_text": input[:10000], # Truncate to 10k chars
+            "instructions_text": (instructions or "")[:5000],
         })
         
         last_error: Exception | None = None
@@ -276,7 +279,9 @@ class LLMClient:
                     "content_chars": len(content),
                     "cache_status": cache_status,
                     "attempt": attempt + 1,
-                    "payload_hash": payload_hash
+                    "payload_hash": payload_hash,
+                    # M67: Log full response for debugging
+                    "response_text": content[:15000], # Truncate to 15k chars
                 })
                 
                 return result

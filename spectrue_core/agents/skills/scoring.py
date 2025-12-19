@@ -5,6 +5,7 @@ from spectrue_core.agents.prompts import get_prompt
 from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from spectrue_core.utils.security import sanitize_input
 from spectrue_core.constants import SUPPORTED_LANGUAGES
+from spectrue_core.verification.trusted_sources import get_tier_ceiling_for_domain
 from datetime import datetime
 import re
 
@@ -39,7 +40,7 @@ class ScoringSkill(BaseSkill):
             })
             
         constraints = pack.get("constraints") or {}
-        global_cap = constraints.get("global_cap", 1.0)
+        global_cap = float(constraints.get("global_cap", 1.0))
         cap_reasons = constraints.get("cap_reasons", [])
 
         # Construct prompt
@@ -149,7 +150,7 @@ Global Confidence Cap: {global_cap}
                 trace_kind="score_evidence",
             )
             
-            # --- Aggregation Logic (T3) + M62 Hard Caps ---
+            # --- Aggregation Logic (T3) + M62 Hard Caps + M67 Code Caps ---
             claim_verdicts = result.get("claim_verdicts", [])
             
             # 1. Map scores to claims to get importance
@@ -178,7 +179,34 @@ Global Confidence Cap: {global_cap}
                     original_score = score
                     cap_reason = None
                     
-                    # Cap 1: Insufficient independent sources
+                    # --- M67: Code is Law (Tier-based Capping) ---
+                    # 1. Determine Highest Tier for this claim
+                    # Note: We duplicate classification logic here or assume 'metrics' has it?
+                    # For P0, we re-evaluate from sources mapped to this claim.
+                    claim_sources = sources_by_claim.get(cid, [])
+                    highest_tier_ceiling = 0.35 # Default to Tier D (Social/Weak)
+                    
+                    for src in claim_sources:
+                        tier_c = self._get_tier_ceiling(src)
+                        if tier_c > highest_tier_ceiling:
+                            highest_tier_ceiling = tier_c
+                            
+                    # 2. Calculate Code Cap (Verified Score Ceiling)
+                    # Section 7.5: verified_score = clamp(min(score, tier_ceiling))
+                    code_cap = highest_tier_ceiling
+                    
+                    # Apply Code Cap to verified_score
+                    if score > code_cap:
+                        score = code_cap
+                        cap_reason = f"Tier Ceiling ({code_cap})"
+                        # M67: Invariant Logger
+                        logger.warning(
+                            "[M67] Invariant Violation: Claim %s LLM confidence (%.2f) > Code Cap (%.2f). Clamping.",
+                            cid, original_score, code_cap
+                        )
+
+                    # M62 Caps (legacy, kept for extra safety)
+                    # Cap 1: Insufficient independent sources (only if Tier allows high score)
                     independent_domains = claim_metrics.get("independent_domains", 0)
                     if independent_domains < 2 and score > 0.65:
                         score = 0.65
@@ -193,7 +221,7 @@ Global Confidence Cap: {global_cap}
                     
                     if cap_reason and original_score != score:
                         logger.info(
-                            "[M62] Cap applied to %s: %.2f -> %.2f (%s)",
+                            "[M62/M67] Cap applied to %s: %.2f -> %.2f (%s)",
                             cid, original_score, score, cap_reason
                         )
                         caps_applied.append({
@@ -226,18 +254,48 @@ Global Confidence Cap: {global_cap}
                 final_v_score = 0.25
                 result["rationale"] = f"[Core Claim Refuted] {result.get('rationale', '')}"
 
+            # M67 Invariant: Code Cap Enforcement
+            # Ensure final score does not exceed the ceiling determined by evidence tiers.
+            if final_v_score > global_cap:
+                logger.warning("[INVARIANT] LLM Score %.2f exceeded Code Cap %.2f. Clamping.", final_v_score, global_cap)
+                final_v_score = global_cap
+                result["cap_enforced"] = True
+
             result["verified_score"] = final_v_score
             
             # M62: Record caps applied for transparency
             if caps_applied:
                 result["caps_applied"] = caps_applied
             
-            # Post-clamp to ensure LLM respected the cap (T165)
-            v_score = float(result.get("verified_score", 0.5))
-            if v_score > global_cap:
-                logger.info(f"[Scoring] Aggregated {v_score} > cap {global_cap}. Clamping.")
-                result["verified_score"] = global_cap
-                result["cap_enforced"] = True
+            # M67: Enforce Confidence Integrity
+            # Confidence cannot exceed verified_score + 0.15 (margin of error), capped at 1.0.
+            # AND it cannot exceed the global cap by much (theoretically confidence shouldn't exceed verify score 
+            # if we are strict, but RGBA allows "Confidence 0.9, Verified 0.5" -> "I am sure this is unverified")
+            # Wait, verify_score IS the G channel. Confidence is metadata. 
+            # Section 8 says: c_cap = min(c, tier_c + 0.15).
+            
+            c_cap = min(final_v_score + 0.15, 1.0)
+            
+            # Check for missing attributes global penalty (simplified: < 2 independent sources globally)
+            # In Section 8: "if missing_count >= 2 then c_cap = min(c_cap, 0.65)"
+            # Approximating missing_count with evidence gaps for now
+            if metrics.get("unique_domains", 0) < 2:
+                 c_cap = min(c_cap, 0.65)
+
+            llm_conf = float(result.get("confidence_score", 0.5))
+            if llm_conf > c_cap:
+                logger.debug(
+                    "[M67] Confidence Invariant: LLM (%.2f) > Cap (%.2f). Clamping.",
+                    llm_conf, c_cap
+                )
+                result["confidence_score"] = c_cap
+                
+            # M67: Debug Info
+            result["evidence_debug"] = {
+                "llm_raw_score": weighted_sum / total_importance if total_importance > 0 else 0.5,
+                "code_cap": global_cap,
+                "final_score": final_v_score
+            }
             
             return result
 
@@ -249,6 +307,28 @@ Global Confidence Cap: {global_cap}
                 "confidence_score": 0.5,
                 "rationale": "Error during evaluation."
             }
+
+    def _get_tier_ceiling(self, src: dict) -> float:
+        """
+        Determine Tier Ceiling (Confidence Cap) for a source (M67).
+        Delegates to trusted_sources registry but handles Skill-specific logic (e.g. Social).
+        """
+        domain = (src.get("domain") or "").lower()
+        stype = src.get("source_type")
+        
+        # 1. Get Base Cap from Registry (Domain Authority)
+        cap = get_tier_ceiling_for_domain(domain)
+        
+        # 2. Apply Type-Specific Downgrades
+        
+        # Social Media: Default to Tier D (0.35) regardless of domain reputation
+        # (e.g. twitter.com is high traffic but content is user-generated)
+        if stype == "social":
+            # TODO: Implement Tier A' check here (Stage 3)
+            # If validated as official account -> allow higher cap
+            return 0.35
+            
+        return cap
 
     def detect_evidence_gaps(self, pack: EvidencePack) -> list[str]:
         """

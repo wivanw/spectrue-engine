@@ -117,7 +117,7 @@ Search Results:
             return clustered_results
             
         except Exception as e:
-            logger.warning("[M48] Stance clustering failed: %s. Using fallback.", e)
+            logger.warning("[Clustering] ⚠️ Stance clustering LLM failed: %s. Using fallback. BUG!", e)
             return self._fallback_cluster(claims, search_results)
 
     def _fallback_cluster(self, claims: list[Claim], search_results: list[dict]) -> list[SearchResult]:

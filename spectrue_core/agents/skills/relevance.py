@@ -1,5 +1,5 @@
 from .base_skill import BaseSkill, logger
-from spectrue_core.verification.evidence_pack import Claim, SearchResult
+from spectrue_core.verification.evidence_pack import Claim
 
 class RelevanceSkill(BaseSkill):
     """
@@ -35,7 +35,7 @@ class RelevanceSkill(BaseSkill):
             for res in search_results[:3]
         ])
         
-        prompt = f"""You are a semantic relevance filter for a fact-checking system.
+        prompt = f"""You are a semantic relevance router for a fact-checking system.
         
 Input Claims:
 {claims_text}
@@ -43,15 +43,17 @@ Input Claims:
 Search Results Snippets:
 {snippets_text}
 
-Task: Determine if the search snippets contain RELEVANT information to verify or debunk these specific claims.
-- Ignore minor keyword matches if the context is unrelated.
-- Look for semantic relevance (facts, data, statements related to the claim event/topic).
-- "Relevant" means the text confirms, denies, or provides specific context about the events in the claim.
+Task: Determine the semantic relationship between the snippets and the claims.
+Return one of these statuses:
+- "RELEVANT": The snippets discuss the same entities, events, or topic. Useful for verification.
+- "OFF_TOPIC": Completely unrelated (e.g., search discussing football, claims discussing physics).
+- "TOO_BROAD": Snippets are too generic (e.g., dictionary definitions) when specific news is needed.
+- "NOT_FOUND": Snippets explicitly say "No results found" or similar.
 
 Output JSON:
 {{
-  "is_relevant": true/false,
-  "reason": "Short explanation why relevant or not"
+  "status": "RELEVANT" | "OFF_TOPIC" | "TOO_BROAD" | "NOT_FOUND",
+  "reason": "Short explanation"
 }}
 """
         
@@ -59,25 +61,26 @@ Output JSON:
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
                 input=prompt,
-                instructions="You are a relevance filter.",
+                instructions="You are a semantic router.",
                 reasoning_effort="low",
                 timeout=15.0,
                 trace_kind="semantic_gating"
             )
             
-            is_relevant = bool(result.get("is_relevant", False))
+            status = result.get("status", "RELEVANT")
             reason = result.get("reason", "No reason provided")
             
-            if not is_relevant:
-                logger.info("[M66] Semantic Gating: Results rejected. Reason: %s", reason)
-            else:
-                logger.debug("[M66] Semantic Gating: Results accepted. Reason: %s", reason)
+            # Map legacy boolean for backward compat if needed, but primary is status
+            is_relevant = status == "RELEVANT"
+            
+            logger.info("[M67] Semantic Router: Status=%s. Reason: %s", status, reason)
                 
             return {
-                "is_relevant": is_relevant,
+                "status": status,
+                "is_relevant": is_relevant, # Keep for compatibility
                 "reason": reason
             }
             
         except Exception as e:
             logger.warning("[M66] Semantic Gating failed: %s. Assuming relevant.", e)
-            return {"is_relevant": True, "reason": "Error in check, fail open"}
+            return {"status": "RELEVANT", "is_relevant": True, "reason": "Error in check, fail open"}

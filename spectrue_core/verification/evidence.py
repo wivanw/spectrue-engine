@@ -4,6 +4,7 @@ from spectrue_core.verification.evidence_pack import (
 )
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.trusted_sources import get_tier_ceiling_for_domain
 
 def build_evidence_pack(
     *,
@@ -175,11 +176,31 @@ def build_evidence_pack(
         source_type_distribution=type_dist,
     )
     
-    # 5. Initialize confidence constraints (now handled by LLM)
-    # We set global_cap to 1.0 and provide no reasons for capping,
-    # trusting the LLM to make nuanced judgments on evidence sufficiency.
-    global_cap = 1.0
-    cap_reasons = ["Confidence capping is now determined by LLM discretion."]
+    # 5. Initialize confidence constraints (Code is Law: M67)
+    # The Code defines the Maximum Possible Probability (Ceiling) a source can contribute.
+    # An LLM cannot "hallucinate" high confidence if the Evidence Tier is low.
+    
+    max_cap_found = 0.35 # Default to Tier D (Social) if no sources
+    
+    if search_results:
+        caps = []
+        for r in search_results:
+            d = r.get("domain") or get_registrable_domain(r.get("url") or "")
+            tier_override = r.get("evidence_tier") 
+            
+            # Check for explicitly promoted tiers (M67 Stage 3)
+            # Tier A' (Verified Official Social) -> 0.75 (same as Trusted Media)
+            if tier_override == "A'":
+                caps.append(0.75)
+            else:
+                c = get_tier_ceiling_for_domain(d)
+                caps.append(c)
+        
+        if caps:
+            max_cap_found = max(caps)
+            
+    global_cap = float(max_cap_found)
+    cap_reasons = [f"Ceiling determined by strongest source tier (limit {global_cap:.2f})"]
     
     constraints = ConfidenceConstraints(
         cap_per_claim={},

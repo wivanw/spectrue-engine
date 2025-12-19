@@ -20,10 +20,11 @@ class FactVerifier:
     Uses composition with ValidationPipeline for clean architecture.
     """
     
-    def __init__(self, config: SpectrueConfig = None):
+    def __init__(self, config: SpectrueConfig = None, translation_service=None):
         self.config = config
         self.agent = FactCheckerAgent(config)
-        self.pipeline = ValidationPipeline(config, self.agent)
+        # M67: Optional translation_service for Oracle result localization
+        self.pipeline = ValidationPipeline(config, self.agent, translation_service=translation_service)
 
     async def fetch_url_content(self, url: str) -> str | None:
         """Fetch URL content securely via configured search provider (no local requests)."""

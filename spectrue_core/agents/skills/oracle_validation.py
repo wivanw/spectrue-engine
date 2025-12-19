@@ -73,12 +73,22 @@ class OracleValidationSkill(BaseSkill):
             relevance_score = float(result.get("relevance_score", 0.0))
             relevance_score = max(0.0, min(1.0, relevance_score))  # Clamp to 0-1
             
-            status = self._map_status(result.get("status", ""), oracle_rating)
+            status = self._map_status(result.get("status", ""))
             is_jackpot = relevance_score > JACKPOT_THRESHOLD
+            
+            # M67: Extract LLM-determined scores (no heuristics!)
+            verified_score = float(result.get("verified_score", -1.0))
+            danger_score = float(result.get("danger_score", -1.0))
+            
+            # Warning only - no fallback! If -1, it's a bug and should be visible.
+            if verified_score < 0 or danger_score < 0:
+                logger.warning("[OracleValidation] ⚠️ LLM did not return verified_score/danger_score. BUG!")
             
             validated_result = {
                 "relevance_score": relevance_score,
                 "status": status,
+                "verified_score": verified_score,
+                "danger_score": danger_score,
                 "reasoning": result.get("reasoning", ""),
                 "is_jackpot": is_jackpot
             }
@@ -87,14 +97,16 @@ class OracleValidationSkill(BaseSkill):
                 "user_claim": user_claim[:80],
                 "oracle_claim": oracle_claim[:80],
                 "relevance_score": relevance_score,
+                "verified_score": verified_score,
+                "danger_score": danger_score,
                 "status": status,
                 "is_jackpot": is_jackpot
             })
             
             log_level = logging.INFO if is_jackpot else logging.DEBUG
             logger.log(log_level, 
-                "[OracleValidation] score=%.2f, status=%s, jackpot=%s", 
-                relevance_score, status, is_jackpot
+                "[OracleValidation] score=%.2f, v=%.2f, status=%s, jackpot=%s", 
+                relevance_score, verified_score, status, is_jackpot
             )
             
             return validated_result
@@ -152,14 +164,23 @@ class OracleValidationSkill(BaseSkill):
                 # No good match found
                 return self._empty_batch_result("No suitable match")
             
-            winner = candidates[best_index]
-            status = self._map_status(result.get("status", ""), winner.get("rating", ""))
+            status = self._map_status(result.get("status", ""))
             is_jackpot = relevance_score > JACKPOT_THRESHOLD
+            
+            # M67: Extract LLM-determined scores (no more heuristics!)
+            verified_score = float(result.get("verified_score", -1.0))
+            danger_score = float(result.get("danger_score", -1.0))
+            
+            # Warning only - no fallback! If -1, it's a bug and should be visible.
+            if verified_score < 0 or danger_score < 0:
+                logger.warning("[OracleBatch] ⚠️ LLM did not return verified_score/danger_score. BUG!")
             
             validated_result = {
                 "best_index": best_index,
                 "relevance_score": relevance_score,
                 "status": status,
+                "verified_score": verified_score,
+                "danger_score": danger_score,
                 "reasoning": result.get("reasoning", ""),
                 "is_jackpot": is_jackpot
             }
@@ -169,14 +190,16 @@ class OracleValidationSkill(BaseSkill):
                 "num_candidates": len(candidates),
                 "best_index": best_index,
                 "relevance_score": relevance_score,
+                "verified_score": verified_score,
+                "danger_score": danger_score,
                 "status": status,
                 "is_jackpot": is_jackpot
             })
             
             log_level = logging.INFO if is_jackpot else logging.DEBUG
             logger.log(log_level,
-                "[OracleBatch] %d candidates -> best=%d, score=%.2f, status=%s, jackpot=%s",
-                len(candidates), best_index, relevance_score, status, is_jackpot
+                "[OracleBatch] %d candidates -> best=%d, score=%.2f, v=%.2f, status=%s, jackpot=%s",
+                len(candidates), best_index, relevance_score, verified_score, status, is_jackpot
             )
             
             return validated_result
@@ -221,16 +244,30 @@ If NO candidate scores above 0.5, return best_index: -1
 3. Same core ASSERTION?
 4. CONCLUSIVE verdict?
 
-## Determine Status (for best match):
-- CONFIRMED: Claim is TRUE/VERIFIED
-- REFUTED: Claim is FALSE/FAKE/DEBUNKED  
-- MIXED: Partially true or NEEDS CONTEXT
+## Determine Status AND Scores (for best match):
+- CONFIRMED: Claim is TRUE/VERIFIED → verified_score: 0.85-0.95
+- REFUTED: Claim is FALSE/FAKE/DEBUNKED → verified_score: 0.05-0.15
+- MIXED: Partially true or NEEDS CONTEXT → verified_score: 0.50-0.70
+
+Determined danger_score (0.0-1.0):
+- How harmful/dangerous is this claim if believed?
+- High (0.8-1.0): Medical misinfo, scams, hate speech.
+- Low (0.0-0.3): Scientific nuances, minor inaccuracies, satire.
+
+IMPORTANT: Rating nuances matter!
+- "Pants on Fire" / "Fake" → verified_score: 0.05
+- "Mostly False" → verified_score: 0.20
+- "Half True" / "Mixture" → verified_score: 0.55
+- "Mostly True" → verified_score: 0.75
+- "True" → verified_score: 0.90
 
 Output JSON:
 {{
     "best_index": 0-{len(candidates)-1} or -1 if no match,
     "relevance_score": 0.0-1.0,
     "status": "CONFIRMED" | "REFUTED" | "MIXED",
+    "verified_score": 0.0-1.0,
+    "danger_score": 0.0-1.0,
     "reasoning": "Brief explanation"
 }}"""
 
@@ -286,15 +323,29 @@ Score the relevance from 0.0 to 1.0:
 3. Same ASSERTION? (e.g., both claiming he bought it, not one about a different purchase)
 4. CONCLUSIVE verdict? (e.g., "False" is conclusive; "Needs context" is not)
 
-## Determine Status:
-- CONFIRMED: Rating indicates claim is TRUE/VERIFIED
-- REFUTED: Rating indicates claim is FALSE/FAKE/DEBUNKED
-- MIXED: Rating indicates PARTIAL truth, MISLEADING, or NEEDS CONTEXT
+## Determine Status AND Scores:
+- CONFIRMED: Claim is TRUE/VERIFIED → verified_score: 0.85-0.95
+- REFUTED: Claim is FALSE/FAKE/DEBUNKED → verified_score: 0.05-0.15
+- MIXED: Partially true or NEEDS CONTEXT → verified_score: 0.50-0.70
+
+Determined danger_score (0.0-1.0):
+- How harmful/dangerous is this claim if believed?
+- High (0.8-1.0): Medical misinfo, scams, hate speech.
+- Low (0.0-0.3): Scientific nuances, minor inaccuracies, satire.
+
+IMPORTANT: Rating nuances matter!
+- "Pants on Fire" / "Fake" → verified_score: 0.05
+- "Mostly False" → verified_score: 0.20
+- "Half True" / "Mixture" → verified_score: 0.55
+- "Mostly True" → verified_score: 0.75
+- "True" → verified_score: 0.90
 
 Output JSON:
 {{
     "relevance_score": 0.0-1.0,
     "status": "CONFIRMED" | "REFUTED" | "MIXED",
+    "verified_score": 0.0-1.0,
+    "danger_score": 0.0-1.0,
     "reasoning": "Brief explanation of why this score"
 }}"""
 
@@ -304,24 +355,16 @@ Your job is to prevent false positive matches where keywords overlap but the act
 Be CONSERVATIVE with high scores (0.8+). Only give 0.9+ if the claims are essentially identical.
 A score of 0.5-0.7 means "related but not the same claim" - this is useful context but not conclusive."""
 
-    def _map_status(self, llm_status: str, oracle_rating: str) -> OracleStatus:
-        """Map LLM status or rating to OracleStatus."""
+    def _map_status(self, llm_status: str) -> OracleStatus:
+        """Map LLM status to OracleStatus. No heuristics - LLM must provide valid status."""
         status_upper = (llm_status or "").upper()
         
         if status_upper in ("CONFIRMED", "REFUTED", "MIXED"):
             return status_upper  # type: ignore
         
-        # Fallback: derive from oracle_rating
-        rating_lower = (oracle_rating or "").lower()
-        
-        if any(x in rating_lower for x in ["false", "fake", "incorrect", "debunked", "lie", "pants on fire"]):
-            return "REFUTED"
-        elif any(x in rating_lower for x in ["true", "correct", "accurate", "verified"]):
-            return "CONFIRMED"
-        elif any(x in rating_lower for x in ["misleading", "mixture", "half-true", "partly", "needs context"]):
-            return "MIXED"
-        
-        return "MIXED"  # Default to MIXED for ambiguous ratings
+        # No fallback! If LLM didn't return valid status, it's a bug.
+        logger.warning("[OracleValidation] ⚠️ LLM returned invalid status '%s'. BUG!", llm_status)
+        return "MIXED"  # Return MIXED but log the bug
     
     def _empty_result(self, reason: str) -> dict:
         """Return a MISS result for empty/error cases."""
