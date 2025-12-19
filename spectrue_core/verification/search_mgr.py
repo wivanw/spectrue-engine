@@ -114,13 +114,13 @@ class SearchManager:
     async def search_unified(self, query: str, topic: str = "general", intent: str = "news") -> tuple[str, list[dict]]:
         """
         M65: Unified search replacing Tier 1/2 split.
-        Performs single search (limit=10) and filters garbage.
+        Performs single search (limit=5) and filters garbage.
         """
         self.tavily_calls += 1
-        # Use limit=10 to cover both tiers in one go
+        # Use limit=5 to strictly match Tavily billing unit and avoid noise from results 6-10
         context, results = await self.web_tool.search(
             query,
-            num_results=10,
+            num_results=5,
             depth="advanced",
             topic=topic
         )
