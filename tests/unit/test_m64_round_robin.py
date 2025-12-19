@@ -118,55 +118,49 @@ class TestM64RoundRobin:
 
     @pytest.mark.asyncio
     async def test_tavily_topic_guardrail_news(self, pipeline):
-        """M64: Verify 'news' topic is passed to SearchManager for 'news' intent."""
+        """M64/M65: Verify 'news' topic is passed to Unified Search for 'news' intent."""
         # Setup
         pipeline.agent.extract_claims = AsyncMock(return_value=(
             [], # claims
             False, # check_oracle
             "news" # article_intent -> triggers topic="news"
         ))
-        pipeline._select_diverse_queries = MagicMock(return_value=["Query 1", "Query 2"])
+        pipeline._select_diverse_queries = MagicMock(return_value=["Query 1"])
         pipeline._can_add_search = MagicMock(return_value=True) # Allow search
         
-        # Setup Oracle to MISS (so we proceed to search)
+        # Setup Oracle to MISS
         pipeline.search_mgr.check_oracle_hybrid = AsyncMock(return_value=None)
         
-        # Setup Search Results directly to trigger fallback
-        pipeline.search_mgr.search_tier1 = AsyncMock(return_value=("", []))
-        pipeline.search_mgr.search_tier2 = AsyncMock(return_value=("", []))
+        # Setup Search Results
+        pipeline.search_mgr.search_unified = AsyncMock(return_value=("", []))
     
         # Execute
         await pipeline.execute("Fake text", search_type="smart", gpt_model="gpt-5-nano", lang="en")
     
-        # Verify T2 called with topic="news"
-        call_args = pipeline.search_mgr.search_tier2.call_args
+        # Verify Unified Called with topic="news"
+        call_args = pipeline.search_mgr.search_unified.call_args
         assert call_args is not None
+        # Args: query, topic, intent
+        # Keyword args or positional?
+        # definition: search_unified(self, query: str, topic: str = "general", intent: str = "news")
+        # Call used kwargs: search_unified(primary_query, topic=tavily_topic, intent=article_intent)
         assert call_args.kwargs.get("topic") == "news"
 
     @pytest.mark.asyncio
     async def test_tavily_topic_guardrail_general(self, pipeline):
-        """M64: Verify 'general' topic is passed for 'evergreen' intent."""
+        """M64/M65: Verify 'general' topic is passed for 'evergreen' intent."""
         # Setup
         pipeline.agent.extract_claims = AsyncMock(return_value=(
             [], False, "evergreen" # intent -> topic="general"
         ))
         pipeline._select_diverse_queries = MagicMock(return_value=["Query 1"])
         
-        pipeline.search_mgr.search_tier1 = AsyncMock(return_value=("", []))
-        pipeline.search_mgr.search_tier2 = AsyncMock(return_value=("", [])) # Ensure T2 is mocked properly
+        pipeline.search_mgr.search_unified = AsyncMock(return_value=("", []))
         pipeline.search_mgr.check_oracle_hybrid = AsyncMock(return_value=None)
     
         await pipeline.execute("Fake text", search_type="smart", gpt_model="gpt-5-nano", lang="en")
         
-        # We need to trigger T2 again, assume fallback logic
-        # T1 returns empty -> T2 should trigger if enabled 
-        # (Though logic says if T1 weak -> T2).
-        
-        # To strictly verify, we check the argument passed.
-        # But pipeline.py logic: if not run_t2_parallel and search_sources_count < 3 ...
-        # So we need T1 to return 0 sources.
-        
-        # Verify search_tier2 NOT called with topic="news" (default is general)
-        call_args = pipeline.search_mgr.search_tier2.call_args
-        if call_args:
-             assert call_args.kwargs.get("topic", "general") == "general"
+        # Verify Unified Called with topic="general"
+        call_args = pipeline.search_mgr.search_unified.call_args
+        assert call_args is not None
+        assert call_args.kwargs.get("topic") == "general"

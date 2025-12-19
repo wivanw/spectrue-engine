@@ -77,7 +77,8 @@ class WebSearchTool:
         if depth not in ("basic", "advanced"):
             depth = "basic"
         m = int(max_results) if max_results else 5  # M46: Reduced to 5 for better relevance
-        return depth, max(1, min(m, 15))
+        # M65: Hard cap at 5 to strict limit billing units (1 credit/request) and prevent double-billing
+        return depth, max(1, min(m, 5))
 
     def _is_valid_url(self, url: str) -> bool:
         try:
