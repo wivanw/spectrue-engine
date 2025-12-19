@@ -406,9 +406,8 @@ class WebSearchTool:
                 payload["exclude_domains"] = filtered
 
         payload["topic"] = topic
-        # M65: Force raw content always (User Instruction Step 758)
-        # "Parameter will be added always"
-        payload["include_raw_content"] = True
+        if raw_mode:
+            payload["include_raw_content"] = True
 
         url = "https://api.tavily.com/search"
         async with self._sem:
