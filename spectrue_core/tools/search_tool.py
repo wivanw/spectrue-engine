@@ -188,8 +188,9 @@ class WebSearchTool:
             return False
 
         # auto:
-        if depth == "advanced" and not domains:
-            return True
+        # M65: Urgent fix - DISABLE auto raw content. We rely on Tavily's AI summary ('content').
+        # if depth == "advanced" and not domains:
+        #    return True
         return False
 
     def _raw_max_results(self) -> int:
