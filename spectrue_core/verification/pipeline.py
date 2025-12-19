@@ -329,8 +329,17 @@ class ValidationPipeline:
             search_lang = content_lang or lang
             
             # Determine Tavily topic based on article intent
+            # M66: Smart Routing - Use claim search_method if available
             tavily_topic = "general"
-            if article_intent in ("news", "opinion"):
+            
+            # Check if any significant claim requests "news" method
+            claims_need_news = any(
+                c.get("search_method") == "news" 
+                for c in claims 
+                if c.get("importance", 0) >= 0.5
+            )
+            
+            if claims_need_news or article_intent in ("news", "opinion"):
                 tavily_topic = "news"
             
             # M65: Use primary query for single unified search
@@ -349,6 +358,22 @@ class ValidationPipeline:
                 )
                 
                 if u_srcs:
+                    # M66: Semantic Gating - Verify results relevance before proceeding
+                    gate_result = await self.agent.verify_search_relevance(claims, u_srcs)
+                    if not gate_result.get("is_relevant", True):
+                        logger.warning("[M66] Semantic Gating REJECTED results: %s", gate_result.get("reason"))
+                        # Early return with Missing Evidence status
+                        return {
+                            "verified_score": 0.0,
+                            "confidence_score": 0.0,
+                            "analysis": f"Search results were retrieved but found irrelevant to the specific claim. Reason: {gate_result.get('reason')}",
+                            "rationale": "Evidence retrieval failed semantic validation.",
+                            "sources": [],
+                            "search_meta": self.search_mgr.get_search_meta(),
+                            "cost": self.search_mgr.calculate_cost(gpt_model, search_type),
+                            "text": fact
+                        }
+
                     final_context += "\n" + u_ctx
                     final_sources.extend(u_srcs)
                     has_results = True

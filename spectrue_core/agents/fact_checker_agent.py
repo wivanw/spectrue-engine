@@ -7,7 +7,9 @@ from spectrue_core.agents.skills.clustering import ClusteringSkill
 from spectrue_core.agents.skills.scoring import ScoringSkill
 from spectrue_core.agents.skills.query import QuerySkill
 from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
+from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
 from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
+from spectrue_core.agents.skills.relevance import RelevanceSkill
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,7 +35,10 @@ class FactCheckerAgent:
         self.query_skill = QuerySkill(self.config, self.llm_client)
         self.article_cleaner = ArticleCleanerSkill(self.config, self.llm_client)
         # M63: Oracle validation skill for hybrid mode
+        # M63: Oracle validation skill for hybrid mode
         self.oracle_skill = OracleValidationSkill(self.config, self.llm_client)
+        # M66: Relevance skill for semantic gating
+        self.relevance_skill = RelevanceSkill(self.config, self.llm_client)
 
     async def extract_claims(
         self, text: str, *, lang: str = "en", max_claims: int = 7
@@ -62,6 +67,10 @@ class FactCheckerAgent:
     async def clean_article(self, raw_text: str) -> str:
         """Clean article text using LLM Nano."""
         return await self.article_cleaner.clean_article(raw_text)
+
+    async def verify_search_relevance(self, claims: list[Claim], search_results: list[dict]) -> dict:
+        """M66: Verify if search results are semantically relevant to claims."""
+        return await self.relevance_skill.verify_search_relevance(claims, search_results)
 
     async def verify_oracle_relevance(self, user_fact: str, oracle_claim: str, oracle_rating: str) -> bool:
         """

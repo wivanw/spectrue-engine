@@ -166,6 +166,8 @@ class Claim(TypedDict, total=False):
     # M64: Topic-Aware Round-Robin fields
     topic_key: str                  # Specific entity tag (e.g., "Fomalhaut System", "Bitcoin Price")
     query_candidates: list["QueryCandidate"]  # Typed query candidates with roles
+    # M66: Smart Routing method
+    search_method: Literal["news", "general_search", "academic"]
 
 
 

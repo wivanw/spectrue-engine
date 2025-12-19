@@ -90,6 +90,11 @@ For each claim, REASON about:
    - Scientific facts → Search in ENGLISH
    - Local news → Search in LOCAL language ({lang_name})
 
+4. **Search Method Selection**:
+   - **"news"**: Recent events (last 30 days), politics, unfolding situations.
+   - **"general_search"**: Scientific facts, historical data, definitions, established context.
+   - **"academic"**: specialized studies (if required).
+
 ## STEP 3: GENERATE QUERY CANDIDATES
 Generate 2-3 query candidates for each claim with SPECIFIC ROLES:
 
@@ -139,6 +144,7 @@ Determine the OVERALL article intent for Oracle triggering:
         {{"text": "Trump China tariffs announcement 2025", "role": "CORE", "score": 1.0}},
         {{"text": "Трамп мита Китай 2025", "role": "LOCAL", "score": 0.5}}
       ],
+      "search_method": "news",
       "search_queries": [
         "Trump China tariffs announcement 2025",
         "Трамп мита Китай 2025"
@@ -242,7 +248,9 @@ Return the result in JSON format.
                     check_worthiness=worthiness,
                     # M64: New fields
                     topic_key=topic_key,
-                    query_candidates=rc.get("query_candidates", [])
+                    query_candidates=rc.get("query_candidates", []),
+                    # M66: Smart Routing
+                    search_method=rc.get("search_method", "general_search")
                 )
                 
                 # Log strategy for debugging

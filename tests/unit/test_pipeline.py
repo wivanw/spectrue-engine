@@ -15,6 +15,7 @@ class TestValidationPipeline:
         agent.score_evidence = AsyncMock()
         agent.verify_oracle_relevance = AsyncMock()
         agent.verify_inline_source_relevance = AsyncMock()  # T7
+        agent.verify_search_relevance = AsyncMock(return_value={"is_relevant": True, "reason": "Test ok"}) # M66
         return agent
 
     @pytest.fixture
@@ -200,3 +201,27 @@ class TestValidationPipeline:
         # Verify inline source was rejected (not in sources)
         inline_sources = [s for s in result["sources"] if s.get("source_type") == "inline"]
         assert len(inline_sources) == 0
+
+    @pytest.mark.asyncio
+    async def test_semantic_gating_rejection(self, pipeline, mock_agent, mock_search_mgr):
+        """M66: Verify pipeline stops if search results are semantically irrelevant."""
+        mock_agent.extract_claims.return_value = ([{"id": "c1", "search_queries": ["q1"], "search_method": "news"}], False, "news")
+        
+        # Search returns results
+        mock_search_mgr.search_unified.return_value = ("Context", [{"title": "Irrelevant", "snippet": "Foo"}])
+        
+        # Gating REJECTS them
+        mock_agent.verify_search_relevance.return_value = {
+            "is_relevant": False,
+            "reason": "Off-topic"
+        }
+        
+        result = await pipeline.execute(fact="Test", search_type="standard", gpt_model="nano", lang="en")
+        
+        # Verify result is failure
+        assert result["verified_score"] == 0.0
+        assert "irrelevant" in result["analysis"].lower()
+        assert len(result["sources"]) == 0
+        
+        # Verify heavy steps skipped
+        mock_agent.score_evidence.assert_not_called()
