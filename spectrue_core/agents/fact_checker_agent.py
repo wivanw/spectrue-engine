@@ -1,4 +1,4 @@
-from spectrue_core.verification.evidence_pack import Claim, EvidencePack
+from spectrue_core.verification.evidence_pack import Claim, EvidencePack, ArticleIntent
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.agents.llm_client import LLMClient
@@ -7,6 +7,7 @@ from spectrue_core.agents.skills.clustering import ClusteringSkill
 from spectrue_core.agents.skills.scoring import ScoringSkill
 from spectrue_core.agents.skills.query import QuerySkill
 from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
+from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,8 +32,13 @@ class FactCheckerAgent:
         self.scoring_skill = ScoringSkill(self.config, self.llm_client)
         self.query_skill = QuerySkill(self.config, self.llm_client)
         self.article_cleaner = ArticleCleanerSkill(self.config, self.llm_client)
+        # M63: Oracle validation skill for hybrid mode
+        self.oracle_skill = OracleValidationSkill(self.config, self.llm_client)
 
-    async def extract_claims(self, text: str, *, lang: str = "en", max_claims: int = 7) -> tuple[list[Claim], bool]:
+    async def extract_claims(
+        self, text: str, *, lang: str = "en", max_claims: int = 7
+    ) -> tuple[list[Claim], bool, ArticleIntent]:
+        """Extract claims with article intent for M63 Oracle triggering."""
         return await self.claims_skill.extract_claims(text, lang=lang, max_claims=max_claims)
 
     async def cluster_evidence(self, claims: list[Claim], search_results: list[dict]) -> list:
@@ -185,13 +191,14 @@ Output JSON: {{ "is_relevant": true/false, "is_primary": true/false, "reason": "
                 "domain": domain,
                 "is_relevant": is_relevant,
                 "is_primary": is_primary,
-                "reason": reason[:100]
+                "reason": reason  # Full reason for debugging
             })
             
             if is_primary:
-                logger.info("[Agent] Inline source marked PRIMARY: %s - %s", domain, reason)
+                logger.info("[Agent] Inline source PRIMARY: %s", domain)
             elif not is_relevant:
-                logger.info("[Agent] Inline source rejected: %s - %s", domain, reason)
+                # Full reason available in trace, keep console clean
+                logger.debug("[Agent] Inline source rejected: %s - %s", domain, reason[:60])
             
             return {
                 "is_relevant": is_relevant,

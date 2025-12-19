@@ -1,4 +1,4 @@
-from spectrue_core.verification.evidence_pack import Claim, EvidenceRequirement
+from spectrue_core.verification.evidence_pack import Claim, EvidenceRequirement, ArticleIntent
 from .base_skill import BaseSkill, logger
 from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from spectrue_core.constants import SUPPORTED_LANGUAGES
@@ -20,6 +20,11 @@ SEARCH_INTENTS = [
     "viral_rumor",          # Hoaxes, myths, debunking needed
 ]
 
+# M63: Article intent types for Oracle triggering
+# - CHECK Oracle: news, evergreen, official
+# - SKIP Oracle: opinion, prediction
+ARTICLE_INTENTS = ["news", "evergreen", "official", "opinion", "prediction"]
+
 
 class ClaimExtractionSkill(BaseSkill):
     
@@ -29,16 +34,20 @@ class ClaimExtractionSkill(BaseSkill):
         *,
         lang: str = "en",
         max_claims: int = 5,
-    ) -> tuple[list[Claim], bool]:
+    ) -> tuple[list[Claim], bool, ArticleIntent]:
         """
         Extract atomic verifiable claims from article text.
         
         M62: Context-aware claims with normalized_text, topic_group, check_worthiness
         M62+: Search Strategist approach - LLM decides search strategy per claim
+        M63: Returns article_intent for Oracle triggering
+        
+        Returns:
+            tuple of (claims, should_check_oracle, article_intent)
         """
         text = (text or "").strip()
         if not text:
-            return [], False
+            return [], False, "news"  # Default intent
 
         # Limit input to prevent token overflow
         text_excerpt = text[:8000] if len(text) > 8000 else text
@@ -87,10 +96,19 @@ Based on your strategy, generate 2 queries per claim:
 - Query 1: Best language for PRIMARY source (often English for science)
 - Query 2: Local language ({lang_name}) for additional coverage
 
+## STEP 4: CLASSIFY ARTICLE INTENT
+Determine the OVERALL article intent for Oracle triggering:
+- "news": Current events, breaking news → CHECK Oracle
+- "evergreen": Science facts, historical claims, health info → CHECK Oracle  
+- "official": Government/company announcements → CHECK Oracle
+- "opinion": Editorial, commentary, predictions → SKIP Oracle
+- "prediction": Future events, betting forecasts → SKIP Oracle
+
 ## OUTPUT FORMAT
 
 ```json
 {{
+  "article_intent": "news",
   "claims": [
     {{
       "text": "Original text from article",
@@ -159,6 +177,12 @@ Return the result in JSON format.
             raw_claims = result.get("claims", [])
             claims: list[Claim] = []
             
+            # M63: Extract article intent
+            raw_intent = result.get("article_intent", "news")
+            if raw_intent not in ARTICLE_INTENTS:
+                raw_intent = "news"  # Default to news (check Oracle)
+            article_intent: ArticleIntent = raw_intent  # type: ignore
+            
             for idx, rc in enumerate(raw_claims):
                 if not isinstance(rc, dict) or not rc.get("text"):
                     continue
@@ -220,7 +244,11 @@ Return the result in JSON format.
                 
             # M60 Oracle Optimization: Check if ANY claim needs oracle
             check_oracle = any(c.get("check_oracle", False) for c in claims)
-            return claims, check_oracle
+            
+            # M63: Log intent for debugging
+            logger.info("[Claims] Article intent: %s (check_oracle=%s)", article_intent, check_oracle)
+            
+            return claims, check_oracle, article_intent
             
         except Exception as e:
             logger.warning("[M48] Claim extraction failed: %s. Using fallback.", e)
@@ -241,4 +269,4 @@ Return the result in JSON format.
                     ),
                     search_queries=[],
                 )
-            ], False
+            ], False, "news"  # Default intent on fallback

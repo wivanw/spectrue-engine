@@ -37,9 +37,54 @@ SourceType = Literal[
     "independent_media",  # Independent news outlet
     "aggregator",     # News aggregator, syndication
     "social",         # Social media post
+    "fact_check",     # M63: Fact-check from Oracle (Google Fact Check API)
     "unknown",        # Cannot determine
 ]
 """Classification of source authority."""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M63: Oracle Check Result
+# ─────────────────────────────────────────────────────────────────────────────
+
+OracleStatus = Literal["CONFIRMED", "REFUTED", "MIXED", "EMPTY"]
+"""
+Oracle verdict status:
+- CONFIRMED: Fact-check confirms the claim is true
+- REFUTED: Fact-check says the claim is false/fake
+- MIXED: Fact-check says partially true or needs context
+- EMPTY: No relevant fact-check found
+"""
+
+ArticleIntent = Literal["news", "evergreen", "official", "opinion", "prediction"]
+"""
+Article intent classification for Oracle triggering:
+- news: Current events, breaking news (CHECK Oracle)
+- evergreen: Science facts, historical claims, health info (CHECK Oracle)
+- official: Government/company announcements (CHECK Oracle)
+- opinion: Editorial, commentary (SKIP Oracle)
+- prediction: Future events (SKIP Oracle)
+"""
+
+
+class OracleCheckResult(TypedDict, total=False):
+    """
+    M63: Result from Google Fact Check API with LLM semantic validation.
+    
+    Used in hybrid Oracle flow:
+    - JACKPOT (relevance > 0.9): Stop pipeline, return immediately
+    - EVIDENCE (0.5 < relevance <= 0.9): Add to evidence pack, continue search
+    - MISS (relevance <= 0.5 or EMPTY): Ignore, proceed to standard search
+    """
+    status: OracleStatus              # Verdict from fact-check
+    url: str | None                   # URL of the fact-check article
+    claim_reviewed: str | None        # The claim text from the external fact-check
+    summary: str | None               # The verdict/explanation
+    relevance_score: float            # 0.0 to 1.0 (Calculated by LLM)
+    is_jackpot: bool                  # True if relevance > 0.9 (Stop search immediately)
+    publisher: str | None             # Fact-check publisher name (Snopes, PolitiFact, etc.)
+    rating: str | None                # Original textual rating from fact-checker
+    source_provider: str | None       # UX: "Snopes via Google Fact Check"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

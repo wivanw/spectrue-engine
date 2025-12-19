@@ -2,6 +2,7 @@ from spectrue_core.tools.search_tool import WebSearchTool
 from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
+from spectrue_core.verification.evidence_pack import OracleCheckResult
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,21 +14,31 @@ class SearchManager:
     """
     Manages search tools, execution, and cost budgeting.
     """
-    def __init__(self, config: SpectrueConfig):
+    def __init__(self, config: SpectrueConfig, oracle_validator=None):
+        """
+        Initialize SearchManager.
+        
+        Args:
+            config: Spectrue configuration
+            oracle_validator: Optional OracleValidationSkill for M63 hybrid mode
+        """
         self.config = config
         self.web_tool = WebSearchTool(config)
-        self.oracle_tool = GoogleFactCheckTool(config)
+        # M63: Pass validator to GoogleFactCheckTool for hybrid mode
+        self.oracle_tool = GoogleFactCheckTool(config, oracle_validator=oracle_validator)
         self.cse_tool = GoogleCSESearchTool(config)
         
         # Metrics state for current run
         self.tavily_calls = 0
         self.google_cse_calls = 0
         self.page_fetches = 0
+        self.oracle_calls = 0  # M63: Track Oracle API calls
         
     def reset_metrics(self):
         self.tavily_calls = 0
         self.google_cse_calls = 0
         self.page_fetches = 0
+        self.oracle_calls = 0
 
     def calculate_cost(self, model: str, search_type: str) -> int:
         """Calculate total billed cost based on operations performed."""
@@ -56,8 +67,29 @@ class SearchManager:
         return content
 
     async def check_oracle(self, query: str) -> dict | None:
-        """Check Google Fact Check API."""
+        """Check Google Fact Check API (legacy method)."""
+        self.oracle_calls += 1
         return await self.oracle_tool.search(query)
+
+    async def check_oracle_hybrid(self, user_claim: str, intent: str = "news") -> OracleCheckResult:
+        """
+        M63: Check Oracle with LLM semantic validation.
+        
+        Returns OracleCheckResult with relevance_score for three-scenario flow:
+        - JACKPOT (>0.9): Stop pipeline, return Oracle result
+        - EVIDENCE (0.5-0.9): Add to evidence pack, continue search
+        - MISS (<0.5): Ignore, proceed to standard search
+        
+        Args:
+            user_claim: The claim to search for
+            intent: Article intent (news/evergreen/official/opinion/prediction)
+            
+        Returns:
+            OracleCheckResult with status, relevance_score, is_jackpot
+        """
+        self.oracle_calls += 1
+        return await self.oracle_tool.search_and_validate(user_claim, intent)
+
 
     async def search_tier1(self, query: str, domains: list[str]) -> tuple[str, list[dict]]:
         """Perform Tier 1 search on trusted domains."""

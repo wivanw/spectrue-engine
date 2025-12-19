@@ -7,11 +7,18 @@ from spectrue_core.utils.trust_utils import enrich_sources_with_trust
 from spectrue_core.utils.trace import Trace
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
+from spectrue_core.agents.skills.oracle_validation import EVIDENCE_THRESHOLD
 import logging
 import asyncio
 import re
 
 logger = logging.getLogger(__name__)
+
+# M63: Intents that should trigger Oracle check
+ORACLE_CHECK_INTENTS = {"news", "evergreen", "official"}
+# M63: Intents that should skip Oracle (opinion, prediction)
+ORACLE_SKIP_INTENTS = {"opinion", "prediction"}
+
 
 class ValidationPipeline:
     """
@@ -20,7 +27,8 @@ class ValidationPipeline:
     def __init__(self, config: SpectrueConfig, agent: FactCheckerAgent):
         self.config = config
         self.agent = agent
-        self.search_mgr = SearchManager(config)
+        # M63: Pass oracle_skill to SearchManager for hybrid mode
+        self.search_mgr = SearchManager(config, oracle_validator=agent.oracle_skill)
 
     async def execute(
         self,
@@ -149,13 +157,19 @@ class ValidationPipeline:
             await progress_callback("extracting_claims")
         try:
             claims_result = await task_claims
-            if isinstance(claims_result, tuple):
+            # M63: Now returns 3-tuple: (claims, should_check_oracle, article_intent)
+            if isinstance(claims_result, tuple) and len(claims_result) >= 3:
+                claims, should_check_oracle, article_intent = claims_result
+            elif isinstance(claims_result, tuple) and len(claims_result) == 2:
+                # Backwards compatibility
                 claims, should_check_oracle = claims_result
+                article_intent = "news"  # Default
             else:
-                claims, should_check_oracle = claims_result, False # Safety fallback
+                claims, should_check_oracle, article_intent = claims_result, False, "news"
         except asyncio.CancelledError:
             claims = []
             should_check_oracle = False
+            article_intent = "news"
         
         # T7: Verify inline source relevance against extracted claims
         if inline_sources and claims:
@@ -193,8 +207,7 @@ class ValidationPipeline:
                         logger.info("[Pipeline] Inline source %s: relevant=%s, primary=%s", 
                                    src.get("domain"), is_relevant, is_primary)
                     else:
-                        logger.info("[Pipeline] Inline source REJECTED: %s - %s", 
-                                   src.get("domain"), result.get("reason", "not relevant"))
+                        logger.debug("[Pipeline] Inline source rejected: %s", src.get("domain"))
             
             if verified_inline_sources:
                 Trace.event("pipeline.inline_sources_verified", {
@@ -211,49 +224,95 @@ class ValidationPipeline:
                 src["is_relevant"] = True
             final_sources.extend(inline_sources)
         
-        # M58: Oracle Optimization (T10)
-        # Only run Oracle if LLM detected viral/fake markers on SPECIFIC claims
-        if should_check_oracle:
+        # M63: Hybrid Oracle Flow
+        # Check Oracle based on article_intent (news/evergreen/official) OR should_check_oracle flag
+        run_oracle = (
+            (article_intent in ORACLE_CHECK_INTENTS) or 
+            should_check_oracle
+        ) and (article_intent not in ORACLE_SKIP_INTENTS)
+        
+        oracle_evidence_source = None  # Will hold Oracle source if EVIDENCE scenario
+        
+        if run_oracle:
             if progress_callback:
                 await progress_callback("checking_oracle")
             
-            # T10: Identify specific candidate claims to check
-            # Prioritize claims marked by LLM as needing oracle check
+            # M63: Identify claims to check - use normalized_text if available
             candidates = [c for c in claims if c.get("check_oracle")]
             
-            # Fallback: If no claim specifically marked (but flag was true?), use fast_query on whole text
+            # Fallback: Use first core claim with high importance
             if not candidates:
-                # Mock a claim object for consistency
-                candidates = [{"text": fast_query}]
+                core_claims = [c for c in claims if c.get("type") == "core"]
+                if core_claims:
+                    # Use normalized_text for better Oracle matching
+                    candidates = [core_claims[0]]
+                else:
+                    # Use fast_query as last resort
+                    candidates = [{"text": fast_query, "normalized_text": fast_query}]
             
-            # Limit to top 2 candidates to strictly preserve quota (1000/day hard limit)
-            candidates = candidates[:2]
+            # Limit to 1 candidate to preserve quota (more targeted now)
+            candidates = candidates[:1]
             
-            for i, cand in enumerate(candidates):
-                query_text = cand.get("text", "")
-                # Normalize query (strip quotes, extra spaces)
+            for cand in candidates:
+                # Prefer normalized_text over raw text for cleaner Oracle query
+                query_text = cand.get("normalized_text") or cand.get("text", "")
                 q = normalize_search_query(query_text)
                 
-                logger.info("[Pipeline] Oracle Check %d/%d: %s", i+1, len(candidates), q[:50])
-                oracle_res = await self.search_mgr.check_oracle(q)
+                logger.info("[Pipeline] Oracle Hybrid Check: intent=%s, query=%s", article_intent, q[:50])
                 
-                if oracle_res:
-                     # Verify Semantic Relevance
-                     oracle_claim_text = oracle_res.get("rationale", "")
-                     oracle_rating = "Unknown" 
-                     
-                     # Check relevance against the specific claim we queried, AND the original fact
-                     is_relevant = await self.agent.verify_oracle_relevance(original_fact, oracle_claim_text, oracle_rating)
-                     
-                     if is_relevant:
-                         logger.info("[Pipeline] Oracle hit VERIFIED. Stopping.")
-                         return self._finalize_oracle(oracle_res, original_fact)
-                     else:
-                         logger.info("[Pipeline] Oracle hit REJECTED (irrelevant). Continuing.")
+                # M63: Use new hybrid method with LLM validation
+                oracle_result = await self.search_mgr.check_oracle_hybrid(q, intent=article_intent)
+                
+                relevance = oracle_result.get("relevance_score", 0.0)
+                status = oracle_result.get("status", "EMPTY")
+                is_jackpot = oracle_result.get("is_jackpot", False)
+                
+                Trace.event("pipeline.oracle_hybrid", {
+                    "intent": article_intent,
+                    "query": q[:50],
+                    "relevance_score": relevance,
+                    "status": status,
+                    "is_jackpot": is_jackpot
+                })
+                
+                if status == "EMPTY":
+                    logger.info("[Pipeline] Oracle: No results found. Continuing to search.")
+                    continue
+                
+                # SCENARIO A: JACKPOT (relevance > 0.9)
+                if is_jackpot:
+                    logger.info(
+                        "[Pipeline] 🎰 JACKPOT! Oracle hit (score=%.2f). Stopping pipeline.",
+                        relevance
+                    )
+                    return self._finalize_oracle_hybrid(oracle_result, original_fact)
+                
+                # SCENARIO B: EVIDENCE (0.5 < relevance <= 0.9)
+                elif relevance > EVIDENCE_THRESHOLD:
+                    logger.info(
+                        "[Pipeline] 📚 EVIDENCE: Oracle related (score=%.2f). Adding to pack.",
+                        relevance
+                    )
+                    # Create source from Oracle result for evidence pack
+                    oracle_evidence_source = self._create_oracle_source(oracle_result)
+                    # Don't stop - continue to Tavily for more context
+                
+                # SCENARIO C: MISS (relevance <= 0.5)
+                else:
+                    logger.info(
+                        "[Pipeline] Oracle MISS (score=%.2f). Proceeding to search.",
+                        relevance
+                    )
             
-            logger.info("[Pipeline] Oracle checks finished. No relevant hits found.")
+            if not oracle_evidence_source:
+                logger.info("[Pipeline] Oracle checks finished. No relevant hits.")
         else:
-             logger.info("[Pipeline] Skipping Oracle (no viral markers detected).")
+            skip_reason = "opinion/prediction intent" if article_intent in ORACLE_SKIP_INTENTS else "no markers"
+            logger.info("[Pipeline] Skipping Oracle (%s, intent=%s)", skip_reason, article_intent)
+        
+        # Add Oracle evidence source if we got one (EVIDENCE scenario)
+        if oracle_evidence_source:
+            final_sources.append(oracle_evidence_source)
 
         # M62: Smart Query Selection (typed priority slots)
         search_queries = self._select_diverse_queries(claims, max_queries=3, fact_fallback=fact)
@@ -714,8 +773,95 @@ class ValidationPipeline:
         return self.search_mgr.can_afford(current + step_cost, max_cost)
 
     def _finalize_oracle(self, oracle_res: dict, fact: str) -> dict:
-        """Format oracle result for return."""
+        """Format oracle result for return (legacy)."""
         oracle_res["text"] = fact
         oracle_res["search_meta"] = self.search_mgr.get_search_meta()
         return oracle_res
+
+    def _finalize_oracle_hybrid(self, oracle_result: dict, fact: str) -> dict:
+        """
+        M63: Format Oracle JACKPOT result for immediate return.
+        
+        Converts OracleCheckResult to FactCheckResponse format.
+        """
+        status = oracle_result.get("status", "MIXED")
+        rating = oracle_result.get("rating", "")
+        publisher = oracle_result.get("publisher", "Fact Check")
+        url = oracle_result.get("url", "")
+        claim_reviewed = oracle_result.get("claim_reviewed", "")
+        summary = oracle_result.get("summary", "")
+        
+        # Map status to verified_score
+        if status == "CONFIRMED":
+            verified_score = 0.9
+            danger_score = 0.1
+        elif status == "REFUTED":
+            verified_score = 0.1
+            danger_score = 0.9
+        else:  # MIXED
+            verified_score = 0.4
+            danger_score = 0.6
+        
+        # Build response
+        analysis = f"According to {publisher}, this claim is rated as '{rating}'. {summary}"
+        rationale = f"Fact check by {publisher}: Rated as '{rating}'. {claim_reviewed}"
+        
+        sources = [{
+            "title": f"Fact Check by {publisher}",
+            "link": url,
+            "url": url,
+            "domain": get_registrable_domain(url) if url else publisher.lower().replace(" ", ""),
+            "snippet": f"Rating: {rating}. {summary}",
+            "origin": "GOOGLE_FACT_CHECK",
+            "source_type": "fact_check",
+            "is_trusted": True,
+        }]
+        
+        return {
+            "verified_score": verified_score,
+            "confidence_score": 1.0,
+            "danger_score": danger_score,
+            "context_score": 1.0,
+            "style_score": 1.0,
+            "analysis": analysis,
+            "rationale": rationale,
+            "sources": sources,
+            "cost": 0,  # Oracle is free!
+            "rgba": [danger_score, verified_score, 1.0, 1.0],
+            "text": fact,
+            "search_meta": self.search_mgr.get_search_meta(),
+            "oracle_jackpot": True,  # M63: Flag for frontend
+        }
+
+    def _create_oracle_source(self, oracle_result: dict) -> dict:
+        """
+        M63: Create source dict from Oracle result for EVIDENCE scenario.
+        
+        This source is added to the evidence pack as a Tier A (high trust) source.
+        """
+        url = oracle_result.get("url", "")
+        publisher = oracle_result.get("publisher", "Fact Check")
+        rating = oracle_result.get("rating", "")
+        claim_reviewed = oracle_result.get("claim_reviewed", "")
+        summary = oracle_result.get("summary", "")
+        relevance = oracle_result.get("relevance_score", 0.0)
+        status = oracle_result.get("status", "MIXED")
+        
+        return {
+            "url": url,
+            "domain": get_registrable_domain(url) if url else publisher.lower().replace(" ", ""),
+            "title": f"Fact Check: {claim_reviewed[:50]}..." if len(claim_reviewed) > 50 else f"Fact Check: {claim_reviewed}",
+            "content": f"{publisher} rated this claim as '{rating}': {summary}",
+            "snippet": f"Rating: {rating}. {summary[:200]}",
+            "source_type": "fact_check",
+            "is_trusted": True,
+            "origin": "GOOGLE_FACT_CHECK",
+            # M63: Oracle metadata for transparency in scoring
+            "oracle_metadata": {
+                "relevance_score": relevance,
+                "status": status,
+                "publisher": publisher,
+                "rating": rating,
+            }
+        }
 
