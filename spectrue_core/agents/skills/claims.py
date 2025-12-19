@@ -39,8 +39,9 @@ class ClaimExtractionSkill(BaseSkill):
         Extract atomic verifiable claims from article text.
         
         M62: Context-aware claims with normalized_text, topic_group, check_worthiness
-        M62+: Search Strategist approach - LLM decides search strategy per claim
         M63: Returns article_intent for Oracle triggering
+        M64: Topic-Aware Round-Robin support (topic_key, query_candidates)
+             + Negative Constraints (Gambling Guardrail via LLM)
         
         Returns:
             tuple of (claims, should_check_oracle, article_intent)
@@ -58,9 +59,14 @@ class ClaimExtractionSkill(BaseSkill):
         topics_str = ", ".join(TOPIC_GROUPS)
         intents_str = ", ".join(SEARCH_INTENTS)
         
-        # M62+: Search Strategist Prompt with Chain of Thought
+        # Updated Strategist Prompt with Negative Constraints & Query Candidates
         instructions = f"""You are an expert Fact-Checking Search Strategist.
 Your goal is to extract verifiable claims AND develop optimal SEARCH STRATEGIES for each.
+
+## NEGATIVE CONSTRAINTS (CRITICAL):
+1. Do NOT generate queries seeking betting odds, gambling coefficients, or bookmaker predictions.
+2. If the user asks for a prediction (e.g. sports), search for "expert analysis" or "official announcement", NOT "betting site".
+3. EXCEPTION: If the user explicitly asks about "gambling regulations" or "corruption in betting", then betting terms ARE allowed.
 
 ## STEP 1: EXTRACT CLAIMS
 For each claim in the article:
@@ -76,33 +82,39 @@ For each claim, REASON about:
    - {intents_str}
 
 2. **Primary Authority**: Where would the ORIGINAL evidence exist?
-   - Science/Medicine → Journals (Nature, Lancet, CDC). Best in ENGLISH.
-   - Local Politics → Local news, government sites. Best in LOCAL language.
-   - Sports/Celebrity → Interviews, social media. AVOID betting sites!
-   - Official data → Government stats, UN agencies.
+   - Science/Medicine → Journals. Best in ENGLISH.
+   - Local Politics → Local news. Best in LOCAL language.
+   - Sports → Official sites, Interviews. AVOID betting sites!
 
 3. **Language Strategy**: 
-   - Scientific facts → Search in ENGLISH (quality research)
+   - Scientific facts → Search in ENGLISH
    - Local news → Search in LOCAL language ({lang_name})
-   - International events → English first, then local
 
-4. **Risk Assessment**:
-   - Sports prediction? → Use "interview", "quote", "statement". AVOID "odds", "bet"
-   - Health claim? → Use "study", "research". AVOID "cure", "miracle"
-   - Rumor/viral? → Use "fact check", "debunk", "hoax"
+## STEP 3: GENERATE QUERY CANDIDATES
+Generate 2-3 query candidates for each claim with SPECIFIC ROLES:
 
-## STEP 3: GENERATE SMART QUERIES
-Based on your strategy, generate 2 queries per claim:
-- Query 1: Best language for PRIMARY source (often English for science)
-- Query 2: Local language ({lang_name}) for additional coverage
+1. **CORE** (Required): "Event + Date + Action" (Priority 1.0)
+   Example: "Hubble Fomalhaut collision December 2024"
+   
+2. **NUMERIC** (If numbers exist): "Metric + Value + 'Official Data'" (Priority 0.8)
+   Example: "Bitcoin price $42000 official exchange rate"
+   
+3. **ATTRIBUTION** (If quotes exist): "Person + 'Quote' + Source" (Priority 0.7)
+   Example: "NASA administrator statement Fomalhaut discovery"
+
+4. **LOCAL** (Optional): Best local language query (Priority 0.5)
+
+Also assign for each claim:
+- **topic_group**: High-level category ({topics_str})
+- **topic_key**: Short, consistent subject tag (e.g., "Fomalhaut System", "Bitcoin Price") - used for round-robin coverage.
 
 ## STEP 4: CLASSIFY ARTICLE INTENT
 Determine the OVERALL article intent for Oracle triggering:
 - "news": Current events, breaking news → CHECK Oracle
-- "evergreen": Science facts, historical claims, health info → CHECK Oracle  
-- "official": Government/company announcements → CHECK Oracle
-- "opinion": Editorial, commentary, predictions → SKIP Oracle
-- "prediction": Future events, betting forecasts → SKIP Oracle
+- "evergreen": Science facts, historical claims → CHECK Oracle  
+- "official": Government notifications → CHECK Oracle
+- "opinion": Editorial, commentary → SKIP Oracle
+- "prediction": Future events, forecasts → SKIP Oracle
 
 ## OUTPUT FORMAT
 
@@ -115,18 +127,21 @@ Determine the OVERALL article intent for Oracle triggering:
       "normalized_text": "Self-sufficient: Trump announced tariffs on China Dec 19",
       "type": "core",
       "topic_group": "Politics",
+      "topic_key": "Trump Tariffs",
       "importance": 0.9,
-      "check_worthiness": 0.85,
+      "check_worthiness": 0.9,
       "search_strategy": {{
         "intent": "official_statement",
-        "reasoning": "Political announcement needs official confirmation or major news outlets",
-        "best_language": "en",
-        "risks": ["avoid opinion pieces", "need official source"],
-        "query_approach": "Search for official statement + major news coverage"
+        "reasoning": "Needs official confirmation or major news",
+        "best_language": "en"
       }},
+      "query_candidates": [
+        {{"text": "Trump China tariffs announcement 2025", "role": "CORE", "score": 1.0}},
+        {{"text": "Трамп мита Китай 2025", "role": "LOCAL", "score": 0.5}}
+      ],
       "search_queries": [
-        "Trump China tariffs announcement December 2025 official",
-        "Трамп мита Китай грудень 2025"
+        "Trump China tariffs announcement 2025",
+        "Трамп мита Китай 2025"
       ],
       "evidence_req": {{
         "needs_primary": true,
@@ -145,15 +160,12 @@ Determine the OVERALL article intent for Oracle triggering:
 - "attribution": Quote - WHO said WHAT (importance 0.6)
 - "sidefact": Background, common knowledge (SKIP search, importance 0.3)
 
-## TOPIC GROUPS
-{topics_str}
-
 You MUST respond in valid JSON.
 
 {UNIVERSAL_METHODOLOGY_APPENDIX}
 """
         prompt = f"""Extract 3-{max_claims} atomic verifiable claims from this article.
-Analyze each claim and develop a search strategy using Chain of Thought reasoning.
+Apply Topic-Aware logic: group by topic_key and generate query_candidates with roles.
 
 ARTICLE:
 {text_excerpt}
@@ -161,8 +173,8 @@ ARTICLE:
 Return the result in JSON format.
 """
         try:
-            # M62: Updated cache key version
-            cache_key = f"claim_strategist_v1_{lang}"
+            # Updated cache key version for new prompt structure
+            cache_key = f"claim_strategist_v2_{lang}"
 
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
@@ -202,6 +214,9 @@ Return the result in JSON format.
                 if topic not in TOPIC_GROUPS:
                     topic = "Other"
                 
+                # M64: topic_key extraction
+                topic_key = rc.get("topic_key") or topic  # Fallback to group if key missing
+                
                 worthiness = rc.get("check_worthiness")
                 if worthiness is None:
                     # Fallback: derive from importance
@@ -225,6 +240,9 @@ Return the result in JSON format.
                     normalized_text=normalized,
                     topic_group=topic,
                     check_worthiness=worthiness,
+                    # M64: New fields
+                    topic_key=topic_key,
+                    query_candidates=rc.get("query_candidates", [])
                 )
                 
                 # Log strategy for debugging
@@ -232,15 +250,15 @@ Return the result in JSON format.
                     intent = strategy.get("intent", "?")
                     reasoning = strategy.get("reasoning", "")[:50]
                     logger.debug(
-                        "[Strategist] Claim %d: intent=%s, lang=%s | %s",
-                        idx+1, intent, strategy.get("best_language", "?"), reasoning
+                        "[Strategist] Claim %d: intent=%s, topic_key=%s | %s",
+                        idx+1, intent, topic_key, reasoning
                     )
                 
                 claims.append(c)
             
             # Log topic and strategy distribution
-            topics_found = [c.get("topic_group", "?") for c in claims]
-            logger.info("[Claims] Extracted %d claims. Topics: %s", len(claims), topics_found)
+            topics_found = [c.get("topic_key", "?") for c in claims]
+            logger.info("[Claims] Extracted %d claims. Topics keys: %s", len(claims), topics_found)
                 
             # M60 Oracle Optimization: Check if ANY claim needs oracle
             check_oracle = any(c.get("check_oracle", False) for c in claims)
@@ -261,6 +279,7 @@ Return the result in JSON format.
                     normalized_text=fallback_text,
                     type="core",
                     topic_group="Other",
+                    topic_key="General",
                     importance=1.0,
                     check_worthiness=0.5,
                     evidence_requirement=EvidenceRequirement(
@@ -268,5 +287,6 @@ Return the result in JSON format.
                         needs_independent_2x=True
                     ),
                     search_queries=[],
+                    query_candidates=[],
                 )
             ], False, "news"  # Default intent on fallback

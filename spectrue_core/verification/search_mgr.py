@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 SEARCH_COSTS = {"smart": 100}
 MODEL_COSTS = {"gpt-5-nano": 5, "gpt-5-mini": 20, "gpt-5.2": 100}
 
+SKIP_EXTENSIONS = (".txt", ".xml", ".zip")
+
 class SearchManager:
     """
     Manages search tools, execution, and cost budgeting.
@@ -75,24 +77,66 @@ class SearchManager:
         """
         M63: Check Oracle with LLM semantic validation.
         
-        Returns OracleCheckResult with relevance_score for three-scenario flow:
-        - JACKPOT (>0.9): Stop pipeline, return Oracle result
-        - EVIDENCE (0.5-0.9): Add to evidence pack, continue search
-        - MISS (<0.5): Ignore, proceed to standard search
-        
-        Args:
-            user_claim: The claim to search for
-            intent: Article intent (news/evergreen/official/opinion/prediction)
-            
-        Returns:
-            OracleCheckResult with status, relevance_score, is_jackpot
+        Returns OracleCheckResult with status, relevance_score, is_jackpot.
         """
         self.oracle_calls += 1
         return await self.oracle_tool.search_and_validate(user_claim, intent)
 
+    def _extract_domain(self, url: str) -> str:
+        from urllib.parse import urlparse
+        try:
+            return urlparse(url).netloc.lower().replace("www.", "")
+        except Exception:
+            return ""
+
+    def _filter_search_results(self, results: list[dict], intent: str) -> list[dict]:
+        """M65: Filter search results (Score > 0.15, No .txt/.xml)."""
+        out = []
+        for r in results:
+            # 1. Score Cutoff (M65 Goal 2)
+            # Tavily returns relevance_score (0..1), sometimes missing
+            score = r.get("relevance_score")
+            # If score is present and valid float, check it.
+            if isinstance(score, (int, float)) and score < 0.15:
+                continue
+            
+            # 2. File Extension
+            url_str = r.get("link", "") or r.get("url", "")
+            if url_str.lower().endswith(SKIP_EXTENSIONS):
+                continue
+            
+            # NOTE: We delegate domain quality filtering to Tavily's topic="news" 
+            # and the score cutoff. Hardcoded JUNK_DOMAINS are removed (Technical Debt).
+            
+            out.append(r)
+        return out
+
+    async def search_unified(self, query: str, topic: str = "general", intent: str = "news") -> tuple[str, list[dict]]:
+        """
+        M65: Unified search replacing Tier 1/2 split.
+        Performs single search (limit=10) and filters garbage.
+        """
+        self.tavily_calls += 1
+        # Use limit=10 to cover both tiers in one go
+        context, results = await self.web_tool.search(
+            query,
+            num_results=10,
+            depth="advanced",
+            topic=topic
+        )
+        
+        filtered = self._filter_search_results(results, intent)
+        
+        # Reconstruct context derived from filtered sources only
+        def format_source(obj: dict) -> str:
+            return f"Source: {obj.get('title')}\nURL: {obj.get('link')}\nContent: {obj.get('snippet')}\n---"
+            
+        new_context = "\n".join([format_source(obj) for obj in filtered])
+        
+        return new_context, filtered
 
     async def search_tier1(self, query: str, domains: list[str]) -> tuple[str, list[dict]]:
-        """Perform Tier 1 search on trusted domains."""
+        """Perform Tier 1 search on trusted domains (Legacy/Fallback)."""
         self.tavily_calls += 1
         return await self.web_tool.search(
             query, 
@@ -100,13 +144,19 @@ class SearchManager:
             include_domains=domains
         )
 
-    async def search_tier2(self, query: str, exclude_domains: list[str] = None) -> tuple[str, list[dict]]:
-        """Perform Tier 2 (General) search."""
+    async def search_tier2(
+        self, 
+        query: str, 
+        exclude_domains: list[str] = None,
+        topic: str = "general"
+    ) -> tuple[str, list[dict]]:
+        """Perform Tier 2 (General) search (Legacy/Fallback)."""
         self.tavily_calls += 1
         return await self.web_tool.search(
             query,
             depth="advanced",
-            exclude_domains=exclude_domains
+            exclude_domains=exclude_domains,
+            topic=topic
         )
     
     async def search_google_cse(self, query: str, lang: str) -> list[dict]:

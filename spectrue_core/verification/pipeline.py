@@ -254,8 +254,9 @@ class ValidationPipeline:
             candidates = candidates[:1]
             
             for cand in candidates:
-                # Prefer normalized_text over raw text for cleaner Oracle query
-                query_text = cand.get("normalized_text") or cand.get("text", "")
+                # Prefer normalized_text over raw text for cleaner Oracle query (M56/M65)
+                # M65: Strip trailing punctuation
+                query_text = (cand.get("normalized_text") or cand.get("text", "")).strip(" ,.-:;")
                 q = normalize_search_query(query_text)
                 
                 logger.info("[Pipeline] Oracle Hybrid Check: intent=%s, query=%s", article_intent, q[:50])
@@ -263,6 +264,9 @@ class ValidationPipeline:
                 # M63: Use new hybrid method with LLM validation
                 oracle_result = await self.search_mgr.check_oracle_hybrid(q, intent=article_intent)
                 
+                if not oracle_result:
+                    continue
+
                 relevance = oracle_result.get("relevance_score", 0.0)
                 status = oracle_result.get("status", "EMPTY")
                 is_jackpot = oracle_result.get("is_jackpot", False)
@@ -317,93 +321,58 @@ class ValidationPipeline:
         # M62: Smart Query Selection (typed priority slots)
         search_queries = self._select_diverse_queries(claims, max_queries=3, fact_fallback=fact)
         
-        # 5. Parallel Waterfall Search (Tier 1 + Tier 2)
+        # 5. M65: Unified Search (cost-optimized waterfall)
         if not preloaded_context:
             if progress_callback:
-                await progress_callback("searching_tier1")
+                await progress_callback("searching_unified")
             
             search_lang = content_lang or lang
-            tier1_domains = get_trusted_domains_by_lang(search_lang)
             
-            # Select queries
-            # Select queries
-            # T1 (Trusted) prefers Event-Based (Index 1) for broader context in trusted sources
-            # Fallback to Specific (Index 0) if only 1 query exists
-            if len(search_queries) > 1:
-                t1_query = search_queries[1]
-            else:
-                t1_query = search_queries[0]
+            # Determine Tavily topic based on article intent
+            tavily_topic = "general"
+            if article_intent in ("news", "opinion"):
+                tavily_topic = "news"
             
-            # T2 (General) uses Local query (Index 2) if available to capture local context
-            # Fallback to Specific (Index 0)
-            if len(search_queries) > 2:
-                t2_query = search_queries[2]
-            else:
-                t2_query = search_queries[0]
+            # M65: Use primary query for single unified search
+            # This replaces the wasteful Tier 1 -> Tier 2 (same query) pattern.
+            primary_query = search_queries[0] if search_queries else ""
             
-            # Determine if we run Tier 2
-            # For parallel execution, the logic "run T2 if T1 yields weak results" is hard purely in parallel
-            # unless we speculate.
-            # Speculation: If search_type is "standard", maybe just T1?
-            # User wants "parallelization". 
-            # Strategy: Run both if budget allows. OR run T1, then T2 (traditional waterfall).
-            # The prompt asked for "parallelization". So let's run them parallel.
-            # But we must ensure no duplicates.
-            # T1: include_domains=TRUSTED
-            # T2: exclude_domains=TRUSTED
+            has_results = False
             
+            if primary_query and self._can_add_search(gpt_model, search_type, max_cost):
+                logger.info("[M65] Unified Search: %s (topic=%s)", primary_query[:50], tavily_topic)
+                
+                u_ctx, u_srcs = await self.search_mgr.search_unified(
+                    primary_query, 
+                    topic=tavily_topic,
+                    intent=article_intent
+                )
+                
+                if u_srcs:
+                    final_context += "\n" + u_ctx
+                    final_sources.extend(u_srcs)
+                    has_results = True
             
-            # T9: Simplified "Smart" Mode - Waterfall Strategy
-            # Always run T1 first. If T1 results are insufficient (< 2), fall back to T2.
-            # Parallel execution removed to save quota and reduce noise.
-            
-            tasks = []
-            
-            # Task T1
-            if self._can_add_search(gpt_model, search_type, max_cost):
-                tasks.append(self.search_mgr.search_tier1(t1_query, tier1_domains))
-            
-            # Execute T1
-            results = await asyncio.gather(*tasks)
-            
-            # Process T1
-            if len(results) > 0:
-                ctx1, srcs1 = results[0]
-                final_context += "\n" + ctx1
-                final_sources.extend(srcs1)
-            
-            run_t2_parallel = False  # Always waterfall in smart mode
-            
-            # Waterfall Fallback (if T2 didn't run parallel AND T1 was weak)
-            # M60: Count only search sources, not inline sources from article
-            search_sources_count = len([s for s in final_sources if s.get("source_type") != "inline"])
-            
-            # T8: Ensure minimum 3 unique domains for diversity (increased from 2)
-            if not run_t2_parallel and search_sources_count < 3 and self._can_add_search(gpt_model, search_type, max_cost):
+            # Fallback: Google CSE
+            # If Unified Tavily search failed or returned 0 results (after filtering), try CSE.
+            if not has_results and self.search_mgr.tavily_calls > 0:
                 if progress_callback:
-                    await progress_callback("searching_tier2_fallback")
-                # Now we know T1 domains, but we can just exclude the predefined TRUSTED list to be safe/consistent
-                ctx2, srcs2 = await self.search_mgr.search_tier2(t2_query, exclude_domains=tier1_domains)
-                if srcs2:
-                    final_context += "\n\n=== GENERAL SEARCH ===\n" + ctx2
-                    final_sources.extend(srcs2)
-                else:
-                    # CSE Fallback (Tier 3)
-                     if self.search_mgr.tavily_calls > 0:
-                         if progress_callback:
-                             await progress_callback("searching_deep")
-                         cse_ctx, cse_srcs = await self.search_mgr.search_google_cse(t1_query, lang=lang)
-                         if cse_ctx:
-                             final_context += "\n\n=== CSE SEARCH ===\n" + cse_ctx
-                         for res in cse_srcs:
-                                final_sources.append({
-                                    "url": res.get("link"),
-                                    "domain": get_registrable_domain(res.get("link")),
-                                    "title": res.get("title"),
-                                    "content": res.get("snippet", ""),
-                                    "source_type": "general",
-                                    "is_trusted": False
-                                })
+                    await progress_callback("searching_deep")
+                
+                # Try CSE with same query
+                if primary_query:
+                    cse_ctx, cse_srcs = await self.search_mgr.search_google_cse(primary_query, lang=lang)
+                    if cse_ctx:
+                        final_context += "\n\n=== CSE SEARCH ===\n" + cse_ctx
+                    for res in cse_srcs:
+                        final_sources.append({
+                            "url": res.get("link"),
+                            "domain": get_registrable_domain(res.get("link")),
+                            "title": res.get("title"),
+                            "content": res.get("snippet", ""),
+                            "source_type": "general",
+                            "is_trusted": False
+                        })
 
         # 6. Analysis and Scoring
         if progress_callback:
@@ -630,6 +599,10 @@ class ValidationPipeline:
             logger.warning("[Pipeline] Failed to resolve URL: %s", e)
             return None
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # M64: Topic-Aware Round-Robin Query Selection ("Coverage Engine")
+    # ─────────────────────────────────────────────────────────────────────────
+    
     def _select_diverse_queries(
         self, 
         claims: list, 
@@ -637,133 +610,239 @@ class ValidationPipeline:
         fact_fallback: str = ""
     ) -> list[str]:
         """
-        M62: Typed Priority Slot Query Selection.
+        M64: Topic-Aware Round-Robin Query Selection ("Coverage Engine").
         
-        Instead of round-robin across topics, we use typed priority slots:
-        - Slot 1: Core Claim (Event query) - most important
-        - Slot 2: Numeric/Timeline Claim (if available)
-        - Slot 3: Attribution/Quote Claim (if available)
-        - Slot 4+: Next Core from different topic_group (if budget allows)
+        Ensures every topic_key gets at least 1 query before any topic gets
+        a 2nd query. This solves the "Digest Problem" where multi-topic 
+        articles had all queries spent on the first topic only.
         
-        Sidefacts are SKIPPED entirely to save search budget.
+        Algorithm:
+        1. PREPROCESS: Filter sidefacts, group by topic_key, sort by importance
+        2. PASS 1 (COVERAGE): 1 CORE query per topic_key (round-robin)
+        3. PASS 2 (DEPTH): NUMERIC/ATTRIBUTION if budget remains
+        4. PASS 3 (FILL): LOCAL/remaining queries
+        5. POST: Fuzzy dedup (90%)
         
         Args:
-            claims: List of Claim objects with type, topic_group, check_worthiness
+            claims: List of Claim objects with topic_key, query_candidates
             max_queries: Maximum queries to return
             fact_fallback: Fallback text if no claims/queries available
             
         Returns:
             List of diverse search queries (max max_queries)
         """
+        from collections import defaultdict
+        
         if not claims:
             return [normalize_search_query(fact_fallback[:200])] if fact_fallback else []
         
-        # 1. Filter claims
+        # ─────────────────────────────────────────────────────────────────────
+        # 1. PREPROCESS: Filter and group claims
+        # ─────────────────────────────────────────────────────────────────────
         MIN_WORTHINESS = 0.4
-        eligible_claims = [
+        eligible = [
             c for c in claims 
             if c.get("type") != "sidefact"  # Skip sidefacts entirely
             and c.get("check_worthiness", c.get("importance", 0.5)) >= MIN_WORTHINESS
         ]
         
-        if not eligible_claims:
+        if not eligible:
             # Fallback: take highest importance claim even if below threshold
-            eligible_claims = sorted(
+            eligible = sorted(
                 [c for c in claims if c.get("type") != "sidefact"],
                 key=lambda c: c.get("importance", 0), 
                 reverse=True
             )[:1]
-            if not eligible_claims:
-                eligible_claims = claims[:1]
-            logger.info("[M62] All claims below threshold or sidefacts, using highest importance")
+            if not eligible:
+                eligible = claims[:1]
+            logger.info("[M64] All claims below threshold or sidefacts, using highest importance")
         
-        # 2. Categorize by type
-        core_claims = [c for c in eligible_claims if c.get("type") == "core"]
-        numeric_timeline = [c for c in eligible_claims if c.get("type") in ("numeric", "timeline")]
-        attribution = [c for c in eligible_claims if c.get("type") == "attribution"]
+        # Group by topic_key (specific entity) for round-robin coverage
+        # If topic_key missing, fallback to topic_group
+        groups: dict[str, list] = defaultdict(list)
+        for c in eligible:
+            key = c.get("topic_key") or c.get("topic_group", "Other")
+            groups[key].append(c)
         
-        # Sort each category by importance (descending)
-        core_claims.sort(key=lambda c: c.get("importance", 0), reverse=True)
-        numeric_timeline.sort(key=lambda c: c.get("importance", 0), reverse=True)
-        attribution.sort(key=lambda c: c.get("importance", 0), reverse=True)
-        
-        # 3. Build priority slot queue
-        slot_queue: list[dict] = []
-        
-        # Slot 1: Core Claim (mandatory if exists)
-        if core_claims:
-            slot_queue.append(core_claims[0])
-        
-        # Slot 2: Numeric/Timeline Claim (if exists)
-        if numeric_timeline:
-            slot_queue.append(numeric_timeline[0])
-        
-        # Slot 3: Attribution Claim (if exists)
-        if attribution:
-            slot_queue.append(attribution[0])
-        
-        # Slot 4+: Additional Core claims from DIFFERENT topic groups
-        if len(slot_queue) < max_queries and len(core_claims) > 1:
-            seen_topics = {slot_queue[0].get("topic_group", "Other")} if slot_queue else set()
-            
-            for c in core_claims[1:]:
-                if len(slot_queue) >= max_queries:
-                    break
-                topic = c.get("topic_group", "Other")
-                if topic not in seen_topics:
-                    slot_queue.append(c)
-                    seen_topics.add(topic)
-        
-        # 4. Extract queries from slot queue
-        selected_queries: list[str] = []
-        seen_queries: set[str] = set()
-        
-        for claim in slot_queue[:max_queries]:
-            queries = claim.get("search_queries", [])
-            
-            # Use Event-Based query (index 1) as primary, fallback to index 0
-            query_idx = 1 if len(queries) > 1 else 0
-            if query_idx < len(queries):
-                raw_query = queries[query_idx]
-                normalized = normalize_search_query(raw_query)
-                
-                if normalized and normalized not in seen_queries:
-                    selected_queries.append(normalized)
-                    seen_queries.add(normalized)
-                    claim_type = claim.get("type", "?")
-                    claim_topic = claim.get("topic_group", "?")
-                    logger.debug(
-                        "[M62] Slot %d: type=%s, topic=%s, query=%s",
-                        len(selected_queries), claim_type, claim_topic, normalized[:50]
-                    )
-        
-        # 5. Fill remaining slots if we have fewer queries than slots
-        if len(selected_queries) < max_queries:
-            # Try to get any remaining queries from eligible claims
-            for c in eligible_claims:
-                if len(selected_queries) >= max_queries:
-                    break
-                for q in c.get("search_queries", []):
-                    if len(selected_queries) >= max_queries:
-                        break
-                    normalized = normalize_search_query(q)
-                    if normalized and normalized not in seen_queries:
-                        selected_queries.append(normalized)
-                        seen_queries.add(normalized)
-        
-        # 6. Fallback if no queries selected
-        if not selected_queries:
-            if fact_fallback:
-                selected_queries = [normalize_search_query(fact_fallback[:200])]
-        
-        # Log summary
-        slot_types = [c.get("type", "?") for c in slot_queue[:len(selected_queries)]]
-        logger.info(
-            "[M62] Query selection: %d eligible claims -> %d queries. Slot types: %s",
-            len(eligible_claims), len(selected_queries), slot_types
+        # Sort groups by max importance of their claims (most important topics first)
+        sorted_keys = sorted(
+            groups.keys(),
+            key=lambda k: max(c.get("importance", 0) for c in groups[k]),
+            reverse=True
         )
         
-        return selected_queries[:max_queries]
+        # Sort claims within each group by importance
+        for key in groups:
+            groups[key].sort(key=lambda c: c.get("importance", 0), reverse=True)
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 2. PASS 1: COVERAGE (Critical) - One CORE query per topic
+        # ─────────────────────────────────────────────────────────────────────
+        selected: list[str] = []
+        covered_topics: set[str] = set()  # Track which topics have at least 1 query
+        
+        for key in sorted_keys:
+            if len(selected) >= max_queries:
+                break
+            
+            top_claim = groups[key][0]
+            core_query = self._get_query_by_role(top_claim, "CORE")
+            
+            if core_query:
+                normalized = self._normalize_and_sanitize(core_query)
+                if normalized and not self._is_fuzzy_duplicate(normalized, selected, threshold=0.9):
+                    selected.append(normalized)
+                    covered_topics.add(key)
+                    logger.debug("[M64] Pass 1 (Coverage): topic=%s, query=%s", key, normalized[:50])
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 3. PASS 2: DEPTH - NUMERIC/ATTRIBUTION for already-covered topics
+        # ─────────────────────────────────────────────────────────────────────
+        if len(selected) < max_queries:
+            for key in sorted_keys:
+                if len(selected) >= max_queries:
+                    break
+                if key not in covered_topics:
+                    continue  # Only add depth to already-covered topics
+                
+                top_claim = groups[key][0]
+                for role in ["NUMERIC", "ATTRIBUTION"]:
+                    query = self._get_query_by_role(top_claim, role)
+                    if query:
+                        normalized = self._normalize_and_sanitize(query)
+                        if normalized and not self._is_fuzzy_duplicate(normalized, selected, threshold=0.9):
+                            selected.append(normalized)
+                            logger.debug("[M64] Pass 2 (Depth): topic=%s, role=%s, query=%s", 
+                                        key, role, normalized[:50])
+                            break  # One depth query per topic
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 4. PASS 3: FILL - Any remaining valid queries
+        # ─────────────────────────────────────────────────────────────────────
+        if len(selected) < max_queries:
+            for key in sorted_keys:
+                if len(selected) >= max_queries:
+                    break
+                for claim in groups[key]:
+                    if len(selected) >= max_queries:
+                        break
+                    # Try all queries from query_candidates
+                    for candidate in claim.get("query_candidates", []):
+                        query = candidate.get("text", "")
+                        normalized = self._normalize_and_sanitize(query)
+                        if normalized and not self._is_fuzzy_duplicate(normalized, selected, threshold=0.9):
+                            selected.append(normalized)
+                            logger.debug("[M64] Pass 3 (Fill): topic=%s, query=%s", key, normalized[:50])
+                            if len(selected) >= max_queries:
+                                break
+                    # Also try legacy search_queries
+                    for query in claim.get("search_queries", []):
+                        normalized = self._normalize_and_sanitize(query)
+                        if normalized and not self._is_fuzzy_duplicate(normalized, selected, threshold=0.9):
+                            selected.append(normalized)
+                            logger.debug("[M64] Pass 3 (Fill/Legacy): topic=%s, query=%s", key, normalized[:50])
+                            if len(selected) >= max_queries:
+                                break
+        
+        # ─────────────────────────────────────────────────────────────────────
+        # 5. FALLBACK: If no queries selected, use fact_fallback
+        # ─────────────────────────────────────────────────────────────────────
+        if not selected and fact_fallback:
+            selected = [normalize_search_query(fact_fallback[:200])]
+        
+        # Log summary
+        logger.info(
+            "[M64] Query selection: %d eligible claims, %d topic_keys -> %d queries. Topics covered: %s",
+            len(eligible), len(groups), len(selected), list(covered_topics)[:5]
+        )
+        
+        return selected[:max_queries]
+    
+    def _get_query_by_role(self, claim: dict, role: str) -> str | None:
+        """
+        M64: Extract query with specific role from claim's query_candidates.
+        
+        Args:
+            claim: Claim dict with query_candidates and/or search_queries
+            role: Query role ("CORE", "NUMERIC", "ATTRIBUTION", "LOCAL")
+            
+        Returns:
+            Query text or None if not found
+        """
+        # Try query_candidates first (M64 format)
+        for candidate in claim.get("query_candidates", []):
+            if candidate.get("role") == role:
+                return candidate.get("text", "")
+        
+        # Fallback to legacy search_queries by position
+        legacy = claim.get("search_queries", [])
+        role_index = {"CORE": 0, "NUMERIC": 1, "ATTRIBUTION": 2, "LOCAL": 0}
+        idx = role_index.get(role, 0)
+        if idx < len(legacy):
+            return legacy[idx]
+        # If role not found but legacy exists, return first as CORE fallback
+        if role == "CORE" and legacy:
+            return legacy[0]
+        return None
+    
+    def _normalize_and_sanitize(self, query: str) -> str | None:
+        """
+        M64: Normalize query.
+        
+        Note: Strict gambling keywords removal is deprecated (M64).
+        We rely on LLM constraints and Tavily 'topic="news"' mode 
+        to prevent gambling/spam results instead of hardcoded stoplists.
+        
+        Args:
+            query: Raw query text
+            
+        Returns:
+            Normalized query or None if invalid
+        """
+        if not query:
+            return None
+        
+        normalized = normalize_search_query(query)
+        if not normalized:
+            return None
+        
+        return normalized
+    
+    def _is_fuzzy_duplicate(self, query: str, existing: list[str], threshold: float = 0.9) -> bool:
+        """
+        M64: Check if query is >threshold similar to any existing query.
+        
+        Uses Jaccard similarity on word sets.
+        
+        Args:
+            query: Query to check
+            existing: List of already-selected queries
+            threshold: Similarity threshold (0.9 = 90% word overlap)
+            
+        Returns:
+            True if query is a duplicate
+        """
+        query_words = set(query.lower().split())
+        if not query_words:
+            return True  # Empty query is always a "duplicate"
+        
+        for existing_query in existing:
+            existing_words = set(existing_query.lower().split())
+            if not existing_words:
+                continue
+            
+            # Jaccard similarity: |intersection| / |union|
+            intersection = len(query_words & existing_words)
+            union = len(query_words | existing_words)
+            similarity = intersection / union if union > 0 else 0
+            
+            if similarity >= threshold:
+                logger.debug("[M64] Fuzzy duplicate (%.0f%%): '%s' ≈ '%s'", 
+                            similarity * 100, query[:30], existing_query[:30])
+                return True
+        
+        return False
+
 
     def _can_add_search(self, model, search_type, max_cost):
         # Speculative cost check

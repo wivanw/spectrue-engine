@@ -67,6 +67,42 @@ Article intent classification for Oracle triggering:
 """
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# M64: Query Candidates for Round-Robin Selection
+# ─────────────────────────────────────────────────────────────────────────────
+
+QueryRole = Literal["CORE", "NUMERIC", "ATTRIBUTION", "LOCAL"]
+"""
+Query role types for Coverage Engine:
+- CORE: Event + Date + Action (Required, highest priority)
+- NUMERIC: Metric + Value + "Official Data" (If numbers exist)
+- ATTRIBUTION: Person + "Quote" + Source (If quotes exist)
+- LOCAL: Local language variant of CORE query
+"""
+
+# Priority scores for query roles (used in round-robin selection)
+QUERY_ROLE_SCORES: dict[str, float] = {
+    "CORE": 1.0,        # Most important - verifies event existence
+    "NUMERIC": 0.8,     # Verifies specific numbers/statistics
+    "ATTRIBUTION": 0.7, # Verifies quotes/sources
+    "LOCAL": 0.5,       # Alternative language phrasing
+}
+
+
+class QueryCandidate(TypedDict, total=False):
+    """
+    M64: A typed search query candidate with priority score.
+    
+    Used by the Coverage Engine for topic-aware round-robin selection.
+    The 'role' determines priority: CORE queries are selected first (Pass 1),
+    then NUMERIC/ATTRIBUTION (Pass 2), then LOCAL (Pass 3).
+    """
+    text: str           # The search query text
+    role: QueryRole     # Query type/role
+    score: float        # Priority score (default from QUERY_ROLE_SCORES)
+    lang: str           # Target language (optional, e.g., "en", "uk")
+
+
 class OracleCheckResult(TypedDict, total=False):
     """
     M63: Result from Google Fact Check API with LLM semantic validation.
@@ -121,12 +157,16 @@ class Claim(TypedDict, total=False):
     type: ClaimType                 # Claim classification
     importance: float               # 0-1, how critical to main thesis
     evidence_requirement: EvidenceRequirement
-    search_queries: list[str]       # Generated queries for this claim
+    search_queries: list[str]       # Generated queries for this claim (legacy)
     check_oracle: bool              # T10: Should this specific claim be checked against Oracle?
     # M62: Context-aware atomization fields
     normalized_text: str            # Self-sufficient statement with pronouns resolved
     topic_group: str                # Topic tag (e.g., "Economy", "War", "Science")
     check_worthiness: float         # 0-1, how important to verify (filters opinions)
+    # M64: Topic-Aware Round-Robin fields
+    topic_key: str                  # Specific entity tag (e.g., "Fomalhaut System", "Bitcoin Price")
+    query_candidates: list["QueryCandidate"]  # Typed query candidates with roles
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

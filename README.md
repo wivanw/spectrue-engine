@@ -38,21 +38,22 @@ The core verification process follows this pipeline:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  2. ORACLE CHECK (Fast Path)                                    │
-│     • Queries Google Fact Check API for viral rumors            │
-│     • If match found → immediate return with cached verdict     │
-│     • Saves API quota for novel claims                          │
+│  2. ORACLE CHECK (Hybrid Mode)                                  │
+│     • Smart Validator: LLM compares claim vs fact-check         │
+│     • JACKPOT (>0.9): Stop pipeline immediately                 │
+│     • EVIDENCE (0.5-0.9): Add to evidence pack (Tier A)         │
+│     • MISS (<0.5): Proceed to web search                        │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  3. QUERY SELECTION                                             │
-│     • Typed priority slots:                                     │
-│       Slot 1: Core Claim                                        │
-│       Slot 2: Numeric/Timeline Claim                            │
-│       Slot 3: Attribution/Quote Claim                           │
-│     • Sidefacts are SKIPPED (background info, common knowledge) │
-│     • Filter by check_worthiness threshold (< 0.4 = skip)       │
+│  3. QUERY SELECTION (Coverage Engine)                           │
+│     • Topic-Aware Round-Robin: Ensures 100% topic coverage      │
+│     • 3-Pass Selection:                                         │
+│       1. Coverage: One CORE query per topic (Space, Economy...) │
+│       2. Depth: Add NUMERIC/ATTRIBUTION if budget allows        │
+│       3. Fill: Remaining slots                                  │
+│     • Safety: 90% fuzzy dedup + LLM/Tavily gambling guards      │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼

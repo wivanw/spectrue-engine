@@ -51,7 +51,7 @@ class SpectrueEngine:
         self.config = config
         self.verifier = FactVerifier(config)
         try:
-            logger.info("Effective config: %s", json.dumps(self.config.runtime.to_safe_log_dict(), ensure_ascii=False))
+            logger.debug("Effective config: %s", json.dumps(self.config.runtime.to_safe_log_dict(), ensure_ascii=False))
         except Exception:
             pass
 

@@ -377,6 +377,7 @@ class WebSearchTool:
         domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
         raw_mode: bool = False,
+        topic: str = "general",
     ) -> dict:
         payload = {"query": q, "search_depth": depth, "max_results": max_results}
         # M20: Add trusted domains filter for Tier 1 searches
@@ -402,7 +403,7 @@ class WebSearchTool:
             if filtered:
                 payload["exclude_domains"] = filtered
 
-        payload["topic"] = "general"
+        payload["topic"] = topic
         if raw_mode:
             payload["include_raw_content"] = True
 
@@ -499,6 +500,7 @@ class WebSearchTool:
         raw_content: bool = False,
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
+        topic: str = "general",
     ) -> tuple[str, list[dict]]:
         """Search with Tavily and return both context text and structured sources.
         
@@ -532,7 +534,8 @@ class WebSearchTool:
             depth=_d,
             raw_content=raw_content,
             include_domains=include_domains,
-            exclude_domains=exclude_domains
+            exclude_domains=exclude_domains,
+            topic=topic
         )
 
     async def _search_internal(
@@ -543,6 +546,7 @@ class WebSearchTool:
         raw_content: bool = False,
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
+        topic: str = "general",
         ttl: int | None = None, 
     ) -> tuple[str, list[dict]]: 
         from spectrue_core.utils.text_processing import normalize_search_query
@@ -607,8 +611,9 @@ class WebSearchTool:
         
         # M58: Normalize cache key with lowercase for better hit rate
         # "Kyiv population" and "kyiv Population" should hit the same cache entry
+        # M64: Add topic to cache key
         q_cache = q.lower()
-        cache_key = f"{q_cache}|{depth}|{effective_limit}|{int(bool(raw_mode))}|{domains_key}|{exclude_key}"
+        cache_key = f"{q_cache}|{depth}|{effective_limit}|{int(bool(raw_mode))}|{domains_key}|{exclude_key}|{topic}"
 
         effective_ttl = ttl if ttl is not None else self.ttl
         self.last_cache_hit = False
@@ -676,6 +681,7 @@ class WebSearchTool:
                 domains=normalized_include,
                 exclude_domains=normalized_exclude,
                 raw_mode=raw_mode,
+                topic=topic,
             )
             results_raw = response.get('results', [])
             logger.debug("[Tavily] Got %d raw results", len(results_raw))
