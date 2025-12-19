@@ -34,8 +34,11 @@ def build_evidence_pack(
             Claim(
                 id="c1",
                 text=fact,
+                normalized_text=fact,  # M62: Use fact as-is
                 type="core",
+                topic_group="Other",   # M62: Default topic
                 importance=1.0,
+                check_worthiness=0.5,  # M62: Default worthiness
                 evidence_requirement={
                     "needs_primary_source": False,
                     "needs_independent_2x": True,
@@ -153,6 +156,9 @@ def build_evidence_pack(
             coverage=coverage,
             freshness_days_median=None,
             source_type_distribution=type_dist,  # type: ignore
+            # M62: Include claim metadata for scoring caps
+            topic_group=claim.get("topic_group"),
+            claim_type=claim.get("type"),
         )
     
     # Overall coverage

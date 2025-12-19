@@ -63,11 +63,16 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     # Setup varying responses for different calls
     
     # 1. Claim Extraction Response
+    # M62: Include importance, check_worthiness, topic_group for proper aggregation
     claim_resp = {
         "claims": [{
             "text": "The sky is blue.",
+            "normalized_text": "The sky is blue during clear weather conditions.",
             "type": "core",
-            "search_queries": ["sky blue"]
+            "importance": 1.0,
+            "check_worthiness": 0.8,
+            "topic_group": "Science",
+            "search_queries": ["sky blue", "why is sky blue", "небо синє"]
         }]
     }
     
@@ -96,8 +101,16 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     }
     
     # 3. Score Evidence Response (M48 / T164)
+    # M62: Must include claim_verdicts for aggregation logic
     score_resp = {
-        "verified_score": 0.9,
+        "claim_verdicts": [
+            {
+                "claim_id": "c1",
+                "verdict_score": 0.9,
+                "verdict": "verified",
+                "reason": "Claim verified by multiple sources"
+            }
+        ],
         "danger_score": 0.0,
         "rationale": "M48 logic working.",
         "explainability_score": 0.8,

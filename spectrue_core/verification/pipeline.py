@@ -255,8 +255,8 @@ class ValidationPipeline:
         else:
              logger.info("[Pipeline] Skipping Oracle (no viral markers detected).")
 
-        # Generate Queries
-        search_queries = self._generate_initial_queries(claims, fact)
+        # M62: Smart Query Selection (typed priority slots)
+        search_queries = self._select_diverse_queries(claims, max_queries=3, fact_fallback=fact)
         
         # 5. Parallel Waterfall Search (Tier 1 + Tier 2)
         if not preloaded_context:
@@ -571,25 +571,140 @@ class ValidationPipeline:
             logger.warning("[Pipeline] Failed to resolve URL: %s", e)
             return None
 
-    def _generate_initial_queries(self, claims: list, fact: str) -> list[str]:
-        # Collect from claims
-        qs = []
-        for c in claims:
-            if c.get("search_queries"):
-                qs.extend(c["search_queries"])
-        if not qs:
-            qs = [fact[:200]]
+    def _select_diverse_queries(
+        self, 
+        claims: list, 
+        max_queries: int = 3,
+        fact_fallback: str = ""
+    ) -> list[str]:
+        """
+        M62: Typed Priority Slot Query Selection.
         
-        # Normalize
-        normalized = [normalize_search_query(q) for q in qs]
-        # Dedupe
-        seen = set()
-        final = []
-        for q in normalized:
-            if q not in seen:
-                seen.add(q)
-                final.append(q)
-        return final[:3]
+        Instead of round-robin across topics, we use typed priority slots:
+        - Slot 1: Core Claim (Event query) - most important
+        - Slot 2: Numeric/Timeline Claim (if available)
+        - Slot 3: Attribution/Quote Claim (if available)
+        - Slot 4+: Next Core from different topic_group (if budget allows)
+        
+        Sidefacts are SKIPPED entirely to save search budget.
+        
+        Args:
+            claims: List of Claim objects with type, topic_group, check_worthiness
+            max_queries: Maximum queries to return
+            fact_fallback: Fallback text if no claims/queries available
+            
+        Returns:
+            List of diverse search queries (max max_queries)
+        """
+        if not claims:
+            return [normalize_search_query(fact_fallback[:200])] if fact_fallback else []
+        
+        # 1. Filter claims
+        MIN_WORTHINESS = 0.4
+        eligible_claims = [
+            c for c in claims 
+            if c.get("type") != "sidefact"  # Skip sidefacts entirely
+            and c.get("check_worthiness", c.get("importance", 0.5)) >= MIN_WORTHINESS
+        ]
+        
+        if not eligible_claims:
+            # Fallback: take highest importance claim even if below threshold
+            eligible_claims = sorted(
+                [c for c in claims if c.get("type") != "sidefact"],
+                key=lambda c: c.get("importance", 0), 
+                reverse=True
+            )[:1]
+            if not eligible_claims:
+                eligible_claims = claims[:1]
+            logger.info("[M62] All claims below threshold or sidefacts, using highest importance")
+        
+        # 2. Categorize by type
+        core_claims = [c for c in eligible_claims if c.get("type") == "core"]
+        numeric_timeline = [c for c in eligible_claims if c.get("type") in ("numeric", "timeline")]
+        attribution = [c for c in eligible_claims if c.get("type") == "attribution"]
+        
+        # Sort each category by importance (descending)
+        core_claims.sort(key=lambda c: c.get("importance", 0), reverse=True)
+        numeric_timeline.sort(key=lambda c: c.get("importance", 0), reverse=True)
+        attribution.sort(key=lambda c: c.get("importance", 0), reverse=True)
+        
+        # 3. Build priority slot queue
+        slot_queue: list[dict] = []
+        
+        # Slot 1: Core Claim (mandatory if exists)
+        if core_claims:
+            slot_queue.append(core_claims[0])
+        
+        # Slot 2: Numeric/Timeline Claim (if exists)
+        if numeric_timeline:
+            slot_queue.append(numeric_timeline[0])
+        
+        # Slot 3: Attribution Claim (if exists)
+        if attribution:
+            slot_queue.append(attribution[0])
+        
+        # Slot 4+: Additional Core claims from DIFFERENT topic groups
+        if len(slot_queue) < max_queries and len(core_claims) > 1:
+            seen_topics = {slot_queue[0].get("topic_group", "Other")} if slot_queue else set()
+            
+            for c in core_claims[1:]:
+                if len(slot_queue) >= max_queries:
+                    break
+                topic = c.get("topic_group", "Other")
+                if topic not in seen_topics:
+                    slot_queue.append(c)
+                    seen_topics.add(topic)
+        
+        # 4. Extract queries from slot queue
+        selected_queries: list[str] = []
+        seen_queries: set[str] = set()
+        
+        for claim in slot_queue[:max_queries]:
+            queries = claim.get("search_queries", [])
+            
+            # Use Event-Based query (index 1) as primary, fallback to index 0
+            query_idx = 1 if len(queries) > 1 else 0
+            if query_idx < len(queries):
+                raw_query = queries[query_idx]
+                normalized = normalize_search_query(raw_query)
+                
+                if normalized and normalized not in seen_queries:
+                    selected_queries.append(normalized)
+                    seen_queries.add(normalized)
+                    claim_type = claim.get("type", "?")
+                    claim_topic = claim.get("topic_group", "?")
+                    logger.debug(
+                        "[M62] Slot %d: type=%s, topic=%s, query=%s",
+                        len(selected_queries), claim_type, claim_topic, normalized[:50]
+                    )
+        
+        # 5. Fill remaining slots if we have fewer queries than slots
+        if len(selected_queries) < max_queries:
+            # Try to get any remaining queries from eligible claims
+            for c in eligible_claims:
+                if len(selected_queries) >= max_queries:
+                    break
+                for q in c.get("search_queries", []):
+                    if len(selected_queries) >= max_queries:
+                        break
+                    normalized = normalize_search_query(q)
+                    if normalized and normalized not in seen_queries:
+                        selected_queries.append(normalized)
+                        seen_queries.add(normalized)
+        
+        # 6. Fallback if no queries selected
+        if not selected_queries:
+            if fact_fallback:
+                selected_queries = [normalize_search_query(fact_fallback[:200])]
+        
+        # Log summary
+        slot_types = [c.get("type", "?") for c in slot_queue[:len(selected_queries)]]
+        logger.info(
+            "[M62] Query selection: %d eligible claims -> %d queries. Slot types: %s",
+            len(eligible_claims), len(selected_queries), slot_types
+        )
+        
+        return selected_queries[:max_queries]
 
     def _can_add_search(self, model, search_type, max_cost):
         # Speculative cost check

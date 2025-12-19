@@ -149,16 +149,21 @@ Global Confidence Cap: {global_cap}
                 trace_kind="score_evidence",
             )
             
-            # --- Aggregation Logic (T3) ---
+            # --- Aggregation Logic (T3) + M62 Hard Caps ---
             claim_verdicts = result.get("claim_verdicts", [])
             
             # 1. Map scores to claims to get importance
             weighted_sum = 0.0
             total_importance = 0.0
             core_refuted = False
+            caps_applied = []
             
             # Lookup map for claims
             claims_map = {c["id"]: c for c in (pack.get("claims") or [])}
+            
+            # M62: Get per-claim metrics for hard caps
+            metrics = pack.get("metrics", {})
+            per_claim_metrics = metrics.get("per_claim", {})
             
             for cv in claim_verdicts:
                 cid = cv.get("claim_id")
@@ -167,6 +172,37 @@ Global Confidence Cap: {global_cap}
                 
                 if claim_obj:
                     imp = float(claim_obj.get("importance", 0.5))
+                    
+                    # M62: Apply Hard Caps based on evidence quality
+                    claim_metrics = per_claim_metrics.get(cid, {})
+                    original_score = score
+                    cap_reason = None
+                    
+                    # Cap 1: Insufficient independent sources
+                    independent_domains = claim_metrics.get("independent_domains", 0)
+                    if independent_domains < 2 and score > 0.65:
+                        score = 0.65
+                        cap_reason = f"<2 independent domains ({independent_domains})"
+                    
+                    # Cap 2: Numeric claim without primary source
+                    claim_type = claim_obj.get("type", "core")
+                    has_primary = claim_metrics.get("primary_present", False)
+                    if claim_type == "numeric" and not has_primary and score > 0.60:
+                        score = 0.60
+                        cap_reason = "numeric claim, no primary source"
+                    
+                    if cap_reason and original_score != score:
+                        logger.info(
+                            "[M62] Cap applied to %s: %.2f -> %.2f (%s)",
+                            cid, original_score, score, cap_reason
+                        )
+                        caps_applied.append({
+                            "claim_id": cid,
+                            "original": original_score,
+                            "capped": score,
+                            "reason": cap_reason
+                        })
+                    
                     weighted_sum += score * imp
                     total_importance += imp
                     
@@ -191,6 +227,10 @@ Global Confidence Cap: {global_cap}
                 result["rationale"] = f"[Core Claim Refuted] {result.get('rationale', '')}"
 
             result["verified_score"] = final_v_score
+            
+            # M62: Record caps applied for transparency
+            if caps_applied:
+                result["caps_applied"] = caps_applied
             
             # Post-clamp to ensure LLM respected the cap (T165)
             v_score = float(result.get("verified_score", 0.5))

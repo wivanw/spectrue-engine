@@ -25,10 +25,16 @@ class TestScoringSkill:
         }
         
         # Provide claim in pack so importance weighting works
+        # M62: Include metrics with sufficient independent_domains to avoid hard caps
         pack = {
             "original_fact": "Test", 
             "search_results": [],
-            "claims": [{"id": "c1", "importance": 1.0, "type": "core"}]
+            "claims": [{"id": "c1", "importance": 1.0, "type": "core"}],
+            "metrics": {
+                "per_claim": {
+                    "c1": {"independent_domains": 3, "primary_present": True}
+                }
+            }
         }
         result = await skill.score_evidence(pack)
         

@@ -72,12 +72,16 @@ class EvidenceRequirement(TypedDict, total=False):
 class Claim(TypedDict, total=False):
     """A single atomic claim extracted from the article."""
     id: str                         # Unique claim ID (c1, c2, ...)
-    text: str                       # The claim text
+    text: str                       # The claim text (may contain pronouns)
     type: ClaimType                 # Claim classification
     importance: float               # 0-1, how critical to main thesis
     evidence_requirement: EvidenceRequirement
     search_queries: list[str]       # Generated queries for this claim
     check_oracle: bool              # T10: Should this specific claim be checked against Oracle?
+    # M62: Context-aware atomization fields
+    normalized_text: str            # Self-sufficient statement with pronouns resolved
+    topic_group: str                # Topic tag (e.g., "Economy", "War", "Science")
+    check_worthiness: float         # 0-1, how important to verify (filters opinions)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -115,6 +119,9 @@ class ClaimMetrics(TypedDict, total=False):
     stance_distribution: dict[str, int]  # {"support": 3, "contradict": 1, ...}
     coverage: float                 # 0-1, how well is claim covered?
     freshness_days_median: int | None
+    # M62: Additional claim metadata for scoring
+    topic_group: str | None         # Topic category from claim extraction
+    claim_type: str | None          # Claim type (core, numeric, etc.)
 
 
 class EvidenceGap(TypedDict, total=False):
