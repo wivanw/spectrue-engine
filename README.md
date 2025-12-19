@@ -17,6 +17,105 @@ This library provides the core logic for multi-agent fact-checking, web-based ve
 - **RGBA Analysis**: Returns orthogonal scores for Relevance, Veracity, Bias, and Authority
 - **Cloud-Native**: Fully web-based verification (Tavily + Google Fact Check)
 
+## 🔄 Verification Pipeline
+
+The core verification process follows this pipeline:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     INPUT (URL or Text)                         │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  1. CLAIM EXTRACTION                                            │
+│     • LLM extracts atomic verifiable claims                     │
+│     • Each claim gets: normalized_text, topic_group,            │
+│       check_worthiness, search_strategy                         │
+│     • "Search Strategist" approach: LLM reasons about           │
+│       intent, authority, language, risks (Chain of Thought)     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  2. ORACLE CHECK (Fast Path)                                    │
+│     • Queries Google Fact Check API for viral rumors            │
+│     • If match found → immediate return with cached verdict     │
+│     • Saves API quota for novel claims                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  3. QUERY SELECTION                                             │
+│     • Typed priority slots:                                     │
+│       Slot 1: Core Claim                                        │
+│       Slot 2: Numeric/Timeline Claim                            │
+│       Slot 3: Attribution/Quote Claim                           │
+│     • Sidefacts are SKIPPED (background info, common knowledge) │
+│     • Filter by check_worthiness threshold (< 0.4 = skip)       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  4. SEARCH WATERFALL                                            │
+│     • Tier 1: Trusted domains (Reuters, AP, gov sites)          │
+│     • Tier 2: General search (if T1 insufficient)               │
+│     • CSE Fallback: Google Custom Search (if Tavily empty)      │
+│     • Extracts full text from top results                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  5. STANCE CLUSTERING                                           │
+│     • LLM maps search results to claims                         │
+│     • Assigns stance: support | contradict | irrelevant         │
+│     • Calculates relevance score per source-claim pair          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  6. EVIDENCE PACK BUILDING                                      │
+│     • Structures evidence for LLM scorer                        │
+│     • Computes per-claim metrics:                               │
+│       - independent_domains, primary_present, official_present  │
+│       - stance_distribution, coverage                           │
+│     • Sets confidence constraints based on evidence quality     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  7. SCORING (LLM)                                               │
+│     • Generates verdict per-claim                               │
+│     • Aggregates to verified_score (importance-weighted)        │
+│     • Applies Hard Caps (Python, not LLM):                      │
+│       - < 2 independent domains → max 0.65                      │
+│       - Numeric claim no primary → max 0.60                     │
+│     • Core claim refuted → global cap 0.25                      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       OUTPUT (Result)                           │
+│  verified_score, confidence_score, danger_score,                │
+│  rationale, claim_verdicts, sources, caps_applied               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## 🧠 Design Philosophy
+
+### LLM as Search Strategist
+
+**При роботі з кодом пошукової системи треба опиратись не на евристику і конкретні приклади, а делегувати ці задачі LLM для покращення результатів.**
+
+This means:
+- ❌ **NO hardcoded `if/else`** for "if science → search English"
+- ❌ **NO domain-specific heuristics** like keyword lists
+- ✅ **LLM reasons** about intent, authority, language, risks
+- ✅ **Chain of Thought prompts** force LLM to explain before generating
+- ✅ **Python only for**: filtering, caps enforcement, API calls
+
+**Why?** LLM generalizes to new domains (K-Pop → Korean, Cricket → Hindi) without code changes.
+
 ## 📋 Requirements
 
 - **Python**: 3.10 or higher
@@ -73,10 +172,21 @@ print(f"Analysis: {result['rationale']}")
 spectrue_core/
 ├── engine.py              # Main entry point
 ├── config.py              # Configuration management
-├── agents/                # LLM agents (fact checker, query generator)
-├── analysis/              # Text analysis and parsing
-├── verification/          # Fact verification logic
-└── tools/                 # Search tools (Tavily, Google FC)
+├── agents/                # LLM agents
+│   └── skills/            # Modular skills
+│       ├── claims.py      # Claim extraction + Search Strategist
+│       ├── clustering.py  # Stance clustering
+│       ├── scoring.py     # Evidence scoring + Hard Caps
+│       └── query.py       # Query generation (legacy)
+├── verification/          # Verification pipeline
+│   ├── pipeline.py        # Main orchestrator
+│   ├── evidence.py        # Evidence pack builder
+│   ├── evidence_pack.py   # Data structures (TypedDicts)
+│   └── search_mgr.py      # Search tool orchestration
+└── tools/                 # Search tools
+    ├── search_tool.py     # Tavily API
+    ├── google_fact_check.py  # Google Fact Check API
+    └── google_cse_search.py  # Google Custom Search
 ```
 
 ## 🔧 Configuration
@@ -111,7 +221,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 5. Lint: `ruff check .`
 6. Submit a Pull Request
 
-## �� License
+## 📜 License
 
 This project is licensed under the **GNU Affero General Public License v3 (AGPLv3)**.
 
