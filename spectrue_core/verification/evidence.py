@@ -1,10 +1,11 @@
 from spectrue_core.verification.evidence_pack import (
     ArticleContext, Claim, ClaimMetrics, ConfidenceConstraints,
-    EvidenceMetrics, EvidencePack, SearchResult
+    EvidenceMetrics, EvidencePack, SearchResult, AssertionMetrics
 )
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.trusted_sources import get_tier_ceiling_for_domain
+from typing import Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ def build_evidence_pack(
     search_results_clustered: list[SearchResult] | None = None,
     article_context: ArticleContext | None = None,
     content_lang: str | None = None,
+    claim_units: list[Any] | None = None,  # M70: Structured ClaimUnits
 ) -> EvidencePack:
     """
     Build structured Evidence Pack for LLM scorer.
@@ -168,6 +170,50 @@ def build_evidence_pack(
             claim_type=claim.get("type"),
         )
     
+    # M70: Per-Assertion Metrics
+    assertion_metrics: dict[str, AssertionMetrics] = {}
+    if claim_units:
+        # Map all assertions
+        all_assertions = []
+        for cu in claim_units:
+            all_assertions.extend(cu.assertions)
+            
+        for assertion in all_assertions:
+            akey = assertion.key
+            # Filter evidence for this assertion
+            a_evidence = [
+                r for r in search_results 
+                if r.get("assertion_key") == akey
+            ]
+            
+            support = sum(1 for r in a_evidence if r.get("stance") == "SUPPORT")
+            refute = sum(1 for r in a_evidence if r.get("stance") == "REFUTE")
+            unavailable = sum(1 for r in a_evidence if r.get("content_status") == "unavailable")
+            
+            # Tiers present
+            tiers = {}
+            for r in a_evidence:
+                t = (r.get("source_type") or "").upper()
+                # Rough mapping back to tiers if needed, or rely on evidence_tier if present in SearchResult (it's not by default, purely derived)
+                # Actually SearchResult doesn't have evidence_tier, it has source_type.
+                # Let's map source_type to tier for metrics
+                tier = "C"
+                if r.get("is_trusted"): tier = "B"
+                if r.get("source_type") == "primary": tier = "A"
+                if r.get("source_type") == "official": tier = "A'"
+                if r.get("source_type") == "social": tier = "D"
+                
+                tiers[tier] = tiers.get(tier, 0) + 1
+                
+            assertion_metrics[akey] = AssertionMetrics(
+                support_count=support,
+                refute_count=refute,
+                tier_coverage=tiers,
+                primary_present=any(r.get("source_type") == "primary" for r in a_evidence),
+                official_present=any(r.get("source_type") == "official" for r in a_evidence),
+                content_unavailable_count=unavailable,
+            )
+    
     # Overall coverage
     coverages = [m.get("coverage", 0) for m in claim_metrics.values()]
     overall_coverage = sum(coverages) / len(coverages) if coverages else 0.0
@@ -180,6 +226,7 @@ def build_evidence_pack(
         overall_coverage=overall_coverage,
         freshness_days_median=None,
         source_type_distribution=type_dist,
+        per_assertion=assertion_metrics, # M70
     )
     
     # 5. Initialize confidence constraints (Code is Law: M67)
@@ -219,6 +266,7 @@ def build_evidence_pack(
         article=article_context,
         original_fact=fact,
         claims=claims,
+        claim_units=claim_units, # M70
         search_results=search_results,
         metrics=evidence_metrics,
         constraints=constraints,

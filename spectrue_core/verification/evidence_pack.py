@@ -11,7 +11,7 @@ Philosophy:
 - LLM = judge with constraints (verdict, explanation)
 """
 
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, Any
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -192,6 +192,13 @@ class SearchResult(TypedDict, total=False):
     is_trusted: bool                # From trusted sources registry
     is_duplicate: bool              # Content duplicate of another result
     duplicate_of: str | None        # URL of original if duplicate
+    
+    # M70: Assertion-level mapping
+    assertion_key: str | None       # Which assertion this evidence maps to (e.g., "event.location.city")
+    
+    # M70: Content availability status
+    content_status: Literal["available", "unavailable", "blocked", "error"]
+    unavailable_reason: str | None  # Why content couldn't be retrieved
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +218,16 @@ class ClaimMetrics(TypedDict, total=False):
     claim_type: str | None          # Claim type (core, numeric, etc.)
 
 
+class AssertionMetrics(TypedDict, total=False):
+    """M70: Metrics for a single assertion (field-level fact)."""
+    support_count: int              # Number of supporting sources
+    refute_count: int               # Number of refuting sources
+    tier_coverage: dict[str, int]   # Tiers present (A, B, C, D)
+    primary_present: bool
+    official_present: bool
+    content_unavailable_count: int  # M70: Count of sources with unavailable content
+
+
 class EvidenceGap(TypedDict, total=False):
     """A detected gap in evidence for a claim."""
     claim_id: str                   # Which claim has the gap
@@ -226,6 +243,7 @@ class EvidenceMetrics(TypedDict, total=False):
     unique_domains: int
     duplicate_ratio: float          # % of sources that are duplicates
     per_claim: dict[str, ClaimMetrics]  # claim_id -> metrics
+    per_assertion: dict[str, AssertionMetrics]  # assertion_key -> metrics (M70)
     overall_coverage: float         # Average coverage across claims
     freshness_days_median: int | None
     source_type_distribution: dict[str, int]
@@ -269,6 +287,7 @@ class EvidencePack(TypedDict, total=False):
 
     # Claims (multi-claim extraction)
     claims: list[Claim]
+    claim_units: list[Any] | None   # M70: Structured ClaimUnits (Pydantic objects)
 
     # Evidence
     search_results: list[SearchResult]

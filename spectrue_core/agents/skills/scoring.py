@@ -9,6 +9,16 @@ import json
 import hashlib
 import re
 
+# M70: Schema imports for structured scoring
+from spectrue_core.schema import (
+    ClaimUnit,
+    StructuredVerdict,
+    ClaimVerdict,
+    AssertionVerdict,
+    VerdictStatus,
+    StructuredDebug,
+)
+
 # Constants for input safety (Defensive Programming)
 MAX_SNIPPET_LEN = 600
 MAX_QUOTE_LEN = 300
@@ -364,8 +374,8 @@ Return JSON.
             logger.exception("[GPT] ✗ Error calling %s: %s", gpt_model, e)
             Trace.event("llm.error", {"kind": "analysis", "error": str(e)})
             return {
-                "verified_score": 0.5, "context_score": 0.5, "danger_score": 0.0,
-                "style_score": 0.5, "confidence_score": 0.2, "rationale_key": "errors.agent_call_failed"
+                "verified_score": -1.0, "context_score": -1.0, "danger_score": -1.0,
+                "style_score": -1.0, "confidence_score": -1.0, "rationale_key": "errors.agent_call_failed"
             }
 
         if "rationale" in result:
@@ -386,3 +396,331 @@ Return JSON.
              result["analysis"] = self._strip_internal_source_markers(result["analysis"])
 
         return result
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # M70: Schema-First Scoring (Per-Assertion Verdicts)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    async def score_evidence_structured(
+        self,
+        claim_units: list[ClaimUnit],
+        evidence: list[dict],
+        *,
+        model: str = "gpt-5.2",
+        lang: str = "en",
+    ) -> StructuredVerdict:
+        """
+        M70: Score claims with per-assertion verdicts.
+        
+        Key Design:
+        - FACT assertions: Strictly verified (can be VERIFIED/REFUTED/AMBIGUOUS)
+        - CONTEXT assertions: Soft verification (only VERIFIED/AMBIGUOUS, rarely REFUTED)
+        - CRITICAL: CONTEXT evidence cannot refute FACT assertions
+        - Scores use -1.0 sentinel for "not computed"
+        
+        Args:
+            claim_units: List of structured ClaimUnit objects
+            evidence: List of evidence dicts with assertion_key
+            model: LLM model to use
+            lang: Output language for rationale
+            
+        Returns:
+            StructuredVerdict with per-claim and per-assertion verdicts
+        """
+        lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
+        
+        if not claim_units:
+            return StructuredVerdict(
+                verified_score=-1.0,
+                explainability_score=-1.0,
+                danger_score=-1.0,
+                style_score=-1.0,
+                rationale="No claims to verify.",
+            )
+        
+        # --- 1. PREPARE CLAIMS WITH ASSERTIONS ---
+        claims_data = []
+        for unit in claim_units:
+            assertions_data = []
+            for a in unit.assertions:
+                assertions_data.append({
+                    "key": a.key,
+                    "value": str(a.value) if a.value else "",
+                    "dimension": a.dimension.value,  # FACT / CONTEXT / INTERPRETATION
+                    "importance": a.importance,
+                    "is_inferred": a.is_inferred,
+                })
+            
+            claims_data.append({
+                "id": unit.id,
+                "text": sanitize_input(unit.text or unit.normalized_text),
+                "type": unit.claim_type.value,
+                "importance": unit.importance,
+                "assertions": assertions_data,
+            })
+        
+        # --- 2. PREPARE EVIDENCE BY ASSERTION ---
+        evidence_by_assertion: dict[str, list[dict]] = {}
+        for e in evidence:
+            if not isinstance(e, dict):
+                continue
+            
+            claim_id = e.get("claim_id", "")
+            assertion_key = e.get("assertion_key", "")
+            map_key = f"{claim_id}:{assertion_key}" if assertion_key else claim_id
+            
+            if map_key not in evidence_by_assertion:
+                evidence_by_assertion[map_key] = []
+            
+            raw_content = e.get("content_excerpt") or e.get("snippet") or ""
+            safe_content = sanitize_input(raw_content)[:MAX_SNIPPET_LEN]
+            
+            key_snippet = e.get("key_snippet") or e.get("quote")
+            stance = e.get("stance", "MENTION")
+            
+            if key_snippet and stance in ["SUPPORT", "REFUTE", "MIXED"]:
+                safe_quote = sanitize_input(key_snippet)[:MAX_QUOTE_LEN]
+                content_text = f'📌 QUOTE: "{safe_quote}"\nℹ️ CONTEXT: {safe_content}'
+            else:
+                content_text = safe_content
+            
+            evidence_by_assertion[map_key].append({
+                "domain": e.get("domain"),
+                "stance": stance,
+                "content_status": e.get("content_status", "available"),
+                "excerpt": content_text,
+                "is_trusted": e.get("is_trusted", False),
+            })
+        
+        # --- 3. SYSTEM PROMPT (Schema-First) ---
+        instructions = f"""You are the Spectrue Schema-First Verdict Engine.
+Your task is to score each ASSERTION individually, then aggregate to claim and global verdicts.
+
+# CRITICAL RULES
+
+## DIMENSION HANDLING
+1. **FACT assertions**: Strictly verify. Can be VERIFIED, REFUTED, or AMBIGUOUS.
+2. **CONTEXT assertions**: Soft verify. Only VERIFIED or AMBIGUOUS. Rarely REFUTED.
+3. **🚨 GOLDEN RULE**: CONTEXT evidence CANNOT refute FACT assertions!
+   - If time_reference says "Ukraine time" but event is in "Miami" → location is still a FACT
+   - Time context doesn't contradict location facts
+
+## SCORING SCALE (0.0 - 1.0)
+- **0.8 - 1.0**: Verified (strong evidence confirms)
+- **0.6 - 0.8**: Likely verified (supported but not definitive)
+- **0.4 - 0.6**: Ambiguous (insufficient evidence)
+- **0.2 - 0.4**: Unlikely (evidence suggests doubt)
+- **0.0 - 0.2**: Refuted (evidence contradicts)
+
+## AGGREGATION
+1. Score each assertion independently
+2. Claim verdict = importance-weighted mean of FACT assertion scores
+3. CONTEXT assertions are modifiers, not drivers
+4. Global verified_score = importance-weighted mean of claim verdicts
+
+## CONTENT_UNAVAILABLE Handling
+If evidence has `content_status: "unavailable"`:
+- Lower explainability_score (we couldn't read the source)
+- Assertion stays AMBIGUOUS, NOT refuted
+- This is NOT evidence against the claim
+
+# OUTPUT FORMAT
+```json
+{{
+  "claim_verdicts": [
+    {{
+      "claim_id": "c1",
+      "verdict_score": 0.85,
+      "status": "verified",
+      "assertion_verdicts": [
+        {{
+          "assertion_key": "event.location.city",
+          "dimension": "FACT",
+          "score": 0.9,
+          "status": "verified",
+          "evidence_count": 2,
+          "rationale": "Multiple sources confirm Miami"
+        }},
+        {{
+          "assertion_key": "event.time_reference",
+          "dimension": "CONTEXT",
+          "score": 0.8,
+          "status": "verified",
+          "evidence_count": 1,
+          "rationale": "Time zone context verified"
+        }}
+      ],
+      "reason": "Location and timing confirmed by official sources."
+    }}
+  ],
+  "verified_score": 0.85,
+  "explainability_score": 0.9,
+  "danger_score": 0.1,
+  "style_score": 0.9,
+  "rationale": "Global summary in {lang_name}..."
+}}
+```
+
+Write rationale and reason in **{lang_name}** ({lang}).
+Return valid JSON.
+"""
+
+        # --- 4. USER PROMPT ---
+        prompt = f"""Score these claims with per-assertion verdicts.
+
+Claims with Assertions:
+{json.dumps(claims_data, indent=2, ensure_ascii=False)}
+
+Evidence by Assertion:
+{json.dumps(evidence_by_assertion, indent=2, ensure_ascii=False)}
+
+Remember: CONTEXT cannot refute FACT. Score each assertion independently.
+Return JSON.
+"""
+
+        # Cache key
+        prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
+        cache_key = f"score_struct_v1_{prompt_hash}"
+
+        try:
+            m = model if "gpt-5" in model or "o1" in model else "gpt-5.2"
+
+            result = await self.llm_client.call_json(
+                model=m,
+                input=prompt,
+                instructions=instructions,
+                reasoning_effort="medium",
+                cache_key=cache_key,
+                timeout=float(self.runtime.llm.timeout_sec),
+                trace_kind="score_evidence_structured",
+            )
+
+            # --- 5. PARSE LLM RESPONSE INTO StructuredVerdict ---
+            return self._parse_structured_verdict(result, lang=lang)
+
+        except Exception as e:
+            logger.exception("[M70 Scoring] Failed: %s", e)
+            Trace.event("llm.error", {"kind": "score_evidence_structured", "error": str(e)})
+            return StructuredVerdict(
+                verified_score=-1.0,
+                explainability_score=-1.0,
+                danger_score=-1.0,
+                style_score=-1.0,
+                rationale="Error during analysis.",
+                structured_debug=StructuredDebug(
+                    processing_notes=[f"LLM error: {str(e)}"]
+                ),
+            )
+
+    def _parse_structured_verdict(self, raw: dict, *, lang: str = "en") -> StructuredVerdict:
+        """
+        M70: Parse LLM response into StructuredVerdict.
+        
+        Uses -1.0 sentinel for missing scores.
+        """
+        def safe_score(val, default=-1.0) -> float:
+            try:
+                f = float(val)
+            except (TypeError, ValueError):
+                return default
+            if default < 0 and (f < 0.0 or f > 1.0):
+                return default
+            return max(0.0, min(1.0, f))
+
+        def parse_status(s: str) -> VerdictStatus:
+            s_lower = (s or "").lower()
+            if s_lower in ("verified", "confirmed"):
+                return VerdictStatus.VERIFIED
+            elif s_lower in ("refuted", "false"):
+                return VerdictStatus.REFUTED
+            elif s_lower == "partially_verified":
+                return VerdictStatus.PARTIALLY_VERIFIED
+            elif s_lower == "unverified":
+                return VerdictStatus.UNVERIFIED
+            else:
+                return VerdictStatus.AMBIGUOUS
+
+        # Parse claim verdicts
+        claim_verdicts: list[ClaimVerdict] = []
+        raw_claims = raw.get("claim_verdicts", [])
+        
+        if isinstance(raw_claims, list):
+            for rc in raw_claims:
+                if not isinstance(rc, dict):
+                    continue
+
+                # Parse assertion verdicts
+                assertion_verdicts: list[AssertionVerdict] = []
+                raw_assertions = rc.get("assertion_verdicts", [])
+                
+                fact_verified = 0
+                fact_total = 0
+                
+                if isinstance(raw_assertions, list):
+                    for ra in raw_assertions:
+                        if not isinstance(ra, dict):
+                            continue
+                        
+                        dim = (ra.get("dimension") or "FACT").upper()
+                        if dim == "FACT":
+                            fact_total += 1
+                            score = safe_score(ra.get("score"), default=-1.0)
+                            if score >= 0.6:
+                                fact_verified += 1
+                        
+                        assertion_verdicts.append(AssertionVerdict(
+                            assertion_key=ra.get("assertion_key", ""),
+                            dimension=dim,
+                            status=parse_status(ra.get("status", "")),
+                            score=safe_score(ra.get("score"), default=-1.0),
+                            evidence_count=int(ra.get("evidence_count", 0)),
+                            supporting_urls=ra.get("supporting_urls", []),
+                            rationale=ra.get("rationale", ""),
+                        ))
+
+                claim_verdicts.append(ClaimVerdict(
+                    claim_id=rc.get("claim_id", ""),
+                    status=parse_status(rc.get("status", "")),
+                    verdict_score=safe_score(rc.get("verdict_score"), default=-1.0),
+                    assertion_verdicts=assertion_verdicts,
+                    evidence_count=int(rc.get("evidence_count", 0)),
+                    fact_assertions_verified=fact_verified,
+                    fact_assertions_total=fact_total,
+                    reason=rc.get("reason", ""),
+                    key_evidence=rc.get("key_evidence", []),
+                ))
+
+        # Parse global scores
+        verified = safe_score(raw.get("verified_score"), default=-1.0)
+        explainability = safe_score(raw.get("explainability_score"), default=-1.0)
+        danger = safe_score(raw.get("danger_score"), default=-1.0)
+        style = safe_score(raw.get("style_score"), default=-1.0)
+
+        # Fallback: if verified_score missing, calculate from claim verdicts
+        if verified < 0 and claim_verdicts:
+            scores = [(cv.verdict_score, 1.0) for cv in claim_verdicts if cv.verdict_score >= 0]
+            if scores:
+                total_weight = sum(w for _, w in scores)
+                if total_weight > 0:
+                    verified = sum(s * w for s, w in scores) / total_weight
+
+        # Clean rationale
+        rationale = self._strip_internal_source_markers(str(raw.get("rationale", "")))
+        rationale = self._maybe_drop_style_section(rationale, honesty_score=style, lang=lang)
+
+        # Build debug info
+        debug = StructuredDebug(
+            per_claim={cv.claim_id: {"score": cv.verdict_score, "status": cv.status.value} for cv in claim_verdicts},
+            content_unavailable_count=0,  # TODO: count from evidence
+        )
+
+        return StructuredVerdict(
+            claim_verdicts=claim_verdicts,
+            verified_score=verified,
+            explainability_score=explainability,
+            danger_score=danger,
+            style_score=style,
+            rationale=rationale,
+            structured_debug=debug,
+            overall_confidence=verified,  # Legacy compat
+        )

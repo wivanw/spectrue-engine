@@ -1067,3 +1067,166 @@ class ValidationPipeline:
             }
         }
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # M70: Schema-First Query Generation (Assertion-Based)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _select_queries_from_claim_units(
+        self,
+        claim_units: list,
+        max_queries: int = 3,
+        fact_fallback: str = "",
+    ) -> list[str]:
+        """
+        M70: Generate search queries from structured ClaimUnits.
+        
+        Key difference from legacy:
+        - Only FACT assertions generate verification queries
+        - CONTEXT assertions are informational (no refutation search)
+        - Queries are built from assertion_key + value
+        
+        Args:
+            claim_units: List of ClaimUnit objects (from schema)
+            max_queries: Maximum queries to return
+            fact_fallback: Fallback text if no queries generated
+            
+        Returns:
+            List of search queries
+        """
+        from spectrue_core.schema import ClaimUnit, Dimension
+        
+        if not claim_units:
+            return [normalize_search_query(fact_fallback[:200])] if fact_fallback else []
+        
+        queries: list[str] = []
+        
+        for unit in claim_units:
+            if not isinstance(unit, ClaimUnit):
+                continue
+                
+            # Only FACT assertions get verification queries
+            fact_assertions = unit.get_fact_assertions()
+            
+            for assertion in fact_assertions:
+                if len(queries) >= max_queries:
+                    break
+                    
+                query = self._build_assertion_query(unit, assertion)
+                if query:
+                    normalized = self._normalize_and_sanitize(query)
+                    if normalized and not self._is_fuzzy_duplicate(normalized, queries, threshold=0.9):
+                        queries.append(normalized)
+                        logger.debug(
+                            "[M70] Assertion query: key=%s, query=%s",
+                            assertion.key, normalized[:50]
+                        )
+        
+        # Fallback if no queries generated
+        if not queries:
+            # Try to use claim text
+            for unit in claim_units:
+                if isinstance(unit, ClaimUnit) and unit.text:
+                    return [normalize_search_query(unit.text[:200])]
+            # Last resort: fact_fallback
+            if fact_fallback:
+                return [normalize_search_query(fact_fallback[:200])]
+        
+        logger.info(
+            "[M70] Query selection: %d claims, %d FACT queries generated",
+            len(claim_units), len(queries)
+        )
+        
+        return queries[:max_queries]
+
+    def _build_assertion_query(self, unit, assertion) -> str | None:
+        """
+        M70: Build search query for a specific assertion.
+        
+        Query structure: "{subject} {assertion.value} {context}"
+        
+        Examples:
+        - event.location.city: "Joshua Paul fight Miami official location"
+        - numeric.value: "Bitcoin price $42000 official"
+        - event.time: "Joshua Paul fight March 2025 date confirmed"
+        
+        Args:
+            unit: ClaimUnit containing the assertion
+            assertion: Assertion to build query for
+            
+        Returns:
+            Search query string or None
+        """
+        from spectrue_core.schema import Assertion, Dimension
+        
+        if not isinstance(assertion, Assertion):
+            return None
+            
+        # Don't generate queries for CONTEXT (they're informational)
+        if assertion.dimension == Dimension.CONTEXT:
+            return None
+        
+        parts: list[str] = []
+        
+        # Add subject if available
+        if unit.subject:
+            parts.append(unit.subject)
+        
+        # Add object if available (often the other party)
+        if unit.object:
+            parts.append(unit.object)
+        
+        # Add assertion value
+        if assertion.value:
+            value_str = str(assertion.value)
+            if len(value_str) < 50:  # Don't add very long values
+                parts.append(value_str)
+        
+        # Add context based on assertion key
+        key = assertion.key
+        if "location" in key:
+            parts.append("location official")
+        elif "time" in key or "date" in key:
+            parts.append("date confirmed")
+        elif "quote" in key or "attribution" in key:
+            parts.append("said statement")
+        elif "numeric" in key or "value" in key:
+            parts.append("official data")
+        else:
+            parts.append("verified")
+        
+        if not parts:
+            return None
+            
+        return " ".join(parts)
+
+    def _get_claim_units_for_evidence_mapping(
+        self,
+        claim_units: list,
+        sources: list[dict],
+    ) -> dict[str, list[str]]:
+        """
+        M70: Map sources to assertion_keys for targeted verification.
+        
+        This is used by clustering to understand which assertion
+        each piece of evidence relates to.
+        
+        Returns:
+            Dict of claim_id -> list of assertion_keys that need evidence
+        """
+        from spectrue_core.schema import ClaimUnit, Dimension
+        
+        mapping: dict[str, list[str]] = {}
+        
+        for unit in claim_units:
+            if not isinstance(unit, ClaimUnit):
+                continue
+                
+            fact_keys = [
+                a.key for a in unit.assertions
+                if a.dimension == Dimension.FACT
+            ]
+            
+            if fact_keys:
+                mapping[unit.id] = fact_keys
+        
+        return mapping

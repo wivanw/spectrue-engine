@@ -1,8 +1,10 @@
 from spectrue_core.verification.evidence_pack import Claim, SearchResult
 from spectrue_core.utils.trace import Trace
+from spectrue_core.schema import ClaimUnit
 from .base_skill import BaseSkill, logger
 import json
 import hashlib
+from typing import Union
 
 class ClusteringSkill(BaseSkill):
     """
@@ -12,14 +14,15 @@ class ClusteringSkill(BaseSkill):
 
     async def cluster_evidence(
         self,
-        claims: list[Claim],
+        claims: list[Union[ClaimUnit, dict]], # Support both M70 ClaimUnit and legacy dict
         search_results: list[dict],
     ) -> list[SearchResult]:
         """
         Cluster search results against claims using Evidence Matrix pattern.
         
-        Refactoring M68:
+        Refactoring M68/M70:
         - Maps each source to BEST claim (1:1)
+        - M70: Maps to specific `assertion_key` within the claim
         - Gates by relevance < 0.4 (DROP)
         - Filters IRRELEVANT/MENTION stances
         - Extracts quotes directly via LLM
@@ -28,33 +31,61 @@ class ClusteringSkill(BaseSkill):
             return []
         
         # 1. Prepare inputs for LLM
-        claims_lite = [{"id": c["id"], "text": c["text"]} for c in claims]
+        # Handle both ClaimUnit and legacy dicts
+        claims_lite = []
+        for c in claims:
+            if isinstance(c, ClaimUnit):
+                # M70 Structured Claim
+                assertions_lite = [
+                    {"key": a.key, "value": str(a.value)[:50]} 
+                    for a in c.assertions
+                ]
+                claims_lite.append({
+                    "id": c.id,
+                    "text": c.normalized_text or c.text,
+                    "assertions": assertions_lite
+                })
+            else:
+                # Legacy dict
+                claims_lite.append({
+                    "id": c.get("id"),
+                    "text": c.get("text"),
+                    "assertions": [] # No assertions for legacy
+                })
+
         results_lite = []
         for i, r in enumerate(search_results):
+            # M70: Handle content status hints
+            status_hint = ""
+            if r.get("content_status") == "unavailable":
+                status_hint = "[CONTENT UNAVAILABLE - JUDGE BY SNIPPET/TITLE]"
+            
             text_preview = (r.get("snippet") or "") + " " + (r.get("content") or r.get("extracted_content") or "")
             results_lite.append({
                 "index": i,
                 "domain": r.get("domain") or r.get("url"), 
                 "title": r.get("title", ""),
-                "text": text_preview[:800] # Slightly increased from 600 for better context
+                "text": f"{status_hint} {text_preview[:800]}".strip()
             })
             
         # 2. Build Prompt (Evidence Matrix Pattern)
         instructions = """You are an Evidence Analyst. 
-Your task is to map each Search Source to its BEST matching Claim from the provided list.
+Your task is to map each Search Source to its BEST matching Claim AND Assertion.
 
 ## Methodology
 1. **1:1 Mapping**: Each Source must be mapped to EXACTLY ONE Claim (the most relevant one).
-   - CRITICAL: You MUST include an entry in the matrix for EVERY source index (0 to N-1). If a source is irrelevant, explicitly return `stance: IRRELEVANT`.
+   - If a source supports/refutes a specific ASSERTION (e.g. location, time, amount), map it to that `assertion_key`.
+   - If it covers the whole claim generally, leave `assertion_key` null.
+   - CRITICAL: You MUST include an entry in the matrix for EVERY source index.
 2. **Stance Classification**:
-   - `SUPPORT`: Source confirms the claim is TRUE.
-   - `REFUTE`: Source proves the claim is FALSE.
+   - `SUPPORT`: Source confirms the claim/assertion is TRUE.
+   - `REFUTE`: Source proves the claim/assertion is FALSE.
    - `MIXED`: Source says it's complicated / partially true.
    - `MENTION`: Topic is mentioned but no clear verdict.
    - `IRRELEVANT`: Source is unrelated to any claim.
 3. **Relevance Scoring**: Assign `relevance` (0.0-1.0).
    - If relevance < 0.4, you MUST mark stance as `IRRELEVANT`.
-   - If a source is not relevant to any claim, set `claim_id: null` and `stance: IRRELEVANT`.
+   - If content is [UNAVAILABLE], judge relevance based on title/snippet. Do NOT penalize relevance just because content is missing if the source seems authoritative.
 4. **Quote Extraction**: Extract the key text segment that justifies your verdict.
 
 ## Output JSON Schema
@@ -63,7 +94,8 @@ Your task is to map each Search Source to its BEST matching Claim from the provi
   "matrix": [
     {
       "source_index": 0,
-      "claim_id": "c1" or null,
+      "claim_id": "c1",
+      "assertion_key": "event.location.city", // or null
       "stance": "SUPPORT",
       "relevance": 0.9,
       "quote": "Direct quote from text...",
@@ -136,6 +168,7 @@ Return the result in JSON format with key "matrix".
                     continue
                 
                 cid = match.get("claim_id")
+                akey = match.get("assertion_key")
                 stance = (match.get("stance") or "IRRELEVANT").upper()
                 relevance = float(match.get("relevance", 0.0))
                 quote = match.get("quote")
@@ -185,7 +218,11 @@ Return the result in JSON format with key "matrix".
                     
                     is_trusted=bool(r.get("is_trusted")),
                     is_duplicate=False,
-                    duplicate_of=None
+                    duplicate_of=None,
+                    
+                    # M70 Fields
+                    assertion_key=akey,
+                    content_status=r.get("content_status", "available"),
                 )
                 clustered_results.append(res)
             
