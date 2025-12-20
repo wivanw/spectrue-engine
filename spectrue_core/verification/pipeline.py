@@ -266,7 +266,7 @@ class ValidationPipeline:
                 query_text = (cand.get("normalized_text") or cand.get("text", "")).strip(" ,.-:;")
                 q = normalize_search_query(query_text)
                 
-                logger.info("[Pipeline] Oracle Hybrid Check: intent=%s, query=%s", article_intent, q[:50])
+                logger.info("[Pipeline] Oracle Hybrid Check: intent=%s, query=%s", article_intent, q[:300])
                 
                 # M63: Use new hybrid method with LLM validation
                 oracle_result = await self.search_mgr.check_oracle_hybrid(q, intent=article_intent)
@@ -280,7 +280,7 @@ class ValidationPipeline:
                 
                 Trace.event("pipeline.oracle_hybrid", {
                     "intent": article_intent,
-                    "query": q[:50],
+                    "query": q[:300],
                     "relevance_score": relevance,
                     "status": status,
                     "is_jackpot": is_jackpot
@@ -296,7 +296,12 @@ class ValidationPipeline:
                         "[Pipeline] 🎰 JACKPOT! Oracle hit (score=%.2f). Stopping pipeline.",
                         relevance
                     )
-                    oracle_final = await self._finalize_oracle_hybrid(oracle_result, original_fact, lang=lang)
+                    oracle_final = await self._finalize_oracle_hybrid(
+                        oracle_result, 
+                        original_fact, 
+                        lang=lang, 
+                        progress_callback=progress_callback
+                    )
                     Trace.event("pipeline.result", {
                         "type": "oracle_jackpot",
                         "verified_score": oracle_final.get("verified_score"),
@@ -442,6 +447,8 @@ class ValidationPipeline:
         # Cluster (T168)
         clustered_results = None
         if claims and final_sources:
+             if progress_callback:
+                 await progress_callback("clustering_evidence")
              clustered_results = await self.agent.cluster_evidence(claims, final_sources)
 
         # T1.2: Extract anchor claim (the main claim being verified) - moved up for Social Verification
@@ -956,10 +963,17 @@ class ValidationPipeline:
         oracle_res["search_meta"] = self.search_mgr.get_search_meta()
         return oracle_res
 
-    async def _finalize_oracle_hybrid(self, oracle_result: dict, fact: str, lang: str = "en") -> dict:
+    async def _finalize_oracle_hybrid(
+        self, 
+        oracle_result: dict, 
+        fact: str, 
+        lang: str = "en", 
+        progress_callback=None
+    ) -> dict:
         """
         M63: Format Oracle JACKPOT result for immediate return.
         M67: Added lang parameter for localization support.
+        M69: Added granular progress updates (localizing_content).
         
         Converts OracleCheckResult to FactCheckResponse format.
         """
@@ -984,6 +998,9 @@ class ValidationPipeline:
         
         # M67: Translate if non-English and translation_service available
         if lang and lang.lower() not in ("en", "en-us") and self.translation_service:
+            if progress_callback:
+                await progress_callback("localizing_content")
+            
             try:
                 analysis = await self.translation_service.translate(analysis, target_lang=lang)
                 rationale = await self.translation_service.translate(rationale, target_lang=lang)

@@ -1,8 +1,14 @@
 from spectrue_core.verification.evidence_pack import Claim, SearchResult
-from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
+from spectrue_core.utils.trace import Trace
 from .base_skill import BaseSkill, logger
+import json
+import hashlib
 
 class ClusteringSkill(BaseSkill):
+    """
+    M68: Clustering Skill with Evidence Matrix Pattern.
+    Maps sources to claims (1:1) with strict relevance gating.
+    """
 
     async def cluster_evidence(
         self,
@@ -10,61 +16,85 @@ class ClusteringSkill(BaseSkill):
         search_results: list[dict],
     ) -> list[SearchResult]:
         """
-        Cluster search results against claims using GPT-5 Nano.
+        Cluster search results against claims using Evidence Matrix pattern.
+        
+        Refactoring M68:
+        - Maps each source to BEST claim (1:1)
+        - Gates by relevance < 0.4 (DROP)
+        - Filters IRRELEVANT/MENTION stances
+        - Extracts quotes directly via LLM
         """
         if not claims or not search_results:
             return []
         
-        # Prepare inputs
+        # 1. Prepare inputs for LLM
         claims_lite = [{"id": c["id"], "text": c["text"]} for c in claims]
         results_lite = []
         for i, r in enumerate(search_results):
             text_preview = (r.get("snippet") or "") + " " + (r.get("content") or r.get("extracted_content") or "")
             results_lite.append({
                 "index": i,
-                "domain": r.get("domain") or r.get("url"), # Hint
+                "domain": r.get("domain") or r.get("url"), 
                 "title": r.get("title", ""),
-                "text": text_preview[:600] # Truncate for token efficiency
+                "text": text_preview[:800] # Slightly increased from 600 for better context
             })
-        
-        # Move static task rules to instructions (M56 Refactor)
-        # We use the UNIVERSAL_METHODOLOGY_APPENDIX to pad the prefix >1024 tokens.
-        instructions = f"""You are a stance clustering assistant. Group search results by claim relevance and stance.
+            
+        # 2. Build Prompt (Evidence Matrix Pattern)
+        instructions = """You are an Evidence Analyst. 
+Your task is to map each Search Source to its BEST matching Claim from the provided list.
 
-Task:
-For each search result, determine:
-1. `claim_id`: Which claim ID (c1, c2...) is this result most relevant to? If none, use null.
-2. `stance`: Does this source confirm ("support"), deny ("contradict"), or is it neutral/unclear ("neutral") regarding that claim?
-3. `relevance`: 0.0-1.0 score.
+## Methodology
+1. **1:1 Mapping**: Each Source must be mapped to EXACTLY ONE Claim (the most relevant one).
+   - CRITICAL: You MUST include an entry in the matrix for EVERY source index (0 to N-1). If a source is irrelevant, explicitly return `stance: IRRELEVANT`.
+2. **Stance Classification**:
+   - `SUPPORT`: Source confirms the claim is TRUE.
+   - `REFUTE`: Source proves the claim is FALSE.
+   - `MIXED`: Source says it's complicated / partially true.
+   - `MENTION`: Topic is mentioned but no clear verdict.
+   - `IRRELEVANT`: Source is unrelated to any claim.
+3. **Relevance Scoring**: Assign `relevance` (0.0-1.0).
+   - If relevance < 0.4, you MUST mark stance as `IRRELEVANT`.
+   - If a source is not relevant to any claim, set `claim_id: null` and `stance: IRRELEVANT`.
+4. **Quote Extraction**: Extract the key text segment that justifies your verdict.
 
-Output valid JSON with key "mappings" (array of objects):
-{{
-  "mappings": [
-    {{ "result_index": 0, "claim_id": "c1", "stance": "support", "relevance": 0.9 }},
-    {{ "result_index": 1, "claim_id": "c2", "stance": "neutral", "relevance": 0.4 }}
-    ...
+## Output JSON Schema
+```json
+{
+  "matrix": [
+    {
+      "source_index": 0,
+      "claim_id": "c1" or null,
+      "stance": "SUPPORT",
+      "relevance": 0.9,
+      "quote": "Direct quote from text...",
+      "reason": "Explain why..."
+    }
   ]
-}}
+}
+```"""
 
-You MUST respond in valid JSON.
+        prompt = f"""Build the Evidence Matrix for these sources.
 
-{UNIVERSAL_METHODOLOGY_APPENDIX}
+CLAIMS:
+{json.dumps(claims_lite, indent=2)}
+
+SOURCES:
+{json.dumps(results_lite, indent=2)}
+
+Return the result in JSON format with key "matrix".
 """
-        prompt = f"""Analyze the search results and match them to the most relevant CLAIM.
-Claims:
-{claims_lite}
+        
+        # Calculate cache key based on content hash (M68 Requirement: Stable SHA256)
+        content_hash = hashlib.sha256(
+            (json.dumps(claims_lite, sort_keys=True) + 
+             json.dumps(results_lite, sort_keys=True)).encode()
+        ).hexdigest()[:32] 
+        
+        cache_key = f"ev_mat_v1_{content_hash}"
 
-Search Results:
-{results_lite}
-"""
-        # M49/T184: Use LLMClient with Responses API + 30s timeout
-        cluster_timeout = float(getattr(self.runtime.llm, "cluster_timeout_sec", 30.0) or 30.0)
-        # Ensure timeout is at least 30s as per T184 requirement
-        cluster_timeout = max(30.0, cluster_timeout)
-
-        # M56: Fix for OpenAI 400 "Response input messages must contain the word 'json'"
-        # REQUIRED: The word "JSON" must appear in the INPUT message, not just system instructions.
-        prompt += "\n\nReturn the result in JSON format."
+        # Timeout configuration
+        cluster_timeout = float(getattr(self.runtime.llm, "cluster_timeout_sec", 35.0) or 35.0)
+        cluster_timeout = max(35.0, cluster_timeout)
 
         try:
             result = await self.llm_client.call_json(
@@ -72,76 +102,99 @@ Search Results:
                 input=prompt,
                 instructions=instructions,
                 reasoning_effort="low",
-                cache_key="stance_clustering_v3",
+                cache_key=cache_key,
                 timeout=cluster_timeout,
-                trace_kind="stance_clustering",
+                trace_kind="evidence_matrix",
             )
             
-            mappings = result.get("mappings", [])
-            mapping_dict = {m.get("result_index"): m for m in mappings if isinstance(m, dict)}
+            matrix = result.get("matrix", [])
             
+            # 3. Post-Processing Router
             clustered_results: list[SearchResult] = []
+            stats = {
+                "input_sources": len(search_results),
+                "dropped_irrelevant": 0,
+                "dropped_mention": 0,
+                "dropped_bad_id": 0,
+                "dropped_no_quote": 0,
+                "dropped_missing": 0,
+                "kept_valid": 0
+            }
+            
+            VALID_STANCES = {"SUPPORT", "REFUTE", "MIXED"}
+            
+            # Map by source_index for easy lookup
+            matrix_map = {m.get("source_index"): m for m in matrix if isinstance(m, dict)}
+            valid_claim_ids = {c["id"] for c in claims}
             
             for i, r in enumerate(search_results):
-                m = mapping_dict.get(i, {})
+                match = matrix_map.get(i)
                 
-                # Determine fields
-                cid = m.get("claim_id")
-                # validation: cid must exist in claims
-                if cid and not any(c["id"] == cid for c in claims):
-                    cid = "c1" # Fallback to first claim if invalid ID returned
-                if not cid:
-                    cid = "c1" # Default catch-all
+                # Rule 1: Missing Match (LLM broken constraint)
+                if not match:
+                    stats["dropped_missing"] += 1
+                    continue
+                
+                cid = match.get("claim_id")
+                stance = (match.get("stance") or "IRRELEVANT").upper()
+                relevance = float(match.get("relevance", 0.0))
+                quote = match.get("quote")
+                
+                # Rule 2: Invalid Claim ID / Null
+                if not cid or cid not in valid_claim_ids:
+                    stats["dropped_bad_id"] += 1
+                    # DO NOT fallback to c1 (Strict M68)
+                    continue
+                
+                # Rule 3: Relevance Gate
+                if relevance < 0.4:
+                    stats["dropped_irrelevant"] += 1
+                    continue
+                
+                # Rule 4: Stance Filter (Whitelist)
+                if stance not in VALID_STANCES:
+                    if stance == "MENTION":
+                        stats["dropped_mention"] += 1
+                    else:
+                        stats["dropped_irrelevant"] += 1
+                    continue
+                    
+                # Rule 5: Quote Mandatory
+                if not quote or not str(quote).strip():
+                    stats["dropped_no_quote"] += 1
+                    continue
 
+                stats["kept_valid"] += 1
+
+                # Construct SearchResult
                 res = SearchResult(
-                    claim_id=cid,
+                    claim_id=cid, # type: ignore
                     url=r.get("url") or r.get("link") or "",
-                    domain=r.get("domain"), # Will be enriched later if missing
-                    # ... Copy other fields ...
+                    domain=r.get("domain"),
                     title=r.get("title", ""),
                     snippet=r.get("snippet", ""),
                     content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:1500],
                     published_at=r.get("published_date"),
                     source_type=r.get("source_type", "unknown"), # type: ignore
-                    stance=m.get("stance", "neutral"), # type: ignore
-                    relevance_score=float(m.get("relevance", r.get("relevance_score", 0.0))),
-                    # ...
-                    key_snippet=None,
-                    quote_matches=[],
+                    
+                    # M68: Injected Fields
+                    stance=stance, # type: ignore
+                    relevance_score=relevance,
+                    quote_matches=[quote],
+                    key_snippet=quote,
+                    
                     is_trusted=bool(r.get("is_trusted")),
-                    is_duplicate=False, # Handled in Evidence builder
+                    is_duplicate=False,
                     duplicate_of=None
                 )
                 clustered_results.append(res)
+            
+            # 4. Telemetry
+            Trace.event("evidence.synthesis_stats", stats)
+            logger.info("[Clustering] Matrix stats: %s", stats)
                 
             return clustered_results
             
         except Exception as e:
-            logger.warning("[Clustering] ⚠️ Stance clustering LLM failed: %s. Using fallback. BUG!", e)
-            return self._fallback_cluster(claims, search_results)
-
-    def _fallback_cluster(self, claims: list[Claim], search_results: list[dict]) -> list[SearchResult]:
-        """Graceful degradation: map all results to first claim with neutral stance."""
-        clustered_results = []
-        cid = claims[0]["id"] if claims else "c1"
-        
-        for r in search_results:
-            res = SearchResult(
-                claim_id=cid,
-                url=r.get("url") or r.get("link") or "",
-                domain=r.get("domain"),
-                title=r.get("title", ""),
-                snippet=r.get("snippet", ""),
-                content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:1500],
-                published_at=r.get("published_date"),
-                source_type=r.get("source_type", "unknown"), # type: ignore
-                stance="neutral", # type: ignore
-                relevance_score=float(r.get("relevance_score", 0.5)),
-                key_snippet=None,
-                quote_matches=[],
-                is_trusted=bool(r.get("is_trusted")),
-                is_duplicate=False,
-                duplicate_of=None
-            )
-            clustered_results.append(res)
-        return clustered_results
+            logger.warning("[Clustering] ⚠️ Evidence Matrix LLM failed: %s. Returning empty evidence.", e)
+            return []

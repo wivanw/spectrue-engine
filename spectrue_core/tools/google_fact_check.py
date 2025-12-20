@@ -81,7 +81,7 @@ class GoogleFactCheckTool:
                 "pageSize": 5,
             }
 
-            Trace.event("google_fact_check.request", {"url": self.BASE_URL, "query": q[:50]})
+            Trace.event("google_fact_check.request", {"url": self.BASE_URL, "query": q[:300]})
             response = await self.client.get(self.BASE_URL, params=params)
             Trace.event(
                 "google_fact_check.response",

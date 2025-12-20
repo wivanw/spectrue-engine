@@ -5,6 +5,9 @@ from spectrue_core.verification.evidence_pack import (
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.trusted_sources import get_tier_ceiling_for_domain
+import logging
+
+logger = logging.getLogger(__name__)
 
 def build_evidence_pack(
     *,
@@ -51,8 +54,11 @@ def build_evidence_pack(
     # 3. Convert sources to SearchResult format with enrichments
     search_results: list[SearchResult] = []
         
-    if search_results_clustered:
+    # If clustering ran and returned a list (even empty), use it.
+    # Only fallback to raw sources if it returned None (error/timeout).
+    if search_results_clustered is not None:
         search_results = search_results_clustered
+        logger.info("Using clustered evidence: %d items", len(search_results))
         seen_domains = set()
         for r in search_results:
             d = r.get("domain") or get_registrable_domain(r.get("url") or "")
