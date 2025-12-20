@@ -85,20 +85,18 @@ The core verification process follows this pipeline:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  7. SCORING (LLM)                                               │
-│     • Generates verdict per-claim                               │
+│  7. SCORING (LLM - Native Trust)                                │
+│     • Quote Highlighting: "📌 QUOTE" markers for key evidence   │
+│     • Generates verdict per-claim with semantic scale           │
 │     • Aggregates to verified_score (importance-weighted)        │
-│     • Applies Hard Caps (Python, not LLM):                      │
-│       - < 2 independent domains → max 0.65                      │
-│       - Numeric claim no primary → max 0.60                     │
-│     • Core claim refuted → global cap 0.25                      │
+│     • No heuristic caps - LLM verdicts are trusted directly     │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       OUTPUT (Result)                           │
-│  verified_score, confidence_score, danger_score,                │
-│  rationale, claim_verdicts, sources, caps_applied               │
+│  verified_score, danger_score, style_score,                     │
+│  rationale, claim_verdicts, sources                             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -177,7 +175,7 @@ spectrue_core/
 │   └── skills/            # Modular skills
 │       ├── claims.py      # Claim extraction + Search Strategist
 │       ├── clustering.py  # Stance clustering
-│       ├── scoring.py     # Evidence scoring + Hard Caps
+│       ├── scoring.py     # Evidence scoring
 │       └── query.py       # Query generation (legacy)
 ├── verification/          # Verification pipeline
 │   ├── pipeline.py        # Main orchestrator

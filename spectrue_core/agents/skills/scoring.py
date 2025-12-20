@@ -1,13 +1,17 @@
 from spectrue_core.verification.evidence_pack import EvidencePack
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.trace import Trace
-from spectrue_core.agents.prompts import get_prompt
-from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
-from spectrue_core.utils.security import sanitize_input
 from spectrue_core.constants import SUPPORTED_LANGUAGES
-from spectrue_core.verification.trusted_sources import get_tier_ceiling_for_domain
+from spectrue_core.utils.security import sanitize_input
+from spectrue_core.agents.prompts import get_prompt
 from datetime import datetime
+import json
+import hashlib
 import re
+
+# Constants for input safety (Defensive Programming)
+MAX_SNIPPET_LEN = 600
+MAX_QUOTE_LEN = 300
 
 class ScoringSkill(BaseSkill):
 
@@ -19,340 +23,254 @@ class ScoringSkill(BaseSkill):
         lang: str = "en",
     ) -> dict:
         """
-        Produce Final Verdict using Evidence Pack (M48).
+        Produce Final Verdict using Evidence Pack (Native Scoring v1.5 / M73.2 Platinum).
+        Features: LLM-based aggregation, Deep Sanitization, Type Safety, UX Guardrails.
+        ZERO-CRASH GUARANTEE: Robust handling of malformed lists/items.
         """
-        # M57: Resolve language name for explicit rationale localization
         lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
         
-        # Group search results by claim for the prompt
+        # --- 1. PREPARE EVIDENCE (Sanitized & Highlighted) ---
         sources_by_claim = {}
-        for r in (pack.get("search_results") or []):
+        
+        # Defensive: ensure search_results is a list
+        raw_results = pack.get("search_results")
+        if not isinstance(raw_results, list):
+            raw_results = []
+
+        for r in raw_results:
+            # PLATINUM FIX: Skip non-dict items to prevent crash on .get()
+            if not isinstance(r, dict):
+                continue
+
             cid = r.get("claim_id", "unknown")
             if cid not in sources_by_claim:
                 sources_by_claim[cid] = []
+            
+            # SECURITY P0: Sanitize external content
+            raw_snippet = r.get("content_excerpt") or r.get("snippet") or ""
+            safe_snippet = sanitize_input(raw_snippet)[:MAX_SNIPPET_LEN]
+            
+            key_snippet = r.get("key_snippet")
+            stance = r.get("stance", "")
+            
+            # Visual cue: Highlight quotes found by Clustering
+            if key_snippet and stance in ["SUPPORT", "REFUTE", "MIXED"]:
+                safe_key = sanitize_input(key_snippet)[:MAX_QUOTE_LEN]
+                content_text = f'📌 QUOTE: "{safe_key}"\nℹ️ CONTEXT: {safe_snippet}'
+            else:
+                content_text = safe_snippet
+            
             sources_by_claim[cid].append({
                 "domain": r.get("domain"),
-                "source_type": r.get("source_type"),
-                "stance": r.get("stance"),
-                "is_trusted": r.get("is_trusted"),
-                "relevance": r.get("relevance_score"),
-                "excerpt": (r.get("content_excerpt") or "")[:500]
+                "source_reliability_hint": "high" if r.get("is_trusted") else "general",
+                "stance": stance, 
+                "excerpt": content_text
             })
             
-        constraints = pack.get("constraints") or {}
-        global_cap = float(constraints.get("global_cap", 1.0))
-        cap_reasons = constraints.get("cap_reasons", [])
-
-        # Construct prompt
-        # Prepare detailed claim info for the prompt
+        # --- 2. PREPARE CLAIMS (Sanitized + Importance) ---
         claims_info = []
-        for c in (pack.get("claims") or []):
+        raw_claims = pack.get("claims")
+        if not isinstance(raw_claims, list):
+            raw_claims = []
+
+        for c in raw_claims:
+            # PLATINUM FIX: Skip non-dict items
+            if not isinstance(c, dict):
+                continue
+
             cid = c.get("id")
-            # Get evidence specific to this claim (if mapped) or all relevant evidence
-            claim_evidence = sources_by_claim.get(cid, [])
+            # SECURITY: Sanitize claims text
+            safe_text = sanitize_input(c.get("text", ""))
             
             claims_info.append({
                 "id": cid,
-                "text": c.get("text"),
-                "type": c.get("type"),
-                "importance": c.get("importance", 0.5),
-                "matched_evidence_count": len(claim_evidence)
+                "text": safe_text,
+                "importance": float(c.get("importance", 0.5)), # Vital for LLM aggregation
+                "matched_evidence_count": len(sources_by_claim.get(cid, []))
             })
 
-        # Construct instructions (static prefix)
-        instructions = f"""You are the Spectrue Verdict Engine. Strictly evaluate claims against evidence.
+        # SECURITY: Sanitize original fact
+        safe_original_fact = sanitize_input(pack.get("original_fact", ""))
 
-Task:
-1. Analyze EACH claim individually against the provided evidence.
-2. For each claim, assign a `verdict_score` (0.0-1.0) and `verdict` (verified/refuted/unverified/partially_verified).
-3. Provide a global `danger_score` (0.0-1.0) and `style_score` (0.0-1.0).
-4. Explain the overall result in `rationale`.
+        # --- 3. SYSTEM PROMPT (The Constitution) ---
+        instructions = f"""You are the Spectrue Verdict Engine.
+Your task is to classify the reliability of claims based *strictly* on the provided Evidence.
 
-Scores:
-- 0.8-1.0: Verified (True)
-- 0.6-0.8: Plausible (Mostly True/Likely)
-- 0.4-0.6: Unverified (No clear evidence)
-- 0.2-0.4: Misleading (False context)
-- 0.0-0.2: Refuted (False)
+# INPUT DATA
+- **Claims**: Note the `importance` (0.0-1.0). High importance = Core Thesis.
+- **Evidence**: Look for "📌 QUOTE" segments. `stance` is a hint; always verify against the quote/excerpt.
+- **Metadata**: `source_reliability_hint` is context, not a hard rule.
 
-Requirements:
-- Aggregated `verified_score` will be calculated automatically from your claim scores, DO NOT output it manually.
-- POLICY: Primary source requirement applies to each claim individually.
-- CRITICAL: Write the `rationale` ENTIRELY in {lang_name} ({lang}).
+# SCORING SCALE (0.0 - 1.0)
+- **0.8 - 1.0 (Verified)**: Strong confirmation (direct quotes, official consensus).
+- **0.6 - 0.8 (Plausible)**: Supported, but may lack direct/official confirmation or deep detail.
+- **0.4 - 0.6 (Ambiguous)**: Insufficient, irrelevant, or conflicting evidence. DO NOT GUESS. Absence of evidence is not False.
+- **0.2 - 0.4 (Unlikely)**: Evidence suggests the claim is doubtful.
+- **0.0 - 0.2 (Refuted)**: Evidence contradicts the claim.
 
-Rationale Style Guide (User-Facing):
-- Write for a general reader, NOT a system log. Use natural, simple language (1-2 paragraphs).
-- FOCUS: Can this be trusted? Why or why not?
-- FORBIDDEN: Do not use technical terms like "primary source", "independent domains", "score", "cap", "relevance", "deduplication", "JSON", "parameters".
-- Instead of "lack of primary sources", say "no official confirmation found".
-- Instead of "insufficient independent sources", say "verified by only one source".
-- BAD: "Score limited to 0.6 due to lack of primary source."
-- GOOD: "The claim is supported by Bloomberg, but there are no official statements confirming it yet. Therefore, it cannot be considered fully verified."
+# AGGREGATION LOGIC (Global Score)
+Calculate the global `verified_score` yourself:
+- **Core Claims (High Importance)** drive the verdict.
+- **Side Facts** are modifiers.
+- If the core claim is unverified, the global score must reflect that uncertainty.
 
-Output valid JSON:
+# WRITING GUIDELINES (User-Facing Text Only)
+- Write `rationale` and `reason` ENTIRELY in **{lang_name}** ({lang}).
+- **Tone**: Natural, journalistic style.
+- **FORBIDDEN TERMS (in text/rationale)**: Do not use technical words like "JSON", "dataset", "primary source", "relevance score", "cap" in the readable text. 
+  - *Allowed in JSON keys/values, but forbidden in human explanations.*
+  - Instead of "lack of primary source", say "no official confirmation found".
+
+# OUTPUT FORMAT
+Return valid JSON:
 {{
   "claim_verdicts": [
-    {{
-      "claim_id": "c1",
-      "verdict_score": 0.9, 
-      "verdict": "verified",
-      "reason": "..." 
-    }}
+    {{"claim_id": "c1", "verdict_score": 0.9, "verdict": "verified", "reason": "..."}}
   ],
+  "verified_score": 0.85,
+  "explainability_score": 0.8,
   "danger_score": 0.1,
   "style_score": 0.9,
-  "explainability_score": 0.9,
-  "rationale": "Overall summary..."
+  "rationale": "Global summary in {lang_name}..."
 }}
 
-You MUST respond in valid JSON.
-
-{UNIVERSAL_METHODOLOGY_APPENDIX}
+# GLOBAL SCORES EXPLANATION
+- **verified_score**: The GLOBAL aggregated truthfulness, calculated by YOU based on importance.
+- **explainability_score** (0.0-1.0): How well the evidence supports your rationale. 1.0 = every claim verdict is backed by direct quotes.
+- **danger_score** (0.0-1.0): How harmful if acted upon? (0.0 = harmless, 1.0 = dangerous misinformation)
+- **style_score** (0.0-1.0): How neutral is the writing style? (0.0 = heavily biased, 1.0 = neutral journalism)
 """
 
-        # Construct prompt (variable content)
+        # --- 4. USER PROMPT (The Data) ---
         prompt = f"""Evaluate these claims based strictly on the Evidence.
 
 Original Fact:
-{pack.get("original_fact")}
+{safe_original_fact}
 
 Claims to Verify:
-{claims_info}
+{json.dumps(claims_info, indent=2, ensure_ascii=False)}
 
-Evidence (Grouped by Claim ID where possible):
-{sources_by_claim}
+Evidence:
+{json.dumps(sources_by_claim, indent=2, ensure_ascii=False)}
 
-Constraints (Caps):
-Global Confidence Cap: {global_cap}
+Return JSON.
 """
-        # Select reasoning effort
-        effort = "medium" 
         
-        # Cache key identifies static instructions for prefix caching
-        cache_key = f"evidence_score_v4_{lang}"
+        # Stable Cache Key
+        prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
+        cache_key = f"score_v7_plat_{prompt_hash}"
 
         try:
-            # Determine appropriate model
-            m = model
-            if "gpt-5" not in m and "o1" not in m:
-                m = "gpt-5.2"
-
-            # REQUIRED: The word "JSON" must appear in the INPUT message
-            prompt += "\n\nReturn the result in JSON format."
+            m = model if "gpt-5" in model or "o1" in model else "gpt-5.2"
 
             result = await self.llm_client.call_json(
                 model=m,
                 input=prompt,
                 instructions=instructions,
-                reasoning_effort=effort,
+                reasoning_effort="medium",
                 cache_key=cache_key,
                 timeout=float(self.runtime.llm.timeout_sec),
                 trace_kind="score_evidence",
             )
             
-            # --- Aggregation Logic (T3) + M62 Hard Caps + M67 Code Caps ---
-            claim_verdicts = result.get("claim_verdicts", [])
+            # --- 5. TYPE SAFETY & CLAMPING (Defensive) ---
             
-            # 1. Map scores to claims to get importance
-            weighted_sum = 0.0
-            total_importance = 0.0
-            core_refuted = False
-            caps_applied = []
-            
-            # Lookup map for claims
-            claims_map = {c["id"]: c for c in (pack.get("claims") or [])}
-            
-            # M62: Get per-claim metrics for hard caps
-            metrics = pack.get("metrics", {})
-            per_claim_metrics = metrics.get("per_claim", {})
-            
-            for cv in claim_verdicts:
-                cid = cv.get("claim_id")
-                score = float(cv.get("verdict_score", 0.5))
-                claim_obj = claims_map.get(cid)
+            def safe_score(val, default=-1.0):
+                try:
+                    f = float(val)
+                except (TypeError, ValueError):
+                    return default
                 
-                if claim_obj:
-                    imp = float(claim_obj.get("importance", 0.5))
-                    
-                    # M62: Apply Hard Caps based on evidence quality
-                    claim_metrics = per_claim_metrics.get(cid, {})
-                    original_score = score
-                    cap_reason = None
-                    
-                    # --- M67: Code is Law (Tier-based Capping) ---
-                    # 1. Determine Highest Tier for this claim
-                    # Note: We duplicate classification logic here or assume 'metrics' has it?
-                    # For P0, we re-evaluate from sources mapped to this claim.
-                    claim_sources = sources_by_claim.get(cid, [])
-                    highest_tier_ceiling = 0.35 # Default to Tier D (Social/Weak)
-                    
-                    for src in claim_sources:
-                        tier_c = self._get_tier_ceiling(src)
-                        if tier_c > highest_tier_ceiling:
-                            highest_tier_ceiling = tier_c
-                            
-                    # 2. Calculate Code Cap (Verified Score Ceiling)
-                    # Section 7.5: verified_score = clamp(min(score, tier_ceiling))
-                    code_cap = highest_tier_ceiling
-                    
-                    # Apply Code Cap to verified_score
-                    if score > code_cap:
-                        score = code_cap
-                        cap_reason = f"Tier Ceiling ({code_cap})"
-                        # M67: Invariant Logger
-                        logger.warning(
-                            "[M67] Invariant Violation: Claim %s LLM confidence (%.2f) > Code Cap (%.2f). Clamping.",
-                            cid, original_score, code_cap
-                        )
+                # Preserve sentinel semantics: if default < 0 and value outside [0..1], return sentinel
+                if default < 0 and (f < 0.0 or f > 1.0):
+                    return default
+                
+                return max(0.0, min(1.0, f))
 
-                    # M62 Caps (legacy, kept for extra safety)
-                    # Cap 1: Insufficient independent sources (only if Tier allows high score)
-                    independent_domains = claim_metrics.get("independent_domains", 0)
-                    if independent_domains < 2 and score > 0.65:
-                        score = 0.65
-                        cap_reason = f"<2 independent domains ({independent_domains})"
-                    
-                    # Cap 2: Numeric claim without primary source
-                    claim_type = claim_obj.get("type", "core")
-                    has_primary = claim_metrics.get("primary_present", False)
-                    if claim_type == "numeric" and not has_primary and score > 0.60:
-                        score = 0.60
-                        cap_reason = "numeric claim, no primary source"
-                    
-                    if cap_reason and original_score != score:
-                        logger.info(
-                            "[M62/M67] Cap applied to %s: %.2f -> %.2f (%s)",
-                            cid, original_score, score, cap_reason
-                        )
-                        caps_applied.append({
-                            "claim_id": cid,
-                            "original": original_score,
-                            "capped": score,
-                            "reason": cap_reason
-                        })
-                    
-                    weighted_sum += score * imp
-                    total_importance += imp
-                    
-                    # Veto: If a CORE claim is REFUTED (<0.2), global can't be true
-                    if claim_obj.get("type") == "core" and score < 0.25:
-                        core_refuted = True
-                else:
-                    # Fallback if ID mismatch
-                    weighted_sum += score * 0.5
-                    total_importance += 0.5
-
-            # Calculate Global Verified Score
-            if total_importance > 0:
-                final_v_score = weighted_sum / total_importance
+            # Clamp Global Scores (-1.0 = "LLM didn't provide this")
+            if "verified_score" in result:
+                result["verified_score"] = safe_score(result["verified_score"], default=-1.0)
             else:
-                final_v_score = 0.5
-                
-            # Apply Core Veto
-            if core_refuted and final_v_score > 0.3:
-                logger.info("[Scoring] Core claim refuted. Dragging score down to 0.25")
-                final_v_score = 0.25
-                result["rationale"] = f"[Core Claim Refuted] {result.get('rationale', '')}"
+                # Fallback aggregation only if LLM forgot the field
+                verdicts = result.get("claim_verdicts")
+                if isinstance(verdicts, list) and verdicts:
+                    vals = []
+                    for v in verdicts:
+                        if isinstance(v, dict):
+                            vals.append(safe_score(v.get("verdict_score", 0.5)))
+                    
+                    if vals:
+                        result["verified_score"] = sum(vals) / len(vals)
+                    else:
+                        result["verified_score"] = -1.0
+                else:
+                    result["verified_score"] = -1.0
+            
+            result["explainability_score"] = safe_score(result.get("explainability_score"), default=-1.0)
+            result["danger_score"] = safe_score(result.get("danger_score"), default=-1.0)
+            result["style_score"] = safe_score(result.get("style_score"), default=-1.0)
 
-            # M67 Invariant: Code Cap Enforcement
-            # Ensure final score does not exceed the ceiling determined by evidence tiers.
-            if final_v_score > global_cap:
-                logger.warning("[INVARIANT] LLM Score %.2f exceeded Code Cap %.2f. Clamping.", final_v_score, global_cap)
-                final_v_score = global_cap
-                result["cap_enforced"] = True
+            # Clamp Individual Verdicts
+            claim_verdicts = result.get("claim_verdicts")
+            if isinstance(claim_verdicts, list):
+                for cv in claim_verdicts:
+                    if isinstance(cv, dict):
+                        cv["verdict_score"] = safe_score(cv.get("verdict_score", 0.5))
+            else:
+                result["claim_verdicts"] = []
 
-            result["verified_score"] = final_v_score
-            
-            # M62: Record caps applied for transparency
-            if caps_applied:
-                result["caps_applied"] = caps_applied
-            
-            # M67: Enforce Confidence Integrity
-            # Confidence cannot exceed verified_score + 0.15 (margin of error), capped at 1.0.
-            # AND it cannot exceed the global cap by much (theoretically confidence shouldn't exceed verify score 
-            # if we are strict, but RGBA allows "Confidence 0.9, Verified 0.5" -> "I am sure this is unverified")
-            # Wait, verify_score IS the G channel. Confidence is metadata. 
-            # Section 8 says: c_cap = min(c, tier_c + 0.15).
-            
-            c_cap = min(final_v_score + 0.15, 1.0)
-            
-            # Check for missing attributes global penalty (simplified: < 2 independent sources globally)
-            # In Section 8: "if missing_count >= 2 then c_cap = min(c_cap, 0.65)"
-            # Approximating missing_count with evidence gaps for now
-            if metrics.get("unique_domains", 0) < 2:
-                 c_cap = min(c_cap, 0.65)
-
-            llm_conf = float(result.get("confidence_score", 0.5))
-            if llm_conf > c_cap:
-                logger.debug(
-                    "[M67] Confidence Invariant: LLM (%.2f) > Cap (%.2f). Clamping.",
-                    llm_conf, c_cap
-                )
-                result["confidence_score"] = c_cap
-                
-            # M67: Debug Info
-            result["evidence_debug"] = {
-                "llm_raw_score": weighted_sum / total_importance if total_importance > 0 else 0.5,
-                "code_cap": global_cap,
-                "final_score": final_v_score
-            }
-            
             return result
 
         except Exception as e:
-            logger.exception("[M48] Evidence scoring failed: %s", e)
+            logger.exception("[Scoring] Failed: %s", e)
             Trace.event("llm.error", {"kind": "score_evidence", "error": str(e)})
             return {
-                "verified_score": 0.5,
-                "confidence_score": 0.5,
-                "rationale": "Error during evaluation."
+                "verified_score": -1.0,
+                "explainability_score": -1.0,
+                "danger_score": -1.0,
+                "style_score": -1.0,
+                "rationale": "Error during analysis."
             }
 
-    def _get_tier_ceiling(self, src: dict) -> float:
-        """
-        Determine Tier Ceiling (Confidence Cap) for a source (M67).
-        Delegates to trusted_sources registry but handles Skill-specific logic (e.g. Social).
-        """
-        domain = (src.get("domain") or "").lower()
-        stype = src.get("source_type")
-        
-        # 1. Get Base Cap from Registry (Domain Authority)
-        cap = get_tier_ceiling_for_domain(domain)
-        
-        # 2. Apply Type-Specific Downgrades
-        
-        # Social Media: Default to Tier D (0.35) regardless of domain reputation
-        # (e.g. twitter.com is high traffic but content is user-generated)
-        if stype == "social":
-            # TODO: Implement Tier A' check here (Stage 3)
-            # If validated as official account -> allow higher cap
-            return 0.35
-            
-        return cap
 
     def detect_evidence_gaps(self, pack: EvidencePack) -> list[str]:
         """
-        Identify missing evidence types (T169).
+        Identify missing evidence types (Legacy/Informational).
         """
-        # Can be logic-based or LLM-based.
-        # Logic-based for speed/predictability (Nano usage optional).
         gaps = []
+        
+        # Harden: ensure metrics and per_claim are dicts
         metrics = pack.get("metrics", {})
+        if not isinstance(metrics, dict):
+            metrics = {}
+        
         per_claim = metrics.get("per_claim", {})
+        if not isinstance(per_claim, dict):
+            per_claim = {}
+        
+        # Harden: ensure claims is a list
+        claims = pack.get("claims")
+        if not isinstance(claims, list):
+            claims = []
         
         for cid, m in per_claim.items():
+            # Skip non-dict entries
+            if not isinstance(m, dict):
+                continue
+                
             if m.get("independent_domains", 0) < 2:
-                gaps.append(f"Claim {cid}: Cited by fewer than 2 independent sources.")
+                gaps.append(f"Claim {cid}: Low source diversity (informational).")
             
-            # Retrieve claim reqs
-            # (Need to lookup claim object in pack)
-            claim_obj = next((c for c in (pack.get("claims") or []) if c["id"] == cid), None)
+            claim_obj = next(
+                (c for c in claims if isinstance(c, dict) and c.get("id") == cid),
+                None
+            )
             if claim_obj:
                 req = claim_obj.get("evidence_requirement", {})
                 if req.get("needs_primary_source") and not m.get("primary_present"):
-                     gaps.append(f"Claim {cid}: Missing primary source.")
-                if req.get("needs_quote_verification") and not m.get("quote_match"): # (Hypothetical field)
-                     pass
+                     gaps.append(f"Claim {cid}: Missing primary source (informational).")
+        
+        return gaps
 
     def _strip_internal_source_markers(self, text: str) -> str:
         if not text or not isinstance(text, str):
@@ -395,9 +313,7 @@ Global Confidence Cap: {global_cap}
 
         s = rationale
         for label in labels:
-            # Try to remove from label to end of string mostly
             s = re.sub(rf"\s*{re.escape(label)}.*$", "", s, flags=re.IGNORECASE | re.DOTALL)
-            # Fallback cleanup if label was inline somehow (unlikely if at end)
             s = re.sub(rf"(?:^|\n)\s*{re.escape(label)}.*(?:\n|$)", "\n", s, flags=re.IGNORECASE)
         s = re.sub(r"\n{3,}", "\n\n", s).strip()
         return s
@@ -452,25 +368,20 @@ Global Confidence Cap: {global_cap}
                 "style_score": 0.5, "confidence_score": 0.2, "rationale_key": "errors.agent_call_failed"
             }
 
-        # Post-processing
-        if "rationale" in result and isinstance(result["rationale"], dict):
-             lines = []
-             for k, v in result["rationale"].items():
-                  lines.append(f"**{k.replace('_', ' ').title()}:** {v}")
-             result["rationale"] = "\n\n".join(lines)
-        elif "rationale" in result and isinstance(result["rationale"], list):
-             result["rationale"] = "\n".join([str(item) for item in result["rationale"]])
-
         if "rationale" in result:
-            result["rationale"] = self._strip_internal_source_markers(str(result["rationale"] or ""))
-            try:
+             # Clean up markers and style section
+             cleaned_rationale = self._strip_internal_source_markers(str(result.get("rationale") or ""))
+             
+             # Calculate legacy honesty score for style dropping logic
+             try:
                 cs = float(result.get("context_score", 0.5))
                 ss = float(result.get("style_score", 0.5))
                 honesty = (max(0.0, min(1.0, cs)) + max(0.0, min(1.0, ss))) / 2.0
-            except Exception:
+             except Exception:
                 honesty = None
-            result["rationale"] = self._maybe_drop_style_section(result["rationale"], honesty_score=honesty, lang=lang)
-            
+                
+             result["rationale"] = self._maybe_drop_style_section(cleaned_rationale, honesty_score=honesty, lang=lang)
+
         if "analysis" in result and isinstance(result["analysis"], str):
              result["analysis"] = self._strip_internal_source_markers(result["analysis"])
 

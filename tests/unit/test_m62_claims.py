@@ -4,13 +4,11 @@ M62 Tests: Claim Extraction & Query Generation Refactoring
 Tests for:
 - Context-aware claim extraction (normalized_text, topic_group, check_worthiness)
 - Topic-based round-robin query selection
-- Hard caps for scoring
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from spectrue_core.verification.pipeline import ValidationPipeline
 from spectrue_core.agents.skills.claims import ClaimExtractionSkill, TOPIC_GROUPS
-from spectrue_core.agents.skills.scoring import ScoringSkill
 
 
 @pytest.mark.unit
@@ -302,102 +300,3 @@ class TestM62QuerySelection:
         assert "legacy" in queries[0].lower()
 
         assert "legacy" in queries[1].lower()
-
-
-
-@pytest.mark.unit
-class TestM62HardCaps:
-    """Test hard caps for scoring."""
-    
-    @pytest.fixture
-    def skill(self, mock_llm_client, mock_config):
-        return ScoringSkill(config=mock_config, llm_client=mock_llm_client)
-    
-    @pytest.mark.asyncio
-    async def test_cap_insufficient_domains(self, skill, mock_llm_client):
-        """Score should be capped to 0.65 if < 2 independent domains."""
-        mock_llm_client.call_json.return_value = {
-            "claim_verdicts": [
-                {"claim_id": "c1", "verdict_score": 0.9}  # LLM gives high score
-            ],
-            "rationale": "Good evidence."
-        }
-        
-        pack = {
-            "original_fact": "Test",
-            "claims": [{"id": "c1", "importance": 1.0, "type": "core"}],
-            "search_results": [],
-            "metrics": {
-                "per_claim": {
-                    "c1": {"independent_domains": 1}  # Only 1 domain!
-                }
-            }
-        }
-        
-        result = await skill.score_evidence(pack)
-        
-        # Should be capped to 0.65
-        assert result["verified_score"] == 0.65
-        assert "caps_applied" in result
-        assert result["caps_applied"][0]["reason"] == "<2 independent domains (1)"
-    
-    @pytest.mark.asyncio
-    async def test_cap_numeric_no_primary(self, skill, mock_llm_client):
-        """Numeric claim without primary source should be capped to 0.60."""
-        mock_llm_client.call_json.return_value = {
-            "claim_verdicts": [
-                {"claim_id": "c1", "verdict_score": 0.85}
-            ],
-            "rationale": "Figure verified."
-        }
-        
-        pack = {
-            "original_fact": "Test with numbers",
-            "claims": [{"id": "c1", "importance": 1.0, "type": "numeric"}],
-            "search_results": [],
-            "metrics": {
-                "per_claim": {
-                    "c1": {
-                        "independent_domains": 5,  # Enough domains
-                        "primary_present": False    # But no primary!
-                    }
-                }
-            }
-        }
-        
-        result = await skill.score_evidence(pack)
-        
-        # Should be capped to 0.60
-        assert result["verified_score"] == 0.60
-        assert "caps_applied" in result
-        assert result["caps_applied"][0]["reason"] == "numeric claim, no primary source"
-    
-    @pytest.mark.asyncio
-    async def test_no_cap_when_sufficient_evidence(self, skill, mock_llm_client):
-        """No cap should be applied when evidence is sufficient."""
-        mock_llm_client.call_json.return_value = {
-            "claim_verdicts": [
-                {"claim_id": "c1", "verdict_score": 0.9}
-            ],
-            "rationale": "Strong evidence."
-        }
-        
-        pack = {
-            "original_fact": "Test",
-            "claims": [{"id": "c1", "importance": 1.0, "type": "core"}],
-            "search_results": [],
-            "metrics": {
-                "per_claim": {
-                    "c1": {
-                        "independent_domains": 4,
-                        "primary_present": True
-                    }
-                }
-            }
-        }
-        
-        result = await skill.score_evidence(pack)
-        
-        # No cap, keep original
-        assert result["verified_score"] == 0.9
-        assert "caps_applied" not in result

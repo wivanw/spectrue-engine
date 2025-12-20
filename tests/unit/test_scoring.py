@@ -12,58 +12,58 @@ class TestScoringSkill:
         return skill
 
     @pytest.mark.asyncio
-    async def test_score_evidence_basic(self, skill, mock_llm_client):
-        # Mock LLM response with claim verdicts
+    async def test_score_evidence_llm_aggregation(self, skill, mock_llm_client):
+        """M69 v2: LLM provides verified_score directly."""
         mock_llm_client.call_json.return_value = {
             "claim_verdicts": [
                 {"claim_id": "c1", "verdict_score": 0.8}
             ],
+            "verified_score": 0.85,  # LLM provides this now!
             "danger_score": 0.1,
             "style_score": 0.9,
-            "explainability_score": 0.9,
             "rationale": "Solid evidence."
         }
         
-        # Provide claim in pack so importance weighting works
-        # M62: Include metrics with sufficient independent_domains to avoid hard caps
         pack = {
             "original_fact": "Test", 
-            "search_results": [],
-            "claims": [{"id": "c1", "importance": 1.0, "type": "core"}],
-            "metrics": {
-                "per_claim": {
-                    "c1": {"independent_domains": 3, "primary_present": True}
-                }
-            }
+            "search_results": [
+                {"claim_id": "c1", "domain": "reuters.com", "is_trusted": True}
+            ],
+            "claims": [{"id": "c1", "importance": 1.0}],
         }
         result = await skill.score_evidence(pack)
         
-        assert result["verified_score"] == 0.8
+        # LLM's verified_score is trusted directly
+        assert result["verified_score"] == 0.85
         assert result["rationale"] == "Solid evidence."
 
     @pytest.mark.asyncio
-    async def test_score_capping(self, skill, mock_llm_client):
-        # Pack has global cap 0.6
-        pack = {
-            "original_fact": "Test", 
-            "constraints": {"global_cap": 0.6},
-            "search_results": [],
-            "claims": [{"id": "c1", "importance": 1.0, "type": "core"}]
-        }
-        
-        # LLM tries to give 0.9 via claim verdict
+    async def test_fallback_when_llm_forgets_verified_score(self, skill, mock_llm_client):
+        """M69 v2: Fallback to mean if LLM forgets verified_score."""
         mock_llm_client.call_json.return_value = {
             "claim_verdicts": [
-                {"claim_id": "c1", "verdict_score": 0.9}
+                {"claim_id": "c1", "verdict_score": 0.8},
+                {"claim_id": "c2", "verdict_score": 0.6}
             ],
-            "rationale": "It is true."
+            # verified_score missing!
+            "danger_score": 0.1,
+            "style_score": 0.9,
+            "rationale": "Analysis."
+        }
+        
+        pack = {
+            "original_fact": "Test", 
+            "search_results": [],
+            "claims": [
+                {"id": "c1", "importance": 0.9},
+                {"id": "c2", "importance": 0.3}
+            ]
         }
         
         result = await skill.score_evidence(pack)
         
-        # Should be clamped
-        assert result["verified_score"] == 0.6
-        assert result.get("cap_enforced") is True
+        # Fallback: simple mean of verdict_scores
+        assert result["verified_score"] == 0.7  # (0.8 + 0.6) / 2
 
     def test_strip_internal_source_markers(self, skill):
         # Test cleaning of [TRUSTED], [REL=0.9], [RAW]
