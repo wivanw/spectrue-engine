@@ -250,8 +250,8 @@ ARTICLE:
 Return the result in JSON format.
 """
         try:
-            # Updated cache key version for new prompt structure (M77)
-            cache_key = f"claim_strategist_v3_{lang}"
+            # M78: Updated cache key for satire detection prompt
+            cache_key = f"claim_strategist_v4_{lang}"
 
             # M73.5: Dynamic timeout based on input size
             dynamic_timeout = self._calculate_timeout(len(text_excerpt))
