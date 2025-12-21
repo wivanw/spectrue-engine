@@ -14,6 +14,9 @@ def mock_config():
     config.google_fact_check_key = "test-key"
     config.google_search_api_key = "test-key"
     config.google_search_cse_id = "test-cse-id"
+    # M72: Disable ClaimGraph in tests
+    config.runtime.claim_graph = MagicMock()
+    config.runtime.claim_graph.enabled = False
     return config
 
 @pytest.fixture

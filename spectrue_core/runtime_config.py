@@ -116,12 +116,48 @@ class EngineTunableConfig:
 
 
 @dataclass(frozen=True)
+class ClaimGraphConfig:
+    """
+    M72: Hybrid ClaimGraph (B + C) configuration.
+    
+    Two-stage graph for claim prioritization:
+    - B-stage: cheap candidate generation (embeddings + adjacency)
+    - C-stage: LLM edge typing (GPT-5 nano)
+    """
+    # Feature flag
+    enabled: bool = False
+    
+    # B-Stage parameters
+    k_sim: int = 10              # Top-K by embedding similarity
+    k_adj: int = 2               # ±K adjacent claims in section
+    k_total_cap: int = 20        # Hard cap on candidates per claim
+    
+    # C-Stage parameters
+    tau: float = 0.6             # Edge score threshold
+    batch_size: int = 30         # Edges per LLM batch
+    max_claim_chars: int = 280   # Max chars per claim in prompt
+    
+    # Output parameters
+    top_k: int = 12              # Key claims to select
+    
+    # Budget limits
+    max_cost_usd: float = 0.05
+    max_latency_sec: float = 90.0
+    avg_tokens_per_edge: int = 120
+    
+    # Quality gates
+    min_kept_ratio: float = 0.05
+    max_kept_ratio: float = 0.60
+
+
+@dataclass(frozen=True)
 class EngineRuntimeConfig:
     llm: EngineLLMConfig
     features: EngineFeatureFlags
     debug: EngineDebugFlags
     search: EngineSearchConfig
     tunables: EngineTunableConfig
+    claim_graph: ClaimGraphConfig
 
     @staticmethod
     def load_from_env() -> "EngineRuntimeConfig":
@@ -187,7 +223,32 @@ class EngineRuntimeConfig:
             max_output_tokens_lite=int(max_out_lite),
             max_output_tokens_deep=int(max_out_deep),
         )
-        return EngineRuntimeConfig(llm=llm, features=features, debug=debug, search=search, tunables=tunables)
+
+        # M72: ClaimGraph configuration
+        claim_graph = ClaimGraphConfig(
+            enabled=_parse_bool(os.getenv("CLAIM_GRAPH_ENABLED"), default=False),
+            k_sim=_parse_int(os.getenv("CLAIM_GRAPH_K_SIM"), default=10, min_v=1, max_v=50),
+            k_adj=_parse_int(os.getenv("CLAIM_GRAPH_K_ADJ"), default=2, min_v=0, max_v=10),
+            k_total_cap=_parse_int(os.getenv("CLAIM_GRAPH_K_TOTAL_CAP"), default=20, min_v=5, max_v=100),
+            tau=_parse_float(os.getenv("CLAIM_GRAPH_TAU"), default=0.6, min_v=0.0, max_v=1.0),
+            batch_size=_parse_int(os.getenv("CLAIM_GRAPH_BATCH_SIZE"), default=30, min_v=1, max_v=100),
+            max_claim_chars=_parse_int(os.getenv("CLAIM_GRAPH_MAX_CLAIM_CHARS"), default=280, min_v=50, max_v=500),
+            top_k=_parse_int(os.getenv("CLAIM_GRAPH_TOP_K"), default=12, min_v=1, max_v=50),
+            max_cost_usd=_parse_float(os.getenv("CLAIM_GRAPH_MAX_COST_USD"), default=0.05, min_v=0.001, max_v=1.0),
+            max_latency_sec=_parse_float(os.getenv("CLAIM_GRAPH_MAX_LATENCY_SEC"), default=90.0, min_v=10.0, max_v=300.0),
+            avg_tokens_per_edge=_parse_int(os.getenv("CLAIM_GRAPH_AVG_TOKENS_PER_EDGE"), default=120, min_v=50, max_v=500),
+            min_kept_ratio=_parse_float(os.getenv("CLAIM_GRAPH_MIN_KEPT_RATIO"), default=0.05, min_v=0.0, max_v=0.5),
+            max_kept_ratio=_parse_float(os.getenv("CLAIM_GRAPH_MAX_KEPT_RATIO"), default=0.60, min_v=0.3, max_v=1.0),
+        )
+
+        return EngineRuntimeConfig(
+            llm=llm,
+            features=features,
+            debug=debug,
+            search=search,
+            tunables=tunables,
+            claim_graph=claim_graph,
+        )
 
     def to_safe_log_dict(self) -> dict[str, Any]:
         ex = list(self.search.tavily_exclude_domains or [])
@@ -225,6 +286,17 @@ class EngineRuntimeConfig:
             "tunables": {
                 "langdetect_min_prob": float(self.tunables.langdetect_min_prob),
                 "max_claims_deep": int(self.tunables.max_claims_deep),
+            },
+            "claim_graph": {
+                "enabled": bool(self.claim_graph.enabled),
+                "k_sim": int(self.claim_graph.k_sim),
+                "k_adj": int(self.claim_graph.k_adj),
+                "k_total_cap": int(self.claim_graph.k_total_cap),
+                "tau": float(self.claim_graph.tau),
+                "batch_size": int(self.claim_graph.batch_size),
+                "top_k": int(self.claim_graph.top_k),
+                "max_cost_usd": float(self.claim_graph.max_cost_usd),
+                "max_latency_sec": float(self.claim_graph.max_latency_sec),
             },
         }
 

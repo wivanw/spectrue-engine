@@ -22,6 +22,10 @@ def mock_config():
     config.runtime.features = MagicMock()
     config.runtime.features.fulltext_fetch = False
     
+    # M72: ClaimGraph config (disabled by default in tests)
+    config.runtime.claim_graph = MagicMock()
+    config.runtime.claim_graph.enabled = False
+    
     return config
 
 @pytest.fixture

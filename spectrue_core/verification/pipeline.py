@@ -8,6 +8,7 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 from spectrue_core.agents.skills.oracle_validation import EVIDENCE_THRESHOLD
+from spectrue_core.graph import ClaimGraphBuilder
 import logging
 import asyncio
 import re
@@ -31,6 +32,17 @@ class ValidationPipeline:
         self.search_mgr = SearchManager(config, oracle_validator=agent.oracle_skill)
         # M67: Optional translation service for Oracle result localization
         self.translation_service = translation_service
+        
+        # M72: ClaimGraph for key claim identification
+        self._claim_graph: ClaimGraphBuilder | None = None
+        if config and config.runtime.claim_graph.enabled:
+            from openai import AsyncOpenAI
+            openai_client = AsyncOpenAI(api_key=config.openai_api_key)
+            self._claim_graph = ClaimGraphBuilder(
+                config=config.runtime.claim_graph,
+                openai_client=openai_client,
+                edge_typing_skill=agent.edge_typing_skill,
+            )
 
     async def execute(
         self,
@@ -70,6 +82,11 @@ class ValidationPipeline:
                 if url_anchors:
                     logger.info("[Pipeline] Found %d URL-anchor pairs in raw text", len(url_anchors))
                 
+                # M73.5: Warn user about large text processing
+                if len(fetched_text) > 10000 and progress_callback:
+                    await progress_callback("processing_large_text")
+                    logger.info("[Pipeline] Large text detected: %d chars, extended timeout", len(fetched_text))
+                
                 # LLM cleaning for UX quality
                 cleaned_article = await self.agent.clean_article(fetched_text)
                 fact = cleaned_article or fetched_text
@@ -94,6 +111,11 @@ class ValidationPipeline:
             url_anchors = self._extract_url_anchors(fact, exclude_url=exclude_url)
             if url_anchors:
                 logger.info("[Pipeline] Found %d URL-anchor pairs in extension text", len(url_anchors))
+            
+            # M73.5: Warn user about large text processing
+            if len(fact) > 10000 and progress_callback:
+                await progress_callback("processing_large_text")
+                logger.info("[Pipeline] Large text detected: %d chars, extended timeout", len(fact))
             
             # LLM cleaning
             cleaned_article = await self.agent.clean_article(fact)
@@ -261,9 +283,23 @@ class ValidationPipeline:
             candidates = candidates[:1]
             
             for cand in candidates:
-                # Prefer normalized_text over raw text for cleaner Oracle query (M56/M65)
-                # M65: Strip trailing punctuation
-                query_text = (cand.get("normalized_text") or cand.get("text", "")).strip(" ,.-:;")
+                # M71: Try English query first (Google Fact Check has better EN coverage)
+                # Look for English query in query_candidates
+                en_query = None
+                for qc in cand.get("query_candidates", []):
+                    qc_text = qc.get("text", "")
+                    # Simple heuristic: English if mostly ASCII
+                    if qc_text and sum(1 for c in qc_text if ord(c) < 128) / len(qc_text) > 0.9:
+                        en_query = qc_text
+                        break
+                
+                # Prefer English query, fallback to normalized_text
+                if en_query:
+                    query_text = en_query.strip(" ,.-:;")
+                    logger.info("[Pipeline] Oracle: Using English query candidate")
+                else:
+                    query_text = (cand.get("normalized_text") or cand.get("text", "")).strip(" ,.-:;")
+                
                 q = normalize_search_query(query_text)
                 
                 logger.info("[Pipeline] Oracle Hybrid Check: intent=%s, query=%s", article_intent, q[:300])
@@ -274,17 +310,41 @@ class ValidationPipeline:
                 if not oracle_result:
                     continue
 
-                relevance = oracle_result.get("relevance_score", 0.0)
                 status = oracle_result.get("status", "EMPTY")
+                relevance = oracle_result.get("relevance_score", 0.0)
                 is_jackpot = oracle_result.get("is_jackpot", False)
                 
-                Trace.event("pipeline.oracle_hybrid", {
+                # M73.4: Build trace payload with error details if applicable
+                trace_payload = {
                     "intent": article_intent,
-                    "query": q[:300],
+                    "query_used": q[:300],
                     "relevance_score": relevance,
                     "status": status,
                     "is_jackpot": is_jackpot
-                })
+                }
+                
+                # M73.4: Handle ERROR status (API failure)
+                if status == "ERROR":
+                    code = oracle_result.get("error_status_code")
+                    detail = oracle_result.get("error_detail", "")
+                    trace_payload.update({"error_code": code, "error_detail": detail})
+                    Trace.event("pipeline.oracle_hybrid_error", trace_payload)
+                    
+                    logger.warning("[Pipeline] Oracle API ERROR (%s): %s", code, detail)
+                    
+                    # Break loop on auth/quota errors, continue on timeouts
+                    if code in (403, 429):
+                        logger.error("[Pipeline] Oracle Quota Exceeded/Auth Error. Stopping Oracle loop.")
+                        break 
+                    continue
+                
+                # M73.4: Handle DISABLED status (no validator configured)
+                if status == "DISABLED":
+                    Trace.event("pipeline.oracle_hybrid", {**trace_payload, "disabled": True})
+                    logger.warning("[Pipeline] Oracle DISABLED (no LLM validator). Skipping.")
+                    break
+                
+                Trace.event("pipeline.oracle_hybrid", trace_payload)
                 
                 if status == "EMPTY":
                     logger.info("[Pipeline] Oracle: No results found. Continuing to search.")
@@ -339,6 +399,34 @@ class ValidationPipeline:
         if oracle_evidence_source:
             final_sources.append(oracle_evidence_source)
 
+        # M72: ClaimGraph - identify key claims for query prioritization
+        key_claim_ids: set[str] = set()
+        if self._claim_graph and claims:
+            if progress_callback:
+                await progress_callback("building_claim_graph")
+            
+            try:
+                graph_result = await self._claim_graph.build(claims)
+                
+                if not graph_result.disabled:
+                    key_claim_ids = set(graph_result.key_claim_ids)
+                    # Boost key claims' importance for query selection
+                    for claim in claims:
+                        if claim.get("id") in key_claim_ids:
+                            claim["importance"] = min(1.0, claim.get("importance", 0.5) + 0.2)
+                
+                # Always trace results
+                Trace.event("claim_graph", graph_result.to_trace_dict())
+                
+                if graph_result.disabled:
+                    logger.info("[M72] ClaimGraph disabled: %s", graph_result.disabled_reason)
+                else:
+                    logger.info("[M72] ClaimGraph: %d key claims identified", len(key_claim_ids))
+                    
+            except Exception as e:
+                logger.warning("[M72] ClaimGraph failed: %s. Fallback to original flow.", e)
+                Trace.event("claim_graph", {"enabled": True, "error": str(e)[:100]})
+
         # M62: Smart Query Selection (typed priority slots)
         search_queries = self._select_diverse_queries(claims, max_queries=3, fact_fallback=fact)
         
@@ -347,7 +435,6 @@ class ValidationPipeline:
             if progress_callback:
                 await progress_callback("searching_unified")
             
-            search_lang = content_lang or lang
             
             # Determine Tavily topic based on article intent
             # M66: Smart Routing - Use claim search_method if available
@@ -507,10 +594,14 @@ class ValidationPipeline:
         
         # M61: Signal finalizing before long LLM call to prevent UI freeze appearance
         if progress_callback:
-            await progress_callback("finalizing")
+            await progress_callback("score_evidence")
         
         # Score (T164)
         result = await self.agent.score_evidence(pack, model=gpt_model, lang=lang)
+        
+        # Signal finalizing after LLM call
+        if progress_callback:
+            await progress_callback("finalizing")
         
         # Finalize
         result["cost"] = current_cost
@@ -977,7 +1068,7 @@ class ValidationPipeline:
         
         Converts OracleCheckResult to FactCheckResponse format.
         """
-        status = oracle_result.get("status", "MIXED")
+        oracle_result.get("status", "MIXED")
         rating = oracle_result.get("rating", "")
         publisher = oracle_result.get("publisher", "Fact Check")
         url = oracle_result.get("url", "")
@@ -1093,7 +1184,7 @@ class ValidationPipeline:
         Returns:
             List of search queries
         """
-        from spectrue_core.schema import ClaimUnit, Dimension
+        from spectrue_core.schema import ClaimUnit
         
         if not claim_units:
             return [normalize_search_query(fact_fallback[:200])] if fact_fallback else []

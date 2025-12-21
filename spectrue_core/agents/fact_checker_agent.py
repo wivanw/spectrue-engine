@@ -9,6 +9,7 @@ from spectrue_core.agents.skills.query import QuerySkill
 from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
 from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
 from spectrue_core.agents.skills.relevance import RelevanceSkill
+from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
 from spectrue_core.verification.inline_verification import InlineVerificationSkill
 import logging
 
@@ -40,6 +41,8 @@ class FactCheckerAgent:
         self.relevance_skill = RelevanceSkill(self.config, self.llm_client)
         # M67: Inline Verification (Social Identity check)
         self.inline_verification_skill = InlineVerificationSkill(self.config, self.llm_client)
+        # M72: Edge Typing for ClaimGraph C-stage
+        self.edge_typing_skill = EdgeTypingSkill(self.config, self.llm_client)
 
     async def extract_claims(
         self, text: str, *, lang: str = "en", max_claims: int = 7
