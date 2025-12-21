@@ -70,6 +70,13 @@ class EngineFeatureFlags:
     trace_enabled: bool = True
     # Optional crawler behavior: default False to avoid server-side crawling / IP reputation issues.
     fulltext_fetch: bool = False
+    
+    # M74 Flags
+    coverage_chunking: bool = False
+    topic_aware_claim_graph: bool = False
+    semantic_gating_v2: bool = False
+    claim_sanitize: bool = True
+    log_redaction: bool = False
 
 
 @dataclass(frozen=True)
@@ -156,6 +163,9 @@ class ClaimGraphConfig:
     
     # M73 Layer 3: Tension Signal
     tension_signal_enabled: bool = True
+    
+    # M74
+    topic_aware: bool = False
     tension_threshold: float = 0.5            # min in_contradict_weight for "high tension"
     tension_boost: float = 0.15               # importance boost for high-tension claims
     
@@ -200,6 +210,12 @@ class EngineRuntimeConfig:
             query_rewrite_short=_parse_bool(os.getenv("SPECTRUE_LLM_QUERY_REWRITE_SHORT"), default=False),
             trace_enabled=not _parse_bool(os.getenv("SPECTRUE_TRACE_DISABLE"), default=False),
             fulltext_fetch=_parse_bool(os.getenv("SPECTRUE_FULLTEXT_FETCH"), default=False),
+            # M74 Feature Flags
+            coverage_chunking=_parse_bool(os.getenv("FEATURE_COVERAGE_CHUNKING"), default=False),
+            topic_aware_claim_graph=_parse_bool(os.getenv("FEATURE_TOPIC_AWARE_CLAIM_GRAPH"), default=False),
+            semantic_gating_v2=_parse_bool(os.getenv("FEATURE_SEMANTIC_GATING_V2"), default=False),
+            claim_sanitize=_parse_bool(os.getenv("FEATURE_CLAIM_SANITIZE"), default=True),
+            log_redaction=_parse_bool(os.getenv("FEATURE_LOG_REDACTION"), default=False),
         )
 
         # Search knobs
@@ -260,6 +276,7 @@ class EngineRuntimeConfig:
             tension_threshold=_parse_float(os.getenv("CLAIM_GRAPH_TENSION_THRESHOLD"), default=0.5, min_v=0.0, max_v=2.0),
             tension_boost=_parse_float(os.getenv("CLAIM_GRAPH_TENSION_BOOST"), default=0.15, min_v=0.0, max_v=0.5),
             evidence_need_routing_enabled=_parse_bool(os.getenv("CLAIM_GRAPH_EVIDENCE_NEED_ENABLED"), default=True),
+            topic_aware=features.topic_aware_claim_graph,
         )
 
         return EngineRuntimeConfig(
@@ -280,6 +297,10 @@ class EngineRuntimeConfig:
                 "query_rewrite_short": bool(self.features.query_rewrite_short),
                 "trace_enabled": bool(self.features.trace_enabled),
                 "fulltext_fetch": bool(self.features.fulltext_fetch),
+                "coverage_chunking": bool(self.features.coverage_chunking),
+                "topic_aware_graph": bool(self.features.topic_aware_claim_graph),
+                "semantic_gating_v2": bool(self.features.semantic_gating_v2),
+                "claim_sanitize": bool(self.features.claim_sanitize),
             },
             "debug": {
                 "engine_debug": bool(self.debug.engine_debug),

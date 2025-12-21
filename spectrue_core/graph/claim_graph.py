@@ -90,7 +90,9 @@ class ClaimGraphBuilder:
         
         if not claims or len(claims) < 2:
             logger.debug("[M72] ClaimGraph skipped: < 2 claims")
-            return result
+            # M74: Ensure fallback even if skipped
+            nodes = [ClaimNode.from_claim_dict(c, i) for i, c in enumerate(claims)] if claims else []
+            return self._apply_fallback(result, nodes)
         
         try:
             # Step 1: Convert to ClaimNodes
@@ -104,7 +106,7 @@ class ClaimGraphBuilder:
             
             if len(nodes) < 2:
                 logger.debug("[M72] ClaimGraph skipped after dedup: < 2 claims")
-                return result
+                return self._apply_fallback(result, nodes)
             
             # Step 3: B-Stage - Generate candidates
             candidates = await self._generate_candidates(nodes)
@@ -112,7 +114,10 @@ class ClaimGraphBuilder:
             
             if not candidates:
                 logger.debug("[M72] ClaimGraph: no candidate edges generated")
-                return result
+                # M74: Fallback
+                result.disabled = True
+                result.disabled_reason = "no_candidates"
+                return self._apply_fallback(result, nodes)
             
             # Step 4: Pre-flight budget check
             budget_ok, estimated_cost, estimated_latency = self._preflight_budget_check(
@@ -127,7 +132,7 @@ class ClaimGraphBuilder:
                     "[M72] ClaimGraph disabled: budget exceeded (cost=$%.4f, latency=%.1fs)",
                     estimated_cost, estimated_latency
                 )
-                return result
+                return self._apply_fallback(result, nodes)
             
             # Step 5: C-Stage - Edge typing
             typed_edges = await self._type_edges(candidates, nodes)
@@ -148,19 +153,26 @@ class ClaimGraphBuilder:
             result.typed_edges_by_relation = dict(relation_counts)
             
             # Calculate kept ratio
-            if candidates:
-                result.kept_ratio = len(kept_edges) / len(candidates)
+            # M74: Pass candidates and kept_edges to quality gate (which calculates ratio)
             
             # Step 7: Quality gate
-            if not self._quality_gate(result.kept_ratio):
+            if not self._quality_gate(len(candidates), candidates, kept_edges):
                 result.disabled = True
                 result.disabled_reason = "quality_gate_failed"
+                # kept_ratio is set inside _quality_gate or we need to set it here?
+                # Let's set it here for trace
+                # Recalculate basic ratio for logging/trace (or use the one from gate?)
+                # We'll stick to simple ratio for trace, but gate decides.
+                result.kept_ratio = len(kept_edges) / len(candidates) if candidates else 0
+                
                 logger.warning(
-                    "[M72] ClaimGraph disabled: quality gate failed (kept_ratio=%.3f)",
+                    "[M72] ClaimGraph disabled: quality gate failed (ratio=%.3f)",
                     result.kept_ratio
                 )
-                return result
+                return self._apply_fallback(result, nodes)
             
+            result.kept_ratio = len(kept_edges) / len(candidates) if candidates else 0
+
             # Step 8: Graph ranking (PageRank)
             ranked = self._rank_claims(nodes, kept_edges)
             result.all_ranked = ranked
@@ -183,7 +195,50 @@ class ClaimGraphBuilder:
             logger.warning("[M72] ClaimGraph failed: %s", e)
             result.disabled = True
             result.disabled_reason = f"error: {str(e)[:50]}"
+            # Try fallback if nodes exist
+            if 'nodes' in locals() and nodes:
+                return self._apply_fallback(result, nodes)
             return result
+
+    def _apply_fallback(self, result: GraphResult, nodes: list[ClaimNode]) -> GraphResult:
+        """M74/T6: Apply deterministic fallback when graph is disabled."""
+        if not nodes:
+            return result
+            
+        result.fallback_used = True
+        
+        # Sort by importance desc, then text asc (deterministic)
+        sorted_nodes = sorted(
+            nodes, 
+            key=lambda n: (-n.importance, n.text)
+        )
+        
+        # Populate key_claims
+        top_k = self.config.top_k
+        result.key_claims = [
+            RankedClaim(
+                claim_id=n.claim_id,
+                centrality_score=n.importance,
+                in_structural_weight=0.0,
+                in_contradict_weight=0.0,
+                is_key_claim=True
+            )
+            for n in sorted_nodes[:top_k]
+        ]
+        
+        # Populate all_ranked
+        result.all_ranked = [
+            RankedClaim(
+                claim_id=n.claim_id,
+                centrality_score=n.importance,
+                in_structural_weight=0.0,
+                in_contradict_weight=0.0,
+                is_key_claim=(i < top_k)
+            )
+            for i, n in enumerate(sorted_nodes)
+        ]
+        
+        return result
     
     # ─────────────────────────────────────────────────────────────────────────
     # Step 2: Deduplication
@@ -306,12 +361,23 @@ class ClaimGraphBuilder:
             node_candidates: list[CandidateEdge] = []
             
             # Similarity-based candidates (Top-K_SIM)
+            # M74: Topic-aware check
+            # We get all indices sorted by sim, then iterate and filtering by topic if needed
             top_similar = self.embedding_client.get_top_k_similar(
-                i, sim_matrix, self.config.k_sim
+                i, sim_matrix, k=len(nodes)  # Get max candidates, we filter below
             )
             
+            sim_count = 0
             for j, sim_score in top_similar:
+                if sim_count >= self.config.k_sim:
+                    break
+
                 other = nodes[j]
+                
+                # M74: Skip cross-topic for SIM edges
+                if self.config.topic_aware and node.topic_key != other.topic_key:
+                    continue
+                
                 pair = tuple(sorted([node.claim_id, other.claim_id]))
                 
                 if pair in seen_pairs:
@@ -324,7 +390,9 @@ class ClaimGraphBuilder:
                     reason="sim",
                     sim_score=sim_score,
                     same_section=node.section_id == other.section_id,
+                    cross_topic=False,  # SIM edges are always within-topic here
                 ))
+                sim_count += 1
             
             # Adjacency-based candidates (±K_ADJ in same section)
             for delta in range(-self.config.k_adj, self.config.k_adj + 1):
@@ -336,6 +404,7 @@ class ClaimGraphBuilder:
                     continue
                 
                 other = nodes[adj_idx]
+                # Keep section constraint? Usually yes.
                 if node.section_id != other.section_id:
                     continue
                 
@@ -344,12 +413,17 @@ class ClaimGraphBuilder:
                     continue
                 
                 seen_pairs.add(pair)
+                
+                # M74: Mark cross-topic for Adjacency
+                is_cross_topic = (node.topic_key != other.topic_key)
+                
                 node_candidates.append(CandidateEdge(
                     src_id=node.claim_id,
                     dst_id=other.claim_id,
                     reason="adjacent",
                     sim_score=0.0,  # N/A for adjacency
                     same_section=True,
+                    cross_topic=is_cross_topic,
                 ))
             
             # Apply cap per node
@@ -512,13 +586,47 @@ class ClaimGraphBuilder:
     # Step 7: Quality Gate
     # ─────────────────────────────────────────────────────────────────────────
     
-    def _quality_gate(self, kept_ratio: float) -> bool:
+    def _quality_gate(
+        self, 
+        num_candidates: int,
+        candidates: list[CandidateEdge],
+        kept_edges: list[TypedEdge]
+    ) -> bool:
         """
         Check if kept_ratio is within acceptable bounds.
         
-        - Too low (<5%): something is wrong (all unrelated)
-        - Too high (>60%): likely hallucination
+        M74: Exclude cross-topic edges from the ratio calculation.
         """
+        # Identify cross-topic pairs
+        cross_topic_pairs = {
+            (c.src_id, c.dst_id) 
+            for c in candidates 
+            if c.cross_topic
+        }
+        
+        # Filter numerator: kept edges that are NOT cross-topic
+        kept_filtered = [
+            e for e in kept_edges 
+            if (e.src_id, e.dst_id) not in cross_topic_pairs
+        ]
+        
+        # Filter denominator: candidates that are NOT cross-topic
+        cand_filtered = [c for c in candidates if not c.cross_topic]
+        
+        if not cand_filtered:
+            # Avoid division by zero. If all edges are cross-topic, use raw ratio?
+            # Or assume ratio is 1.0 (pass)?
+            # If all are cross-topic, then we rely on cross-topic edges only.
+            # But normally there are some within-topic.
+            # Let's fallback to raw ratio if no within-topic candidates.
+            numerator = len(kept_edges)
+            denominator = len(candidates)
+        else:
+            numerator = len(kept_filtered)
+            denominator = len(cand_filtered)
+            
+        kept_ratio = numerator / denominator if denominator > 0 else 0
+        
         if kept_ratio < self.config.min_kept_ratio:
             logger.warning(
                 "[M72] Quality gate: kept_ratio %.3f < min %.3f",

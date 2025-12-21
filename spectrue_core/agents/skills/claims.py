@@ -1,5 +1,6 @@
-from spectrue_core.verification.evidence_pack import Claim, EvidenceRequirement, ArticleIntent
+from spectrue_core.verification.evidence_pack import Claim, ClaimAnchor, EvidenceRequirement, ArticleIntent
 from .base_skill import BaseSkill, logger
+from spectrue_core.utils.text_chunking import TextChunk
 from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 
@@ -86,6 +87,7 @@ class ClaimExtractionSkill(BaseSkill):
         self,
         text: str,
         *,
+        chunks: list[TextChunk] | None = None,  # M74
         lang: str = "en",
         max_claims: int = 5,
     ) -> tuple[list[Claim], bool, ArticleIntent]:
@@ -322,6 +324,8 @@ Return the result in JSON format.
                     search_method=rc.get("search_method", "general_search"),
                     # M73 Layer 4: Evidence-Need Routing
                     evidence_need=rc.get("evidence_need", "unknown"),
+                    # M74: Anchor
+                    anchor=self._locate_anchor(rc.get("text", ""), chunks),
                 )
                 
                 # Log strategy for debugging
@@ -383,6 +387,7 @@ Return the result in JSON format.
         self,
         text: str,
         *,
+        chunks: list[TextChunk] | None = None,  # M74
         lang: str = "en",
         max_claims: int = 5,
     ) -> tuple[list[ClaimUnit], bool, ArticleIntent]:
@@ -716,6 +721,26 @@ Return structured ClaimUnits in JSON format.
     # M73.5: Claim Deduplication
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _locate_anchor(self, text: str, chunks: list[TextChunk] | None) -> ClaimAnchor | None:
+        """M74: Locate claim anchor in text chunks."""
+        if not text or not chunks:
+            return None
+        
+        # Simple exact substring match of first 100 chars (case-insensitive)
+        # Sufficient for anchoring
+        target = " ".join(text.lower().split())[:100]
+        
+        for ch in chunks:
+            if target in ch.text.lower():
+                 start = ch.text.lower().find(target)
+                 return {
+                     "chunk_id": ch.chunk_id,
+                     "char_start": ch.char_start + start,
+                     "char_end": ch.char_start + start + len(text),
+                     "section_path": ch.section_path
+                 }
+        return None
+
     def _dedupe_claims(self, claims: list[Claim]) -> list[Claim]:
         """
         Deduplicate claims by normalized_text hash.
@@ -726,8 +751,8 @@ Return structured ClaimUnits in JSON format.
         - Keeps first occurrence (for type, topic_group, etc.)
         - Merges search_queries and query_candidates
         
-        Returns:
-            Deduplicated list of claims with re-assigned IDs.
+        M74: Spatial Deduplication
+        - Uses simple bucketing (200 chars) to determine if claims are distinct instances
         """
         if not claims:
             return []
@@ -737,9 +762,16 @@ Return structured ClaimUnits in JSON format.
         
         for c in claims:
             # Normalize key: lowercase, strip, collapse whitespace
-            key = " ".join((c.get("normalized_text") or c.get("text") or "").lower().split())
-            if not key:
+            base_key = " ".join((c.get("normalized_text") or c.get("text") or "").lower().split())
+            if not base_key:
                 continue
+            
+            # M74: Spatial bucketing
+            key = base_key
+            if c.get("anchor"):
+                # Claims >200 chars apart are treated as separate
+                bucket = c["anchor"]["char_start"] // 200
+                key = f"{base_key}|loc:{bucket}"
             
             if key in seen:
                 # Merge: take max importance

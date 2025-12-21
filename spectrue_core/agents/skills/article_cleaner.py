@@ -16,6 +16,8 @@ import re
 from spectrue_core.agents.llm_client import LLMClient
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
+import asyncio
+from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +143,11 @@ class ArticleCleanerSkill:
         """
         if not raw_text or len(raw_text) < 100:
             return raw_text
+            
+        # M74: Coverage Chunking
+        if self.runtime.features.coverage_chunking:
+            merged, _ = await self.clean_article_chunked(raw_text)
+            return merged
         
         # Truncate to avoid token limits
         truncated = raw_text[:max_input_chars]
@@ -175,3 +182,52 @@ class ArticleCleanerSkill:
             logger.warning("[ArticleCleaner] LLM cleaning failed: %s. Using fallback.", e)
             # M73.5: Use regex fallback instead of returning raw text
             return self._quick_clean_fallback(raw_text)
+
+    async def clean_article_chunked(
+        self, 
+        raw_text: str, 
+        *, 
+        max_chunk_chars: int = 6000
+    ) -> tuple[str, list[TextChunk]]:
+        """
+        M74: Clean article in chunks to prevent coverage loss.
+        Returns (merged_clean_text, original_chunks).
+        """
+        sampler = CoverageSampler()
+        chunks = sampler.chunk(raw_text, max_chunk_chars)
+        
+        if not chunks:
+            return "", []
+            
+        logger.info("[M74] Chunked cleaning: %d chunks for %d chars", len(chunks), len(raw_text))
+        
+        sem = asyncio.Semaphore(3)
+        # Limit concurrency to 3
+        
+        async def _process_chunk(chunk: TextChunk) -> str:
+            async with sem:
+                timeout = self._calculate_timeout(len(chunk.text))
+                prompt = ARTICLE_CLEAN_PROMPT.format(text=chunk.text)
+                try:
+                    result = await self.llm_client.call(
+                        model="gpt-5-nano",
+                        input=prompt,
+                        instructions="Extract only the main article content. Remove navigation, ads, related articles, footer.",
+                        json_output=False,
+                        trace_kind="article_clean_chunk",
+                        timeout=timeout,
+                    )
+                    content = result.get("content", "") if isinstance(result, dict) else result
+                    # Lower threshold for chunks as they might be smaller
+                    if content and len(content.strip()) > 50:
+                        return content.strip()
+                    return self._quick_clean_fallback(chunk.text)
+                except Exception as e:
+                    logger.warning("[M74] Chunk cleaning failed: %s. Using fallback.", e)
+                    return self._quick_clean_fallback(chunk.text)
+
+        cleaned_results = await asyncio.gather(*[_process_chunk(c) for c in chunks])
+        merged = sampler.merge(list(cleaned_results))
+        
+        logger.info("[M74] Merged length: %d chars", len(merged))
+        return merged, chunks

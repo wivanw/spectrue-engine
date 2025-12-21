@@ -146,6 +146,18 @@ class ArticleContext(TypedDict, total=False):
 # Claim Structure
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Claim Structure
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ClaimAnchor(TypedDict, total=False):
+    """M74: Tracks claim's position in original text."""
+    chunk_id: str
+    char_start: int
+    char_end: int
+    section_path: list[str]
+
+
 class EvidenceRequirement(TypedDict, total=False):
     """What evidence is required to verify this claim."""
     needs_primary_source: bool      # Needs official/primary confirmation
@@ -178,6 +190,12 @@ class Claim(TypedDict, total=False):
         "empirical_study", "guideline", "official_stats",
         "expert_opinion", "anecdotal", "news_report", "unknown"
     ]
+    # M74 Safety & Coverage
+    anchor: ClaimAnchor
+    text_safe: str
+    is_actionable_medical: bool
+    danger_tags: list[str]
+    redacted_spans: list[dict]
 
 
 

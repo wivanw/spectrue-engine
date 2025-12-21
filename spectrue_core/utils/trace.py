@@ -31,6 +31,12 @@ from spectrue_core.runtime_config import EngineRuntimeConfig
 
 _trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("spectrue_trace_id", default=None)
 _trace_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_enabled", default=False)
+_redact_pii_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_redact_pii", default=False)
+
+# M74: PII Regex Patterns
+EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+PHONE_REGEX = re.compile(r"\b(?:\+?1[-. ]?)?\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\b")
+CC_REGEX = re.compile(r"\b(?:\d{4}[- ]?){3}\d{4}\b")
 
 
 def _now_ms() -> int:
@@ -42,14 +48,69 @@ def _redact_text(s: str) -> str:
         return s
 
     # URL params
-    s = re.sub(r"([?&]key=)[^&]+", r"\1***", s, flags=re.IGNORECASE)
-    s = re.sub(r"([?&]api_key=)[^&]+", r"\1***", s, flags=re.IGNORECASE)
-    s = re.sub(r"([?&]access_token=)[^&]+", r"\1***", s, flags=re.IGNORECASE)
+    # URL params (stop at &, whitespace, or end of string)
+    s = re.sub(r"([?&]key=)[^&\s]+", r"\1***", s, flags=re.IGNORECASE)
+    s = re.sub(r"([?&]api_key=)[^&\s]+", r"\1***", s, flags=re.IGNORECASE)
+    s = re.sub(r"([?&]access_token=)[^&\s]+", r"\1***", s, flags=re.IGNORECASE)
 
     # Bearer tokens / auth headers
     s = re.sub(r"(Authorization:\s*Bearer\s+)[^\s]+", r"\1***", s, flags=re.IGNORECASE)
     s = re.sub(r"(Bearer\s+)[A-Za-z0-9._-]+", r"\1***", s)
 
+    # M74: Medical content redaction
+    s = _redact_medical(s)
+
+    # M74: PII Redaction (Email, Phone, Credit Card)
+    if _redact_pii_enabled_var.get():
+        s = EMAIL_REGEX.sub("[EMAIL]", s)
+        s = PHONE_REGEX.sub("[PHONE]", s)
+        s = CC_REGEX.sub("[CARD]", s)
+
+    return s
+
+
+# M74: Medical Patterns for Log Redaction
+# These patterns match actionable medical instructions that should not be stored in logs.
+# We preserve sha256 + safe_head for debugging while removing doses/instructions.
+_MEDICAL_PATTERNS = [
+    # Dosing with units (Ukrainian + English)
+    r"\d+[\s,]*(?:мг|мл|г|грам|mg|ml|g|gram|mcg|мкг|iu|од|одиниц)(?:\s*/\s*(?:кг|kg|день|day|добу))?\b",
+    # Intake instructions (Ukrainian)
+    r"(?:приймати|пити|вживати|вводити|застосовувати|наносити|полоскати)\s+(?:по\s+)?\d+",
+    # Intake instructions (English)
+    r"(?:take|consume|administer|apply|inject|drink)\s+\d+",
+    # Frequency patterns (Ukrainian)
+    r"\d+\s*(?:раз|рази|разів)\s*(?:на|в|per)\s*(?:день|добу|тиждень|годину)",
+    # Frequency patterns (English)
+    r"\d+\s*(?:times?)\s*(?:per|a|daily|weekly)\s*(?:day|hour|week)?",
+    # Procedural steps with numbers
+    r"(?:крок|етап|step)\s*\d+\s*[:\.]\s*[^\n]{10,50}",
+    # Concentration patterns
+    r"\d+[\s,]*%\s*(?:розчин|solution|концентрація|concentration)",
+    # Duration patterns
+    r"(?:протягом|впродовж|for|during)\s+\d+\s*(?:днів|дні|хвилин|годин|days|hours|minutes|weeks)",
+]
+
+
+def _redact_medical(s: str) -> str:
+    """
+    M74: Redact medical dosing and instructions from text.
+    
+    Removes actionable medical content while preserving structure for debugging.
+    Patterns are designed to catch common dosing formats without false positives.
+    
+    Args:
+        s: Input text
+        
+    Returns:
+        Text with medical instructions replaced by [REDACTED_MEDICAL]
+    """
+    if not s:
+        return s
+    
+    for pattern in _MEDICAL_PATTERNS:
+        s = re.sub(pattern, "[REDACTED_MEDICAL]", s, flags=re.IGNORECASE)
+    
     return s
 
 
@@ -125,6 +186,7 @@ class Trace:
         enabled = bool(is_local_run() and runtime.features.trace_enabled)
         _trace_id_var.set(trace_id)
         _trace_enabled_var.set(enabled)
+        _redact_pii_enabled_var.set(runtime.features.log_redaction)
         if enabled:
             # M47: Clean up old traces, keep only the latest one
             try:

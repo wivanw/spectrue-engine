@@ -44,15 +44,14 @@ Search Results Snippets:
 {snippets_text}
 
 Task: Determine the semantic relationship between the snippets and the claims.
-Return one of these statuses:
-- "RELEVANT": The snippets discuss the same entities, events, or topic. Useful for verification.
-- "OFF_TOPIC": Completely unrelated (e.g., search discussing football, claims discussing physics).
-- "TOO_BROAD": Snippets are too generic (e.g., dictionary definitions) when specific news is needed.
-- "NOT_FOUND": Snippets explicitly say "No results found" or similar.
+Classify the MATCH TYPE:
+- "EXACT": The snippets explicitly mention the specific event, stats, or quotes in the claims. High verification value.
+- "TOPIC": The snippets discuss the same entities/topic but do NOT confirm/deny the specific details. Useful for context.
+- "UNRELATED": Completely unrelated (different entities, different context, spam).
 
-Output JSON:
+Return JSON:
 {{
-  "status": "RELEVANT" | "OFF_TOPIC" | "TOO_BROAD" | "NOT_FOUND",
+  "match_type": "EXACT" | "TOPIC" | "UNRELATED",
   "reason": "Short explanation"
 }}
 """
@@ -61,23 +60,26 @@ Output JSON:
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
                 input=prompt,
-                instructions="You are a semantic router.",
+                instructions="You are a semantic router. Be generous with TOPIC matches for context, strict with EXACT matches.",
                 reasoning_effort="low",
                 timeout=15.0,
                 trace_kind="semantic_gating"
             )
             
-            status = result.get("status", "RELEVANT")
+            match_type = result.get("match_type", "TOPIC")
             reason = result.get("reason", "No reason provided")
             
-            # Map legacy boolean for backward compat if needed, but primary is status
-            is_relevant = status == "RELEVANT"
+            # M74: Two-Level Gating
+            # Accept both EXACT and TOPIC as "RELEVANT" to prevent coverage loss
+            is_relevant = match_type in ("EXACT", "TOPIC")
+            status = "RELEVANT" if is_relevant else "OFF_TOPIC"
             
-            logger.info("[M67] Semantic Router: Status=%s. Reason: %s", status, reason)
+            logger.info("[M74] Semantic Router: match_type=%s → Status=%s. Reason: %s", match_type, status, reason)
                 
             return {
                 "status": status,
-                "is_relevant": is_relevant, # Keep for compatibility
+                "match_type": match_type,
+                "is_relevant": is_relevant,
                 "reason": reason
             }
             

@@ -89,6 +89,7 @@ class CandidateEdge:
     reason: Literal["sim", "adjacent", "keyword"]
     sim_score: float        # 0.0-1.0 (embeddings) or Jaccard (keywords)
     same_section: bool
+    cross_topic: bool = False  # M74: Edge crosses topic boundaries
 
 
 @dataclass
@@ -172,6 +173,7 @@ class GraphResult:
     # Disable state
     disabled: bool = False
     disabled_reason: str | None = None  # "budget_exceeded_preflight" | "quality_gate_failed"
+    fallback_used: bool = False  # M74: Fallback Key Claims used when graph disabled
     
     @property
     def key_claim_ids(self) -> list[str]:
@@ -209,6 +211,7 @@ class GraphResult:
         return {
             "enabled": not self.disabled,
             "disabled_reason": self.disabled_reason,
+            "fallback_used": self.fallback_used,
             "claims_count_raw": self.claims_count_raw,
             "claims_count_dedup": self.claims_count_dedup,
             "candidate_edges_count": self.candidate_edges_count,

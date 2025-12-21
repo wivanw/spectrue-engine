@@ -65,23 +65,48 @@ class EdgeTypingSkill(BaseSkill):
         instructions = self._build_instructions()
         prompt = self._build_prompt(edges, node_map, max_claim_chars)
         
-        try:
-            result = await self.llm_client.call_json(
-                model="gpt-5-nano",
-                input=prompt,
-                instructions=instructions,
-                reasoning_effort="low",
-                cache_key=f"edge_typing_{PROMPT_VERSION}",
-                timeout=30.0,
-                trace_kind="edge_typing",
-            )
-            
-            return self._parse_response(result, edges)
-            
-        except Exception as e:
-            logger.warning("[M72] Edge typing batch failed: %s", e)
-            # Return None for all edges (fail closed)
-            return [None] * len(edges)
+        # T9: Retry Logic with Validation
+        max_retries = 1
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Use slightly higher temp on retry to break loops
+                temp = 0.0 if attempt == 0 else 0.3
+                
+                result = await self.llm_client.call_json(
+                    model="gpt-5-nano",
+                    input=prompt,
+                    instructions=instructions,
+                    reasoning_effort="low",
+                    cache_key=f"edge_typing_{PROMPT_VERSION}_{attempt}" if attempt > 0 else f"edge_typing_{PROMPT_VERSION}",
+                    timeout=30.0,
+                    trace_kind="edge_typing",
+                    temperature=temp,
+                )
+                
+                parsed = self._parse_response(result, edges)
+                
+                # T8: Validation
+                is_valid, reason = self._validate_batch(parsed, edges)
+                if is_valid:
+                    return parsed
+                
+                logger.warning("[M72] Edge typing validation failed (attempt %d): %s", attempt + 1, reason)
+                if attempt == max_retries:
+                    # Return best effort on final failure
+                    return parsed
+                
+            except Exception as e:
+                logger.warning("[M72] Edge typing batch failed (attempt %d): %s", attempt + 1, e)
+                if attempt == max_retries:
+                    # Return safe defaults (Unrelated)
+                    return [
+                        TypedEdge(
+                            e.src_id, e.dst_id, EdgeRelation.UNRELATED, 0.0, 
+                            "Error / Failed", ""
+                        ) 
+                        for e in edges
+                    ]
     
     def _build_instructions(self) -> str:
         """Build injection-hardened instructions."""
@@ -158,6 +183,31 @@ CLAIM PAIRS:
 Return JSON array with classifications for each pair.
 Remember: "unrelated" is the correct answer for many pairs.
 """
+
+    def _validate_batch(self, typed: list[TypedEdge | None], input_edges: list[CandidateEdge]) -> tuple[bool, str]:
+        """T8: Validate edge typing batch for consistency and quality."""
+        if not typed or len(typed) != len(input_edges):
+            return False, "Length mismatch"
+            
+        # 1. Check for failure rate (None or "Failed to classify")
+        failures = sum(1 for e in typed if e is None or e.rationale_short == "Failed to classify")
+        if failures > len(typed) * 0.5 and len(typed) > 2:
+            return False, f"High failure rate ({failures}/{len(typed)})"
+            
+        # 2. Check for Hallucinated Strong Relations (Low Score)
+        # If relation is SUPPORTS/CONTRADICTS, score should typically be > 0.6
+        valid_edges = [e for e in typed if e is not None]
+        weak_strong = sum(
+            1 for e in valid_edges 
+            if e.relation in (EdgeRelation.SUPPORTS, EdgeRelation.CONTRADICTS) 
+            and e.score < 0.6
+        )
+        
+        # If >30% of edges are weak strong signals, LLM might be confused
+        if valid_edges and weak_strong > len(valid_edges) * 0.3:
+             return False, f"Too many weak strong relations ({weak_strong})"
+             
+        return True, "OK"
     
     def _truncate_claim(self, text: str, max_chars: int) -> str:
         """Truncate claim text, preserving anchor context."""
