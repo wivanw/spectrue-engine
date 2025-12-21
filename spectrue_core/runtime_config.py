@@ -226,7 +226,7 @@ class EngineRuntimeConfig:
 
         # M72: ClaimGraph configuration
         claim_graph = ClaimGraphConfig(
-            enabled=_parse_bool(os.getenv("CLAIM_GRAPH_ENABLED"), default=False),
+            enabled=_parse_bool(os.getenv("CLAIM_GRAPH_ENABLED"), default=True),
             k_sim=_parse_int(os.getenv("CLAIM_GRAPH_K_SIM"), default=10, min_v=1, max_v=50),
             k_adj=_parse_int(os.getenv("CLAIM_GRAPH_K_ADJ"), default=2, min_v=0, max_v=10),
             k_total_cap=_parse_int(os.getenv("CLAIM_GRAPH_K_TOTAL_CAP"), default=20, min_v=5, max_v=100),
