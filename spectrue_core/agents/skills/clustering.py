@@ -191,8 +191,10 @@ Return the result in JSON format with key "matrix".
                 "dropped_bad_id": 0,
                 "dropped_no_quote": 0,
                 "dropped_missing": 0,  # NOTE: M78 makes this 0 via fallback
-                "kept_valid": 0,
-                "context_fallback": 0,  # M78: Count of sources converted to CONTEXT
+                "kept_scored": 0,      # M78: Sources with scoring stances (SUPPORT/REFUTE/MIXED)
+                "kept_context": 0,     # M78: Sources with context stances (CONTEXT)
+                "context_fallback": 0,  # M78: Count of sources converted to CONTEXT by fallback
+
             }
             
             VALID_STANCES = {"SUPPORT", "REFUTE", "MIXED", "CONTEXT"}
@@ -297,8 +299,11 @@ Return the result in JSON format with key "matrix".
                 if stance not in {"CONTEXT", "IRRELEVANT"} and (not quote or not str(quote).strip()):
                     stats["dropped_no_quote"] += 1
                     continue
-
-                stats["kept_valid"] += 1
+                # M78: Track scored vs context separately
+                if stance in {"SUPPORT", "REFUTE", "MIXED"}:
+                    stats["kept_scored"] += 1
+                else:  # CONTEXT
+                    stats["kept_context"] += 1
 
                 # Construct SearchResult
                 res = SearchResult(

@@ -563,17 +563,25 @@ class ValidationPipeline:
                             current_topic = new_topic
                             continue
                         else:
-                             # Final failure after retry
-                             return {
-                                "verified_score": 0.0,
-                                "confidence_score": 0.0,
-                                "analysis": f"Search results rejected by Semantic Router ({gate_status}) after refinement. Reason: {gate_result.get('reason')}",
-                                "rationale": "Evidence retrieval failed semantic validation due to topic mismatch.",
-                                "sources": [],
-                                "search_meta": self.search_mgr.get_search_meta(),
-                                "cost": self.search_mgr.calculate_cost(gpt_model, search_type),
-                                "text": fact
-                            }
+                             # M78.1: RETAIN sources as CONTEXT instead of dropping
+                             # Mark all sources as low-match context for transparency
+                             logger.warning("[M78] Semantic gating failed after 2 attempts. Retaining %d sources as CONTEXT.", len(u_srcs))
+                             for src in u_srcs:
+                                 src["stance"] = "context"
+                                 src["gating_status"] = gate_status
+                                 src["gating_reason"] = gate_result.get("reason", "")[:100]
+                             final_context += "\n" + u_ctx
+                             final_sources.extend(u_srcs)
+                             has_results = True  # Mark as having results (even if context-only)
+                             
+                             # Telemetry for visibility
+                             Trace.event("gating.retained_as_context", {
+                                 "input_sources": len(u_srcs),
+                                 "match_type": gate_result.get("match_type", gate_status),
+                                 "reason": gate_result.get("reason", "")[:100],
+                                 "query": primary_query[:100],
+                             })
+                             break
             
             # Fallback: Google CSE
             # If Unified Tavily search failed or returned 0 results (after filtering), try CSE.
