@@ -77,12 +77,17 @@ class EngineFeatureFlags:
     semantic_gating_v2: bool = False
     claim_sanitize: bool = True
     log_redaction: bool = False
+    # M75
+    trace_safe_payloads: bool = True
 
 
 @dataclass(frozen=True)
 class EngineDebugFlags:
     engine_debug: bool = False
     log_prompts: bool = False
+    # M75
+    trace_max_head_chars: int = 120
+    trace_max_inline_chars: int = 600
 
 
 @dataclass(frozen=True)
@@ -204,6 +209,8 @@ class EngineRuntimeConfig:
         debug = EngineDebugFlags(
             engine_debug=_parse_bool(os.getenv("SPECTRUE_ENGINE_DEBUG"), default=False),
             log_prompts=_parse_bool(os.getenv("SPECTRUE_ENGINE_LOG_PROMPTS"), default=False),
+            trace_max_head_chars=_parse_int(os.getenv("TRACE_MAX_HEAD_CHARS"), default=120, min_v=50, max_v=1000),
+            trace_max_inline_chars=_parse_int(os.getenv("TRACE_MAX_INLINE_CHARS"), default=600, min_v=100, max_v=5000),
         )
 
         features = EngineFeatureFlags(
@@ -216,6 +223,8 @@ class EngineRuntimeConfig:
             semantic_gating_v2=_parse_bool(os.getenv("FEATURE_SEMANTIC_GATING_V2"), default=False),
             claim_sanitize=_parse_bool(os.getenv("FEATURE_CLAIM_SANITIZE"), default=True),
             log_redaction=_parse_bool(os.getenv("FEATURE_LOG_REDACTION"), default=False),
+            # M75
+            trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=True),
         )
 
         # Search knobs
@@ -301,10 +310,13 @@ class EngineRuntimeConfig:
                 "topic_aware_graph": bool(self.features.topic_aware_claim_graph),
                 "semantic_gating_v2": bool(self.features.semantic_gating_v2),
                 "claim_sanitize": bool(self.features.claim_sanitize),
+                "trace_safe_payloads": bool(self.features.trace_safe_payloads),
             },
             "debug": {
                 "engine_debug": bool(self.debug.engine_debug),
                 "log_prompts": bool(self.debug.log_prompts),
+                "trace_max_head_chars": int(self.debug.trace_max_head_chars),
+                "trace_max_inline_chars": int(self.debug.trace_max_inline_chars),
             },
             "llm": {
                 "timeout_sec": float(self.llm.timeout_sec),

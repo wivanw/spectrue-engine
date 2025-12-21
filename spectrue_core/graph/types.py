@@ -104,7 +104,9 @@ class TypedEdge:
     relation: EdgeRelation
     score: float            # 0.0-1.0 confidence
     rationale_short: str    # 10-25 words, logs only
+    rationale_short: str    # 10-25 words, logs only
     evidence_spans: str     # Key text supporting classification, ≤25 words
+    cross_topic: bool = False  # M75: Preserved from CandidateEdge
     
     def to_trace_dict(self) -> dict:
         """Convert to dict for tracing."""
@@ -163,7 +165,13 @@ class GraphResult:
     claims_count_dedup: int = 0
     candidate_edges_count: int = 0
     typed_edges_kept_count: int = 0
+    typed_edges_kept_count: int = 0
     kept_ratio: float = 0.0
+    # M75: Topic-aware metrics
+    within_topic_edges_count: int = 0
+    cross_topic_edges_count: int = 0
+    kept_ratio_within_topic: float = 0.0
+    
     typed_edges_by_relation: dict[str, int] = field(default_factory=dict)
     
     # Budget tracking
@@ -217,6 +225,9 @@ class GraphResult:
             "candidate_edges_count": self.candidate_edges_count,
             "typed_edges_kept_count": self.typed_edges_kept_count,
             "kept_ratio": round(self.kept_ratio, 3),
+            "within_topic_edges_count": self.within_topic_edges_count,
+            "cross_topic_edges_count": self.cross_topic_edges_count,
+            "kept_ratio_within_topic": round(self.kept_ratio_within_topic, 3),
             "typed_edges_by_relation": self.typed_edges_by_relation,
             "key_claims_ids_and_scores": [c.to_trace_dict() for c in self.key_claims[:12]],
             "sample_edges": [e.to_trace_dict() for e in self.typed_edges[:10]],

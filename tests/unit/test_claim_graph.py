@@ -47,6 +47,8 @@ class MockClaimGraphConfig:
     avg_tokens_per_edge: int = 120
     min_kept_ratio: float = 0.05
     max_kept_ratio: float = 0.60
+    # M75
+    topic_aware: bool = False
 
 
 @pytest.fixture
@@ -431,6 +433,128 @@ class TestGraphResult:
         )
         
         assert result.key_claim_ids == ["c1", "c3"]
+    
+    @pytest.mark.asyncio
+    async def test_quality_gate_ignores_cross_topic_unrelated(self):
+        """M75: Quality gate should ignore cross-topic edges."""
+        # Setup: 10 candidates
+        # 5 within-topic (all SUPPORTS)
+        # 5 cross-topic (all UNRELATED)
+        
+        candidates = []
+        # within-topic
+        for i in range(5):
+            candidates.append(CandidateEdge(
+                src_id=f"c{i}", dst_id=f"c{i+1}", 
+                reason="sim", sim_score=0.9, same_section=True, cross_topic=False
+            ))
+        # cross-topic
+        for i in range(5, 10):
+            candidates.append(CandidateEdge(
+                src_id=f"c{i}", dst_id=f"c{i+1}", 
+                reason="sim", sim_score=0.9, same_section=True, cross_topic=True
+            ))
+            
+        async def mock_type_edges(edges, node_map, max_chars):
+            results = []
+            for e in edges:
+                if e.cross_topic:
+                    relation = EdgeRelation.UNRELATED
+                    score = 0.2
+                else:
+                    relation = EdgeRelation.SUPPORTS
+                    score = 0.9
+                
+                results.append(TypedEdge(
+                    src_id=e.src_id, dst_id=e.dst_id,
+                    relation=relation, score=score,
+                    rationale_short="", evidence_spans="",
+                    # cross_topic is absent here if we don't return it manually? 
+                    # The builder copies it from candidate! So we don't strictly need to set it here
+                    # unless builder relies on returned object having it.
+                    # Builder code: `result.cross_topic = edge.cross_topic` (we implemented this)
+                    # So skill doesn't need to know about M75 field.
+                ))
+            return results
+
+        # We need a builder with mocked typing skill
+        # Can't use fixture easily because we need custom typing logic
+        # OR we can patch the skill
+        
+        config = MockClaimGraphConfig(
+            min_kept_ratio=0.5,
+            max_kept_ratio=1.0, # Relax max ratio for this test
+            topic_aware=False
+        ) 
+        # If naive ratio: 5 kept / 10 total = 0.5. Wait, 0.5 >= 0.5 passes.
+        # Let's make it fail naive check.
+        # 2 kept / 10 total = 0.2 < 0.5 (FAILS naive)
+        # But if within-topic is 2 kept / 2 total = 1.0 (PASSES focus)
+        
+        # Let's adjust candidates:
+        # 2 within-topic (kept)
+        # 8 cross-topic (unrelated)
+        candidates = []
+        for i in range(2):
+            candidates.append(CandidateEdge(
+                src_id=f"w{i}", dst_id=f"w{i+1}", 
+                reason="sim", sim_score=0.9, same_section=True, cross_topic=False
+            ))
+        for i in range(8):
+            candidates.append(CandidateEdge(
+                src_id=f"x{i}", dst_id=f"x{i+1}", 
+                reason="sim", sim_score=0.9, same_section=True, cross_topic=True
+            ))
+            
+        # Re-define mock
+        async def mock_type_edges_2(edges, node_map, max_chars):
+            results = []
+            for e in edges:
+                # We need to look up if 'e' is cross_topic. 
+                # 'e' IS the candidate!
+                if e.cross_topic:
+                    relation = EdgeRelation.UNRELATED
+                else:
+                    relation = EdgeRelation.SUPPORTS
+                results.append(TypedEdge(
+                    src_id=e.src_id, dst_id=e.dst_id,
+                    relation=relation, score=0.9,
+                    rationale_short="", evidence_spans="",
+                ))
+            return results
+
+        skill = MagicMock()
+        skill.type_edges_batch = mock_type_edges_2
+        
+        builder = ClaimGraphBuilder(
+            config=config,
+            openai_client=MagicMock(),
+            edge_typing_skill=skill,
+        )
+        
+        # We need to bypass _generate_candidates to inject our specific candidates
+        # So we mock _generate_candidates
+        builder._generate_candidates = AsyncMock(return_value=candidates)
+        builder.embedding_client.embed_texts = AsyncMock(return_value=[]) # Needed for nodes step 3 if we didn't mock step 3... 
+        # Wait, step 3 calls _generate_candidates.
+        
+        # Create dummy nodes
+        nodes = [
+            {"id": f"w{i}", "text": "Win"} for i in range(3)
+        ] + [
+             {"id": f"x{i}", "text": "Cross"} for i in range(9)
+        ]
+        
+        result = await builder.build(nodes)
+        
+        assert result.disabled is False
+        assert result.kept_ratio_within_topic == 1.0
+        assert result.within_topic_edges_count == 2
+        assert result.cross_topic_edges_count == 8
+        
+        # Verify trace has correct main 'kept_ratio'
+        # In code: result.kept_ratio = result.kept_ratio_within_topic
+        assert result.kept_ratio == 1.0
     
     def test_to_trace_dict(self):
         result = GraphResult(

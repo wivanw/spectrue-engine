@@ -31,7 +31,11 @@ from spectrue_core.runtime_config import EngineRuntimeConfig
 
 _trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("spectrue_trace_id", default=None)
 _trace_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_enabled", default=False)
+_trace_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_enabled", default=False)
 _redact_pii_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_redact_pii", default=False)
+_trace_safe_payloads_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_safe_payloads", default=True)
+_trace_max_head_var: contextvars.ContextVar[int] = contextvars.ContextVar("spectrue_trace_max_head", default=120)
+_trace_max_inline_var: contextvars.ContextVar[int] = contextvars.ContextVar("spectrue_trace_max_inline", default=600)
 
 # M74: PII Regex Patterns
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
@@ -114,13 +118,47 @@ def _redact_medical(s: str) -> str:
     return s
 
 
-def _sanitize(obj: Any, *, max_str: int = 4000, max_list: int = 100, max_dict: int = 200) -> Any:
+
+def _sanitize(
+    obj: Any,
+    *,
+    max_str: int = 4000,
+    max_list: int = 100,
+    max_dict: int = 200,
+    key_hint: str | None = None,
+) -> Any:
     if obj is None:
         return None
     if isinstance(obj, (int, float, bool)):
         return obj
     if isinstance(obj, str):
         s = _redact_text(obj)
+        
+        # M75: Safe Payloads Logic
+        safe_mode = _trace_safe_payloads_var.get()
+        if safe_mode:
+            # Check if this is a sensitive key
+            is_sensitive = False
+            if key_hint:
+                k = key_hint.lower()
+                # Broad match for sensitive keys
+                if any(x in k for x in ("input_text", "response_text", "article", "content", "text", "prompt", "raw_html", "snippet")):
+                    is_sensitive = True
+            
+            # Determine limit
+            limit = _trace_max_head_var.get() if is_sensitive else _trace_max_inline_var.get()
+            
+            if len(s) > limit:
+                # Force head-only (no tail)
+                return {
+                    "len": len(s),
+                    "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest(),
+                    "head": s[:limit],
+                    # Absolutely NO tail in safe mode
+                }
+            return s
+            
+        # Legacy/Unsafe Mode (keep existing behavior for backward compat if flag is off)
         if len(s) <= max_str:
             return s
         head_tail_len = min(300, max_str // 2)
@@ -130,6 +168,7 @@ def _sanitize(obj: Any, *, max_str: int = 4000, max_list: int = 100, max_dict: i
             "head": s[:head_tail_len],
             "tail": s[-head_tail_len:] if head_tail_len else "",
         }
+
     if isinstance(obj, bytes):
         return f"<bytes:{len(obj)}>"
     if isinstance(obj, (list, tuple)):
@@ -144,12 +183,14 @@ def _sanitize(obj: Any, *, max_str: int = 4000, max_list: int = 100, max_dict: i
                 out["..."] = f"(+{len(obj) - max_dict} more keys)"
                 break
             key = str(k)
-            if key.lower() in ("authorization", "api_key", "key", "openai_api_key", "tavily_api_key"):
+            k_lower = key.lower()
+            if k_lower in ("authorization", "api_key", "key", "openai_api_key", "tavily_api_key"):
                 out[key] = "***"
             else:
-                out[key] = _sanitize(v, max_str=max_str, max_list=max_list, max_dict=max_dict)
+                # Pass key_hint down
+                out[key] = _sanitize(v, max_str=max_str, max_list=max_list, max_dict=max_dict, key_hint=key)
         return out
-    return _sanitize(str(obj), max_str=max_str, max_list=max_list, max_dict=max_dict)
+    return _sanitize(str(obj), max_str=max_str, max_list=max_list, max_dict=max_dict, key_hint=key_hint)
 
 
 def _trace_dir() -> Path:
@@ -186,7 +227,11 @@ class Trace:
         enabled = bool(is_local_run() and runtime.features.trace_enabled)
         _trace_id_var.set(trace_id)
         _trace_enabled_var.set(enabled)
+        _trace_enabled_var.set(enabled)
         _redact_pii_enabled_var.set(runtime.features.log_redaction)
+        _trace_safe_payloads_var.set(runtime.features.trace_safe_payloads)
+        _trace_max_head_var.set(runtime.debug.trace_max_head_chars)
+        _trace_max_inline_var.set(runtime.debug.trace_max_inline_chars)
         if enabled:
             # M47: Clean up old traces, keep only the latest one
             try:

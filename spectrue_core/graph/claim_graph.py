@@ -156,14 +156,11 @@ class ClaimGraphBuilder:
             # M74: Pass candidates and kept_edges to quality gate (which calculates ratio)
             
             # Step 7: Quality gate
-            if not self._quality_gate(len(candidates), candidates, kept_edges):
+            if not self._quality_gate(len(candidates), candidates, kept_edges, result):
                 result.disabled = True
                 result.disabled_reason = "quality_gate_failed"
-                # kept_ratio is set inside _quality_gate or we need to set it here?
-                # Let's set it here for trace
-                # Recalculate basic ratio for logging/trace (or use the one from gate?)
-                # We'll stick to simple ratio for trace, but gate decides.
-                result.kept_ratio = len(kept_edges) / len(candidates) if candidates else 0
+                # Use within-topic ratio for main kept_ratio field to align with decision
+                result.kept_ratio = result.kept_ratio_within_topic
                 
                 logger.warning(
                     "[M72] ClaimGraph disabled: quality gate failed (ratio=%.3f)",
@@ -171,7 +168,7 @@ class ClaimGraphBuilder:
                 )
                 return self._apply_fallback(result, nodes)
             
-            result.kept_ratio = len(kept_edges) / len(candidates) if candidates else 0
+            result.kept_ratio = result.kept_ratio_within_topic
 
             # Step 8: Graph ranking (PageRank)
             ranked = self._rank_claims(nodes, kept_edges)
@@ -566,8 +563,19 @@ class ClaimGraphBuilder:
                 cache_key = self._edge_cache_key(edge.src_id, edge.dst_id, node_map)
                 self._edge_cache[cache_key] = result
                 if result is not None:
+                    # M75: Preserve cross_topic flag
+                    result.cross_topic = edge.cross_topic
                     typed_edges.append(result)
         
+        # Also fix cached edges (in case they didn't have it set, though cache stores object reference)
+        # But we need to make sure we set it for this candidate's context
+        # Actually TypedEdge object is shared if cached?
+        # If cache persists across builds, cross_topic property is structural between nodes, so it's stable.
+        # But we need to ensure it's set for cached ones too if we didn't just create them.
+        for edge, result in zip(candidates, typed_edges):
+             if result:
+                 result.cross_topic = edge.cross_topic
+
         return typed_edges
     
     def _edge_cache_key(
@@ -590,12 +598,13 @@ class ClaimGraphBuilder:
         self, 
         num_candidates: int,
         candidates: list[CandidateEdge],
-        kept_edges: list[TypedEdge]
+        kept_edges: list[TypedEdge],
+        result: GraphResult,  # M75: Pass result to update metrics
     ) -> bool:
         """
         Check if kept_ratio is within acceptable bounds.
         
-        M74: Exclude cross-topic edges from the ratio calculation.
+        M75: Exclude cross-topic edges from the ratio calculation.
         """
         # Identify cross-topic pairs
         cross_topic_pairs = {
@@ -605,38 +614,44 @@ class ClaimGraphBuilder:
         }
         
         # Filter numerator: kept edges that are NOT cross-topic
-        kept_filtered = [
+        kept_within = [
             e for e in kept_edges 
             if (e.src_id, e.dst_id) not in cross_topic_pairs
         ]
         
         # Filter denominator: candidates that are NOT cross-topic
-        cand_filtered = [c for c in candidates if not c.cross_topic]
+        cand_within = [c for c in candidates if not c.cross_topic]
         
-        if not cand_filtered:
-            # Avoid division by zero. If all edges are cross-topic, use raw ratio?
-            # Or assume ratio is 1.0 (pass)?
-            # If all are cross-topic, then we rely on cross-topic edges only.
-            # But normally there are some within-topic.
-            # Let's fallback to raw ratio if no within-topic candidates.
+        # M75: Track metrics
+        result.within_topic_edges_count = len(cand_within)
+        result.cross_topic_edges_count = len(candidates) - len(cand_within)
+        
+        if not cand_within:
+            # If no within-topic candidates (rare), we can't calculate valid ratio.
+            # Fallback to passing if we have specific cross-topic edges or fail?
+            # Safe default: if we have NO within-topic candidates, maybe the whole graph is cross-topic?
+            # Let's use overall ratio as fallback.
             numerator = len(kept_edges)
             denominator = len(candidates)
+            logger.debug("[M75] No within-topic candidates, using overall ratio")
         else:
-            numerator = len(kept_filtered)
-            denominator = len(cand_filtered)
+            numerator = len(kept_within)
+            denominator = len(cand_within)
             
         kept_ratio = numerator / denominator if denominator > 0 else 0
+        result.kept_ratio_within_topic = kept_ratio
         
+        # Check constraints
         if kept_ratio < self.config.min_kept_ratio:
             logger.warning(
-                "[M72] Quality gate: kept_ratio %.3f < min %.3f",
+                "[M72] Quality gate: kept_ratio %.3f < min %.3f (within-focus)",
                 kept_ratio, self.config.min_kept_ratio
             )
             return False
         
         if kept_ratio > self.config.max_kept_ratio:
             logger.warning(
-                "[M72] Quality gate: kept_ratio %.3f > max %.3f",
+                "[M72] Quality gate: kept_ratio %.3f > max %.3f (within-focus)",
                 kept_ratio, self.config.max_kept_ratio
             )
             return False
