@@ -205,9 +205,10 @@ class ClaimGraphBuilder:
         result.fallback_used = True
         
         # Sort by importance desc, then text asc (deterministic)
+        # Sort by harm_potential desc, then structural importance (approximated by extracted importance), then text asc
         sorted_nodes = sorted(
             nodes, 
-            key=lambda n: (-n.importance, n.text)
+            key=lambda n: (-n.harm_potential, -n.importance, n.text)
         )
         
         # Populate key_claims
@@ -642,13 +643,18 @@ class ClaimGraphBuilder:
         result.kept_ratio_within_topic = kept_ratio
         
         # Check constraints
+        # Check constraints
         if kept_ratio < self.config.min_kept_ratio:
-            logger.warning(
-                "[M72] Quality gate: kept_ratio %.3f < min %.3f (within-focus)",
+            # M76: Sparse Graph Resilience
+            # If we processed candidates but kept very few (ratio < min), it might just be a sparse/disconnected graph.
+            # Instead of disabling (which logs a warning and triggers fallback), we treat it as valid but sparse.
+            logger.info(
+                "[M76] Quality gate: kept_ratio %.3f < min %.3f. Treating as SPARSE graph (valid).",
                 kept_ratio, self.config.min_kept_ratio
             )
-            return False
-        
+            result.sparse_graph = True # Signal that graph is valid but weak
+            return True
+
         if kept_ratio > self.config.max_kept_ratio:
             logger.warning(
                 "[M72] Quality gate: kept_ratio %.3f > max %.3f (within-focus)",

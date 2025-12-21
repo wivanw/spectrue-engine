@@ -53,6 +53,7 @@ class ClaimNode:
     anchor: str             # Offset or short quote pointer (first 50 chars)
     importance: float       # 0.0-1.0
     topic_key: str          # Topic grouping key
+    harm_potential: int = 1 # M77: Harm Potential (1-5)
     
     # For deduplication
     text_hash: str = ""     # Hash of normalized text for caching
@@ -73,6 +74,7 @@ class ClaimNode:
             anchor=text[:50] if text else "",
             importance=float(claim.get("importance", 0.5)),
             topic_key=claim.get("topic_key", "Other"),
+            harm_potential=int(claim.get("harm_potential", 1)),
             text_hash=text_hash,
         )
 
@@ -182,6 +184,7 @@ class GraphResult:
     disabled: bool = False
     disabled_reason: str | None = None  # "budget_exceeded_preflight" | "quality_gate_failed"
     fallback_used: bool = False  # M74: Fallback Key Claims used when graph disabled
+    sparse_graph: bool = False  # M76: Graph valid but has few/no edges (kept_ratio < min)
     
     @property
     def key_claim_ids(self) -> list[str]:

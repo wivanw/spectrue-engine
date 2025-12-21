@@ -261,19 +261,39 @@ def build_evidence_pack(
         cap_reasons=cap_reasons,
     )
     
+    # ─────────────────────────────────────────────────────────────────────────
+    # M78.1: Split sources into scored (for verdict) and context (for UX)
+    # ─────────────────────────────────────────────────────────────────────────
+    SCORING_STANCES = {"support", "contradict", "refute", "mixed", "neutral"}
+    CONTEXT_STANCES = {"context", "irrelevant", "mention", "unclear"}
+    
+    scored_sources: list[SearchResult] = []
+    context_sources: list[SearchResult] = []
+    
+    for r in search_results:
+        stance = (r.get("stance") or "unclear").lower()
+        if stance in SCORING_STANCES:
+            scored_sources.append(r)
+        else:
+            context_sources.append(r)
+    
     # 6. Build final Evidence Pack
     pack = EvidencePack(
         article=article_context,
         original_fact=fact,
         claims=claims,
         claim_units=claim_units, # M70
-        search_results=search_results,
+        search_results=search_results,  # All sources (backward compat)
+        scored_sources=scored_sources,  # M78.1: For verdict computation
+        context_sources=context_sources, # M78.1: For transparency/UX
         metrics=evidence_metrics,
         constraints=constraints,
     )
     
     Trace.event("evidence_pack.built", {
         "total_sources": total_sources,
+        "scored_sources": len(scored_sources),
+        "context_sources": len(context_sources),
         "unique_domains": unique_domains,
         "duplicate_ratio": round(duplicate_ratio, 2),
         "global_cap": round(global_cap, 2),
@@ -281,3 +301,4 @@ def build_evidence_pack(
     })
     
     return pack
+

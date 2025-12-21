@@ -115,7 +115,7 @@ class ClaimExtractionSkill(BaseSkill):
         topics_str = ", ".join(TOPIC_GROUPS)
         intents_str = ", ".join(SEARCH_INTENTS)
         
-        # Updated Strategist Prompt with Negative Constraints & Query Candidates
+        # Updated Strategist Prompt with Salience & Harm Potential (M77) + Satire (M78)
         instructions = f"""You are an expert Fact-Checking Search Strategist.
 Your goal is to extract verifiable claims AND develop optimal SEARCH STRATEGIES for each.
 
@@ -124,15 +124,38 @@ Your goal is to extract verifiable claims AND develop optimal SEARCH STRATEGIES 
 2. If the user asks for a prediction (e.g. sports), search for "expert analysis" or "official announcement", NOT "betting site".
 3. EXCEPTION: If the user explicitly asks about "gambling regulations" or "corruption in betting", then betting terms ARE allowed.
 
-## STEP 1: EXTRACT CLAIMS
+## STEP 1: EXTRACT CLAIMS & ASSESS HARM (Impact-First)
 For each claim in the article:
-1. Extract the core factual assertion (not opinions)
-2. Preserve EXACT numbers, dates, names, locations
-3. Classify type: "core", "numeric", "timeline", "attribution", "sidefact"
-   - "sidefact" = background info that will be SKIPPED from search
+1. Extract the core factual assertion.
+2. **Assess Harm Potential (1-5)**:
+   - **5 (Critical)**: "Cures cancer", "Drink bleach", "Do not vaccinate", "Violent call to action". Immediate safety risk.
+   - **4 (High)**: Medical/financial advice, "XYZ is toxic", political accusations without proof.
+   - **3 (Medium)**: Controversial political statements, economic figures, historical revisionism.
+   - **2 (Low)**: Attribution ("He said X"), timeline events ("Meeting held on Y").
+   - **1 (Neutral)**: Definitions, physical constants ("Water boils at 100C"), background info.
+
+3. **Prioritize Extraction**: Focus on Levels 4-5.
+   - If an article has dangerous claims, extracted them FIRST.
+   - Avoid filling slots with Level 1 trivia if Level 3+ claims exist.
+
+## STEP 1.5: CLASSIFY CLAIM CATEGORY (Satire Detection)
+For each claim, classify its **claim_category**:
+- **FACTUAL**: Standard verifiable factual claim. Proceed with verification.
+- **SATIRE**: Obvious parody, humor, absurdist claim (e.g., "Worms eating asphalt", "The Onion" style). 
+  - Markers: Absurd scenarios, known satire sources, exaggerated humor, impossible events.
+- **OPINION**: Subjective editorial opinion (e.g., "This policy is terrible").
+- **HYPERBOLIC**: Exaggerated rhetoric not meant literally (e.g., "The best thing ever").
+
+Also provide **satire_likelihood** (0.0-1.0):
+- 0.0-0.3: Clearly factual
+- 0.4-0.6: Ambiguous, could be exaggeration
+- 0.7-0.8: Likely satire/opinion
+- 0.9-1.0: Definitely satire (skip verification)
+
+**ROUTING RULE**: If satire_likelihood >= 0.8, do NOT generate search queries. Mark as SATIRE.
 
 ## STEP 2: THINK LIKE A SEARCH STRATEGIST (Chain of Thought)
-For each claim, REASON about:
+For each **FACTUAL** claim, REASON about:
 
 1. **Intent Analysis**: What type of claim is this?
    - {intents_str}
@@ -140,52 +163,43 @@ For each claim, REASON about:
 2. **Primary Authority**: Where would the ORIGINAL evidence exist?
    - Science/Medicine → Journals. Best in ENGLISH.
    - Local Politics → Local news. Best in LOCAL language.
-   - Sports → Official sites, Interviews. AVOID betting sites!
+   - Sports → Official sites. AVOID betting sites!
 
 3. **Language Strategy**: 
    - Scientific facts → Search in ENGLISH
    - Local news → Search in LOCAL language ({lang_name})
 
 4. **Search Method Selection**:
-   - **"news"**: Recent events (last 30 days), politics, unfolding situations.
-   - **"general_search"**: Scientific facts, historical data, definitions, established context.
-   - **"academic"**: specialized studies (if required).
+   - **"news"**: Recent events (last 30 days).
+   - **"general_search"**: Evergreen facts, medical advice, history.
+   - **"academic"**: specialized studies.
 
 ## STEP 3: GENERATE QUERY CANDIDATES
-Generate 2-3 query candidates for each claim with SPECIFIC ROLES:
+Generate 2-3 query candidates for each **FACTUAL** claim.
 
-1. **CORE** (Required): "Event + Date + Action" (Priority 1.0)
-   Example: "Hubble Fomalhaut collision December 2024"
-   
-2. **NUMERIC** (If numbers exist): "Metric + Value + 'Official Data'" (Priority 0.8)
-   Example: "Bitcoin price $42000 official exchange rate"
-   
-3. **ATTRIBUTION** (If quotes exist): "Person + 'Quote' + Source" (Priority 0.7)
-   Example: "NASA administrator statement Fomalhaut discovery"
+**SPECIAL RULE for HEALTH/MEDICAL claims:**
+If harm_potential >= 4, you MUST include:
+1. **SAFETY/TOXICITY**: "entity + toxicity / poisoning / hazards / CDC / WHO"
+2. **EFFICACY**: "entity + clinical evidence / cancer treatment / systematic review"
 
-4. **LOCAL** (Optional): Best local language query (Priority 0.5)
+**Standard Roles:**
+1. **CORE** (Required): Priority 1.0
+2. **NUMERIC**: Priority 0.8
+3. **ATTRIBUTION**: Priority 0.7
+4. **LOCAL** (Optional): Priority 0.5
 
-Also assign for each claim:
+Also assign:
 - **topic_group**: High-level category ({topics_str})
-- **topic_key**: Short, consistent subject tag (e.g., "Fomalhaut System", "Bitcoin Price") - used for round-robin coverage.
+- **topic_key**: Use NEAREST MARKDOWN HEADING.
 
 ## STEP 4: CLASSIFY ARTICLE INTENT
-Determine the OVERALL article intent for Oracle triggering:
-- "news": Current events, breaking news → CHECK Oracle
-- "evergreen": Science facts, historical claims → CHECK Oracle  
-- "official": Government notifications → CHECK Oracle
-- "opinion": Editorial, commentary → SKIP Oracle
-- "prediction": Future events, forecasts → SKIP Oracle
+- "news": Recent specific events.
+- "evergreen": Medical, history, how-to. (Force "general_search")
+- "official": Gov/Company announcements.
+- "opinion" / "prediction".
 
-## STEP 5: EVIDENCE NEED CLASSIFICATION (M73 Layer 4)
-For each claim, specify what TYPE of evidence would best verify it:
-- "empirical_study": Requires scientific research, clinical trials, peer-reviewed studies
-- "guideline": Requires official guidelines, consensus statements, policy documents
-- "official_stats": Requires government statistics, census data, official reports
-- "expert_opinion": Requires expert quotes, professional assessments
-- "anecdotal": Personal testimonies, case studies only
-- "news_report": Requires journalistic coverage of events
-- "unknown": Cannot determine what evidence is needed
+## STEP 5: EVIDENCE NEED CLASSIFICATION
+- "empirical_study", "guideline", "official_stats", "expert_opinion", "anecdotal", "news_report", "unknown"
 
 ## OUTPUT FORMAT
 
@@ -194,31 +208,27 @@ For each claim, specify what TYPE of evidence would best verify it:
   "article_intent": "news",
   "claims": [
     {{
-      "text": "Original text from article",
-      "normalized_text": "Self-sufficient: Trump announced tariffs on China Dec 19",
+      "text": "Original text",
+      "normalized_text": "Trump announced tariffs...",
       "type": "core",
+      "claim_category": "FACTUAL",
+      "satire_likelihood": 0.0,
       "topic_group": "Politics",
       "topic_key": "Trump Tariffs",
       "importance": 0.9,
       "check_worthiness": 0.9,
+      "harm_potential": 3,
       "search_strategy": {{
         "intent": "official_statement",
-        "reasoning": "Needs official confirmation or major news",
+        "reasoning": "Needs official confirmation",
         "best_language": "en"
       }},
       "query_candidates": [
-        {{"text": "Trump China tariffs announcement 2025", "role": "CORE", "score": 1.0}},
-        {{"text": "Трамп мита Китай 2025", "role": "LOCAL", "score": 0.5}}
+        {{"text": "Trump China tariffs 2025", "role": "CORE", "score": 1.0}}
       ],
       "search_method": "news",
-      "search_queries": [
-        "Trump China tariffs announcement 2025",
-        "Трамп мита Китай 2025"
-      ],
-      "evidence_req": {{
-        "needs_primary": true,
-        "needs_2_independent": true
-      }},
+      "search_queries": ["Trump China tariffs"],
+      "evidence_req": {{"needs_primary": true, "needs_2_independent": true}},
       "evidence_need": "news_report",
       "check_oracle": false
     }}
@@ -226,19 +236,13 @@ For each claim, specify what TYPE of evidence would best verify it:
 }}
 ```
 
-## TYPE CLASSIFICATION
-- "core": Main controversial claim (importance 0.9-1.0)
-- "numeric": Contains specific numbers/stats (importance 0.7-0.8)
-- "timeline": Dates, sequences (importance 0.7)
-- "attribution": Quote - WHO said WHAT (importance 0.6)
-- "sidefact": Background, common knowledge (SKIP search, importance 0.3)
-
 You MUST respond in valid JSON.
 
 {UNIVERSAL_METHODOLOGY_APPENDIX}
 """
-        prompt = f"""Extract 3-{max_claims} atomic verifiable claims from this article.
-Apply Topic-Aware logic: group by topic_key and generate query_candidates with roles.
+        prompt = f"""Extract 3-{max_claims} atomic verifiable claims.
+PRIORITIZE HARM: Find claims with harm_potential 4-5 (Health/Safety) first.
+Ignore separate definitions (harm_potential 1) unless false/dangerous.
 
 ARTICLE:
 {text_excerpt}
@@ -246,8 +250,8 @@ ARTICLE:
 Return the result in JSON format.
 """
         try:
-            # Updated cache key version for new prompt structure
-            cache_key = f"claim_strategist_v2_{lang}"
+            # Updated cache key version for new prompt structure (M77)
+            cache_key = f"claim_strategist_v3_{lang}"
 
             # M73.5: Dynamic timeout based on input size
             dynamic_timeout = self._calculate_timeout(len(text_excerpt))
@@ -302,8 +306,29 @@ Return the result in JSON format.
                     worthiness = float(worthiness)
                 worthiness = max(0.0, min(1.0, worthiness))  # Clamp to 0-1
                 
+                # M77: Harm Potential
+                harm_potential = int(rc.get("harm_potential", 1))
+                harm_potential = max(1, min(5, harm_potential)) # Clamp 1-5
+
+                # M78: Claim Category & Satire Likelihood
+                claim_category = rc.get("claim_category", "FACTUAL")
+                if claim_category not in {"FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"}:
+                    claim_category = "FACTUAL"
+                
+                satire_likelihood = float(rc.get("satire_likelihood", 0.0))
+                satire_likelihood = max(0.0, min(1.0, satire_likelihood))  # Clamp 0-1
+
                 # M62+: Extract search strategy if present
                 strategy = rc.get("search_strategy", {})
+                
+                # M78: Satire Routing - clear search data if high satire likelihood
+                search_queries = rc.get("search_queries", [])
+                query_candidates = rc.get("query_candidates", [])
+                if satire_likelihood >= 0.8 or claim_category == "SATIRE":
+                    search_queries = []  # Skip search for satire
+                    query_candidates = []
+                    logger.info("[M78] Satire detected (%.2f): skipping search for claim: %s", 
+                               satire_likelihood, normalized[:50])
                 
                 c = Claim(
                     id=f"c{idx+1}",
@@ -311,7 +336,7 @@ Return the result in JSON format.
                     type=rc.get("type", "core"),  # type: ignore
                     importance=float(rc.get("importance", 0.5)),
                     evidence_requirement=req,
-                    search_queries=rc.get("search_queries", []),
+                    search_queries=search_queries,
                     check_oracle=bool(rc.get("check_oracle", False)),
                     # M62: New fields
                     normalized_text=normalized,
@@ -319,13 +344,18 @@ Return the result in JSON format.
                     check_worthiness=worthiness,
                     # M64: New fields
                     topic_key=topic_key,
-                    query_candidates=rc.get("query_candidates", []),
+                    query_candidates=query_candidates,
                     # M66: Smart Routing
                     search_method=rc.get("search_method", "general_search"),
                     # M73 Layer 4: Evidence-Need Routing
                     evidence_need=rc.get("evidence_need", "unknown"),
                     # M74: Anchor
                     anchor=self._locate_anchor(rc.get("text", ""), chunks),
+                    # M77: Salience
+                    harm_potential=harm_potential,
+                    # M78: Satire
+                    claim_category=claim_category,
+                    satire_likelihood=satire_likelihood,
                 )
                 
                 # Log strategy for debugging
@@ -333,8 +363,8 @@ Return the result in JSON format.
                     intent = strategy.get("intent", "?")
                     reasoning = strategy.get("reasoning", "")[:50]
                     logger.debug(
-                        "[Strategist] Claim %d: intent=%s, topic_key=%s | %s",
-                        idx+1, intent, topic_key, reasoning
+                        "[Strategist] Claim %d: intent=%s, harm=%d, category=%s | %s",
+                        idx+1, intent, harm_potential, claim_category, reasoning
                     )
                 
                 claims.append(c)
@@ -343,10 +373,18 @@ Return the result in JSON format.
             # M73.5: DEDUPLICATION - Merge claims with identical normalized_text
             # ─────────────────────────────────────────────────────────────────
             claims = self._dedupe_claims(claims)
+
+            # M77: Sort by harm_potential DESC
+            claims.sort(key=lambda x: x.get("harm_potential", 1), reverse=True)
+            
+            # M78: Count satire claims for telemetry
+            satire_count = sum(1 for c in claims if c.get("satire_likelihood", 0) >= 0.8 or c.get("claim_category") == "SATIRE")
+            if satire_count > 0:
+                logger.info("[M78] Detected %d satire/hyperbolic claims", satire_count)
             
             # Log topic and strategy distribution
             topics_found = [c.get("topic_key", "?") for c in claims]
-            logger.info("[Claims] Extracted %d claims (after dedup). Topics keys: %s", len(claims), topics_found)
+            logger.info("[Claims] Extracted %d claims (after dedup/sort). Topics keys: %s", len(claims), topics_found)
                 
             # M60 Oracle Optimization: Check if ANY claim needs oracle
             check_oracle = any(c.get("check_oracle", False) for c in claims)

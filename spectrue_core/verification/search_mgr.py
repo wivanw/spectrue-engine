@@ -111,11 +111,20 @@ class SearchManager:
             out.append(r)
         return out
 
-    async def search_unified(self, query: str, topic: str = "general", intent: str = "news") -> tuple[str, list[dict]]:
+    async def search_unified(self, query: str, topic: str = "general", intent: str = "news", article_intent: str = "news") -> tuple[str, list[dict]]:
         """
         M65: Unified search replacing Tier 1/2 split.
         Performs single search (limit=5) and filters garbage.
+        
+        M76: Added Fallback Ladder:
+        - If article_intent == "evergreen", force topic="general"
+        - If topic="news" AND results are poor (<2 or low score), auto-retry with "general"
         """
+        # M76: Force general search for evergreen content
+        if article_intent == "evergreen" and topic == "news":
+            logger.info("[SearchMgr] forcing topic='general' for evergreen intent (was 'news')")
+            topic = "general"
+
         self.tavily_calls += 1
         # Use limit=5 to strictly match Tavily billing unit and avoid noise from results 6-10
         context, results = await self.web_tool.search(
@@ -127,6 +136,49 @@ class SearchManager:
         
         filtered = self._filter_search_results(results, intent)
         
+        # M76: Fallback Logic (News -> General)
+        # Condition: We tried "news", but got < 2 valid results OR best score is very low (< 0.2)
+        should_fallback = False
+        fallback_reason = ""
+        
+        if topic == "news":
+            valid_count = len(filtered)
+            max_score = max([float(r.get("score", 0)) for r in filtered]) if filtered else 0.0
+            
+            if valid_count < 2:
+                should_fallback = True
+                fallback_reason = f"few_results ({valid_count})"
+            elif max_score < 0.2:
+                should_fallback = True
+                fallback_reason = f"low_relevance ({max_score:.2f})"
+        
+        if should_fallback:
+            logger.info(f"[SearchMgr] Fallback triggered: {fallback_reason}. Retrying with topic='general'.")
+            
+            # Retry with "general"
+            self.tavily_calls += 1
+            fb_context, fb_results = await self.web_tool.search(
+                query,
+                num_results=5,
+                depth="advanced",
+                topic="general"
+            )
+            fb_filtered = self._filter_search_results(fb_results, intent)
+            
+            # Prefer fallback results if they are better
+            fb_count = len(fb_filtered)
+            fb_max_score = max([float(r.get("score", 0)) for r in fb_filtered]) if fb_filtered else 0.0
+            
+            # Use fallback if it produced ANY results and the original was practically empty,
+            # OR if fallback has significantly better relevance.
+            if fb_count > 0 and (len(filtered) == 0 or fb_max_score > max_score):
+                logger.info(f"[SearchMgr] Fallback successful. Using general results (count={fb_count}, max={fb_max_score:.2f})")
+                filtered = fb_filtered
+                # Reconstruct context from the winner
+                # Note: We reconstruct `context` below based on `filtered`, so just updating `filtered` is enough.
+            else:
+                logger.info("[SearchMgr] Fallback yielded no improvement. Keeping original results.")
+
         # Reconstruct context derived from filtered sources only
         def format_source(obj: dict) -> str:
             return f"Source: {obj.get('title')}\nURL: {obj.get('link')}\nContent: {obj.get('snippet')}\n---"

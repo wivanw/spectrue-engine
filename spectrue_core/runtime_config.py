@@ -79,6 +79,8 @@ class EngineFeatureFlags:
     log_redaction: bool = False
     # M75
     trace_safe_payloads: bool = True
+    # M76
+    clean_md_output: bool = True
 
 
 @dataclass(frozen=True)
@@ -225,6 +227,8 @@ class EngineRuntimeConfig:
             log_redaction=_parse_bool(os.getenv("FEATURE_LOG_REDACTION"), default=False),
             # M75
             trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=True),
+            # M76
+            clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
         )
 
         # Search knobs
@@ -311,6 +315,7 @@ class EngineRuntimeConfig:
                 "semantic_gating_v2": bool(self.features.semantic_gating_v2),
                 "claim_sanitize": bool(self.features.claim_sanitize),
                 "trace_safe_payloads": bool(self.features.trace_safe_payloads),
+                "clean_md_output": bool(self.features.clean_md_output),
             },
             "debug": {
                 "engine_debug": bool(self.debug.engine_debug),

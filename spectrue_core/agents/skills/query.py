@@ -43,6 +43,8 @@ Requirements:
   1) English: Pure factual query.
   2) {target_lang_name}: Pure factual query in local language.
 - Queries MUST be specific.
+- Generate search queries ONLY for the TARGET_CLAIM text.
+- Ignore recipes, history, examples, or background unless explicitly referenced in the claim.
 
 You MUST respond in valid JSON.
 
@@ -51,11 +53,8 @@ You MUST respond in valid JSON.
         
         prompt = f"""Generate web search queries for fact-checking.
 
-STATEMENT:
+TARGET_CLAIM:
 {full_statement}
-
-CONTEXT:
-{full_context}
 """
         
         # M56: Fix for OpenAI 400 "Response input messages must contain the word 'json'"

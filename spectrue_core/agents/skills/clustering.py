@@ -102,30 +102,38 @@ class ClusteringSkill(BaseSkill):
             })
             
         # 2. Build Prompt (Evidence Matrix Pattern)
-        instructions = """You are an Evidence Analyst. 
+        num_sources = len(results_lite)
+        instructions = f"""You are an Evidence Analyst. 
 Your task is to map each Search Source to its BEST matching Claim AND Assertion.
+
+## CRITICAL CONTRACT
+- You MUST output EXACTLY {num_sources} matrix rows, one for each source_index from 0 to {num_sources - 1}.
+- NEVER return an empty matrix. If unsure about a source, output a row with stance="CONTEXT".
+- Every row MUST include: source_index, claim_id (or null), stance, quote (string or null), and optional assertion_key.
 
 ## Methodology
 1. **1:1 Mapping**: Each Source must be mapped to EXACTLY ONE Claim (the most relevant one).
    - If a source supports/refutes a specific ASSERTION (e.g. location, time, amount), map it to that `assertion_key`.
    - If it covers the whole claim generally, leave `assertion_key` null.
-   - CRITICAL: You MUST include an entry in the matrix for EVERY source index.
 2. **Stance Classification**:
    - `SUPPORT`: Source confirms the claim/assertion is TRUE.
    - `REFUTE`: Source proves the claim/assertion is FALSE.
    - `MIXED`: Source says it's complicated / partially true.
    - `MENTION`: Topic is mentioned but no clear verdict.
-   - `IRRELEVANT`: Source is unrelated to any claim.
+   - `CONTEXT`: Source is background/tangentially related but not evidence.
+   - `IRRELEVANT`: Source is completely unrelated to any claim.
 3. **Relevance Scoring**: Assign `relevance` (0.0-1.0).
-   - If relevance < 0.4, you MUST mark stance as `IRRELEVANT`.
+   - If relevance < 0.4, you MUST mark stance as `IRRELEVANT` or `CONTEXT`.
    - If content is [UNAVAILABLE], judge relevance based on title/snippet. Do NOT penalize relevance just because content is missing if the source seems authoritative.
-4. **Quote Extraction**: Extract the key text segment that justifies your verdict.
+4. **Quote Extraction**:
+   - For `SUPPORT`, `REFUTE`, `MIXED`: quote MUST be non-empty and directly relevant.
+   - For `CONTEXT`, `IRRELEVANT`, `MENTION`: quote can be null or empty string.
 
 ## Output JSON Schema
 ```json
-{
+{{
   "matrix": [
-    {
+    {{
       "source_index": 0,
       "claim_id": "c1",
       "assertion_key": "event.location.city", // or null
@@ -133,9 +141,9 @@ Your task is to map each Search Source to its BEST matching Claim AND Assertion.
       "relevance": 0.9,
       "quote": "Direct quote from text...",
       "reason": "Explain why..."
-    }
+    }}
   ]
-}
+}}
 ```"""
 
         prompt = f"""Build the Evidence Matrix for these sources.
@@ -182,22 +190,71 @@ Return the result in JSON format with key "matrix".
                 "dropped_mention": 0,
                 "dropped_bad_id": 0,
                 "dropped_no_quote": 0,
-                "dropped_missing": 0,
-                "kept_valid": 0
+                "dropped_missing": 0,  # NOTE: M78 makes this 0 via fallback
+                "kept_valid": 0,
+                "context_fallback": 0,  # M78: Count of sources converted to CONTEXT
             }
             
-            VALID_STANCES = {"SUPPORT", "REFUTE", "MIXED"}
+            VALID_STANCES = {"SUPPORT", "REFUTE", "MIXED", "CONTEXT"}
             
             # Map by source_index for easy lookup
             matrix_map = {m.get("source_index"): m for m in matrix if isinstance(m, dict)}
-            valid_claim_ids = {c["id"] for c in claims}
+            valid_claim_ids = {c["id"] for c in claims_lite}
+            
+            # ─────────────────────────────────────────────────────────────────
+            # M78.1 T3: TELEMETRY — Detect matrix failures
+            # ─────────────────────────────────────────────────────────────────
+            mapped_count = len(matrix_map)
+            input_count = len(search_results)
+            
+            if mapped_count == 0 and input_count > 0:
+                # EMPTY matrix — complete LLM failure
+                Trace.event("matrix.failure", {
+                    "mode": "empty",
+                    "input_sources": input_count,
+                    "mapped_rows": 0,
+                    "claim_count": len(claims_lite),
+                })
+                logger.warning("[Clustering] ⚠️ Matrix EMPTY: LLM returned 0 rows for %d sources", input_count)
+            elif mapped_count < input_count:
+                # PARTIAL matrix — some sources unmapped
+                Trace.event("matrix.failure", {
+                    "mode": "partial",
+                    "input_sources": input_count,
+                    "mapped_rows": mapped_count,
+                    "missing_sources": input_count - mapped_count,
+                })
+                logger.warning("[Clustering] ⚠️ Matrix PARTIAL: %d/%d sources mapped", mapped_count, input_count)
             
             for i, r in enumerate(search_results):
                 match = matrix_map.get(i)
                 
-                # Rule 1: Missing Match (LLM broken constraint)
+                # ─────────────────────────────────────────────────────────────
+                # M78.1 T2: SOFT FALLBACK — Unmapped sources become CONTEXT
+                # ─────────────────────────────────────────────────────────────
                 if not match:
-                    stats["dropped_missing"] += 1
+                    # Create synthetic CONTEXT entry (no drop!)
+                    stats["context_fallback"] += 1
+                    res = SearchResult(
+                        claim_id=None,  # type: ignore
+                        url=r.get("url") or r.get("link") or "",
+                        domain=r.get("domain"),
+                        title=r.get("title", ""),
+                        snippet=r.get("snippet", ""),
+                        content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:1500],
+                        published_at=r.get("published_date"),
+                        source_type=r.get("source_type", "unknown"),  # type: ignore
+                        stance="context",  # type: ignore  # Lowercase for schema
+                        relevance_score=0.0,
+                        quote_matches=[],
+                        key_snippet=r.get("snippet", ""),
+                        is_trusted=bool(r.get("is_trusted")),
+                        is_duplicate=False,
+                        duplicate_of=None,
+                        assertion_key=None,
+                        content_status=r.get("content_status", "available"),
+                    )
+                    clustered_results.append(res)
                     continue
                 
                 cid = match.get("claim_id")
@@ -213,14 +270,18 @@ Return the result in JSON format with key "matrix".
                     relevance = min(relevance, 0.1)
                     stats["dropped_unreadable"] = stats.get("dropped_unreadable", 0) + 1
                 
-                # Rule 2: Invalid Claim ID / Null
+                # Rule 2: Invalid Claim ID / Null (M77 Soft Fallback)
                 if not cid or cid not in valid_claim_ids:
-                    stats["dropped_bad_id"] += 1
-                    # DO NOT fallback to c1 (Strict M68)
-                    continue
+                    # M77: Do NOT drop. Keep as CONTEXT.
+                    cid = None
+                    stance = "CONTEXT"
+                    relevance = 0.0
+                    akey = None
+                    if not quote:
+                         quote = r.get("snippet", "")
                 
                 # Rule 3: Relevance Gate
-                if relevance < 0.4:
+                if stance not in {"CONTEXT", "IRRELEVANT"} and relevance < 0.4:
                     stats["dropped_irrelevant"] += 1
                     continue
                 
@@ -232,8 +293,8 @@ Return the result in JSON format with key "matrix".
                         stats["dropped_irrelevant"] += 1
                     continue
                     
-                # Rule 5: Quote Mandatory
-                if not quote or not str(quote).strip():
+                # Rule 5: Quote Mandatory (only for scoring stances)
+                if stance not in {"CONTEXT", "IRRELEVANT"} and (not quote or not str(quote).strip()):
                     stats["dropped_no_quote"] += 1
                     continue
 
@@ -251,9 +312,9 @@ Return the result in JSON format with key "matrix".
                     source_type=r.get("source_type", "unknown"), # type: ignore
                     
                     # M68: Injected Fields
-                    stance=stance, # type: ignore
+                    stance=stance.lower(), # type: ignore  # Normalize to lowercase
                     relevance_score=relevance,
-                    quote_matches=[quote],
+                    quote_matches=[quote] if quote else [],
                     key_snippet=quote,
                     
                     is_trusted=bool(r.get("is_trusted")),
@@ -266,6 +327,19 @@ Return the result in JSON format with key "matrix".
                 )
                 clustered_results.append(res)
             
+            # ─────────────────────────────────────────────────────────────────
+            # M78.1 T3: TELEMETRY — Degraded mode (too many CONTEXT)
+            # ─────────────────────────────────────────────────────────────────
+            context_count = sum(1 for r in clustered_results if r.get("stance") == "context")
+            if clustered_results and context_count / len(clustered_results) > 0.7:
+                Trace.event("matrix.degraded", {
+                    "context_ratio": round(context_count / len(clustered_results), 2),
+                    "threshold": 0.7,
+                    "input_sources": input_count,
+                })
+                logger.warning("[Clustering] ⚠️ Matrix DEGRADED: %.0f%% sources are CONTEXT", 
+                              (context_count / len(clustered_results)) * 100)
+            
             # 4. Telemetry
             Trace.event("evidence.synthesis_stats", stats)
             logger.info("[Clustering] Matrix stats: %s", stats)
@@ -273,5 +347,37 @@ Return the result in JSON format with key "matrix".
             return clustered_results
             
         except Exception as e:
-            logger.warning("[Clustering] ⚠️ Evidence Matrix LLM failed: %s. Returning empty evidence.", e)
-            return []
+            # ─────────────────────────────────────────────────────────────────
+            # M78.1: EXCEPTION FALLBACK — Convert ALL sources to CONTEXT
+            # ─────────────────────────────────────────────────────────────────
+            logger.warning("[Clustering] ⚠️ Evidence Matrix LLM failed: %s. Converting all to CONTEXT.", e)
+            Trace.event("matrix.failure", {
+                "mode": "exception",
+                "input_sources": len(search_results),
+                "error": str(e)[:200],
+            })
+            
+            fallback_results: list[SearchResult] = []
+            for r in search_results:
+                res = SearchResult(
+                    claim_id=None,  # type: ignore
+                    url=r.get("url") or r.get("link") or "",
+                    domain=r.get("domain"),
+                    title=r.get("title", ""),
+                    snippet=r.get("snippet", ""),
+                    content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:1500],
+                    published_at=r.get("published_date"),
+                    source_type=r.get("source_type", "unknown"),  # type: ignore
+                    stance="context",  # type: ignore
+                    relevance_score=0.0,
+                    quote_matches=[],
+                    key_snippet=r.get("snippet", ""),
+                    is_trusted=bool(r.get("is_trusted")),
+                    is_duplicate=False,
+                    duplicate_of=None,
+                    assertion_key=None,
+                    content_status=r.get("content_status", "available"),
+                )
+                fallback_results.append(res)
+            return fallback_results
+

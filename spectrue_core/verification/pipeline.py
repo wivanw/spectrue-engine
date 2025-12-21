@@ -536,7 +536,8 @@ class ValidationPipeline:
                     u_ctx, u_srcs = await self.search_mgr.search_unified(
                         primary_query, 
                         topic=current_topic,
-                        intent=article_intent
+                        intent=article_intent,
+                        article_intent=article_intent  # M76: Added for fallback ladder
                     )
                     
                     if not u_srcs:

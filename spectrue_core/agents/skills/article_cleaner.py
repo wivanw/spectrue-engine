@@ -53,6 +53,38 @@ RAW TEXT:
 
 CLEANED ARTICLE:"""
 
+ARTICLE_CLEAN_MARKDOWN_PROMPT = """Extract ONLY the main article content from the text below, formatted as clean Markdown.
+
+REMOVE completely:
+- Navigation, menus, headers
+- "Read also", "See also", "Читайте також" sections
+- Related articles, recommended content
+- Advertisements, sidebars
+- Social media sharing buttons and "follow us" links
+- News ticker
+- Footer (address, legal text, copyright)
+- Cookie consent notices
+- Author photos/bios
+- Image captions like "Фото ілюстративне / © ..."
+- "Читати публікацію повністю" links
+
+KEEP and FORMAT:
+- Article title (format as '# Title')
+- Section headings (format as '##' or '###')
+- Lists (format as '- Item')
+- Article body text (separated by blank lines)
+- Important quotes and facts
+- Source links and references
+
+Return ONLY the cleaned Markdown. No explanations.
+
+---
+RAW TEXT:
+{text}
+---
+
+CLEANED MARKDOWN:"""
+
 
 class ArticleCleanerSkill:
     """Uses LLM Nano to extract clean article content from raw page text."""
@@ -156,13 +188,19 @@ class ArticleCleanerSkill:
         dynamic_timeout = self._calculate_timeout(len(truncated))
         logger.debug("[ArticleCleaner] Input: %d chars, timeout: %.1f sec", len(truncated), dynamic_timeout)
         
-        prompt = ARTICLE_CLEAN_PROMPT.format(text=truncated)
+        # M76: Select prompt based on feature flag
+        if self.runtime.features.clean_md_output:
+            prompt = ARTICLE_CLEAN_MARKDOWN_PROMPT.format(text=truncated)
+            instr = "Extract the main article content as Markdown. Preserve headings (#, ##) and lists (-). Remove navigation, ads, footer."
+        else:
+            prompt = ARTICLE_CLEAN_PROMPT.format(text=truncated)
+            instr = "Extract only the main article content. Remove navigation, ads, related articles, footer."
         
         try:
             result = await self.llm_client.call(
                 model="gpt-5-nano",
                 input=prompt,
-                instructions="Extract only the main article content. Remove navigation, ads, related articles, footer.",
+                instructions=instr,
                 json_output=False,
                 cache_key=None,
                 trace_kind="article_clean",
@@ -207,12 +245,19 @@ class ArticleCleanerSkill:
         async def _process_chunk(chunk: TextChunk) -> str:
             async with sem:
                 timeout = self._calculate_timeout(len(chunk.text))
-                prompt = ARTICLE_CLEAN_PROMPT.format(text=chunk.text)
+                # M76: Select prompt based on feature flag
+                if self.runtime.features.clean_md_output:
+                    prompt = ARTICLE_CLEAN_MARKDOWN_PROMPT.format(text=chunk.text)
+                    instr = "Extract the main article content as Markdown. Preserve headings (#, ##) and lists (-). Remove navigation, ads, footer."
+                else:
+                    prompt = ARTICLE_CLEAN_PROMPT.format(text=chunk.text)
+                    instr = "Extract only the main article content. Remove navigation, ads, related articles, footer."
+
                 try:
                     result = await self.llm_client.call(
                         model="gpt-5-nano",
                         input=prompt,
-                        instructions="Extract only the main article content. Remove navigation, ads, related articles, footer.",
+                        instructions=instr,
                         json_output=False,
                         trace_kind="article_clean_chunk",
                         timeout=timeout,

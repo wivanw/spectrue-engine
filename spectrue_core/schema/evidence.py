@@ -38,6 +38,9 @@ class EvidenceStance(str, Enum):
     IRRELEVANT = "IRRELEVANT"
     """Evidence is not related to this assertion."""
 
+    CONTEXT = "CONTEXT"
+    """Additional context preserved for data retention (M77)."""
+
 
 class EvidenceNeedType(str, Enum):
     """
@@ -111,8 +114,8 @@ class EvidenceItem(BaseModel):
         )
     """
 
-    claim_id: str
-    """ID of the claim this evidence relates to."""
+    claim_id: str | None
+    """ID of the claim this evidence relates to (None if purely contextual)."""
 
     assertion_key: str = ""
     """

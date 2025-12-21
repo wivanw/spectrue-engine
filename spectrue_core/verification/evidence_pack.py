@@ -28,8 +28,8 @@ Claim types for multi-claim extraction:
 - sidefact: Secondary supporting facts
 """
 
-Stance = Literal["support", "contradict", "neutral", "unclear"]
-"""Position of a source relative to a claim."""
+Stance = Literal["support", "contradict", "neutral", "unclear", "context", "irrelevant", "mention"]
+"""Position of a source relative to a claim. Upper/Lowercase handled by runtime normalization."""
 
 SourceType = Literal[
     "primary",        # Original source (official website, press release)
@@ -196,6 +196,12 @@ class Claim(TypedDict, total=False):
     is_actionable_medical: bool
     danger_tags: list[str]
     redacted_spans: list[dict]
+    # M77: Salience
+    harm_potential: int  # 1-5 scale (5=Highest Harm Risk)
+    # M78: Claim Category (Satire Detection)
+    claim_category: Literal["FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"]
+    satire_likelihood: float  # 0.0-1.0, probability claim is satirical
+
 
 
 
@@ -205,7 +211,7 @@ class Claim(TypedDict, total=False):
 
 class SearchResult(TypedDict, total=False):
     """A single search result with stance and quality annotations."""
-    claim_id: str                   # Which claim this result pertains to
+    claim_id: str | None          # Which claim this result pertains to
     url: str
     domain: str                     # Registrable domain (example.com)
     title: str
@@ -318,7 +324,9 @@ class EvidencePack(TypedDict, total=False):
     claim_units: list[Any] | None   # M70: Structured ClaimUnits (Pydantic objects)
 
     # Evidence
-    search_results: list[SearchResult]
+    search_results: list[SearchResult]  # All sources (scored + context)
+    scored_sources: list[SearchResult]  # Sources contributing to verdict
+    context_sources: list[SearchResult] # Sources retained for context/transparency
 
     # Metrics (code-computed)
     metrics: EvidenceMetrics

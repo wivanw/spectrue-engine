@@ -36,6 +36,10 @@ class VerdictStatus(str, Enum):
     UNVERIFIED = "unverified"
     """No evidence found."""
 
+    SATIRICAL = "satirical"
+    """M78: Content identified as satire/parody. Not a factual claim."""
+
+
 
 class AssertionVerdict(BaseModel):
     """
