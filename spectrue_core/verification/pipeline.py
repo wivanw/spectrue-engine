@@ -931,16 +931,28 @@ class ValidationPipeline:
             key = c.get("topic_key") or c.get("topic_group", "Other")
             groups[key].append(c)
         
-        # Sort groups by max importance of their claims (most important topics first)
+        # M73: Calculate effective score for sorting
+        # Combines: importance, structural weight, tension score, and key_claim flag
+        def _effective_score(claim: dict) -> float:
+            base_importance = claim.get("importance", 0.5)
+            # M73 Layer 2: Bonus for structurally important claims
+            structural_bonus = min(0.1, claim.get("graph_structural_weight", 0) * 0.1)
+            # M73 Layer 3: Bonus for high-tension claims (need verification)
+            tension_bonus = min(0.15, claim.get("graph_tension_score", 0) * 0.15)
+            # M73: Key claims get strong priority
+            key_claim_bonus = 0.2 if claim.get("is_key_claim") else 0.0
+            return base_importance + structural_bonus + tension_bonus + key_claim_bonus
+        
+        # Sort groups by max effective score of their claims (most important topics first)
         sorted_keys = sorted(
             groups.keys(),
-            key=lambda k: max(c.get("importance", 0) for c in groups[k]),
+            key=lambda k: max(_effective_score(c) for c in groups[k]),
             reverse=True
         )
         
-        # Sort claims within each group by importance
+        # Sort claims within each group by effective score
         for key in groups:
-            groups[key].sort(key=lambda c: c.get("importance", 0), reverse=True)
+            groups[key].sort(key=_effective_score, reverse=True)
         
         # ─────────────────────────────────────────────────────────────────────
         # 2. PASS 1: COVERAGE (Critical) - One CORE query per topic
