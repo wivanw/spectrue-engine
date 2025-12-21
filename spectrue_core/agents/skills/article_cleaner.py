@@ -12,6 +12,7 @@ Article Cleaner Skill - uses LLM Nano to extract clean article content.
 """
 
 import logging
+import re
 from spectrue_core.agents.llm_client import LLMClient
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
@@ -54,6 +55,11 @@ CLEANED ARTICLE:"""
 class ArticleCleanerSkill:
     """Uses LLM Nano to extract clean article content from raw page text."""
     
+    # M73.5: Dynamic timeout constants
+    BASE_TIMEOUT_SEC = 30.0    # Minimum timeout
+    TIMEOUT_PER_1K_CHARS = 3.0  # Additional seconds per 1000 chars
+    MAX_TIMEOUT_SEC = 90.0      # Maximum timeout cap
+    
     def __init__(self, config: SpectrueConfig = None, llm_client: LLMClient = None):
         self.config = config
         self.runtime = (config.runtime if config else None) or EngineRuntimeConfig.load_from_env()
@@ -61,6 +67,66 @@ class ArticleCleanerSkill:
             openai_api_key=config.openai_api_key if config else None,
             default_timeout=float(self.runtime.llm.nano_timeout_sec),
         )
+    
+    def _calculate_timeout(self, text_len: int) -> float:
+        """
+        Calculate dynamic timeout based on text length.
+        
+        Formula: base + (chars / 1000) * per_1k_rate, capped at max.
+        
+        Examples:
+            - 5000 chars → 30 + 15 = 45 sec
+            - 12000 chars → 30 + 36 = 66 sec
+            - 25000 chars → min(30 + 75, 90) = 90 sec
+        """
+        extra = (text_len / 1000) * self.TIMEOUT_PER_1K_CHARS
+        timeout = self.BASE_TIMEOUT_SEC + extra
+        return min(timeout, self.MAX_TIMEOUT_SEC)
+    
+    def _quick_clean_fallback(self, text: str) -> str:
+        """
+        Quick regex-based cleaning as fallback when LLM times out.
+        Removes obvious navigation/junk patterns.
+        """
+        cleaned = text
+        
+        # Remove markdown images: ![alt](url) or !(/path)
+        cleaned = re.sub(r'!\[.*?\]\([^)]+\)', '', cleaned)
+        cleaned = re.sub(r'!\([^)]+\)', '', cleaned)
+        
+        # Remove navigation-style headers
+        nav_patterns = [
+            r'^#+\s*(What Are You Looking For|Popular Tags|Теги|Категорії|Menu|Navigation).*$',
+            r'^#+\s*(Читайте також|Read also|See also|Дивіться також).*$',
+            r'^#+\s*(Поділитись|Share|Follow us|Підписатись).*$',
+            r'^\*\*?(Реклама|Advertisement|Спонсор)\*?\*?.*$',
+        ]
+        for pattern in nav_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
+        
+        # Remove cookie/legal notices
+        cleaned = re.sub(r'(?i)(cookie|cookies|gdpr|privacy policy|політика конфіденційності).*?\n', '', cleaned)
+        
+        # Remove excessive blank lines
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        
+        # Remove lines that are just links or very short nav items
+        lines = cleaned.split('\n')
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip very short lines that look like nav
+            if len(stripped) < 20 and ('#' in stripped or '|' in stripped or stripped.startswith('-')):
+                continue
+            # Skip lines that are just a URL
+            if re.match(r'^https?://\S+$', stripped):
+                continue
+            filtered_lines.append(line)
+        
+        cleaned = '\n'.join(filtered_lines).strip()
+        
+        logger.info("[ArticleCleaner] Fallback regex clean: %d -> %d chars", len(text), len(cleaned))
+        return cleaned
     
     async def clean_article(self, raw_text: str, *, max_input_chars: int = 12000) -> str | None:
         """
@@ -71,7 +137,7 @@ class ArticleCleanerSkill:
             max_input_chars: Maximum characters to send to LLM
             
         Returns:
-            Cleaned article text, or None if cleaning fails
+            Cleaned article text, or fallback-cleaned text if LLM fails
         """
         if not raw_text or len(raw_text) < 100:
             return raw_text
@@ -79,11 +145,13 @@ class ArticleCleanerSkill:
         # Truncate to avoid token limits
         truncated = raw_text[:max_input_chars]
         
+        # M73.5: Calculate dynamic timeout based on input size
+        dynamic_timeout = self._calculate_timeout(len(truncated))
+        logger.debug("[ArticleCleaner] Input: %d chars, timeout: %.1f sec", len(truncated), dynamic_timeout)
+        
         prompt = ARTICLE_CLEAN_PROMPT.format(text=truncated)
         
         try:
-
-            
             result = await self.llm_client.call(
                 model="gpt-5-nano",
                 input=prompt,
@@ -91,19 +159,19 @@ class ArticleCleanerSkill:
                 json_output=False,
                 cache_key=None,
                 trace_kind="article_clean",
+                timeout=dynamic_timeout,  # M73.5: Dynamic timeout
             )
             
             response = result.get("content", "") if isinstance(result, dict) else result
-            
-
             
             if response and len(response.strip()) > 100:
                 logger.info("[ArticleCleaner] Cleaned: %d -> %d chars", len(raw_text), len(response))
                 return response.strip()
             else:
-                logger.warning("[ArticleCleaner] LLM returned short response, using original")
-                return raw_text
+                logger.warning("[ArticleCleaner] LLM returned short response, using fallback")
+                return self._quick_clean_fallback(raw_text)
                 
         except Exception as e:
-            logger.warning("[ArticleCleaner] LLM cleaning failed: %s", e)
-            return raw_text
+            logger.warning("[ArticleCleaner] LLM cleaning failed: %s. Using fallback.", e)
+            # M73.5: Use regex fallback instead of returning raw text
+            return self._quick_clean_fallback(raw_text)

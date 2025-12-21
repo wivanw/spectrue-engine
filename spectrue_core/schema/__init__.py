@@ -1,26 +1,19 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M70: Schema-First Pipeline - Core Schema Module
+Spectrue Core Schema Module
 
-This module provides Pydantic models for structured claim representation.
-The schema is the STABLE CONTRACT between pipeline stages:
-- Claim Extraction (Spec Producer) outputs ClaimUnit
-- Search, Evidence, Scoring (Spec Consumers) consume structured fields
-
-Philosophy:
-- Schema = Structure (Python validates types/fields)
-- LLM = All Decisions (dimension classification, scoring, stance)
-- NO HEURISTICS in code
+Milestones:
+- M70: Schema-First Pipeline (ClaimUnit, Assertion, StructuredVerdict)
+- M71: Verdict Data Contract (Verdict, EvidenceSignals, Policy)
 """
 
+# M70: Claims
 from spectrue_core.schema.claims import (
-    # Enums
     Dimension,
     VerificationScope,
     ClaimDomain,
     ClaimType,
-    # Core models
     Assertion,
     SourceSpan,
     EvidenceRequirementSpec,
@@ -31,47 +24,61 @@ from spectrue_core.schema.claims import (
     ClaimUnit,
 )
 
+# M70: Evidence
 from spectrue_core.schema.evidence import (
-    # Enums
     EvidenceStance,
     ContentStatus,
-    # Models
     EvidenceItem,
 )
 
+# M70: Verdict (keep as primary for backward compat)
 from spectrue_core.schema.verdict import (
-    # Enums
-    VerdictStatus,
-    # Models
+    VerdictStatus,  # M70 VerdictStatus (has PARTIALLY_VERIFIED)
     AssertionVerdict,
     ClaimVerdict,
     StructuredDebug,
     StructuredVerdict,
 )
 
+# M71: Policy
+from spectrue_core.schema.policy import (
+    ErrorState,
+    DecisionPath,
+    VerdictPolicy,
+    DEFAULT_POLICY,
+)
+
+# M71: Signals
+from spectrue_core.schema.signals import (
+    RetrievalSignals,
+    CoverageSignals,
+    TimelinessSignals,
+    EvidenceSignals,
+)
+
+# M71: Verdict Contract (new contract, explicit import)
+from spectrue_core.schema.verdict_contract import (
+    VerdictStatus as ContractVerdictStatus,
+    VerdictHighlight,
+    Verdict,
+)
+
+
 __all__ = [
-    # Enums
-    "Dimension",
-    "VerificationScope", 
-    "ClaimDomain",
-    "ClaimType",
-    "EvidenceStance",
-    "ContentStatus",
-    # Claim models
-    "Assertion",
-    "SourceSpan",
-    "EvidenceRequirementSpec",
-    "LocationQualifier",
-    "EventRules",
-    "BroadcastInfo",
-    "EventQualifiers",
+    # M70: Claims
+    "Dimension", "VerificationScope", "ClaimDomain", "ClaimType",
+    "Assertion", "SourceSpan", "EvidenceRequirementSpec",
+    "LocationQualifier", "EventRules", "BroadcastInfo", "EventQualifiers",
     "ClaimUnit",
-    # Evidence models
-    "EvidenceItem",
-    # Verdict models
-    "VerdictStatus",
-    "AssertionVerdict",
-    "ClaimVerdict",
-    "StructuredDebug",
-    "StructuredVerdict",
+    # M70: Evidence
+    "EvidenceStance", "ContentStatus", "EvidenceItem",
+    # M70: Verdict (backward compat)
+    "VerdictStatus", "AssertionVerdict", "ClaimVerdict",
+    "StructuredDebug", "StructuredVerdict",
+    # M71: Policy
+    "ErrorState", "DecisionPath", "VerdictPolicy", "DEFAULT_POLICY",
+    # M71: Signals
+    "RetrievalSignals", "CoverageSignals", "TimelinessSignals", "EvidenceSignals",
+    # M71: Verdict Contract
+    "ContractVerdictStatus", "VerdictHighlight", "Verdict",
 ]

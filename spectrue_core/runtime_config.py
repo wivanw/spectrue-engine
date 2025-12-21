@@ -148,6 +148,19 @@ class ClaimGraphConfig:
     # Quality gates
     min_kept_ratio: float = 0.05
     max_kept_ratio: float = 0.60
+    
+    # M73 Layer 2: Structural Claim Prioritization
+    structural_prioritization_enabled: bool = True
+    structural_weight_threshold: float = 0.5  # min weight for priority boost
+    structural_boost: float = 0.1             # importance boost for high structural weight
+    
+    # M73 Layer 3: Tension Signal
+    tension_signal_enabled: bool = True
+    tension_threshold: float = 0.5            # min in_contradict_weight for "high tension"
+    tension_boost: float = 0.15               # importance boost for high-tension claims
+    
+    # M73 Layer 4: Evidence-Need Routing
+    evidence_need_routing_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -239,6 +252,14 @@ class EngineRuntimeConfig:
             avg_tokens_per_edge=_parse_int(os.getenv("CLAIM_GRAPH_AVG_TOKENS_PER_EDGE"), default=120, min_v=50, max_v=500),
             min_kept_ratio=_parse_float(os.getenv("CLAIM_GRAPH_MIN_KEPT_RATIO"), default=0.05, min_v=0.0, max_v=0.5),
             max_kept_ratio=_parse_float(os.getenv("CLAIM_GRAPH_MAX_KEPT_RATIO"), default=0.60, min_v=0.3, max_v=1.0),
+            # M73 Layer 2-4
+            structural_prioritization_enabled=_parse_bool(os.getenv("CLAIM_GRAPH_STRUCTURAL_ENABLED"), default=True),
+            structural_weight_threshold=_parse_float(os.getenv("CLAIM_GRAPH_STRUCTURAL_THRESHOLD"), default=0.5, min_v=0.0, max_v=2.0),
+            structural_boost=_parse_float(os.getenv("CLAIM_GRAPH_STRUCTURAL_BOOST"), default=0.1, min_v=0.0, max_v=0.5),
+            tension_signal_enabled=_parse_bool(os.getenv("CLAIM_GRAPH_TENSION_ENABLED"), default=True),
+            tension_threshold=_parse_float(os.getenv("CLAIM_GRAPH_TENSION_THRESHOLD"), default=0.5, min_v=0.0, max_v=2.0),
+            tension_boost=_parse_float(os.getenv("CLAIM_GRAPH_TENSION_BOOST"), default=0.15, min_v=0.0, max_v=0.5),
+            evidence_need_routing_enabled=_parse_bool(os.getenv("CLAIM_GRAPH_EVIDENCE_NEED_ENABLED"), default=True),
         )
 
         return EngineRuntimeConfig(
@@ -297,6 +318,10 @@ class EngineRuntimeConfig:
                 "top_k": int(self.claim_graph.top_k),
                 "max_cost_usd": float(self.claim_graph.max_cost_usd),
                 "max_latency_sec": float(self.claim_graph.max_latency_sec),
+                # M73
+                "structural_prioritization_enabled": bool(self.claim_graph.structural_prioritization_enabled),
+                "tension_signal_enabled": bool(self.claim_graph.tension_signal_enabled),
+                "evidence_need_routing_enabled": bool(self.claim_graph.evidence_need_routing_enabled),
             },
         }
 

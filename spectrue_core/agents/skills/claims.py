@@ -14,6 +14,7 @@ from spectrue_core.schema import (
     EventQualifiers,
     LocationQualifier,
 )
+from spectrue_core.schema.evidence import EvidenceNeedType
 
 # M62: Available topic groups for claim classification
 TOPIC_GROUPS = [
@@ -63,6 +64,23 @@ CLAIM_TYPE_MAPPING = {
 
 
 class ClaimExtractionSkill(BaseSkill):
+    
+    # M73.5: Dynamic timeout constants
+    BASE_TIMEOUT_SEC = 35.0     # Minimum timeout
+    TIMEOUT_PER_1K_CHARS = 2.0  # Additional seconds per 1000 chars
+    MAX_TIMEOUT_SEC = 75.0      # Maximum timeout cap
+    
+    def _calculate_timeout(self, text_len: int, *, base_offset: float = 0.0) -> float:
+        """
+        Calculate dynamic timeout based on text length.
+        
+        Args:
+            text_len: Length of input text in characters
+            base_offset: Additional base time for complex operations (e.g., structured extraction)
+        """
+        extra = (text_len / 1000) * self.TIMEOUT_PER_1K_CHARS
+        timeout = self.BASE_TIMEOUT_SEC + base_offset + extra
+        return min(timeout, self.MAX_TIMEOUT_SEC + base_offset)
     
     async def extract_claims(
         self,
@@ -157,6 +175,16 @@ Determine the OVERALL article intent for Oracle triggering:
 - "opinion": Editorial, commentary → SKIP Oracle
 - "prediction": Future events, forecasts → SKIP Oracle
 
+## STEP 5: EVIDENCE NEED CLASSIFICATION (M73 Layer 4)
+For each claim, specify what TYPE of evidence would best verify it:
+- "empirical_study": Requires scientific research, clinical trials, peer-reviewed studies
+- "guideline": Requires official guidelines, consensus statements, policy documents
+- "official_stats": Requires government statistics, census data, official reports
+- "expert_opinion": Requires expert quotes, professional assessments
+- "anecdotal": Personal testimonies, case studies only
+- "news_report": Requires journalistic coverage of events
+- "unknown": Cannot determine what evidence is needed
+
 ## OUTPUT FORMAT
 
 ```json
@@ -189,6 +217,7 @@ Determine the OVERALL article intent for Oracle triggering:
         "needs_primary": true,
         "needs_2_independent": true
       }},
+      "evidence_need": "news_report",
       "check_oracle": false
     }}
   ]
@@ -218,13 +247,17 @@ Return the result in JSON format.
             # Updated cache key version for new prompt structure
             cache_key = f"claim_strategist_v2_{lang}"
 
+            # M73.5: Dynamic timeout based on input size
+            dynamic_timeout = self._calculate_timeout(len(text_excerpt))
+            logger.debug("[Claims] Input: %d chars, timeout: %.1f sec", len(text_excerpt), dynamic_timeout)
+            
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
                 input=prompt,
                 instructions=instructions,
                 reasoning_effort="low",
                 cache_key=cache_key,
-                timeout=45.0,
+                timeout=dynamic_timeout,
                 trace_kind="claim_extraction",
             )
             
@@ -286,7 +319,9 @@ Return the result in JSON format.
                     topic_key=topic_key,
                     query_candidates=rc.get("query_candidates", []),
                     # M66: Smart Routing
-                    search_method=rc.get("search_method", "general_search")
+                    search_method=rc.get("search_method", "general_search"),
+                    # M73 Layer 4: Evidence-Need Routing
+                    evidence_need=rc.get("evidence_need", "unknown"),
                 )
                 
                 # Log strategy for debugging
@@ -300,9 +335,14 @@ Return the result in JSON format.
                 
                 claims.append(c)
             
+            # ─────────────────────────────────────────────────────────────────
+            # M73.5: DEDUPLICATION - Merge claims with identical normalized_text
+            # ─────────────────────────────────────────────────────────────────
+            claims = self._dedupe_claims(claims)
+            
             # Log topic and strategy distribution
             topics_found = [c.get("topic_key", "?") for c in claims]
-            logger.info("[Claims] Extracted %d claims. Topics keys: %s", len(claims), topics_found)
+            logger.info("[Claims] Extracted %d claims (after dedup). Topics keys: %s", len(claims), topics_found)
                 
             # M60 Oracle Optimization: Check if ANY claim needs oracle
             check_oracle = any(c.get("check_oracle", False) for c in claims)
@@ -501,13 +541,17 @@ Return structured ClaimUnits in JSON format.
         try:
             cache_key = f"claim_schema_v1_{lang}"
 
+            # M73.5: Dynamic timeout with +10s offset for structured extraction complexity
+            dynamic_timeout = self._calculate_timeout(len(text_excerpt), base_offset=10.0)
+            logger.debug("[Claims Structured] Input: %d chars, timeout: %.1f sec", len(text_excerpt), dynamic_timeout)
+            
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
                 input=prompt,
                 instructions=instructions,
                 reasoning_effort="medium",  # Higher effort for schema parsing
                 cache_key=cache_key,
-                timeout=60.0,  # Longer timeout for complex parsing
+                timeout=dynamic_timeout,
                 trace_kind="claim_extraction_structured",
             )
 
@@ -668,3 +712,69 @@ Return structured ClaimUnits in JSON format.
                 )
             ], False, "news"
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # M73.5: Claim Deduplication
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _dedupe_claims(self, claims: list[Claim]) -> list[Claim]:
+        """
+        Deduplicate claims by normalized_text hash.
+        
+        Merges duplicates:
+        - Takes MAX importance (most important wins)
+        - Takes MAX check_worthiness
+        - Keeps first occurrence (for type, topic_group, etc.)
+        - Merges search_queries and query_candidates
+        
+        Returns:
+            Deduplicated list of claims with re-assigned IDs.
+        """
+        if not claims:
+            return []
+        
+        # Group by normalized_text (lowercased, stripped)
+        seen: dict[str, Claim] = {}
+        
+        for c in claims:
+            # Normalize key: lowercase, strip, collapse whitespace
+            key = " ".join((c.get("normalized_text") or c.get("text") or "").lower().split())
+            if not key:
+                continue
+            
+            if key in seen:
+                # Merge: take max importance
+                existing = seen[key]
+                existing["importance"] = max(
+                    float(existing.get("importance", 0.5)),
+                    float(c.get("importance", 0.5))
+                )
+                existing["check_worthiness"] = max(
+                    float(existing.get("check_worthiness", 0.5)),
+                    float(c.get("check_worthiness", 0.5))
+                )
+                # Merge query candidates (dedupe by text)
+                existing_queries = existing.get("query_candidates", []) or []
+                new_queries = c.get("query_candidates", []) or []
+                seen_texts = {q.get("text") for q in existing_queries if q}
+                for q in new_queries:
+                    if q and q.get("text") not in seen_texts:
+                        existing_queries.append(q)
+                        seen_texts.add(q.get("text"))
+                existing["query_candidates"] = existing_queries
+                # Oracle: if ANY duplicate wants oracle, check it
+                if c.get("check_oracle"):
+                    existing["check_oracle"] = True
+                logger.debug("[Dedup] Merged claim: %s", key[:50])
+            else:
+                seen[key] = c
+        
+        # Re-assign IDs (c1, c2, ...)
+        deduped = list(seen.values())
+        for idx, c in enumerate(deduped):
+            c["id"] = f"c{idx + 1}"
+        
+        # Log dedup stats
+        if len(claims) != len(deduped):
+            logger.info("[Dedup] Merged %d → %d claims", len(claims), len(deduped))
+        
+        return deduped

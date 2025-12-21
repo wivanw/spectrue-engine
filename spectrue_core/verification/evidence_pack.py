@@ -47,13 +47,15 @@ SourceType = Literal[
 # M63: Oracle Check Result
 # ─────────────────────────────────────────────────────────────────────────────
 
-OracleStatus = Literal["CONFIRMED", "REFUTED", "MIXED", "EMPTY"]
+OracleStatus = Literal["CONFIRMED", "REFUTED", "MIXED", "EMPTY", "ERROR", "DISABLED"]
 """
 Oracle verdict status:
 - CONFIRMED: Fact-check confirms the claim is true
 - REFUTED: Fact-check says the claim is false/fake
 - MIXED: Fact-check says partially true or needs context
 - EMPTY: No relevant fact-check found
+- ERROR: API failure (check error_status_code)
+- DISABLED: Oracle validator not configured
 """
 
 ArticleIntent = Literal["news", "evergreen", "official", "opinion", "prediction"]
@@ -121,6 +123,9 @@ class OracleCheckResult(TypedDict, total=False):
     publisher: str | None             # Fact-check publisher name (Snopes, PolitiFact, etc.)
     rating: str | None                # Original textual rating from fact-checker
     source_provider: str | None       # UX: "Snopes via Google Fact Check"
+    # M73.4: Error fields (when status == ERROR)
+    error_status_code: int | None     # HTTP status code on failure
+    error_detail: str | None          # Error message
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -168,6 +173,11 @@ class Claim(TypedDict, total=False):
     query_candidates: list["QueryCandidate"]  # Typed query candidates with roles
     # M66: Smart Routing method
     search_method: Literal["news", "general_search", "academic"]
+    # M73 Layer 4: Evidence-Need Routing
+    evidence_need: Literal[
+        "empirical_study", "guideline", "official_stats",
+        "expert_opinion", "anecdotal", "news_report", "unknown"
+    ]
 
 
 

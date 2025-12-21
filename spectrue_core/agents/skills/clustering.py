@@ -1,4 +1,4 @@
-from spectrue_core.verification.evidence_pack import Claim, SearchResult
+from spectrue_core.verification.evidence_pack import SearchResult
 from spectrue_core.utils.trace import Trace
 from spectrue_core.schema import ClaimUnit
 from .base_skill import BaseSkill, logger
@@ -54,13 +54,46 @@ class ClusteringSkill(BaseSkill):
                 })
 
         results_lite = []
+        # M73.5: Track unreadable sources for penalty
+        unreadable_indices: set[int] = set()
+        UNREADABLE_MARKERS = ["access denied", "403 forbidden", "404 not found", 
+                              "javascript required", "please enable javascript",
+                              "cloudflare", "captcha", "robot check"]
+        
         for i, r in enumerate(search_results):
             # M70: Handle content status hints
             status_hint = ""
             if r.get("content_status") == "unavailable":
                 status_hint = "[CONTENT UNAVAILABLE - JUDGE BY SNIPPET/TITLE]"
             
-            text_preview = (r.get("snippet") or "") + " " + (r.get("content") or r.get("extracted_content") or "")
+            raw_content = r.get("content") or r.get("extracted_content") or ""
+            snippet = r.get("snippet") or ""
+            text_preview = f"{snippet} {raw_content}".strip()
+            
+            # ─────────────────────────────────────────────────────────────────
+            # M73.5: NO CONTENT GUARDRAIL
+            # If content is too short or contains access denial markers,
+            # mark as UNREADABLE and cap relevance at 0.1 in post-processing.
+            # ─────────────────────────────────────────────────────────────────
+            is_unreadable = False
+            
+            # Rule 1: Content too short (less than 100 chars)
+            if len(raw_content) < 100:
+                if not snippet or len(snippet) < 50:
+                    is_unreadable = True
+                    status_hint = "[UNREADABLE: Content too short]"
+            
+            # Rule 2: Access denial markers
+            content_lower = text_preview.lower()
+            for marker in UNREADABLE_MARKERS:
+                if marker in content_lower:
+                    is_unreadable = True
+                    status_hint = f"[UNREADABLE: {marker.upper()}]"
+                    break
+            
+            if is_unreadable:
+                unreadable_indices.add(i)
+            
             results_lite.append({
                 "index": i,
                 "domain": r.get("domain") or r.get("url"), 
@@ -172,6 +205,13 @@ Return the result in JSON format with key "matrix".
                 stance = (match.get("stance") or "IRRELEVANT").upper()
                 relevance = float(match.get("relevance", 0.0))
                 quote = match.get("quote")
+                
+                # ─────────────────────────────────────────────────────────────
+                # M73.5: UNREADABLE PENALTY - Cap relevance at 0.1 for bad sources
+                # ─────────────────────────────────────────────────────────────
+                if i in unreadable_indices:
+                    relevance = min(relevance, 0.1)
+                    stats["dropped_unreadable"] = stats.get("dropped_unreadable", 0) + 1
                 
                 # Rule 2: Invalid Claim ID / Null
                 if not cid or cid not in valid_claim_ids:

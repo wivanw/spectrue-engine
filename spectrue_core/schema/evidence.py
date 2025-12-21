@@ -39,6 +39,35 @@ class EvidenceStance(str, Enum):
     """Evidence is not related to this assertion."""
 
 
+class EvidenceNeedType(str, Enum):
+    """
+    M73 Layer 4: Evidence type classification for routing.
+    
+    Used ONLY to route search strategies and sources.
+    Does NOT assert existence or quality of evidence.
+    """
+    EMPIRICAL_STUDY = "empirical_study"
+    """Requires scientific research, clinical trials, peer-reviewed studies."""
+    
+    GUIDELINE = "guideline"
+    """Requires official guidelines, consensus statements, policy documents."""
+    
+    OFFICIAL_STATS = "official_stats"
+    """Requires government statistics, census data, official reports."""
+    
+    EXPERT_OPINION = "expert_opinion"
+    """Requires expert quotes, professional assessments."""
+    
+    ANECDOTAL = "anecdotal"
+    """Personal testimonies, case studies only."""
+    
+    NEWS_REPORT = "news_report"
+    """Requires journalistic coverage of events."""
+    
+    UNKNOWN = "unknown"
+    """Cannot determine what evidence is needed."""
+
+
 class ContentStatus(str, Enum):
     """
     Status of content retrieval.

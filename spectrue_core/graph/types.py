@@ -178,6 +178,32 @@ class GraphResult:
         """Get list of key claim IDs."""
         return [c.claim_id for c in self.key_claims]
     
+    def get_ranked_by_id(self, claim_id: str) -> RankedClaim | None:
+        """Get RankedClaim by claim_id (M73 Layer 2)."""
+        for c in self.all_ranked:
+            if c.claim_id == claim_id:
+                return c
+        return None
+    
+    @property
+    def high_tension_claims(self) -> list[RankedClaim]:
+        """
+        Claims with significant incoming contradictions (M73 Layer 3).
+        
+        Returns top 5 claims sorted by tension score descending.
+        Threshold is hardcoded at 0.5; use config for runtime tuning.
+        """
+        return sorted(
+            [c for c in self.all_ranked if c.in_contradict_weight > 0.5],
+            key=lambda c: c.in_contradict_weight,
+            reverse=True
+        )[:5]
+    
+    def get_tension_score(self, claim_id: str) -> float:
+        """Get tension score (in_contradict_weight) for a claim (M73 Layer 3)."""
+        ranked = self.get_ranked_by_id(claim_id)
+        return ranked.in_contradict_weight if ranked else 0.0
+    
     def to_trace_dict(self) -> dict:
         """Convert to dict for tracing."""
         return {

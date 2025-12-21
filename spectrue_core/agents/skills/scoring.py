@@ -119,10 +119,17 @@ Your task is to classify the reliability of claims based *strictly* on the provi
 - **0.0 - 0.2 (Refuted)**: Evidence contradicts the claim.
 
 # AGGREGATION LOGIC (Global Score)
-Calculate the global `verified_score` yourself:
-- **Core Claims (High Importance)** drive the verdict.
-- **Side Facts** are modifiers.
-- If the core claim is unverified, the global score must reflect that uncertainty.
+Calculate the global `verified_score` using CORE DOMINANCE:
+
+1. **CORE claims (importance >= 0.7)**: These drive the verdict. Weight them heavily.
+2. **SIDE facts (importance < 0.7)**: Modifiers only, never exceed CORE.
+
+**FORMULA**:
+- If ALL core claims score >= 0.6: `verified_score = core_avg * 0.8 + side_avg * 0.2`
+- If ANY core claim scores < 0.4: `verified_score = min(core_avg, 0.5)` (Cap: weak core = weak total)
+- If NO core claims exist: Use simple weighted average
+
+**CRITICAL**: If the main thesis is unverified, side facts CANNOT save the global score.
 
 # WRITING GUIDELINES (User-Facing Text Only)
 - Write `rationale` and `reason` ENTIRELY in **{lang_name}** ({lang}).

@@ -401,6 +401,7 @@ class ValidationPipeline:
 
         # M72: ClaimGraph - identify key claims for query prioritization
         key_claim_ids: set[str] = set()
+        graph_result = None  # M73: Store for claim enrichment
         if self._claim_graph and claims:
             if progress_callback:
                 await progress_callback("building_claim_graph")
@@ -410,7 +411,7 @@ class ValidationPipeline:
                 
                 if not graph_result.disabled:
                     key_claim_ids = set(graph_result.key_claim_ids)
-                    # Boost key claims' importance for query selection
+                    # M72: Basic key claim boost
                     for claim in claims:
                         if claim.get("id") in key_claim_ids:
                             claim["importance"] = min(1.0, claim.get("importance", 0.5) + 0.2)
@@ -426,6 +427,75 @@ class ValidationPipeline:
             except Exception as e:
                 logger.warning("[M72] ClaimGraph failed: %s. Fallback to original flow.", e)
                 Trace.event("claim_graph", {"enabled": True, "error": str(e)[:100]})
+        
+        # M73 Layer 2-3: Claim Enrichment with Graph Signals
+        enriched_count = 0
+        high_tension_count = 0
+        if graph_result and not graph_result.disabled:
+            cfg = self.config.runtime.claim_graph
+            
+            # Layer 2: Structural Prioritization
+            if cfg.structural_prioritization_enabled:
+                for claim in claims:
+                    claim_id = claim.get("id")
+                    if not claim_id:
+                        continue
+                    
+                    ranked = graph_result.get_ranked_by_id(claim_id)
+                    if ranked:
+                        # Enrich claim with graph metrics
+                        claim["graph_centrality"] = ranked.centrality_score
+                        claim["graph_structural_weight"] = ranked.in_structural_weight
+                        claim["graph_tension_score"] = ranked.in_contradict_weight
+                        claim["is_key_claim"] = ranked.is_key_claim
+                        enriched_count += 1
+                        
+                        # M73 Layer 2: Structural weight boost
+                        if ranked.in_structural_weight > cfg.structural_weight_threshold:
+                            claim["importance"] = min(1.0, claim.get("importance", 0.5) + cfg.structural_boost)
+                        
+                        # M73 Layer 3: Tension boost (high contradiction = needs verification)
+                        if cfg.tension_signal_enabled and ranked.in_contradict_weight > cfg.tension_threshold:
+                            claim["importance"] = min(1.0, claim.get("importance", 0.5) + cfg.tension_boost)
+                            high_tension_count += 1
+                
+                # Trace enrichment results
+                Trace.event("claim_intelligence", {
+                    "structural_prioritization_enabled": True,
+                    "tension_signal_enabled": cfg.tension_signal_enabled,
+                    "claims_enriched": enriched_count,
+                    "high_tension_claims": high_tension_count,
+                    "key_claims_with_scores": [
+                        {
+                            "id": c.claim_id,
+                            "centrality": round(c.centrality_score, 4),
+                            "structural": round(c.in_structural_weight, 2),
+                            "tension": round(c.in_contradict_weight, 2),
+                        }
+                        for c in graph_result.key_claims[:5]
+                    ],
+                })
+                
+                if enriched_count > 0:
+                    logger.info("[M73] Enriched %d claims with graph signals (%d high-tension)", 
+                               enriched_count, high_tension_count)
+        
+        # M73 Layer 4: Evidence-Need Routing Tracing
+        if self.config.runtime.claim_graph.evidence_need_routing_enabled and claims:
+            evidence_need_dist: dict[str, int] = {}
+            for claim in claims:
+                need = claim.get("evidence_need", "unknown")
+                evidence_need_dist[need] = evidence_need_dist.get(need, 0) + 1
+            
+            Trace.event("evidence_need_routing", {
+                "enabled": True,
+                "distribution": evidence_need_dist,
+                "sample": [
+                    {"id": c.get("id"), "evidence_need": c.get("evidence_need", "unknown")}
+                    for c in claims[:3]
+                ],
+            })
+
 
         # M62: Smart Query Selection (typed priority slots)
         search_queries = self._select_diverse_queries(claims, max_queries=3, fact_fallback=fact)

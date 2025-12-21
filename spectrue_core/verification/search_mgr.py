@@ -165,8 +165,10 @@ class SearchManager:
         return await self.cse_tool.search(query, lang=lang)
 
     def get_search_meta(self) -> dict:
+        """Return usage metrics for current run."""
         return {
             "tavily_calls": self.tavily_calls,
             "google_cse_calls": self.google_cse_calls,
             "page_fetches": self.page_fetches,
+            "oracle_calls": self.oracle_calls,
         }
