@@ -2,8 +2,25 @@ from spectrue_core.verification.evidence_pack import Claim, ClaimAnchor, Evidenc
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.text_chunking import TextChunk
 from spectrue_core.utils.trace import Trace
-from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from spectrue_core.constants import SUPPORTED_LANGUAGES
+from .claims_prompts import (
+    build_claim_schema_instructions,
+    build_claim_schema_prompt,
+    build_claim_strategist_instructions,
+    build_claim_strategist_prompt,
+)
+from .claims_parsing import (
+    ARTICLE_INTENTS,
+    CLAIM_TYPE_MAPPING,
+    DOMAIN_MAPPING,
+    SEARCH_INTENTS,
+    TOPIC_GROUPS,
+    clamp_float,
+    clamp_int,
+    normalize_article_intent,
+    normalize_claim_category,
+    normalize_topic_group,
+)
 
 # M70: Import schema module for structured claims
 from spectrue_core.schema import (
@@ -34,53 +51,6 @@ from spectrue_core.agents.skills.claim_metadata_parser import (
     parse_claim_metadata as parse_claim_metadata_v1,
     default_channels as default_channels_v1,
 )
-
-# M62: Available topic groups for claim classification
-TOPIC_GROUPS = [
-    "Politics", "Economy", "War", "Science", "Technology", 
-    "Health", "Environment", "Society", "Sports", "Culture", "Other"
-]
-
-# M62+: Search intent types for strategist approach
-SEARCH_INTENTS = [
-    "scientific_fact",      # Peer-reviewed research, studies
-    "official_statement",   # Government, company announcements
-    "breaking_news",        # Recent events, developing stories
-    "historical_event",     # Past events, dates, timelines
-    "quote_attribution",    # Who said what
-    "prediction_opinion",   # Forecasts, betting, expectations
-    "viral_rumor",          # Hoaxes, myths, debunking needed
-]
-
-# M63: Article intent types for Oracle triggering
-# - CHECK Oracle: news, evergreen, official
-# - SKIP Oracle: opinion, prediction
-ARTICLE_INTENTS = ["news", "evergreen", "official", "opinion", "prediction"]
-
-# M70: Claim domain mapping
-DOMAIN_MAPPING = {
-    "Politics": ClaimDomain.POLITICS,
-    "Economy": ClaimDomain.FINANCE,
-    "War": ClaimDomain.NEWS,
-    "Science": ClaimDomain.SCIENCE,
-    "Technology": ClaimDomain.TECHNOLOGY,
-    "Health": ClaimDomain.HEALTH,
-    "Environment": ClaimDomain.SCIENCE,
-    "Society": ClaimDomain.NEWS,
-    "Sports": ClaimDomain.SPORTS,
-    "Culture": ClaimDomain.ENTERTAINMENT,
-    "Other": ClaimDomain.OTHER,
-}
-
-# M70: Claim type mapping from legacy
-CLAIM_TYPE_MAPPING = {
-    "core": ClaimType.EVENT,
-    "numeric": ClaimType.NUMERIC,
-    "timeline": ClaimType.TIMELINE,
-    "attribution": ClaimType.ATTRIBUTION,
-    "sidefact": ClaimType.OTHER,
-}
-
 
 class ClaimExtractionSkill(BaseSkill):
     
@@ -134,279 +104,12 @@ class ClaimExtractionSkill(BaseSkill):
         intents_str = ", ".join(SEARCH_INTENTS)
         
         # Updated Strategist Prompt with Salience & Harm Potential (M77) + Satire (M78)
-        instructions = f"""You are an expert Fact-Checking Search Strategist.
-Your goal is to extract verifiable claims AND develop optimal SEARCH STRATEGIES for each.
-
-## NEGATIVE CONSTRAINTS (CRITICAL):
-1. Do NOT generate queries seeking betting odds, gambling coefficients, or bookmaker predictions.
-2. If the user asks for a prediction (e.g. sports), search for "expert analysis" or "official announcement", NOT "betting site".
-3. EXCEPTION: If the user explicitly asks about "gambling regulations" or "corruption in betting", then betting terms ARE allowed.
-
-## STEP 1: EXTRACT CLAIMS & ASSESS HARM (Impact-First)
-For each claim in the article:
-1. Extract the core factual assertion.
-2. **SPLIT COMPOUND CLAIMS**:
-   - If a sentence contains multiple distinct facts (e.g. "He did X, AND she did Y"), SPLIT them into separate claims!
-   - Example: "The earthquake hit at 5 PM; tsunami followed at 6 PM" → Claim 1 (earthquake time), Claim 2 (tsunami time).
-   - Do not combine verifiable facts into one "megaclaim" unless they are inseparable.
-
-3. **Assess Harm Potential (1-5)**:
-   - **5 (Critical)**: "Cures cancer", "Drink bleach", "Do not vaccinate", "Violent call to action". Immediate safety risk.
-   - **4 (High)**: Medical/financial advice, "XYZ is toxic", political accusations without proof.
-   - **3 (Medium)**: Controversial political statements, economic figures, historical revisionism.
-   - **2 (Low)**: Attribution ("He said X"), timeline events ("Meeting held on Y").
-   - **1 (Neutral)**: Definitions, physical constants ("Water boils at 100C"), background info.
-
-4. **Prioritize Extraction**: Focus on Levels 4-5.
-   - If an article has dangerous claims, extracted them FIRST.
-   - Avoid filling slots with Level 1 trivia if Level 3+ claims exist.
-
-## STEP 1.5: CLASSIFY CLAIM CATEGORY (Satire Detection)
-For each claim, classify its **claim_category**:
-- **FACTUAL**: Standard verifiable factual claim. Proceed with verification.
-- **SATIRE**: Obvious parody, humor, absurdist claim (e.g., "Worms eating asphalt", "The Onion" style). 
-  - Markers: Absurd scenarios, known satire sources, exaggerated humor, impossible events.
-- **OPINION**: Subjective editorial opinion (e.g., "This policy is terrible").
-- **HYPERBOLIC**: Exaggerated rhetoric not meant literally (e.g., "The best thing ever").
-
-Also provide **satire_likelihood** (0.0-1.0):
-- 0.0-0.3: Clearly factual
-- 0.4-0.6: Ambiguous, could be exaggeration
-- 0.7-0.8: Likely satire/opinion
-- 0.9-1.0: Definitely satire (skip verification)
-
-**ROUTING RULE**: If satire_likelihood >= 0.8, do NOT generate search queries. Mark as SATIRE.
-
-## STEP 1.6: CLAIM METADATA FOR ORCHESTRATION (M80/M81)
-For each claim, provide orchestration metadata:
-
-1. **verification_target** (CRITICAL - READ CAREFULLY):
-   - **"attribution"**: Use when the claim reports what someone SAID/STATED/CLAIMED.
-     * MARKERS: "said", "stated", "claimed", "announced", "told", "revealed", "explained",
-       "in an interview", "according to X", "X mentioned", "X recalled", "X shared"
-     * For INTERVIEW articles: MOST claims should be "attribution"!
-     * Verification = "Did person X actually say this?"
-   - **"reality"**: Factual claim about external events/data that can be verified 
-     INDEPENDENTLY of what someone said.
-     * External events: "earthquake killed 50 people", "stock rose 5%"
-     * Scientific facts: "vaccine is 95% effective" (needs study, not quote)
-     * Historical facts: "WWII ended in 1945"
-   - **"existence"**: Verify that a source/document/recording exists.
-   - **"none"**: NOT VERIFIABLE:
-     * Predictions/forecasts ("will happen", "expected to")
-     * Horoscopes, astrology, subjective opinions
-
-   ⚠️ ATTRIBUTION DETECTION RULE:
-   If text contains phrases like "розповіла", "сказала", "заявила", "повідомив",
-   "в інтерв'ю", "said", "told", "announced", "according to", "recalled"
-   → DEFAULT to verification_target="attribution", NOT "reality"!
-
-2. **claim_role** (STRICT LIMITS):
-   - **"core"**: Central claim of the article. **MAXIMUM 2 per article!**
-   - **"support"**: Evidence supporting a core claim.
-   - **"context"**: Background info (not a fact to verify).
-   - **"attribution"**: Quote attribution (what someone said).
-   - **"meta"**: Info about the article/source itself.
-   - **"aggregated"**: Summary from multiple sources.
-   - **"subclaim"**: Subordinate detail.
-   
-   ⚠️ ROLE DISTRIBUTION RULE:
-   For a 5-claim article: max 2 "core", rest must be "support"/"context"/"attribution".
-   If ALL claims are "core", you are doing it WRONG!
-
-3. **search_locale_plan**:
-   - primary: Main search language ("en" for science, article language for local news)
-   - fallback: Backup languages ["en", ...]
-
-4. **retrieval_policy**:
-   - channels_allowed: ["authoritative", "reputable_news", "local_media", "social", "low_reliability_web"]
-   - For high harm_potential (>=4): use ONLY ["authoritative"]
-   - For verification_target="none": use [] (no search needed)
-   - For verification_target="attribution": prioritize ["reputable_news"] (interview sources)
-
-5. **metadata_confidence** (CALIBRATED):
-   - **"high"**: Claim has direct, checkable data points (dates, numbers, official records)
-   - **"medium"**: Interview/quote-based claims without primary source access
-   - **"low"**: Vague, context-dependent, or unverifiable without specialized sources
-   
-   ⚠️ CONFIDENCE RULE: Interview quotes = "medium" (no primary source), NOT "high"!
-
-
-## STEP 2: THINK LIKE A SEARCH STRATEGIST (Chain of Thought)
-For each **FACTUAL** claim, REASON about:
-
-1. **Intent Analysis**: What type of claim is this?
-   - {intents_str}
-
-2. **Primary Authority**: Where would the ORIGINAL evidence exist?
-   - Science/Medicine → Journals. Best in ENGLISH.
-   - Local Politics → Local news. Best in LOCAL language.
-   - Sports → Official sites. AVOID betting sites!
-
-3. **Language Strategy**: 
-   - Scientific facts → Search in ENGLISH
-   - Local news → Search in LOCAL language ({lang_name})
-
-4. **Search Method Selection**:
-   - **"news"**: Recent events (last 30 days).
-   - **"general_search"**: Evergreen facts, medical advice, history.
-   - **"academic"**: specialized studies.
-
-## STEP 3: GENERATE QUERY CANDIDATES
-Generate 2-3 query candidates for each **FACTUAL** claim.
-
-**ATTRIBUTION QUERY RULE:**
-If `verification_target="attribution"` (someone said X):
-- You MUST include attribution markers: "interview", "quote", "said", "transcript", "statement".
-- If the source entity is known (e.g. "BBC", "CNN"), include it: "Kate Winslet BBC interview".
-- DO NOT search for the fact itself as if it happened (e.g. "Did paparazzi follow Kate") -> Search for the STATEMENTS ("Kate Winslet interview paparazzi quotes").
-
-**SPECIAL RULE for HEALTH/MEDICAL claims:**
-If harm_potential >= 4, you MUST include:
-1. **SAFETY/TOXICITY**: "entity + toxicity / poisoning / hazards / CDC / WHO"
-2. **EFFICACY**: "entity + clinical evidence / cancer treatment / systematic review"
-
-**Standard Roles:**
-1. **CORE** (Required): Priority 1.0
-2. **NUMERIC**: Priority 0.8
-3. **ATTRIBUTION**: Priority 0.7
-4. **LOCAL** (Optional): Priority 0.5
-
-Also assign:
-- **topic_group**: High-level category ({topics_str})
-- **topic_key**: Use NEAREST MARKDOWN HEADING.
-
-## STEP 4: CLASSIFY ARTICLE INTENT
-- "news": Recent specific events.
-- "evergreen": Medical, history, how-to. (Force "general_search")
-- "official": Gov/Company announcements.
-- "opinion" / "prediction".
-
-## STEP 5: EVIDENCE NEED CLASSIFICATION
-- "empirical_study", "guideline", "official_stats", "expert_opinion", "anecdotal", "news_report", "unknown"
-
-## OUTPUT FORMAT
-
-```json
-{{
-  "article_intent": "news",
-  "claims": [
-    {{
-      "text": "Original text",
-      "normalized_text": "Trump announced tariffs...",
-      "type": "core",
-      "claim_category": "FACTUAL",
-      "satire_likelihood": 0.0,
-      "topic_group": "Politics",
-      "topic_key": "Trump Tariffs",
-      "importance": 0.9,
-      "check_worthiness": 0.9,
-      "harm_potential": 3,
-      "verification_target": "reality",
-      "claim_role": "core",
-      "search_locale_plan": {{
-        "primary": "en",
-        "fallback": ["en"]
-      }},
-      "retrieval_policy": {{
-        "channels_allowed": ["authoritative", "reputable_news"],
-        "use_policy_by_channel": {{"social": "lead_only", "low_reliability_web": "lead_only"}}
-      }},
-      "metadata_confidence": "high",
-      "search_strategy": {{
-        "intent": "official_statement",
-        "reasoning": "Needs official confirmation",
-        "best_language": "en"
-      }},
-      "query_candidates": [
-        {{"text": "Trump China tariffs 2025", "role": "CORE", "score": 1.0}}
-      ],
-      "search_method": "news",
-      "search_queries": ["Trump China tariffs"],
-      "evidence_req": {{"needs_primary": true, "needs_2_independent": true}},
-      "evidence_need": "news_report",
-      "check_oracle": false
-    }}
-  ]
-}}
-```
-
-**EVIDENCE NEED RULES:**
-- If verification_target="attribution" → MUST use "primary_source" or "quote_verification".
-- If verification_target="reality" (science/health) → "empirical_study" or "expert_opinion".
-- If verification_target="reality" (news) → "news_report".
-
-**EXAMPLE: HOROSCOPE (verification_target=none)**
-```json
-{{
-  "text": "Водоліям сьогодні пощастить у фінансах",
-  "verification_target": "none",
-  "claim_role": "context",
-  "claim_category": "OPINION",
-  "satire_likelihood": 0.0,
-  "check_worthiness": 0.1,
-  "search_locale_plan": {{"primary": "en", "fallback": []}},
-  "retrieval_policy": {{"channels_allowed": []}},
-  "metadata_confidence": "high",
-  "query_candidates": [],
-  "search_queries": []
-}}
-```
-
-**EXAMPLE: INTERVIEW ARTICLE (verification_target=attribution)**
-For an article about Kate Winslet interview:
-```json
-{{
-  "article_intent": "news",
-  "claims": [
-    {{
-      "text": "Вінслет розповіла, що папараці стежили за нею після Титаніка",
-      "normalized_text": "Kate Winslet said paparazzi followed her after Titanic",
-      "type": "attribution",
-      "verification_target": "attribution",
-      "claim_role": "core",
-      "metadata_confidence": "medium",
-      "check_worthiness": 0.7,
-      "search_queries": ["Kate Winslet interview paparazzi Titanic"]
-    }},
-    {{
-      "text": "Акторка згадала, що їй радили схуднути",
-      "normalized_text": "The actress mentioned being told to lose weight",
-      "type": "attribution",
-      "verification_target": "attribution",
-      "claim_role": "support",
-      "metadata_confidence": "medium",
-      "check_worthiness": 0.5,
-      "search_queries": ["Kate Winslet weight pressure interview"]
-    }},
-    {{
-      "text": "Титанік заробив понад 2 мільярди доларів",
-      "normalized_text": "Titanic earned over 2 billion dollars",
-      "type": "numeric",
-      "verification_target": "reality",
-      "claim_role": "support",
-      "metadata_confidence": "high",
-      "check_worthiness": 0.8,
-      "search_queries": ["Titanic box office revenue"]
-    }}
-  ]
-}}
-```
-Note: 2 of 3 claims are "attribution" (what she said), only 1 is "reality" (box office data).
-
-You MUST respond in valid JSON.
-
-{UNIVERSAL_METHODOLOGY_APPENDIX}
-"""
-        prompt = f"""Extract 3-{max_claims} atomic verifiable claims.
-PRIORITIZE HARM: Find claims with harm_potential 4-5 (Health/Safety) first.
-Ignore separate definitions (harm_potential 1) unless false/dangerous.
-
-ARTICLE:
-{text_excerpt}
-
-Return the result in JSON format.
-"""
+        instructions = build_claim_strategist_instructions(
+            intents_str=intents_str,
+            topics_str=topics_str,
+            lang_name=lang_name,
+        )
+        prompt = build_claim_strategist_prompt(text_excerpt=text_excerpt, max_claims=max_claims)
         try:
             # M81: Updated cache key to force prompt refresh with calibration rules
             cache_key = f"claim_strategist_v6_{lang}"
@@ -429,9 +132,7 @@ Return the result in JSON format.
             claims: list[Claim] = []
             
             # M63: Extract article intent
-            raw_intent = result.get("article_intent", "news")
-            if raw_intent not in ARTICLE_INTENTS:
-                raw_intent = "news"  # Default to news (check Oracle)
+            raw_intent = normalize_article_intent(result.get("article_intent", "news"))
             article_intent: ArticleIntent = raw_intent  # type: ignore
             
             for idx, rc in enumerate(raw_claims):
@@ -448,33 +149,22 @@ Return the result in JSON format.
                 
                 # M62: Extract new fields with safe defaults
                 normalized = rc.get("normalized_text", "") or rc.get("text", "")
-                topic = rc.get("topic_group", "Other") or "Other"
-                # Validate topic_group against allowed list
-                if topic not in TOPIC_GROUPS:
-                    topic = "Other"
+                topic = normalize_topic_group(rc.get("topic_group", "Other") or "Other")
                 
                 # M64: topic_key extraction
                 topic_key = rc.get("topic_key") or topic  # Fallback to group if key missing
                 
                 worthiness = rc.get("check_worthiness")
                 if worthiness is None:
-                    # Fallback: derive from importance
-                    worthiness = float(rc.get("importance", 0.5))
-                else:
-                    worthiness = float(worthiness)
-                worthiness = max(0.0, min(1.0, worthiness))  # Clamp to 0-1
+                    worthiness = rc.get("importance", 0.5)
+                worthiness = clamp_float(worthiness, default=0.5, lo=0.0, hi=1.0)
                 
                 # M77: Harm Potential
-                harm_potential = int(rc.get("harm_potential", 1))
-                harm_potential = max(1, min(5, harm_potential)) # Clamp 1-5
+                harm_potential = clamp_int(rc.get("harm_potential", 1), default=1, lo=1, hi=5)
 
                 # M78: Claim Category & Satire Likelihood
-                claim_category = rc.get("claim_category", "FACTUAL")
-                if claim_category not in {"FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"}:
-                    claim_category = "FACTUAL"
-                
-                satire_likelihood = float(rc.get("satire_likelihood", 0.0))
-                satire_likelihood = max(0.0, min(1.0, satire_likelihood))  # Clamp 0-1
+                claim_category = normalize_claim_category(rc.get("claim_category", "FACTUAL"))
+                satire_likelihood = clamp_float(rc.get("satire_likelihood", 0.0), default=0.0, lo=0.0, hi=1.0)
 
                 # M80: Parse ClaimMetadata
                 metadata = self._parse_claim_metadata(rc, lang, harm_potential, claim_category, satire_likelihood)
@@ -628,132 +318,8 @@ Return the result in JSON format.
         topics_str = ", ".join(TOPIC_GROUPS)
 
         # M70: Schema-Constrained Generation Prompt
-        instructions = f"""You are a SCHEMA PARSER for fact-checking.
-
-## YOUR ROLE
-You are a **parser + interpreter**, NOT a judge.
-- Fill structured fields from text
-- Classify each field as FACT / CONTEXT / INTERPRETATION
-- Do NOT decide if claims are true or false
-
-## CRITICAL: FACT vs CONTEXT DISTINCTION
-
-### FACT (dimension: "FACT")
-- Claims about the world that MUST be verified by evidence
-- Examples: "fight in Miami", "price is $100", "John said X"
-- Verification: STRICT (can be verified/refuted)
-
-### CONTEXT (dimension: "CONTEXT")  
-- Contextual framing that provides background
-- Examples: "Ukraine time", "Kyiv timezone", "for European viewers"
-- Verification: SOFT (informational only, rarely refuted)
-
-### THE BUG TO AVOID
-❌ WRONG: "(в Україні)" after time → location.country = "Ukraine"
-✅ CORRECT: "(в Україні)" after "03:00 (за Києвом)" → time_reference = "Ukraine time" (CONTEXT)
-
-Time zone references are NOT location claims!
-
-## OUTPUT SCHEMA
-
-```json
-{{
-  "article_intent": "news|evergreen|official|opinion|prediction",
-  "claims": [
-    {{
-      "id": "c1",
-      "domain": "sports|science|politics|health|finance|news|other",
-      "claim_type": "event|attribution|numeric|definition|timeline|other",
-      
-      "subject": "Anthony Joshua",
-      "predicate": "scheduled_fight_against", 
-      "object": "Jake Paul",
-      
-      "assertions": [
-        {{
-          "key": "event.time",
-          "value": "03:00",
-          "value_raw": "03:00 (за Києвом)",
-          "dimension": "FACT"
-        }},
-        {{
-          "key": "event.time_reference",
-          "value": "Kyiv time",
-          "value_raw": "(за Києвом)",
-          "dimension": "CONTEXT"
-        }},
-        {{
-          "key": "event.location.city",
-          "value": "Miami",
-          "value_raw": "in Miami",
-          "dimension": "FACT"
-        }}
-      ],
-      
-      "qualifiers": {{
-        "event_date": null,
-        "event_time": null,
-        "time_reference": "Kyiv time",
-        "location": {{
-          "city": "Miami",
-          "country": "USA",
-          "is_inferred": false
-        }},
-        "participants": ["Anthony Joshua", "Jake Paul"]
-      }},
-      
-      "importance": 0.9,
-      "check_worthiness": 0.9,
-      "extraction_confidence": 0.95,
-      
-      "text": "original text excerpt",
-      "normalized_text": "Self-sufficient version with context",
-      "topic_group": "{topics_str}",
-      "topic_key": "Joshua vs Paul Fight",
-      
-      "query_candidates": [
-        {{"text": "Joshua Paul fight Miami official announcement", "role": "CORE", "score": 1.0}},
-        {{"text": "Joshua Paul boxing match date location", "role": "NUMERIC", "score": 0.8}}
-      ],
-      "search_method": "news",
-      "check_oracle": false
-    }}
-  ]
-}}
-```
-
-## ASSERTION KEY CONVENTIONS
-- `event.time` - When it happens (FACT)
-- `event.time_reference` - Timezone context (CONTEXT)
-- `event.location.city` - Where it happens (FACT)
-- `event.location.venue` - Specific venue (FACT)
-- `event.participants` - Who is involved (FACT)
-- `attribution.quote` - What was said (FACT)
-- `attribution.speaker` - Who said it (FACT)
-- `numeric.value` - The number (FACT)
-- `numeric.unit` - Unit of measurement (CONTEXT)
-
-## RULES
-
-1. **Extract only explicit claims** - don't infer unstated facts
-2. **Mark inferred fields** - if you infer something, set `is_inferred: true`
-3. **Preserve raw text** - store original excerpt in `value_raw`
-4. **Simple facts are valid** - single FACT assertion is fine for simple claims
-5. **Language**: Generate in {lang_name} for text/normalized_text, English for queries
-
-You MUST respond in valid JSON.
-"""
-
-        prompt = f"""Parse this article into structured claims.
-For each claim, identify FACT assertions (verifiable) and CONTEXT assertions (informational).
-
-CRITICAL: Time zone references like "(в Україні)", "(за Києвом)" are CONTEXT, not location!
-
-ARTICLE:
-{text_excerpt}
-
-Return structured ClaimUnits in JSON format.
-"""
+        instructions = build_claim_schema_instructions(topics_str=topics_str, lang_name=lang_name)
+        prompt = build_claim_schema_prompt(text_excerpt=text_excerpt)
 
         try:
             cache_key = f"claim_schema_v1_{lang}"
@@ -776,9 +342,7 @@ Return structured ClaimUnits in JSON format.
             claim_units: list[ClaimUnit] = []
 
             # M63: Extract article intent
-            raw_intent = result.get("article_intent", "news")
-            if raw_intent not in ARTICLE_INTENTS:
-                raw_intent = "news"
+            raw_intent = normalize_article_intent(result.get("article_intent", "news"))
             article_intent: ArticleIntent = raw_intent  # type: ignore
 
             for idx, rc in enumerate(raw_claims):
