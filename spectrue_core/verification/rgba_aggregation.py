@@ -1,0 +1,206 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2024-2025 Spectrue Contributors
+"""
+M80: Weighted RGBA Aggregation
+
+Fixes the "mixed article dilution" problem where non-verifiable claims
+(horoscopes, predictions, opinions) were averaging down factual claim scores.
+
+Solution:
+- Each claim has a role_weight based on metadata
+- verification_target=none → weight=0 (excluded from aggregate)
+- Final RGBA is weighted average of verifiable claims only
+
+Example:
+    Article with 3 claims:
+    1. "Biden won 2024 election" → verified=0.95, weight=1.0 (CORE/REALITY)
+    2. "Economy will improve" → weight=0.0 (CONTEXT/NONE - prediction)
+    3. "Source says X" → verified=0.80, weight=0.7 (ATTRIBUTION)
+    
+    Old: (0.95 + 0.50 + 0.80) / 3 = 0.75 (diluted)
+    New: (0.95*1.0 + 0.50*0.0 + 0.80*0.7) / (1.0 + 0.7) = 0.53 + 0.33 = 0.89 (correct)
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+from spectrue_core.schema.claim_metadata import ClaimMetadata
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ClaimScore:
+    """Score for a single claim with weighting metadata."""
+    claim_id: str
+    verified_score: float  # 0-1
+    danger_score: float    # 0-1
+    style_score: float     # 0-1
+    explainability_score: float  # 0-1
+    
+    # Weighting factors
+    role_weight: float = 1.0  # From ClaimMetadata.role_weight
+    check_worthiness: float = 0.5  # From ClaimMetadata
+    evidence_quality: float = 1.0  # From sufficiency check
+    
+    @property
+    def total_weight(self) -> float:
+        """Calculate total weight for this claim."""
+        return self.role_weight * self.check_worthiness * self.evidence_quality
+    
+    @property
+    def is_excluded(self) -> bool:
+        """Check if claim should be excluded from aggregate (weight=0)."""
+        return self.role_weight == 0.0 or self.total_weight < 0.01
+
+
+@dataclass
+class AggregatedRGBA:
+    """Aggregated RGBA scores from all claims."""
+    verified: float = 0.5
+    danger: float = 0.5
+    style: float = 0.5
+    explainability: float = 0.5
+    
+    # Metadata
+    total_claims: int = 0
+    included_claims: int = 0  # Claims with weight > 0
+    excluded_claims: int = 0  # Claims with weight = 0
+    total_weight: float = 0.0
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize for API response."""
+        return {
+            "verified": round(self.verified, 3),
+            "danger": round(self.danger, 3),
+            "style": round(self.style, 3),
+            "explainability": round(self.explainability, 3),
+            "meta": {
+                "total_claims": self.total_claims,
+                "included_claims": self.included_claims,
+                "excluded_claims": self.excluded_claims,
+                "total_weight": round(self.total_weight, 3),
+            },
+        }
+
+
+def aggregate_weighted(claim_scores: list[ClaimScore]) -> AggregatedRGBA:
+    """
+    T30: Aggregate RGBA scores with role-based weighting.
+    
+    Weight formula:
+        weight = role_weight × check_worthiness × evidence_quality
+    
+    Where:
+        - role_weight: 0.0 for CONTEXT/META, 1.0 for CORE, etc.
+        - check_worthiness: LLM's priority score (0-1)
+        - evidence_quality: Based on sufficiency check (default 1.0)
+    
+    Aggregation:
+        score = Σ(claim_score × weight) / Σ(weight)
+    
+    Args:
+        claim_scores: List of ClaimScore objects
+        
+    Returns:
+        AggregatedRGBA with weighted scores
+    """
+    result = AggregatedRGBA()
+    
+    if not claim_scores:
+        return result
+    
+    result.total_claims = len(claim_scores)
+    
+    # Accumulators
+    weighted_verified = 0.0
+    weighted_danger = 0.0
+    weighted_style = 0.0
+    weighted_explainability = 0.0
+    total_weight = 0.0
+    
+    for cs in claim_scores:
+        weight = cs.total_weight
+        
+        if cs.is_excluded:
+            result.excluded_claims += 1
+            continue
+        
+        result.included_claims += 1
+        total_weight += weight
+        
+        weighted_verified += cs.verified_score * weight
+        weighted_danger += cs.danger_score * weight
+        weighted_style += cs.style_score * weight
+        weighted_explainability += cs.explainability_score * weight
+    
+    result.total_weight = total_weight
+    
+    # Calculate weighted averages
+    if total_weight > 0:
+        result.verified = weighted_verified / total_weight
+        result.danger = weighted_danger / total_weight
+        result.style = weighted_style / total_weight
+        result.explainability = weighted_explainability / total_weight
+    else:
+        # No verifiable claims - return neutral scores
+        result.verified = 0.5
+        result.danger = 0.5
+        result.style = 0.5
+        result.explainability = 0.5
+        logger.warning(
+            "[M80] No verifiable claims (all weights=0). "
+            "Returning neutral RGBA scores."
+        )
+    
+    return result
+
+
+def claim_to_score(
+    claim: dict,
+    *,
+    verified_score: float,
+    danger_score: float,
+    style_score: float = 0.5,
+    explainability_score: float = 0.5,
+    evidence_quality: float = 1.0,
+) -> ClaimScore:
+    """
+    T31: Convert claim dict to ClaimScore using metadata.
+    
+    Args:
+        claim: Claim dict with metadata
+        verified_score: 0-1 verification score from LLM
+        danger_score: 0-1 danger score from LLM
+        style_score: 0-1 style score
+        explainability_score: 0-1 explainability score
+        evidence_quality: 0-1 evidence quality factor
+        
+    Returns:
+        ClaimScore with proper weighting
+    """
+    claim_id = claim.get("id", "unknown")
+    
+    # Get metadata
+    metadata = claim.get("metadata")
+    if metadata and isinstance(metadata, ClaimMetadata):
+        role_weight = metadata.role_weight
+        check_worthiness = metadata.check_worthiness
+    else:
+        # Default: full weight for backward compat
+        role_weight = 1.0
+        check_worthiness = 0.5
+    
+    return ClaimScore(
+        claim_id=claim_id,
+        verified_score=verified_score,
+        danger_score=danger_score,
+        style_score=style_score,
+        explainability_score=explainability_score,
+        role_weight=role_weight,
+        check_worthiness=check_worthiness,
+        evidence_quality=evidence_quality,
+    )

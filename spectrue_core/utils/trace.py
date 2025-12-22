@@ -31,6 +31,16 @@ from spectrue_core.runtime_config import EngineRuntimeConfig
 
 _trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("spectrue_trace_id", default=None)
 _trace_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_enabled", default=False)
+_trace_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_enabled", default=False)
+_redact_pii_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_redact_pii", default=False)
+_trace_safe_payloads_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_safe_payloads", default=True)
+_trace_max_head_var: contextvars.ContextVar[int] = contextvars.ContextVar("spectrue_trace_max_head", default=120)
+_trace_max_inline_var: contextvars.ContextVar[int] = contextvars.ContextVar("spectrue_trace_max_inline", default=600)
+
+# M74: PII Regex Patterns
+EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+PHONE_REGEX = re.compile(r"\b(?:\+?1[-. ]?)?\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\b")
+CC_REGEX = re.compile(r"\b(?:\d{4}[- ]?){3}\d{4}\b")
 
 
 def _now_ms() -> int:
@@ -42,24 +52,117 @@ def _redact_text(s: str) -> str:
         return s
 
     # URL params
-    s = re.sub(r"([?&]key=)[^&]+", r"\1***", s, flags=re.IGNORECASE)
-    s = re.sub(r"([?&]api_key=)[^&]+", r"\1***", s, flags=re.IGNORECASE)
-    s = re.sub(r"([?&]access_token=)[^&]+", r"\1***", s, flags=re.IGNORECASE)
+    # URL params (stop at &, whitespace, or end of string)
+    s = re.sub(r"([?&]key=)[^&\s]+", r"\1***", s, flags=re.IGNORECASE)
+    s = re.sub(r"([?&]api_key=)[^&\s]+", r"\1***", s, flags=re.IGNORECASE)
+    s = re.sub(r"([?&]access_token=)[^&\s]+", r"\1***", s, flags=re.IGNORECASE)
 
     # Bearer tokens / auth headers
     s = re.sub(r"(Authorization:\s*Bearer\s+)[^\s]+", r"\1***", s, flags=re.IGNORECASE)
     s = re.sub(r"(Bearer\s+)[A-Za-z0-9._-]+", r"\1***", s)
 
+    # M74: Medical content redaction
+    s = _redact_medical(s)
+
+    # M74: PII Redaction (Email, Phone, Credit Card)
+    if _redact_pii_enabled_var.get():
+        s = EMAIL_REGEX.sub("[EMAIL]", s)
+        s = PHONE_REGEX.sub("[PHONE]", s)
+        s = CC_REGEX.sub("[CARD]", s)
+
     return s
 
 
-def _sanitize(obj: Any, *, max_str: int = 4000, max_list: int = 100, max_dict: int = 200) -> Any:
+# M74: Medical Patterns for Log Redaction
+# These patterns match actionable medical instructions that should not be stored in logs.
+# We preserve sha256 + safe_head for debugging while removing doses/instructions.
+_MEDICAL_PATTERNS = [
+    # Dosing with units (Ukrainian + English)
+    r"\d+[\s,]*(?:мг|мл|г|грам|mg|ml|g|gram|mcg|мкг|iu|од|одиниц)(?:\s*/\s*(?:кг|kg|день|day|добу))?\b",
+    # Intake instructions (Ukrainian)
+    r"(?:приймати|пити|вживати|вводити|застосовувати|наносити|полоскати)\s+(?:по\s+)?\d+",
+    # Intake instructions (English)
+    r"(?:take|consume|administer|apply|inject|drink)\s+\d+",
+    # Frequency patterns (Ukrainian)
+    r"\d+\s*(?:раз|рази|разів)\s*(?:на|в|per)\s*(?:день|добу|тиждень|годину)",
+    # Frequency patterns (English)
+    r"\d+\s*(?:times?)\s*(?:per|a|daily|weekly)\s*(?:day|hour|week)?",
+    # Procedural steps with numbers
+    r"(?:крок|етап|step)\s*\d+\s*[:\.]\s*[^\n]{10,50}",
+    # Concentration patterns
+    r"\d+[\s,]*%\s*(?:розчин|solution|концентрація|concentration)",
+    # Duration patterns
+    r"(?:протягом|впродовж|for|during)\s+\d+\s*(?:днів|дні|хвилин|годин|days|hours|minutes|weeks)",
+]
+
+
+def _redact_medical(s: str) -> str:
+    """
+    M74: Redact medical dosing and instructions from text.
+    
+    Removes actionable medical content while preserving structure for debugging.
+    Patterns are designed to catch common dosing formats without false positives.
+    
+    Args:
+        s: Input text
+        
+    Returns:
+        Text with medical instructions replaced by [REDACTED_MEDICAL]
+    """
+    if not s:
+        return s
+    
+    for pattern in _MEDICAL_PATTERNS:
+        s = re.sub(pattern, "[REDACTED_MEDICAL]", s, flags=re.IGNORECASE)
+    
+    return s
+
+
+
+def _sanitize(
+    obj: Any,
+    *,
+    max_str: int = 4000,
+    max_list: int = 100,
+    max_dict: int = 200,
+    key_hint: str | None = None,
+) -> Any:
     if obj is None:
         return None
     if isinstance(obj, (int, float, bool)):
         return obj
     if isinstance(obj, str):
         s = _redact_text(obj)
+        
+        # M75: Safe Payloads Logic
+        safe_mode = _trace_safe_payloads_var.get()
+        if safe_mode:
+            # Check if this is a sensitive key
+            is_sensitive = False
+            if key_hint:
+                k = key_hint.lower()
+                # Broad match for sensitive keys
+                if any(x in k for x in ("input_text", "response_text", "article", "content", "text", "prompt", "raw_html", "snippet")):
+                    is_sensitive = True
+            
+            # Determine limit
+            limit = _trace_max_head_var.get() if is_sensitive else _trace_max_inline_var.get()
+            
+            if len(s) > limit:
+                # Safe mode:
+                # - Sensitive keys (prompt/content/text/etc): head-only + sha256 (no tail)
+                # - Non-sensitive keys: keep head+tail + sha256 for debugging
+                out = {
+                    "len": len(s),
+                    "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest(),
+                    "head": s[:limit],
+                }
+                if not is_sensitive:
+                    out["tail"] = s[-limit:] if limit else ""
+                return out
+            return s
+            
+        # Legacy/Unsafe Mode (keep existing behavior for backward compat if flag is off)
         if len(s) <= max_str:
             return s
         head_tail_len = min(300, max_str // 2)
@@ -69,6 +172,7 @@ def _sanitize(obj: Any, *, max_str: int = 4000, max_list: int = 100, max_dict: i
             "head": s[:head_tail_len],
             "tail": s[-head_tail_len:] if head_tail_len else "",
         }
+
     if isinstance(obj, bytes):
         return f"<bytes:{len(obj)}>"
     if isinstance(obj, (list, tuple)):
@@ -83,12 +187,14 @@ def _sanitize(obj: Any, *, max_str: int = 4000, max_list: int = 100, max_dict: i
                 out["..."] = f"(+{len(obj) - max_dict} more keys)"
                 break
             key = str(k)
-            if key.lower() in ("authorization", "api_key", "key", "openai_api_key", "tavily_api_key"):
+            k_lower = key.lower()
+            if k_lower in ("authorization", "api_key", "key", "openai_api_key", "tavily_api_key"):
                 out[key] = "***"
             else:
-                out[key] = _sanitize(v, max_str=max_str, max_list=max_list, max_dict=max_dict)
+                # Pass key_hint down
+                out[key] = _sanitize(v, max_str=max_str, max_list=max_list, max_dict=max_dict, key_hint=key)
         return out
-    return _sanitize(str(obj), max_str=max_str, max_list=max_list, max_dict=max_dict)
+    return _sanitize(str(obj), max_str=max_str, max_list=max_list, max_dict=max_dict, key_hint=key_hint)
 
 
 def _trace_dir() -> Path:
@@ -125,8 +231,27 @@ class Trace:
         enabled = bool(is_local_run() and runtime.features.trace_enabled)
         _trace_id_var.set(trace_id)
         _trace_enabled_var.set(enabled)
+        _trace_enabled_var.set(enabled)
+        _redact_pii_enabled_var.set(runtime.features.log_redaction)
+        _trace_safe_payloads_var.set(runtime.features.trace_safe_payloads)
+        _trace_max_head_var.set(runtime.debug.trace_max_head_chars)
+        _trace_max_inline_var.set(runtime.debug.trace_max_inline_chars)
         if enabled:
-            Trace.event("trace.start", {"trace_id": trace_id})
+            # M47: Clean up old traces, keep only the latest one
+            try:
+                trace_dir = _trace_dir()
+                for old_file in trace_dir.glob("*.jsonl"):
+                    try:
+                        old_file.unlink()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            
+            Trace.event("trace.start", {
+                "trace_id": trace_id,
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            })
         return TraceContext(trace_id=trace_id, enabled=enabled)
 
     @staticmethod
@@ -152,7 +277,9 @@ class Trace:
             "data": _sanitize(data),
         }
         try:
-            path = _trace_dir() / f"{tid}.jsonl"
+            # M53: Sanitize trace_id for filename safety (e.g. replace ':' with '_')
+            safe_tid = "".join(c if c.isalnum() or c in "._-" else "_" for c in tid)
+            path = _trace_dir() / f"{safe_tid}.jsonl"
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         except Exception:
