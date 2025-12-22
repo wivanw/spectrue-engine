@@ -3,7 +3,7 @@ from typing import Union
 from spectrue_core.schema import ClaimUnit
 from spectrue_core.verification.evidence_pack import SearchResult
 
-from .base_skill import BaseSkill, logger
+from .base_skill import BaseSkill
 from .clustering_contract import VALID_STANCES, build_evidence_matrix_instructions, build_evidence_matrix_prompt
 from .clustering_parsing import (
     build_claims_lite,

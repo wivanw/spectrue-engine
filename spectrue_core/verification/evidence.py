@@ -4,7 +4,6 @@ from spectrue_core.verification.evidence_pack import (
 )
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.trusted_sources import get_tier_ceiling_for_domain
 from typing import Any
 import logging
 
@@ -193,15 +192,16 @@ def build_evidence_pack(
             # Tiers present
             tiers = {}
             for r in a_evidence:
-                t = (r.get("source_type") or "").upper()
-                # Rough mapping back to tiers if needed, or rely on evidence_tier if present in SearchResult (it's not by default, purely derived)
-                # Actually SearchResult doesn't have evidence_tier, it has source_type.
-                # Let's map source_type to tier for metrics
+                # Map source_type to tier for metrics
                 tier = "C"
-                if r.get("is_trusted"): tier = "B"
-                if r.get("source_type") == "primary": tier = "A"
-                if r.get("source_type") == "official": tier = "A'"
-                if r.get("source_type") == "social": tier = "D"
+                if r.get("is_trusted"):
+                    tier = "B"
+                if r.get("source_type") == "primary":
+                    tier = "A"
+                if r.get("source_type") == "official":
+                    tier = "A'"
+                if r.get("source_type") == "social":
+                    tier = "D"
                 
                 tiers[tier] = tiers.get(tier, 0) + 1
                 
@@ -244,11 +244,9 @@ def build_evidence_pack(
         cap_reasons=cap_reasons,
     )
     
-    # ─────────────────────────────────────────────────────────────────────────
     # M78.1: Split sources into scored (for verdict) and context (for UX)
     # ─────────────────────────────────────────────────────────────────────────
     SCORING_STANCES = {"support", "contradict", "refute", "mixed", "neutral"}
-    CONTEXT_STANCES = {"context", "irrelevant", "mention", "unclear"}
     
     scored_sources: list[SearchResult] = []
     context_sources: list[SearchResult] = []

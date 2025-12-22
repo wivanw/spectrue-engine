@@ -10,7 +10,6 @@ from .claims_prompts import (
     build_claim_strategist_prompt,
 )
 from .claims_parsing import (
-    ARTICLE_INTENTS,
     CLAIM_TYPE_MAPPING,
     DOMAIN_MAPPING,
     SEARCH_INTENTS,
@@ -33,18 +32,12 @@ from spectrue_core.schema import (
     EventQualifiers,
     LocationQualifier,
 )
-from spectrue_core.schema.evidence import EvidenceNeedType
 
 # M80: Import claim metadata types
 from spectrue_core.schema.claim_metadata import (
     ClaimMetadata,
-    ClaimRole,
     VerificationTarget,
     EvidenceChannel,
-    MetadataConfidence,
-    SearchLocalePlan,
-    RetrievalPolicy,
-    default_claim_metadata,
 )
 
 from spectrue_core.agents.skills.claim_metadata_parser import (

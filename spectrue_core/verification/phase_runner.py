@@ -21,12 +21,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from spectrue_core.verification.execution_plan import (
     Phase,
     ExecutionPlan,
-    ClaimExecutionState,
     ExecutionState,
 )
 from spectrue_core.verification.sufficiency import (
@@ -430,9 +429,10 @@ class PhaseRunner:
         elif isinstance(raw_result, list):
             sources = raw_result
         else:
+            cid = claim.get("id", "unknown") if isinstance(claim, dict) else "unknown"
             logger.warning(
                 "[M80] Unexpected search result type for claim %s phase %s: %s",
-                claim_id, phase.phase_id, type(raw_result).__name__
+                cid, phase.phase_id, type(raw_result).__name__
             )
             return []
         

@@ -6,7 +6,6 @@ M70: Schema Claims Tests
 Tests for the core bug fix: time_reference vs location distinction.
 """
 
-import pytest
 from spectrue_core.schema import (
     ClaimUnit,
     Assertion,

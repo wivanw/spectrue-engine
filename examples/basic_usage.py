@@ -38,7 +38,7 @@ async def main():
     print("VERIFICATION RESULT")
     print("=" * 60)
     
-    print(f"\n📊 Scores:")
+    print("\n📊 Scores:")
     print(f"  Verified:       {result.get('verified_score', 0):.2f}")
     print(f"  Danger:         {result.get('danger_score', 0):.2f}")
     print(f"  Style:          {result.get('style_score', 0):.2f}")
@@ -46,7 +46,7 @@ async def main():
     
     print(f"\n📝 Verdict: {result.get('verdict', 'N/A')}")
     
-    print(f"\n📖 Rationale:")
+    print("\n📖 Rationale:")
     print(f"  {result.get('rationale', 'No rationale provided')}")
     
     print(f"\n🔗 Sources ({len(result.get('sources', []))} found):")

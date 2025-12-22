@@ -184,8 +184,8 @@ class TestFailOpen:
         
         # Should have A-light prepended: [A-light, A, B]
         assert phases[0].phase_id == "A-light", f"First phase should be A-light, got {phase_ids}"
-        assert "A" in phase_ids, f"Should include Phase A"
-        assert "B" in phase_ids, f"Should include Phase B"
+        assert "A" in phase_ids, "Should include Phase A"
+        assert "B" in phase_ids, "Should include Phase B"
     
     def test_high_confidence_no_a_light(self, orchestrator):
         """High confidence → no A-light injection."""
@@ -200,7 +200,7 @@ class TestFailOpen:
         phases = plan.get_phases("c1")
         phase_ids = [p.phase_id for p in phases]
         
-        assert "A-light" not in phase_ids, f"A-light should not be present for high confidence"
+        assert "A-light" not in phase_ids, "A-light should not be present for high confidence"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

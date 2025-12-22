@@ -6,9 +6,9 @@ Tests for:
 - Topic-based round-robin query selection
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 from spectrue_core.verification.pipeline import ValidationPipeline
-from spectrue_core.agents.skills.claims import ClaimExtractionSkill, TOPIC_GROUPS
+from spectrue_core.agents.skills.claims import ClaimExtractionSkill
 
 
 @pytest.mark.unit

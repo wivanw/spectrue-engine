@@ -13,7 +13,7 @@ Tests for:
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from dataclasses import dataclass
 
 from spectrue_core.graph.types import (
@@ -24,7 +24,7 @@ from spectrue_core.graph.types import (
     GraphResult,
 )
 from spectrue_core.graph.claim_graph import ClaimGraphBuilder
-from spectrue_core.graph.embedding_util import cosine_similarity, EmbeddingClient
+from spectrue_core.graph.embedding_util import cosine_similarity
 
 
 # ─────────────────────────────────────────────────────────────────────────────

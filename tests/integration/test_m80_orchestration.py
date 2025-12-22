@@ -428,7 +428,7 @@ async def test_progressive_widening_early_exit():
     """
     from spectrue_core.verification.phase_runner import PhaseRunner
     from spectrue_core.verification.execution_plan import (
-        ExecutionPlan, BudgetClass, phase_a, phase_b, phase_c, phase_d
+        phase_a, phase_b, phase_c, phase_d
     )
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
@@ -774,11 +774,11 @@ async def test_waterfall_phase_ordering():
     # Since we have 2 claims with A+B phases, we expect: A, A, B, B
     # All A's should come before all B's
     first_b_index = next((i for i, p in enumerate(phase_log) if p == "B"), len(phase_log))
-    last_a_index = len(phase_log) - 1 - next((i for i, p in enumerate(reversed(phase_log)) if p == "A"), len(phase_log))
+    len(phase_log) - 1 - next((i for i, p in enumerate(reversed(phase_log)) if p == "A"), len(phase_log))
     
     # If waterfall is working, last A should be before first B
     a_count = phase_log.count("A")
-    b_count = phase_log.count("B")
+    phase_log.count("B")
     
     assert a_count >= 2, f"Expected at least 2 Phase A executions, got {a_count}"
     # Phase B may or may not run depending on sufficiency check

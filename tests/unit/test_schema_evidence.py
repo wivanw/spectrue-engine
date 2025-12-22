@@ -6,7 +6,6 @@ M70: Schema Evidence Tests
 Tests for EvidenceItem, ContentStatus handling, and per-assertion evidence mapping.
 """
 
-import pytest
 from spectrue_core.schema import (
     EvidenceItem,
     EvidenceStance,

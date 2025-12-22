@@ -1,6 +1,5 @@
 import pytest
-import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock
 from spectrue_core.verification.search_mgr import SearchManager
 from spectrue_core.config import SpectrueConfig
 

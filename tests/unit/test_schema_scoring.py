@@ -8,7 +8,7 @@ These tests verify the scoring logic WITHOUT real LLM calls (mocked).
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 from spectrue_core.schema import (
     ClaimUnit,

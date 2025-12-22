@@ -121,7 +121,7 @@ async def main():
         print(f"    Phases: {[p.phase_id for p in phases]}")
         
         if metadata.should_skip_search:
-            print(f"    ⏭️  SKIP (not verifiable)")
+            print("    ⏭️  SKIP (not verifiable)")
     
     # Step 2: Simulate Phase Execution
     print("\n" + "-" * 40)
@@ -228,12 +228,12 @@ async def main():
     
     result = aggregate_weighted(scores)
     
-    print(f"\n  Aggregated RGBA (weighted):")
+    print("\n  Aggregated RGBA (weighted):")
     print(f"    Verified:       {result.verified:.2f}")
     print(f"    Danger:         {result.danger:.2f}")
     print(f"    Style:          {result.style:.2f}")
     print(f"    Explainability: {result.explainability:.2f}")
-    print(f"\n  Stats:")
+    print("\n  Stats:")
     print(f"    Total claims:   {result.total_claims}")
     print(f"    Included:       {result.included_claims}")
     print(f"    Excluded:       {result.excluded_claims} (context/predictions)")

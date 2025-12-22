@@ -33,7 +33,6 @@ from spectrue_core.verification.pipeline_queries import (
 )
 import logging
 import asyncio
-import re
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

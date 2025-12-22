@@ -9,12 +9,9 @@ Tests for Layer 2-4 functionality:
 - Evidence-Need Routing
 """
 
-import pytest
 from spectrue_core.graph.types import (
     GraphResult,
     RankedClaim,
-    TypedEdge,
-    EdgeRelation,
 )
 from spectrue_core.schema.evidence import EvidenceNeedType
 from spectrue_core.runtime_config import EngineRuntimeConfig, ClaimGraphConfig

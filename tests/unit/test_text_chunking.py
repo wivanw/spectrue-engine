@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 
-import pytest
 from spectrue_core.utils.text_chunking import CoverageSampler
 
 class TestCoverageSampler:

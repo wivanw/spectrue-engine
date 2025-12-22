@@ -6,8 +6,6 @@ M80: Unit Tests for Evidence Sufficiency
 Tests the sufficiency rules for early exit from progressive widening.
 """
 
-import pytest
-
 from spectrue_core.verification.sufficiency import (
     evidence_sufficiency,
     check_sufficiency_for_claim,

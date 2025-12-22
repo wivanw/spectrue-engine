@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import hashlib
-from typing import TypedDict, NotRequired
+from typing import TypedDict
 
 from .base_skill import BaseSkill
 

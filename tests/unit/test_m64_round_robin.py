@@ -1,6 +1,6 @@
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from spectrue_core.verification.pipeline import ValidationPipeline
 from spectrue_core.config import SpectrueConfig
 
@@ -33,7 +33,7 @@ def pipeline(mock_config):
     search_mgr.get_search_meta = MagicMock(return_value={})
     search_mgr.tavily_calls = 0
 
-    llm_client = AsyncMock()
+    AsyncMock()
     # Mocking cluster_evidence and score_evidence to avoid errors during full pipeline execution
     agent = AsyncMock()
     agent.cluster_evidence.return_value = []

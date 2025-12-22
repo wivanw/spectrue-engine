@@ -5,8 +5,6 @@ Tests for:
 - T12: Attribution article handling (interview content)
 - T13: Reality article handling (factual news)
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from spectrue_core.schema.claim_metadata import (
     ClaimMetadata,
@@ -182,7 +180,7 @@ class TestT13RealityArticle:
             1 for c in claims 
             if c.get("type") in ("core", "support")
         )
-        unique_topics = set(c.get("topic_group", "Other") for c in claims)
+        set(c.get("topic_group", "Other") for c in claims)
         
         # Gate: Need at least 2 core/support claims
         graph_worthy = core_support_count >= 2
@@ -281,7 +279,6 @@ class TestOracleGating:
                     attribution_existence_count += 1
         
         # None targets don't count toward attribution_existence
-        should_skip = reality_count == 0 and attribution_existence_count > 0
         
         # With only "none" targets, we don't skip Oracle (no attribution to skip for)
         # but we also don't need to call it (no reality to check)

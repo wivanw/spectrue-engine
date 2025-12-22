@@ -24,7 +24,6 @@ from spectrue_core.schema.signals import (
 
 from spectrue_core.schema.verdict_contract import (
     VerdictStatus,
-    VerdictHighlight,
     Verdict,
 )
 

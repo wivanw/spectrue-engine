@@ -5,9 +5,7 @@ from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.utils.security import sanitize_input
 from spectrue_core.agents.prompts import get_prompt
 from datetime import datetime
-import json
 import hashlib
-import re
 
 # M87: Decomposition helpers
 from .scoring_contract import (
@@ -31,9 +29,6 @@ from .scoring_sanitization import (
 from spectrue_core.schema import (
     ClaimUnit,
     StructuredVerdict,
-    ClaimVerdict,
-    AssertionVerdict,
-    VerdictStatus,
     StructuredDebug,
 )
 

@@ -128,11 +128,8 @@ class CoverageSampler:
         """Yields (text, start, end) for each paragraph/block."""
         prev_end = 0
         for match in self.split_pattern.finditer(text):
-            start, end = match.span()
-            # Text block before the newline separator
-            block_text = text[prev_end:start]
-            # Include the separator in the block (or handle it)
-            # Standard approach: block includes its trailing newlines
+            _, end = match.span()
+            # Include the separator in the block
             full_block_text = text[prev_end:end]
             
             if full_block_text:
