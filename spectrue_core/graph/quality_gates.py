@@ -28,7 +28,8 @@ def check_kept_ratio_within_topic(
     Check if kept_ratio is within acceptable bounds.
 
     M75: Exclude cross-topic edges from the ratio calculation.
-    M76: If ratio is low, treat as sparse-but-valid (do not disable).
+    M76: If ratio is low, treat as sparse-but-valid (record `result.sparse_graph`)
+         but still fail the gate so the caller can fall back deterministically.
     """
     cross_topic_pairs = {(c.src_id, c.dst_id) for c in candidates if c.cross_topic}
 

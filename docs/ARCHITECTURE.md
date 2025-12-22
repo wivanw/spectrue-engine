@@ -116,6 +116,14 @@ focused submodules:
 - `spectrue_core/verification/pipeline_search.py`
 - `spectrue_core/verification/pipeline_evidence.py`
 
+### ClaimGraph (M72) — split modules (M88)
+
+The ClaimGraph module is intentionally split so the builder reads as a pipeline:
+- `spectrue_core/graph/candidates.py`: B-stage candidate generation (embeddings + adjacency).
+- `spectrue_core/graph/quality_gates.py`: gate checks (topic-aware kept_ratio).
+- `spectrue_core/graph/ranking.py`: ranking (PageRank).
+- `spectrue_core/graph/claim_graph.py`: orchestrates the steps and owns caches.
+
 ### ClaimOrchestrator (M80)
 
 Builds `ExecutionPlan` for each claim based on:

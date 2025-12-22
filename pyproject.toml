@@ -56,5 +56,5 @@ addopts = "-v --strict-markers"
 asyncio_mode = "auto"
 markers = [
     "unit: proper unit tests (fast, no io)",
-    "integration: end-to-end integration tests (slow, needs api keys)"
+    "integration: end-to-end integration tests (slow, offline; external calls are mocked)"
 ]

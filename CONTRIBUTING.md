@@ -92,7 +92,11 @@ We enforce high standards for code quality.
 Ensure all tests pass before submitting your PR.
 
 ```bash
-pytest
+export SPECTRUE_TEST_OFFLINE=1
+pytest tests/unit tests/test_*.py \
+  tests/integration/test_m80_orchestration.py \
+  tests/integration/test_m81_calibration.py \
+  tests/integration/test_verification_pipeline.py
 ```
 
 ## 4. Reporting Bugs

@@ -107,8 +107,6 @@ class EngineLLMConfig:
     # M49: Responses API configuration
     cluster_timeout_sec: float = 60.0
 
-
-
     @property
     def nano_concurrency(self) -> int:
         # Keep nano query generation responsive even when analysis calls are in-flight.
@@ -143,7 +141,7 @@ class ClaimGraphConfig:
     - C-stage: LLM edge typing (GPT-5 nano)
     """
     # Feature flag
-    enabled: bool = False
+    enabled: bool = True
     
     # B-Stage parameters
     k_sim: int = 10              # Top-K by embedding similarity
@@ -324,6 +322,7 @@ class EngineRuntimeConfig:
                 "claim_sanitize": bool(self.features.claim_sanitize),
                 "trace_safe_payloads": bool(self.features.trace_safe_payloads),
                 "clean_md_output": bool(self.features.clean_md_output),
+                "claim_orchestration": bool(self.features.claim_orchestration),
             },
             "debug": {
                 "engine_debug": bool(self.debug.engine_debug),
@@ -370,4 +369,3 @@ class EngineRuntimeConfig:
                 "evidence_need_routing_enabled": bool(self.claim_graph.evidence_need_routing_enabled),
             },
         }
-

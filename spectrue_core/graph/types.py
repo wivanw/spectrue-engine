@@ -106,7 +106,6 @@ class TypedEdge:
     relation: EdgeRelation
     score: float            # 0.0-1.0 confidence
     rationale_short: str    # 10-25 words, logs only
-    rationale_short: str    # 10-25 words, logs only
     evidence_spans: str     # Key text supporting classification, ≤25 words
     cross_topic: bool = False  # M75: Preserved from CandidateEdge
     
@@ -166,7 +165,6 @@ class GraphResult:
     claims_count_raw: int = 0
     claims_count_dedup: int = 0
     candidate_edges_count: int = 0
-    typed_edges_kept_count: int = 0
     typed_edges_kept_count: int = 0
     kept_ratio: float = 0.0
     # M75: Topic-aware metrics

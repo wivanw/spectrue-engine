@@ -26,11 +26,11 @@ from spectrue_core.graph.types import (
     EdgeRelation,
     GraphResult,
     RankedClaim,
-    RELATION_MULTIPLIERS,
-    STRUCTURAL_RELATIONS,
     TypedEdge,
 )
+from spectrue_core.graph.candidates import generate_candidate_edges
 from spectrue_core.graph.quality_gates import check_kept_ratio_within_topic
+from spectrue_core.graph.ranking import rank_claims_pagerank
 from spectrue_core.graph.embedding_util import EmbeddingClient
 
 if TYPE_CHECKING:
@@ -329,114 +329,15 @@ class ClaimGraphBuilder:
                 kept.append(node)
         
         return kept
-    
+
     # ─────────────────────────────────────────────────────────────────────────
     # Step 3: B-Stage - Candidate Generation
     # ─────────────────────────────────────────────────────────────────────────
-    
-    async def _generate_candidates(
-        self, 
-        nodes: list[ClaimNode]
-    ) -> list[CandidateEdge]:
-        """
-        Generate candidate edges using embedding similarity and adjacency.
-        
-        MVP: sim + adjacent (keyword overlap is stub/disabled)
-        """
-        if len(nodes) < 2:
-            return []
-        
-        # Generate embeddings
-        texts = [n.text for n in nodes]
-        embeddings = await self.embedding_client.embed_texts(texts)
-        
-        # Build similarity matrix
-        sim_matrix = self.embedding_client.build_similarity_matrix(embeddings)
-        
-        candidates: list[CandidateEdge] = []
-        seen_pairs: set[tuple[str, str]] = set()
-        
-        for i, node in enumerate(nodes):
-            node_candidates: list[CandidateEdge] = []
-            
-            # Similarity-based candidates (Top-K_SIM)
-            # M74: Topic-aware check
-            # We get all indices sorted by sim, then iterate and filtering by topic if needed
-            top_similar = self.embedding_client.get_top_k_similar(
-                i, sim_matrix, k=len(nodes)  # Get max candidates, we filter below
-            )
-            
-            sim_count = 0
-            for j, sim_score in top_similar:
-                if sim_count >= self.config.k_sim:
-                    break
 
-                other = nodes[j]
-                
-                # M74: Skip cross-topic for SIM edges
-                if self.config.topic_aware and node.topic_key != other.topic_key:
-                    continue
-                
-                pair = tuple(sorted([node.claim_id, other.claim_id]))
-                
-                if pair in seen_pairs:
-                    continue
-                
-                seen_pairs.add(pair)
-                node_candidates.append(CandidateEdge(
-                    src_id=node.claim_id,
-                    dst_id=other.claim_id,
-                    reason="sim",
-                    sim_score=sim_score,
-                    same_section=node.section_id == other.section_id,
-                    cross_topic=False,  # SIM edges are always within-topic here
-                ))
-                sim_count += 1
-            
-            # Adjacency-based candidates (±K_ADJ in same section)
-            for delta in range(-self.config.k_adj, self.config.k_adj + 1):
-                if delta == 0:
-                    continue
-                
-                adj_idx = i + delta
-                if adj_idx < 0 or adj_idx >= len(nodes):
-                    continue
-                
-                other = nodes[adj_idx]
-                # Keep section constraint? Usually yes.
-                if node.section_id != other.section_id:
-                    continue
-                
-                pair = tuple(sorted([node.claim_id, other.claim_id]))
-                if pair in seen_pairs:
-                    continue
-                
-                seen_pairs.add(pair)
-                
-                # M74: Mark cross-topic for Adjacency
-                is_cross_topic = (node.topic_key != other.topic_key)
-                
-                node_candidates.append(CandidateEdge(
-                    src_id=node.claim_id,
-                    dst_id=other.claim_id,
-                    reason="adjacent",
-                    sim_score=0.0,  # N/A for adjacency
-                    same_section=True,
-                    cross_topic=is_cross_topic,
-                ))
-            
-            # Apply cap per node
-            if len(node_candidates) > self.config.k_total_cap:
-                # Prioritize by sim_score (descending)
-                node_candidates.sort(key=lambda e: e.sim_score, reverse=True)
-                node_candidates = node_candidates[:self.config.k_total_cap]
-            
-            candidates.extend(node_candidates)
-        
-        logger.debug("[M72] B-Stage: %d candidate edges from %d nodes", 
-                    len(candidates), len(nodes))
-        
-        return candidates
+    async def _generate_candidates(self, nodes: list[ClaimNode]) -> list[CandidateEdge]:
+        return await generate_candidate_edges(
+            nodes=nodes, config=self.config, embedding_client=self.embedding_client
+        )
     
     # ─────────────────────────────────────────────────────────────────────────
     # Step 4: Pre-Flight Budget Check
@@ -539,6 +440,7 @@ class ClaimGraphBuilder:
             if cache_key in self._edge_cache:
                 cached = self._edge_cache[cache_key]
                 if cached is not None:
+                    cached.cross_topic = edge.cross_topic
                     typed_edges.append(cached)
             else:
                 edges_to_type.append(edge)
@@ -568,15 +470,6 @@ class ClaimGraphBuilder:
                     # M75: Preserve cross_topic flag
                     result.cross_topic = edge.cross_topic
                     typed_edges.append(result)
-        
-        # Also fix cached edges (in case they didn't have it set, though cache stores object reference)
-        # But we need to make sure we set it for this candidate's context
-        # Actually TypedEdge object is shared if cached?
-        # If cache persists across builds, cross_topic property is structural between nodes, so it's stable.
-        # But we need to ensure it's set for cached ones too if we didn't just create them.
-        for edge, result in zip(candidates, typed_edges):
-             if result:
-                 result.cross_topic = edge.cross_topic
 
         return typed_edges
     
@@ -610,103 +503,15 @@ class ClaimGraphBuilder:
             kept_edges=kept_edges,
             result=result,
         )
-    
+
     # ─────────────────────────────────────────────────────────────────────────
     # Step 8: Graph Ranking (PageRank)
     # ─────────────────────────────────────────────────────────────────────────
+
+    def _rank_claims(self, nodes: list[ClaimNode], edges: list[TypedEdge]) -> list[RankedClaim]:
+        return rank_claims_pagerank(nodes=nodes, edges=edges, config=self.config)
     
-    def _rank_claims(
-        self,
-        nodes: list[ClaimNode],
-        edges: list[TypedEdge],
-    ) -> list[RankedClaim]:
-        """
-        Rank claims using PageRank and structural weight.
-        
-        Uses networkx for PageRank computation.
-        """
-        try:
-            import networkx as nx
-        except ImportError:
-            logger.warning("[M72] networkx not installed, skipping ranking")
-            return [
-                RankedClaim(
-                    claim_id=n.claim_id,
-                    centrality_score=n.importance,
-                    in_structural_weight=0.0,
-                    in_contradict_weight=0.0,
-                    is_key_claim=i < self.config.top_k,
-                )
-                for i, n in enumerate(sorted(nodes, key=lambda x: x.importance, reverse=True))
-            ]
-        
-        # Build directed weighted graph
-        G = nx.DiGraph()
-        
-        # Add all nodes
-        for node in nodes:
-            G.add_node(node.claim_id, importance=node.importance)
-        
-        # Add edges with weights
-        for edge in edges:
-            weight = edge.score * RELATION_MULTIPLIERS.get(edge.relation, 0.0)
-            if weight > 0:
-                G.add_edge(edge.src_id, edge.dst_id, weight=weight, relation=edge.relation)
-        
-        # Compute PageRank
-        try:
-            pagerank = nx.pagerank(G, weight="weight", alpha=0.85)
-        except Exception as e:
-            logger.warning("[M72] PageRank failed: %s", e)
-            pagerank = {n.claim_id: n.importance for n in nodes}
-        
-        # Calculate structural and contradiction weights
-        structural_weights: dict[str, float] = defaultdict(float)
-        contradict_weights: dict[str, float] = defaultdict(float)
-        
-        for edge in edges:
-            weight = edge.score * RELATION_MULTIPLIERS.get(edge.relation, 0.0)
-            
-            if edge.relation in STRUCTURAL_RELATIONS:
-                structural_weights[edge.dst_id] += weight
-            elif edge.relation == EdgeRelation.CONTRADICTS:
-                contradict_weights[edge.dst_id] += weight
-        
-        # Create ranked claims
-        ranked: list[RankedClaim] = []
-        for node in nodes:
-            ranked.append(RankedClaim(
-                claim_id=node.claim_id,
-                centrality_score=pagerank.get(node.claim_id, 0.0),
-                in_structural_weight=structural_weights.get(node.claim_id, 0.0),
-                in_contradict_weight=contradict_weights.get(node.claim_id, 0.0),
-                is_key_claim=False,  # Will be set below
-            ))
-        
-        # Combined score: centrality + structural weight (normalized)
-        max_centrality = max((r.centrality_score for r in ranked), default=1.0) or 1.0
-        max_structural = max((r.in_structural_weight for r in ranked), default=1.0) or 1.0
-        
-        for r in ranked:
-            r._combined_score = (
-                r.centrality_score / max_centrality * 0.6 +
-                r.in_structural_weight / max_structural * 0.4
-            )
-        
-        # Sort by combined score and select top-K as key claims
-        ranked.sort(key=lambda r: r._combined_score, reverse=True)
-        
-        for i, r in enumerate(ranked):
-            r.is_key_claim = i < self.config.top_k
-            # Clean up temporary attribute
-            if hasattr(r, "_combined_score"):
-                delattr(r, "_combined_score")
-        
-        logger.debug("[M72] Ranking: %d claims, top %d selected as key",
-                    len(ranked), min(len(ranked), self.config.top_k))
-        
-        return ranked
-    
+    # ─────────────────────────────────────────────────────────────────────────
     def clear_cache(self) -> None:
         """Clear all caches."""
         self.embedding_client.clear_cache()

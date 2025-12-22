@@ -1,10 +1,35 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+import os
+import socket
 from spectrue_core.agents.llm_client import LLMClient
 from spectrue_core.tools.search_tool import WebSearchTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
+
+
+def _truthy_env(name: str) -> bool:
+    return (os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+@pytest.fixture(autouse=True)
+def offline_no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    If `SPECTRUE_TEST_OFFLINE` is set, block socket connections during tests.
+
+    This enforces the "offline core suite" guarantee in CI and locally.
+    """
+    if not _truthy_env("SPECTRUE_TEST_OFFLINE"):
+        return
+
+    def _blocked(*_args, **_kwargs):
+        raise RuntimeError(
+            "Network access is disabled for this test run (SPECTRUE_TEST_OFFLINE=1)."
+        )
+
+    monkeypatch.setattr(socket, "create_connection", _blocked, raising=True)
+    monkeypatch.setattr(socket.socket, "connect", _blocked, raising=True)
 
 @pytest.fixture
 def mock_config():

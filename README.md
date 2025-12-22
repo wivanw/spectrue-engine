@@ -203,7 +203,7 @@ The engine is designed to gracefully degrade:
 
 ## 📋 Requirements
 
-- **Python**: 3.10 or higher
+- **Python**: 3.10–3.12 (3.10+ supported)
 - **Dependencies**: See [pyproject.toml](pyproject.toml)
 
 ### Required API Keys
@@ -317,7 +317,8 @@ spectrue_core/
 ├── schema/                # Data types
 │   ├── claim_metadata.py  # M80: ClaimMetadata, VerificationTarget
 │   ├── claims.py          # ClaimUnit, Assertion
-│   └── verdict.py         # StructuredVerdict
+│   ├── verdict.py         # StructuredVerdict
+│   └── serialization.py   # Canonical JSON-safe serialization helpers
 │
 ├── verification/          # Verification pipeline
 │   ├── pipeline.py        # Main orchestrator
@@ -331,7 +332,10 @@ spectrue_core/
 │   └── search_mgr.py      # Search orchestration
 │
 ├── graph/                 # ClaimGraph (M72)
-│   ├── claim_graph.py     # B+C stage graph builder
+│   ├── claim_graph.py     # Build pipeline orchestration
+│   ├── candidates.py      # B-stage: candidate generation
+│   ├── ranking.py         # Ranking (PageRank)
+│   ├── quality_gates.py   # Gate checks (kept_ratio bounds)
 │   └── embedding_util.py  # Embedding client
 │
 ├── utils/                 # Utilities
@@ -381,8 +385,12 @@ config = SpectrueConfig(
 ## 🧪 Testing
 
 ```bash
-# Run all tests
-pytest
+# Run offline core suite (no network, no secrets)
+export SPECTRUE_TEST_OFFLINE=1
+pytest tests/unit tests/test_*.py \
+  tests/integration/test_m80_orchestration.py \
+  tests/integration/test_m81_calibration.py \
+  tests/integration/test_verification_pipeline.py
 
 # Run specific test suite
 pytest tests/unit/test_orchestrator.py -v
