@@ -4,6 +4,12 @@ from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.verification.evidence_pack import OracleCheckResult
 from spectrue_core.verification.types import SearchResponse
+from spectrue_core.verification.search_policy import (
+    build_context_from_sources,
+    filter_search_results,
+    prefer_fallback_results,
+    should_fallback_news_to_general,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -91,26 +97,9 @@ class SearchManager:
             return ""
 
     def _filter_search_results(self, results: list[dict], intent: str) -> list[dict]:
-        """M65: Filter search results (Score > 0.15, No .txt/.xml)."""
-        out = []
-        for r in results:
-            # 1. Score Cutoff (M65 Goal 2)
-            # Tavily returns relevance_score (0..1), sometimes missing
-            score = r.get("relevance_score")
-            # If score is present and valid float, check it.
-            if isinstance(score, (int, float)) and score < 0.15:
-                continue
-            
-            # 2. File Extension
-            url_str = r.get("link", "") or r.get("url", "")
-            if url_str.lower().endswith(SKIP_EXTENSIONS):
-                continue
-            
-            # NOTE: We delegate domain quality filtering to Tavily's topic="news" 
-            # and the score cutoff. Hardcoded JUNK_DOMAINS are removed (Technical Debt).
-            
-            out.append(r)
-        return out
+        # Back-compat: older tests and callers reference this helper on SearchManager.
+        # `intent` is currently unused (policy is score + extension based).
+        return filter_search_results(results, skip_extensions=SKIP_EXTENSIONS)
 
     async def search_unified(self, query: str, topic: str = "general", intent: str = "news", article_intent: str = "news") -> SearchResponse:
         """
@@ -136,23 +125,8 @@ class SearchManager:
         )
         
         filtered = self._filter_search_results(results, intent)
-        
-        # M76: Fallback Logic (News -> General)
-        # Condition: We tried "news", but got < 2 valid results OR best score is very low (< 0.2)
-        should_fallback = False
-        fallback_reason = ""
-        
-        if topic == "news":
-            valid_count = len(filtered)
-            max_score = max([float(r.get("score", 0)) for r in filtered]) if filtered else 0.0
-            
-            if valid_count < 2:
-                should_fallback = True
-                fallback_reason = f"few_results ({valid_count})"
-            elif max_score < 0.2:
-                should_fallback = True
-                fallback_reason = f"low_relevance ({max_score:.2f})"
-        
+        should_fallback, fallback_reason, max_score = should_fallback_news_to_general(topic, filtered)
+
         if should_fallback:
             logger.info(f"[SearchMgr] Fallback triggered: {fallback_reason}. Retrying with topic='general'.")
             
@@ -165,14 +139,14 @@ class SearchManager:
                 topic="general"
             )
             fb_filtered = self._filter_search_results(fb_results, intent)
-            
-            # Prefer fallback results if they are better
-            fb_count = len(fb_filtered)
-            fb_max_score = max([float(r.get("score", 0)) for r in fb_filtered]) if fb_filtered else 0.0
-            
-            # Use fallback if it produced ANY results and the original was practically empty,
-            # OR if fallback has significantly better relevance.
-            if fb_count > 0 and (len(filtered) == 0 or fb_max_score > max_score):
+
+            if prefer_fallback_results(
+                original_filtered=filtered,
+                original_max_score=max_score,
+                fallback_filtered=fb_filtered,
+            ):
+                fb_count = len(fb_filtered)
+                fb_max_score = max([float(r.get("score", 0) or 0.0) for r in fb_filtered]) if fb_filtered else 0.0
                 logger.info(f"[SearchMgr] Fallback successful. Using general results (count={fb_count}, max={fb_max_score:.2f})")
                 filtered = fb_filtered
                 # Reconstruct context from the winner
@@ -180,12 +154,7 @@ class SearchManager:
             else:
                 logger.info("[SearchMgr] Fallback yielded no improvement. Keeping original results.")
 
-        # Reconstruct context derived from filtered sources only
-        def format_source(obj: dict) -> str:
-            return f"Source: {obj.get('title')}\nURL: {obj.get('link')}\nContent: {obj.get('snippet')}\n---"
-            
-        new_context = "\n".join([format_source(obj) for obj in filtered])
-        
+        new_context = build_context_from_sources(filtered)
         return new_context, filtered
 
     async def search_phase(
@@ -218,7 +187,7 @@ class SearchManager:
             topic=topic,
         )
 
-    async def search_tier1(self, query: str, domains: list[str]) -> tuple[str, list[dict]]:
+    async def search_tier1(self, query: str, domains: list[str]) -> SearchResponse:
         """Perform Tier 1 search on trusted domains (Legacy/Fallback)."""
         self.tavily_calls += 1
         return await self.web_tool.search(
@@ -228,11 +197,11 @@ class SearchManager:
         )
 
     async def search_tier2(
-        self, 
-        query: str, 
+        self,
+        query: str,
         exclude_domains: list[str] = None,
-        topic: str = "general"
-    ) -> tuple[str, list[dict]]:
+        topic: str = "general",
+    ) -> SearchResponse:
         """Perform Tier 2 (General) search (Legacy/Fallback)."""
         self.tavily_calls += 1
         return await self.web_tool.search(

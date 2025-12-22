@@ -9,8 +9,8 @@ class TestWebSearchTool:
     
     @pytest.fixture
     def tool(self, mock_config):
-        with patch("spectrue_core.tools.search_tool.httpx.AsyncClient") as mock_client_cls, \
-             patch("spectrue_core.tools.search_tool.diskcache.Cache") as mock_cache_cls:
+        with patch("spectrue_core.tools.tavily_client.httpx.AsyncClient") as mock_client_cls, \
+             patch("spectrue_core.tools.cache_utils.diskcache.Cache") as mock_cache_cls:
             
             # Setup HTTP Client Mock
             mock_http_client = AsyncMock()
