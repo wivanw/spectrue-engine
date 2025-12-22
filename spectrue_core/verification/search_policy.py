@@ -1,6 +1,157 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Iterable
+
+from spectrue_core.schema.claim_metadata import EvidenceChannel, UsePolicy
+
+
+@dataclass(frozen=True)
+class QualityThresholds:
+    min_relevance_score: float = 0.15
+    min_coverage: float = 0.5
+    min_diversity: float = 0.0
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "min_relevance_score": self.min_relevance_score,
+            "min_coverage": self.min_coverage,
+            "min_diversity": self.min_diversity,
+        }
+
+
+@dataclass(frozen=True)
+class LocalePolicy:
+    # None preserves per-claim locale plans.
+    primary: str | None = None
+    fallback: list[str] | None = None
+
+    def to_dict(self) -> dict[str, list[str] | str | None]:
+        return {
+            "primary": self.primary,
+            "fallback": self.fallback,
+        }
+
+
+@dataclass(frozen=True)
+class StopConditions:
+    stop_on_sufficiency: bool = True
+    max_hops: int | None = None
+
+    def to_dict(self) -> dict[str, int | bool | None]:
+        return {
+            "stop_on_sufficiency": self.stop_on_sufficiency,
+            "max_hops": self.max_hops,
+        }
+
+
+@dataclass(frozen=True)
+class SearchPolicyProfile:
+    name: str
+    search_depth: str = "basic"
+    max_results: int = 3
+    max_hops: int = 2
+    channels_allowed: list[EvidenceChannel] = field(default_factory=list)
+    use_policy_by_channel: dict[str, UsePolicy] = field(default_factory=dict)
+    locale_policy: LocalePolicy = field(default_factory=LocalePolicy)
+    quality_thresholds: QualityThresholds = field(default_factory=QualityThresholds)
+    stop_conditions: StopConditions = field(default_factory=StopConditions)
+
+    def __post_init__(self) -> None:
+        if self.stop_conditions.max_hops is None:
+            object.__setattr__(
+                self,
+                "stop_conditions",
+                StopConditions(
+                    stop_on_sufficiency=self.stop_conditions.stop_on_sufficiency,
+                    max_hops=self.max_hops,
+                ),
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "search_depth": self.search_depth,
+            "max_results": self.max_results,
+            "max_hops": self.max_hops,
+            "channels_allowed": [c.value for c in self.channels_allowed],
+            "use_policy_by_channel": {
+                k: v.value for k, v in (self.use_policy_by_channel or {}).items()
+            },
+            "locale_policy": self.locale_policy.to_dict(),
+            "quality_thresholds": self.quality_thresholds.to_dict(),
+            "stop_conditions": self.stop_conditions.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class SearchPolicy:
+    profiles: dict[str, SearchPolicyProfile]
+
+    def get_profile(self, name: str) -> SearchPolicyProfile:
+        return self.profiles.get(name, self.profiles["main"])
+
+
+def resolve_profile_name(raw: str | None) -> str:
+    if not raw:
+        return "main"
+    normalized = str(raw).strip().lower()
+    if normalized in ("main", "deep"):
+        return normalized
+    return "main"
+
+
+def default_search_policy() -> SearchPolicy:
+    main_channels = [
+        EvidenceChannel.AUTHORITATIVE,
+        EvidenceChannel.REPUTABLE_NEWS,
+        EvidenceChannel.LOCAL_MEDIA,
+    ]
+    deep_channels = [
+        EvidenceChannel.AUTHORITATIVE,
+        EvidenceChannel.REPUTABLE_NEWS,
+        EvidenceChannel.LOCAL_MEDIA,
+        EvidenceChannel.SOCIAL,
+        EvidenceChannel.LOW_RELIABILITY,
+    ]
+    use_policy_by_channel = {
+        EvidenceChannel.AUTHORITATIVE.value: UsePolicy.SUPPORT_OK,
+        EvidenceChannel.REPUTABLE_NEWS.value: UsePolicy.SUPPORT_OK,
+        EvidenceChannel.LOCAL_MEDIA.value: UsePolicy.SUPPORT_OK,
+        EvidenceChannel.SOCIAL.value: UsePolicy.LEAD_ONLY,
+        EvidenceChannel.LOW_RELIABILITY.value: UsePolicy.LEAD_ONLY,
+    }
+    profiles = {
+        "main": SearchPolicyProfile(
+            name="main",
+            search_depth="basic",
+            max_results=3,
+            max_hops=3,
+            channels_allowed=main_channels,
+            use_policy_by_channel=use_policy_by_channel,
+            locale_policy=LocalePolicy(primary=None, fallback=None),
+            quality_thresholds=QualityThresholds(
+                min_relevance_score=0.15,
+                min_coverage=0.5,
+                min_diversity=0.0,
+            ),
+        ),
+        "deep": SearchPolicyProfile(
+            name="deep",
+            search_depth="advanced",
+            max_results=7,
+            max_hops=5,
+            channels_allowed=deep_channels,
+            use_policy_by_channel=use_policy_by_channel,
+            locale_policy=LocalePolicy(primary=None, fallback=None),
+            quality_thresholds=QualityThresholds(
+                min_relevance_score=0.15,
+                min_coverage=0.5,
+                min_diversity=0.0,
+            ),
+        ),
+    }
+    return SearchPolicy(profiles=profiles)
 
 
 def filter_search_results(
@@ -52,4 +203,3 @@ def prefer_fallback_results(
     fb_max_score = max([float(r.get("score", 0) or 0.0) for r in (fallback_filtered or [])]) if fallback_filtered else 0.0
 
     return fb_count > 0 and (len(original_filtered or []) == 0 or fb_max_score > original_max_score)
-

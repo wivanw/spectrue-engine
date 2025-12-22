@@ -9,6 +9,7 @@ from spectrue_core.verification.search_policy import (
     filter_search_results,
     prefer_fallback_results,
     should_fallback_news_to_general,
+    SearchPolicyProfile,
 )
 import logging
 
@@ -42,12 +43,17 @@ class SearchManager:
         self.google_cse_calls = 0
         self.page_fetches = 0
         self.oracle_calls = 0  # M63: Track Oracle API calls
+        self.policy_profile: SearchPolicyProfile | None = None
         
     def reset_metrics(self):
         self.tavily_calls = 0
         self.google_cse_calls = 0
         self.page_fetches = 0
         self.oracle_calls = 0
+        self.policy_profile = None
+
+    def set_policy_profile(self, profile: SearchPolicyProfile | None) -> None:
+        self.policy_profile = profile
 
     def calculate_cost(self, model: str, search_type: str) -> int:
         """Calculate total billed cost based on operations performed."""
@@ -99,7 +105,14 @@ class SearchManager:
     def _filter_search_results(self, results: list[dict], intent: str) -> list[dict]:
         # Back-compat: older tests and callers reference this helper on SearchManager.
         # `intent` is currently unused (policy is score + extension based).
-        return filter_search_results(results, skip_extensions=SKIP_EXTENSIONS)
+        min_relevance_score = 0.15
+        if self.policy_profile:
+            min_relevance_score = self.policy_profile.quality_thresholds.min_relevance_score
+        return filter_search_results(
+            results,
+            min_relevance_score=min_relevance_score,
+            skip_extensions=SKIP_EXTENSIONS,
+        )
 
     async def search_unified(self, query: str, topic: str = "general", intent: str = "news", article_intent: str = "news") -> SearchResponse:
         """

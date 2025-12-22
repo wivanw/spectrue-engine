@@ -9,6 +9,14 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.verification.orchestrator import ClaimOrchestrator
 from spectrue_core.verification.phase_runner import PhaseRunner
+from spectrue_core.verification.search_policy import (
+    default_search_policy,
+    resolve_profile_name,
+)
+from spectrue_core.verification.search_policy_adapter import (
+    apply_search_policy_to_plan,
+    budget_class_for_profile,
+)
 from spectrue_core.verification.source_utils import canonicalize_sources
 
 logger = logging.getLogger(__name__)
@@ -63,12 +71,37 @@ async def run_search_flow(
         claim_orchestration_flag is True and inp.claims and not inp.preloaded_context
     )
 
+    policy = default_search_policy()
+    profile_name = resolve_profile_name(inp.search_type)
+    profile = policy.get_profile(profile_name)
+    search_mgr.set_policy_profile(profile)
+
     if use_orchestration:
         logger.info("[M81] Using PhaseRunner for progressive widening (orchestration enabled)")
 
         try:
             orchestrator = ClaimOrchestrator()
-            execution_plan = orchestrator.build_plan(inp.claims, budget_class="standard")
+            budget_class = budget_class_for_profile(profile)
+            execution_plan = orchestrator.build_plan(inp.claims, budget_class=budget_class)
+            execution_plan = apply_search_policy_to_plan(execution_plan, profile=profile)
+
+            Trace.event(
+                "search.policy.applied",
+                {
+                    "profile": profile.name,
+                    "budget_class": execution_plan.budget_class.value,
+                    "max_hops": profile.max_hops,
+                    "max_results_cap": profile.max_results,
+                    "search_depth": profile.search_depth,
+                    "channels_allowed": [c.value for c in profile.channels_allowed],
+                    "use_policy_by_channel": {
+                        k: v.value for k, v in profile.use_policy_by_channel.items()
+                    },
+                    "quality_thresholds": profile.quality_thresholds.to_dict(),
+                    "locale_policy": profile.locale_policy.to_dict(),
+                    "stop_conditions": profile.stop_conditions.to_dict(),
+                },
+            )
 
             Trace.event(
                 "orchestration.plan_built",
