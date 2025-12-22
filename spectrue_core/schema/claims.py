@@ -19,7 +19,9 @@ import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from spectrue_core.schema.serialization import SchemaModel
 
 
 # Type aliases to avoid shadowing
@@ -103,7 +105,7 @@ class ClaimType(str, Enum):
 # Assertion (Field-Level Fact)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class EvidenceRequirementSpec(BaseModel):
+class EvidenceRequirementSpec(SchemaModel):
     """What evidence is required to verify this assertion."""
 
     needs_primary: bool = False
@@ -112,10 +114,8 @@ class EvidenceRequirementSpec(BaseModel):
     needs_2_independent: bool = False
     """Needs 2+ independent sources."""
 
-    model_config = {"extra": "ignore"}
 
-
-class SourceSpan(BaseModel):
+class SourceSpan(SchemaModel):
     """Location of text in original article."""
 
     start: int
@@ -127,10 +127,8 @@ class SourceSpan(BaseModel):
     text: str
     """The extracted text span."""
 
-    model_config = {"extra": "ignore"}
 
-
-class Assertion(BaseModel):
+class Assertion(SchemaModel):
     """
     A single field-level fact within a ClaimUnit.
     
@@ -166,14 +164,12 @@ class Assertion(BaseModel):
     is_inferred: bool = False
     """True if LLM inferred this (wasn't explicit in text)."""
 
-    model_config = {"extra": "ignore"}
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Qualifier Sub-Schemas
 # ─────────────────────────────────────────────────────────────────────────────
 
-class LocationQualifier(BaseModel):
+class LocationQualifier(SchemaModel):
     """
     Structured location information.
     
@@ -196,10 +192,8 @@ class LocationQualifier(BaseModel):
     is_inferred: bool = False
     """True if location was inferred, not explicit in text."""
 
-    model_config = {"extra": "ignore"}
 
-
-class EventRules(BaseModel):
+class EventRules(SchemaModel):
     """Rules for sports/competition events."""
 
     max_rounds: int | None = None
@@ -214,10 +208,8 @@ class EventRules(BaseModel):
     weight_class: str | None = None
     """E.g., "heavyweight"."""
 
-    model_config = {"extra": "ignore"}
 
-
-class BroadcastInfo(BaseModel):
+class BroadcastInfo(SchemaModel):
     """Broadcast/streaming information."""
 
     platform: str | None = None
@@ -229,10 +221,8 @@ class BroadcastInfo(BaseModel):
     region_restrictions: str | None = None
     """E.g., "US only", "Global"."""
 
-    model_config = {"extra": "ignore"}
 
-
-class EventQualifiers(BaseModel):
+class EventQualifiers(SchemaModel):
     """
     Structured qualifiers for event-type claims.
     
@@ -280,14 +270,12 @@ class EventQualifiers(BaseModel):
     broadcast: BroadcastInfo | None = None
     """Streaming/TV info."""
 
-    model_config = {"extra": "ignore"}
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ClaimUnit (Atomic, Verifiable)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ClaimUnit(BaseModel):
+class ClaimUnit(SchemaModel):
     """
     A structured, schema-grounded claim.
     
@@ -378,8 +366,6 @@ class ClaimUnit(BaseModel):
 
     topic_key: str = ""
     """Legacy: specific entity tag for round-robin."""
-
-    model_config = {"extra": "ignore"}
 
     def get_fact_assertions(self) -> list[Assertion]:
         """Get only FACT assertions (for strict verification)."""

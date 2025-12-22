@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from spectrue_core.schema.serialization import SchemaModel
 
 
 class ErrorState(str, Enum):
@@ -30,7 +32,7 @@ class DecisionPath(str, Enum):
     CACHE = "cache"
 
 
-class VerdictPolicy(BaseModel):
+class VerdictPolicy(SchemaModel):
     """Configuration-driven thresholds for verdict derivation."""
     
     # Confidence thresholds (stricter than before: 0.8)
@@ -57,8 +59,6 @@ class VerdictPolicy(BaseModel):
     # Safety Ceiling: If no quotes found, cap confidence at 0.5 (forces Ambiguous)
     max_confidence_without_quotes: float | None = Field(default=0.5, ge=0.0, le=1.0)
     
-    model_config = {"extra": "ignore"}
-
 
 # Default policy for general fact-checking
 DEFAULT_POLICY = VerdictPolicy()

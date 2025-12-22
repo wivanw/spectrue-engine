@@ -107,7 +107,14 @@ Central orchestrator that coordinates:
 4. Evidence building
 5. Scoring
 
-**Location**: `spectrue_core/verification/pipeline.py`
+**Location**: `spectrue_core/verification/pipeline.py` (thin orchestration) +
+focused submodules:
+- `spectrue_core/verification/pipeline_input.py` (URL/input helpers)
+- `spectrue_core/verification/pipeline_queries.py` (query selection helpers)
+- `spectrue_core/verification/pipeline_oracle.py`
+- `spectrue_core/verification/pipeline_claim_graph.py`
+- `spectrue_core/verification/pipeline_search.py`
+- `spectrue_core/verification/pipeline_evidence.py`
 
 ### ClaimOrchestrator (M80)
 
@@ -258,11 +265,18 @@ spectrue_core/
 │   ├── claim_metadata.py     # M80: ClaimMetadata types
 │   ├── claims.py             # ClaimUnit, Assertion
 │   ├── evidence.py           # EvidenceItem
+│   ├── serialization.py      # Canonical schema serialization helpers
 │   ├── verdict.py            # StructuredVerdict
 │   └── verdict_contract.py   # Public verdict schema
 │
 ├── verification/
 │   ├── pipeline.py           # Main orchestrator
+│   ├── pipeline_input.py     # URL/input helpers
+│   ├── pipeline_queries.py   # Query selection helpers
+│   ├── pipeline_oracle.py    # Oracle flow
+│   ├── pipeline_claim_graph.py # ClaimGraph gating + enrichment
+│   ├── pipeline_search.py    # Search orchestration
+│   ├── pipeline_evidence.py  # Evidence pack assembly + scoring glue
 │   ├── orchestrator.py       # M80: ClaimOrchestrator
 │   ├── execution_plan.py     # M80: Phase, ExecutionPlan
 │   ├── types.py              # Canonical types (SearchResponse, Source)
@@ -281,7 +295,11 @@ spectrue_core/
 │   └── types.py              # Graph data types
 │
 ├── tools/
-│   ├── search_tool.py        # Tavily API
+│   ├── web_search_tool.py    # High-level web search facade (cache + enrichment)
+│   ├── tavily_client.py      # Tavily HTTP client + payload shaping
+│   ├── search_result_normalizer.py  # Provider result normalization
+│   ├── cache_utils.py        # Cache helpers (diskcache)
+│   ├── search_tool.py        # Back-compat wrapper
 │   ├── url_utils.py          # Shared URL helpers
 │   ├── google_fact_check.py  # Oracle
 │   └── google_cse_search.py  # CSE fallback

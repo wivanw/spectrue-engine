@@ -16,7 +16,9 @@ Key Design Principles:
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from spectrue_core.schema.serialization import SchemaModel
 
 
 class VerdictStatus(str, Enum):
@@ -41,7 +43,7 @@ class VerdictStatus(str, Enum):
 
 
 
-class AssertionVerdict(BaseModel):
+class AssertionVerdict(SchemaModel):
     """
     Verdict for a single assertion.
     
@@ -70,10 +72,8 @@ class AssertionVerdict(BaseModel):
     rationale: str = ""
     """Explanation for this specific assertion verdict."""
 
-    model_config = {"extra": "ignore"}
 
-
-class ClaimVerdict(BaseModel):
+class ClaimVerdict(SchemaModel):
     """
     Verdict for a claim (aggregated from assertion verdicts).
     
@@ -111,10 +111,8 @@ class ClaimVerdict(BaseModel):
     key_evidence: list[str] = Field(default_factory=list)
     """Most important evidence URLs."""
 
-    model_config = {"extra": "ignore"}
 
-
-class StructuredDebug(BaseModel):
+class StructuredDebug(SchemaModel):
     """
     Debug information (not exposed to users).
     
@@ -133,10 +131,8 @@ class StructuredDebug(BaseModel):
     processing_notes: list[str] = Field(default_factory=list)
     """Notes from processing pipeline."""
 
-    model_config = {"extra": "ignore"}
 
-
-class StructuredVerdict(BaseModel):
+class StructuredVerdict(SchemaModel):
     """
     Complete verdict output from scoring.
     
@@ -194,8 +190,6 @@ class StructuredVerdict(BaseModel):
 
     evidence_gaps: list[str] = Field(default_factory=list)
     """Legacy: list of missing evidence types."""
-
-    model_config = {"extra": "ignore"}
 
     def is_complete(self) -> bool:
         """Check if all required scores are present (not sentinel)."""

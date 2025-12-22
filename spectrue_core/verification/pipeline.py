@@ -16,6 +16,21 @@ from spectrue_core.verification.pipeline_search import (
     SearchFlowState,
     run_search_flow,
 )
+from spectrue_core.verification.pipeline_input import (
+    extract_url_anchors,
+    is_url_input,
+    resolve_url_content,
+    restore_urls_from_anchors,
+)
+from spectrue_core.verification.pipeline_queries import (
+    build_assertion_query,
+    get_claim_units_for_evidence_mapping,
+    get_query_by_role,
+    is_fuzzy_duplicate,
+    normalize_and_sanitize,
+    select_diverse_queries,
+    select_queries_from_claim_units,
+)
 import logging
 import asyncio
 import re
@@ -469,75 +484,7 @@ class ValidationPipeline:
         Returns:
             List of dicts with 'url', 'anchor', and 'domain' keys
         """
-        if not text:
-            return []
-        
-        anchors = []
-        exclude_domain = get_registrable_domain(exclude_url) if exclude_url else None
-        seen_domains = set()
-        
-        # Pattern 1: Markdown links [anchor](url)
-        md_pattern = r'\[([^\]]+)\]\((https?://[^\s\)]+)\)'
-        for match in re.finditer(md_pattern, text):
-            anchor, url = match.groups()
-            url = url.rstrip('.,;:!?')
-            domain = get_registrable_domain(url)
-            
-            if exclude_domain and domain == exclude_domain:
-                continue
-            if domain in seen_domains:
-                continue
-            
-            seen_domains.add(domain)
-            anchors.append({"url": url, "anchor": anchor.strip(), "domain": domain})
-        
-        # Pattern 2: Parenthesized URLs like "anchor text (https://url)"
-        # Common in plain text articles from extensions
-        paren_pattern = r'([^(\n]{3,50})\s*\((https?://[^\s\)]+)\)'
-        for match in re.finditer(paren_pattern, text):
-            anchor, url = match.groups()
-            url = url.rstrip('.,;:!?')
-            domain = get_registrable_domain(url)
-            
-            if exclude_domain and domain == exclude_domain:
-                continue
-            if domain in seen_domains:
-                continue
-            
-            # Clean anchor - remove leading punctuation and trailing whitespace
-            anchor = anchor.strip()
-            anchor = re.sub(r'^[^\w]*', '', anchor)
-            if len(anchor) < 3:
-                continue
-            
-            seen_domains.add(domain)
-            anchors.append({"url": url, "anchor": anchor[:50], "domain": domain})
-        
-        # Pattern 3: Plain URLs - extract ~50 chars before as anchor context
-        url_pattern = r'https?://[^\s\]\)\}>"\'<,]+'
-        for match in re.finditer(url_pattern, text):
-            url = match.group().rstrip('.,;:!?')
-            domain = get_registrable_domain(url)
-            
-            if exclude_domain and domain == exclude_domain:
-                continue
-            if domain in seen_domains:
-                continue
-            
-            # Get preceding text as anchor (up to 50 chars, stop at newline)
-            start = max(0, match.start() - 60)
-            prefix = text[start:match.start()]
-            # Take last line/sentence fragment
-            anchor = prefix.split('\n')[-1].strip()
-            # Clean up
-            anchor = re.sub(r'^[^\w]*', '', anchor)  # Remove leading punctuation
-            if len(anchor) < 5:
-                anchor = domain  # Fallback to domain name
-            
-            seen_domains.add(domain)
-            anchors.append({"url": url, "anchor": anchor[:50], "domain": domain})
-        
-        return anchors[:10]  # Limit to 10 URL-anchor pairs
+        return extract_url_anchors(text, exclude_url=exclude_url)
     
     def _restore_urls_from_anchors(self, cleaned_text: str, url_anchors: list[dict]) -> list[dict]:
         """Find which URL anchors survived cleaning and return them as sources.
@@ -549,236 +496,32 @@ class ValidationPipeline:
         Returns:
             List of source dicts for anchors that survived in cleaned text
         """
-        if not cleaned_text or not url_anchors:
-            return []
-        
-        sources = []
-        cleaned_lower = cleaned_text.lower()
-        
-        for item in url_anchors:
-            anchor = item.get("anchor", "")
-            url = item.get("url", "")
-            domain = item.get("domain", "")
-            
-            if not anchor or not url:
-                continue
-            
-            # Check if anchor text (or significant part) exists in cleaned text
-            anchor_lower = anchor.lower()
-            # Try exact match first
-            if anchor_lower in cleaned_lower:
-                # Use domain as title if anchor is too short
-                display_title = anchor if len(anchor) >= 10 else f"Джерело: {domain}"
-                sources.append({
-                    "url": url,
-                    "title": display_title,
-                    "domain": domain,
-                    "source_type": "inline",
-                    "is_trusted": False
-                })
-                continue
-            
-            # Try fuzzy: check if most words from anchor appear
-            anchor_words = [w for w in anchor_lower.split() if len(w) > 3]
-            if anchor_words:
-                matches = sum(1 for w in anchor_words if w in cleaned_lower)
-                if matches >= len(anchor_words) * 0.7:  # 70% word match
-                    display_title = anchor if len(anchor) >= 10 else f"Джерело: {domain}"
-                    sources.append({
-                        "url": url,
-                        "title": display_title,
-                        "domain": domain,
-                        "source_type": "inline",
-                        "is_trusted": False
-                    })
-        
-        return sources[:5]  # Limit to 5 inline sources
+        return restore_urls_from_anchors(cleaned_text, url_anchors)
 
 
     def _is_url(self, text: str) -> bool:
-        # Text must START with http:// or https:// to be treated as URL input
-        # This prevents text with inline URLs from being treated as URL input
-        if not text or len(text) > 500:
-            return False
-        stripped = text.strip()
-        return stripped.startswith("http://") or stripped.startswith("https://")
+        return is_url_input(text)
 
     async def _resolve_url_content(self, url: str) -> str | None:
         """Fetch URL content via Tavily Extract. Cleaning happens in claim extraction."""
-        # from spectrue_core.utils.trace import Trace (already imported)
-        
-        try:
-            raw_text = await self.search_mgr.fetch_url_content(url)
-            if not raw_text or len(raw_text) < 50:
-                return None
-            
-            logger.info("[Pipeline] URL resolved: %d chars", len(raw_text))
-            Trace.event("pipeline.url_resolved", {"original": url, "chars": len(raw_text)})
-            return raw_text
-                
-        except Exception as e:
-            logger.warning("[Pipeline] Failed to resolve URL: %s", e)
-            return None
+        return await resolve_url_content(self.search_mgr, url, log=logger)
 
     # ─────────────────────────────────────────────────────────────────────────
     # M64: Topic-Aware Round-Robin Query Selection ("Coverage Engine")
     # ─────────────────────────────────────────────────────────────────────────
     
     def _select_diverse_queries(
-        self, 
-        claims: list, 
+        self,
+        claims: list,
         max_queries: int = 3,
         fact_fallback: str = ""
     ) -> list[str]:
-        """
-        M64: Topic-Aware Round-Robin Query Selection ("Coverage Engine").
-        
-        Ensures every topic_key gets at least 1 query before any topic gets
-        a 2nd query. This solves the "Digest Problem" where multi-topic 
-        articles had all queries spent on the first topic only.
-        
-        Algorithm:
-        1. PREPROCESS: Filter sidefacts, group by topic_key, sort by importance
-        2. PASS 1 (COVERAGE): 1 CORE query per topic_key (round-robin)
-        3. PASS 2 (DEPTH): NUMERIC/ATTRIBUTION if budget remains
-        4. PASS 3 (FILL): LOCAL/remaining queries
-        5. POST: Fuzzy dedup (90%)
-        
-        Args:
-            claims: List of Claim objects with topic_key, query_candidates
-            max_queries: Maximum queries to return
-            fact_fallback: Fallback text if no claims/queries available
-            
-        Returns:
-            List of diverse search queries (max max_queries)
-        """
-        from collections import defaultdict
-        
-        if not claims:
-            return [normalize_search_query(fact_fallback[:200])] if fact_fallback else []
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # 1. PREPROCESS: Filter and group claims
-        # ─────────────────────────────────────────────────────────────────────
-        MIN_WORTHINESS = 0.4
-        eligible = [
-            c for c in claims 
-            if c.get("type") != "sidefact"  # Skip sidefacts entirely
-            and c.get("check_worthiness", c.get("importance", 0.5)) >= MIN_WORTHINESS
-        ]
-        
-        if not eligible:
-            # Fallback: take highest importance claim even if below threshold
-            eligible = sorted(
-                [c for c in claims if c.get("type") != "sidefact"],
-                key=lambda c: c.get("importance", 0), 
-                reverse=True
-            )[:1]
-            if not eligible:
-                eligible = claims[:1]
-            logger.info("[M64] All claims below threshold or sidefacts, using highest importance")
-        
-        # Group by topic_key (specific entity) for round-robin coverage
-        # If topic_key missing, fallback to topic_group
-        groups: dict[str, list] = defaultdict(list)
-        for c in eligible:
-            key = c.get("topic_key") or c.get("topic_group", "Other")
-            groups[key].append(c)
-        
-        # M74: Use simple importance (already enriched) for sorting
-        # Sort groups by max importance of their claims
-        sorted_keys = sorted(
-            groups.keys(),
-            key=lambda k: max((c.get("importance", 0) for c in groups[k]), default=0),
-            reverse=True
+        return select_diverse_queries(
+            claims,
+            max_queries=max_queries,
+            fact_fallback=fact_fallback,
+            log=logger,
         )
-        
-        # Sort claims within each group by importance (desc), text (asc)
-        for key in groups:
-            groups[key].sort(key=lambda c: (-c.get("importance", 0.0), c.get("text", "")))
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # 2. PASS 1: COVERAGE (Critical) - One CORE query per topic
-        # ─────────────────────────────────────────────────────────────────────
-        selected: list[str] = []
-        covered_topics: set[str] = set()  # Track which topics have at least 1 query
-        
-        for key in sorted_keys:
-            if len(selected) >= max_queries:
-                break
-            
-            top_claim = groups[key][0]
-            core_query = self._get_query_by_role(top_claim, "CORE")
-            
-            if core_query:
-                normalized = self._normalize_and_sanitize(core_query)
-                if normalized and not self._is_fuzzy_duplicate(normalized, selected, threshold=0.9):
-                    selected.append(normalized)
-                    covered_topics.add(key)
-                    logger.debug("[M64] Pass 1 (Coverage): topic=%s, query=%s", key, normalized[:50])
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # 3. PASS 2: DEPTH - NUMERIC/ATTRIBUTION for already-covered topics
-        # ─────────────────────────────────────────────────────────────────────
-        if len(selected) < max_queries:
-            for key in sorted_keys:
-                if len(selected) >= max_queries:
-                    break
-                if key not in covered_topics:
-                    continue  # Only add depth to already-covered topics
-                
-                top_claim = groups[key][0]
-                for role in ["NUMERIC", "ATTRIBUTION"]:
-                    query = self._get_query_by_role(top_claim, role)
-                    if query:
-                        normalized = self._normalize_and_sanitize(query)
-                        if normalized and not self._is_fuzzy_duplicate(normalized, selected, threshold=0.9):
-                            selected.append(normalized)
-                            logger.debug("[M64] Pass 2 (Depth): topic=%s, role=%s, query=%s", 
-                                        key, role, normalized[:50])
-                            break  # One depth query per topic
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # 4. PASS 3: FILL - Any remaining valid queries
-        # ─────────────────────────────────────────────────────────────────────
-        if len(selected) < max_queries:
-            for key in sorted_keys:
-                if len(selected) >= max_queries:
-                    break
-                for claim in groups[key]:
-                    if len(selected) >= max_queries:
-                        break
-                    # Try all queries from query_candidates
-                    for candidate in claim.get("query_candidates", []):
-                        query = candidate.get("text", "")
-                        normalized = self._normalize_and_sanitize(query)
-                        if normalized and not self._is_fuzzy_duplicate(normalized, selected, threshold=0.9):
-                            selected.append(normalized)
-                            logger.debug("[M64] Pass 3 (Fill): topic=%s, query=%s", key, normalized[:50])
-                            if len(selected) >= max_queries:
-                                break
-                    # Also try legacy search_queries
-                    for query in claim.get("search_queries", []):
-                        normalized = self._normalize_and_sanitize(query)
-                        if normalized and not self._is_fuzzy_duplicate(normalized, selected, threshold=0.9):
-                            selected.append(normalized)
-                            logger.debug("[M64] Pass 3 (Fill/Legacy): topic=%s, query=%s", key, normalized[:50])
-                            if len(selected) >= max_queries:
-                                break
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # 5. FALLBACK: If no queries selected, use fact_fallback
-        # ─────────────────────────────────────────────────────────────────────
-        if not selected and fact_fallback:
-            selected = [normalize_search_query(fact_fallback[:200])]
-        
-        # Log summary
-        logger.info(
-            "[M64] Query selection: %d eligible claims, %d topic_keys -> %d queries. Topics covered: %s",
-            len(eligible), len(groups), len(selected), list(covered_topics)[:5]
-        )
-        
-        return selected[:max_queries]
     
     def _get_query_by_role(self, claim: dict, role: str) -> str | None:
         """
@@ -791,21 +534,7 @@ class ValidationPipeline:
         Returns:
             Query text or None if not found
         """
-        # Try query_candidates first (M64 format)
-        for candidate in claim.get("query_candidates", []):
-            if candidate.get("role") == role:
-                return candidate.get("text", "")
-        
-        # Fallback to legacy search_queries by position
-        legacy = claim.get("search_queries", [])
-        role_index = {"CORE": 0, "NUMERIC": 1, "ATTRIBUTION": 2, "LOCAL": 0}
-        idx = role_index.get(role, 0)
-        if idx < len(legacy):
-            return legacy[idx]
-        # If role not found but legacy exists, return first as CORE fallback
-        if role == "CORE" and legacy:
-            return legacy[0]
-        return None
+        return get_query_by_role(claim, role)
     
     def _normalize_and_sanitize(self, query: str) -> str | None:
         """
@@ -821,14 +550,7 @@ class ValidationPipeline:
         Returns:
             Normalized query or None if invalid
         """
-        if not query:
-            return None
-        
-        normalized = normalize_search_query(query)
-        if not normalized:
-            return None
-        
-        return normalized
+        return normalize_and_sanitize(query)
     
     def _is_fuzzy_duplicate(self, query: str, existing: list[str], threshold: float = 0.9) -> bool:
         """
@@ -844,26 +566,7 @@ class ValidationPipeline:
         Returns:
             True if query is a duplicate
         """
-        query_words = set(query.lower().split())
-        if not query_words:
-            return True  # Empty query is always a "duplicate"
-        
-        for existing_query in existing:
-            existing_words = set(existing_query.lower().split())
-            if not existing_words:
-                continue
-            
-            # Jaccard similarity: |intersection| / |union|
-            intersection = len(query_words & existing_words)
-            union = len(query_words | existing_words)
-            similarity = intersection / union if union > 0 else 0
-            
-            if similarity >= threshold:
-                logger.debug("[M64] Fuzzy duplicate (%.0f%%): '%s' ≈ '%s'", 
-                            similarity * 100, query[:30], existing_query[:30])
-                return True
-        
-        return False
+        return is_fuzzy_duplicate(query, existing, threshold=threshold, log=logger)
 
 
     def _can_add_search(self, model, search_type, max_cost):
@@ -1019,50 +722,12 @@ class ValidationPipeline:
         Returns:
             List of search queries
         """
-        from spectrue_core.schema import ClaimUnit
-        
-        if not claim_units:
-            return [normalize_search_query(fact_fallback[:200])] if fact_fallback else []
-        
-        queries: list[str] = []
-        
-        for unit in claim_units:
-            if not isinstance(unit, ClaimUnit):
-                continue
-                
-            # Only FACT assertions get verification queries
-            fact_assertions = unit.get_fact_assertions()
-            
-            for assertion in fact_assertions:
-                if len(queries) >= max_queries:
-                    break
-                    
-                query = self._build_assertion_query(unit, assertion)
-                if query:
-                    normalized = self._normalize_and_sanitize(query)
-                    if normalized and not self._is_fuzzy_duplicate(normalized, queries, threshold=0.9):
-                        queries.append(normalized)
-                        logger.debug(
-                            "[M70] Assertion query: key=%s, query=%s",
-                            assertion.key, normalized[:50]
-                        )
-        
-        # Fallback if no queries generated
-        if not queries:
-            # Try to use claim text
-            for unit in claim_units:
-                if isinstance(unit, ClaimUnit) and unit.text:
-                    return [normalize_search_query(unit.text[:200])]
-            # Last resort: fact_fallback
-            if fact_fallback:
-                return [normalize_search_query(fact_fallback[:200])]
-        
-        logger.info(
-            "[M70] Query selection: %d claims, %d FACT queries generated",
-            len(claim_units), len(queries)
+        return select_queries_from_claim_units(
+            claim_units,
+            max_queries=max_queries,
+            fact_fallback=fact_fallback,
+            log=logger,
         )
-        
-        return queries[:max_queries]
 
     def _build_assertion_query(self, unit, assertion) -> str | None:
         """
@@ -1082,48 +747,7 @@ class ValidationPipeline:
         Returns:
             Search query string or None
         """
-        from spectrue_core.schema import Assertion, Dimension
-        
-        if not isinstance(assertion, Assertion):
-            return None
-            
-        # Don't generate queries for CONTEXT (they're informational)
-        if assertion.dimension == Dimension.CONTEXT:
-            return None
-        
-        parts: list[str] = []
-        
-        # Add subject if available
-        if unit.subject:
-            parts.append(unit.subject)
-        
-        # Add object if available (often the other party)
-        if unit.object:
-            parts.append(unit.object)
-        
-        # Add assertion value
-        if assertion.value:
-            value_str = str(assertion.value)
-            if len(value_str) < 50:  # Don't add very long values
-                parts.append(value_str)
-        
-        # Add context based on assertion key
-        key = assertion.key
-        if "location" in key:
-            parts.append("location official")
-        elif "time" in key or "date" in key:
-            parts.append("date confirmed")
-        elif "quote" in key or "attribution" in key:
-            parts.append("said statement")
-        elif "numeric" in key or "value" in key:
-            parts.append("official data")
-        else:
-            parts.append("verified")
-        
-        if not parts:
-            return None
-            
-        return " ".join(parts)
+        return build_assertion_query(unit, assertion)
 
     def _get_claim_units_for_evidence_mapping(
         self,
@@ -1139,20 +763,4 @@ class ValidationPipeline:
         Returns:
             Dict of claim_id -> list of assertion_keys that need evidence
         """
-        from spectrue_core.schema import ClaimUnit, Dimension
-        
-        mapping: dict[str, list[str]] = {}
-        
-        for unit in claim_units:
-            if not isinstance(unit, ClaimUnit):
-                continue
-                
-            fact_keys = [
-                a.key for a in unit.assertions
-                if a.dimension == Dimension.FACT
-            ]
-            
-            if fact_keys:
-                mapping[unit.id] = fact_keys
-        
-        return mapping
+        return get_claim_units_for_evidence_mapping(claim_units, sources)

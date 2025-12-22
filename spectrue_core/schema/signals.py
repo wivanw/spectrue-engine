@@ -9,13 +9,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import Field, model_validator
+
+from spectrue_core.schema.serialization import SchemaModel
 
 if TYPE_CHECKING:
     from typing import Self
 
 
-class RetrievalSignals(BaseModel):
+class RetrievalSignals(SchemaModel):
     """Signals about source retrieval."""
     
     total_sources_found: int = Field(default=0, ge=0)
@@ -41,10 +43,8 @@ class RetrievalSignals(BaseModel):
              
         return self
     
-    model_config = {"extra": "ignore"}
 
-
-class CoverageSignals(BaseModel):
+class CoverageSignals(SchemaModel):
     """Signals about assertion coverage."""
     
     # Default is 1 to avoid division by zero, but pipeline must set true value.
@@ -60,10 +60,8 @@ class CoverageSignals(BaseModel):
             raise ValueError("Quotes > Covered")
         return self
     
-    model_config = {"extra": "ignore"}
 
-
-class TimelinessSignals(BaseModel):
+class TimelinessSignals(SchemaModel):
     """Signals about evidence timeliness."""
     
     newest_source_age_hours: float | None = Field(default=None, ge=0.0)
@@ -79,17 +77,13 @@ class TimelinessSignals(BaseModel):
             raise ValueError("Newest age > Oldest age")
         return self
     
-    model_config = {"extra": "ignore"}
 
-
-class EvidenceSignals(BaseModel):
+class EvidenceSignals(SchemaModel):
     """Complete sensor signals."""
     
     retrieval: RetrievalSignals = Field(default_factory=RetrievalSignals)
     coverage: CoverageSignals = Field(default_factory=CoverageSignals)
     timeliness: TimelinessSignals | None = Field(default=None)
-    
-    model_config = {"extra": "ignore"}
     
     @property
     def has_readable_sources(self) -> bool:

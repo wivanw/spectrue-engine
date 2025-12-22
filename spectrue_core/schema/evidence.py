@@ -14,7 +14,9 @@ Key Design Principles:
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from spectrue_core.schema.serialization import SchemaModel
 
 
 class EvidenceStance(str, Enum):
@@ -93,7 +95,7 @@ class ContentStatus(str, Enum):
     """Technical error during retrieval."""
 
 
-class EvidenceItem(BaseModel):
+class EvidenceItem(SchemaModel):
     """
     A single piece of evidence mapped to a specific assertion.
     
@@ -191,8 +193,6 @@ class EvidenceItem(BaseModel):
 
     evidence_tier: str = ""
     """A, A', B, C, D tier classification (if computed)."""
-
-    model_config = {"extra": "ignore"}
 
     def is_actionable(self) -> bool:
         """Check if this evidence can be used for verdict."""

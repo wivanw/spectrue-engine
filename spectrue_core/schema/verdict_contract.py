@@ -9,7 +9,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from spectrue_core.schema.serialization import SchemaModel
 
 from spectrue_core.schema.policy import (
     DecisionPath,
@@ -29,7 +31,7 @@ class VerdictStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-class VerdictHighlight(BaseModel):
+class VerdictHighlight(SchemaModel):
     """Minimal structured explanation for one assertion."""
     
     assertion_id: str
@@ -37,10 +39,8 @@ class VerdictHighlight(BaseModel):
     top_evidence_ids: list[str] = Field(default_factory=list)
     note: str = Field(default="")
     
-    model_config = {"extra": "ignore"}
 
-
-class Verdict(BaseModel):
+class Verdict(SchemaModel):
     """
     Complete verdict output - the M71 Data Contract.
     
@@ -64,8 +64,6 @@ class Verdict(BaseModel):
     danger_score: float | None = None
     style_score: float | None = None
     explainability_score: float | None = None
-    
-    model_config = {"extra": "ignore"}
     
     def status(self, policy: VerdictPolicy | None = None) -> VerdictStatus:
         """
