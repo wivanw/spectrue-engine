@@ -5,9 +5,46 @@ from spectrue_core.verification.evidence_pack import (
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trace import Trace
 from typing import Any
+import re
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def needs_evidence_acquisition_ladder(sources: list[dict]) -> bool:
+    """
+    Determine whether to escalate via the Evidence Acquisition Ladder (EAL).
+    """
+    if not sources:
+        return False
+    has_quote = any(
+        isinstance(s, dict) and (s.get("quote") or s.get("snippet") or s.get("content"))
+        for s in sources
+    )
+    has_support_refute = any(
+        isinstance(s, dict)
+        and (s.get("stance", "") or "").lower() in ("support", "refute", "contradict")
+        for s in sources
+    )
+    return (not has_quote) or (not has_support_refute)
+
+
+def extract_quote_candidates(content: str, max_quotes: int = 2) -> list[str]:
+    """
+    Extract lightweight quote candidates from content.
+    """
+    if not content:
+        return []
+    # Split on sentence boundaries.
+    parts = [p.strip() for p in re.split(r"[.!?]\s+", content) if p.strip()]
+    quotes: list[str] = []
+    for part in parts:
+        if len(part) < 40:
+            continue
+        quotes.append(part[:280])
+        if len(quotes) >= max_quotes:
+            break
+    return quotes
 
 def build_evidence_pack(
     *,

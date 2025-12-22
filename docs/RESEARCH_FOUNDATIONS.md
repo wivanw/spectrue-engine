@@ -1,11 +1,77 @@
-# Research Foundations
+# Research Foundations (Spectrue Engine)
 
-## Policy-Driven Retrieval
+This document summarizes research grounding for engine-level retrieval and verification.
 
-Retrieval quality is a multi-objective tradeoff between precision, recall, and cost. A policy surface makes these tradeoffs explicit and measurable, rather than implicit in ad-hoc branching.
+## Research grounding
+- ReAct: https://arxiv.org/abs/2210.03629
+- Self-RAG: https://arxiv.org/abs/2310.11511
+- FEVER: https://arxiv.org/abs/1803.05355
+- HotpotQA: https://arxiv.org/abs/1809.09600
+- HoVer: https://arxiv.org/abs/2011.03088
+- SciFact: https://arxiv.org/abs/2004.14974
 
-Key research-aligned principles:
-- **Precision-first for mainline**: prioritize authoritative and reputable sources for lower-cost verification.
-- **Recall-first for deep**: expand channel coverage and hop count for high-stakes or ambiguous claims.
-- **Explicit budgets**: cap search hops and results to reduce runaway retrieval while preserving sufficiency checks.
-- **Traceable decisions**: emit policy metadata in traces to enable QA review and reproducibility.
+## Algorithmic appendix (pseudocode)
+
+```text
+SearchPolicy(profile, plan):
+  phase_list = plan.phases
+  phase_list = cap_depth(phase_list, profile.search_depth)
+  phase_list = cap_results(phase_list, profile.max_results)
+  phase_list = filter_channels(phase_list, profile.channels_allowed)
+  phase_list = apply_locale_policy(phase_list, profile.locale_policy)
+  phase_list = cap_hops(phase_list, profile.max_hops)
+  return phase_list
+```
+
+```text
+RetrievalLoop(claim, phase_list, policy):
+  hops = []
+  for hop in range(policy.max_hops):
+    if budget_exceeded(): return STOP
+    query = next_query_or_claim_query(claim)
+    sources = search(query, phase_list[hop])
+    sources = evidence_acquisition_ladder(sources)
+    decision = SufficiencyJudge(claim, sources, policy)
+    record_hop(hops, query, decision)
+    if decision in {ENOUGH, STOP}: break
+    query = followup_from_snippets(sources)
+    if not query: return STOP
+  return hops
+```
+
+```text
+SufficiencyJudge(claim, sources, policy):
+  result = rule_based_sufficiency(claim, sources)
+  if result == SUFFICIENT and policy.stop_on_sufficiency: return ENOUGH
+  if below_quality_thresholds(sources, policy): return NEED_FOLLOWUP
+  if result == INSUFFICIENT: return NEED_FOLLOWUP
+  if result == SKIP: return STOP
+```
+
+```text
+TierDominantAggregation(sources):
+  tier = highest_tier_present(sources)
+  strength = max_relevance_for_tier(sources, tier)
+  score = tier_base(tier) + tier_gain(tier) * strength
+  score -= conflict_penalty(sources)
+  return clamp(score, 0, tier_ceiling(tier))
+```
+
+```text
+TemporalFiltering(claim_time, sources):
+  for src in sources:
+    if src.date outside claim_time.window: mark temporal_mismatch
+  if too_many_mismatches: apply temporal_penalty
+  return sources
+```
+
+```text
+LocaleRouting(phase_id, locale_policy, claim_locale):
+  if phase_id == "C" and locale_policy.fallback: return locale_policy.fallback[0]
+  if locale_policy.primary: return locale_policy.primary
+  return claim_locale
+```
+
+## Test coverage note
+- Unit tests: M92 retrieval loop coverage is in place.
+- Integration tests: pending.

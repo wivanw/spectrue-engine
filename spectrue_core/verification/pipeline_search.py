@@ -118,6 +118,12 @@ async def run_search_flow(
             runner = PhaseRunner(
                 search_mgr=search_mgr,
                 progress_callback=inp.progress_callback,
+                use_retrieval_loop=True,
+                policy_profile=profile,
+                can_add_search=can_add_search,
+                gpt_model=inp.gpt_model,
+                search_type=inp.search_type,
+                max_cost=inp.max_cost,
             )
 
             phase_evidence = await runner.run_all_claims(inp.claims, execution_plan)

@@ -1,7 +1,94 @@
+import re
+
 from .base_skill import BaseSkill, logger
 from spectrue_core.verification.trusted_sources import AVAILABLE_TOPICS
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
+
+FOLLOWUP_QUERY_TYPES = {
+    "clarify_entity",
+    "find_primary",
+    "numeric_resolution",
+    "temporal_disambiguation",
+    "counterevidence_probe",
+}
+
+
+def _extract_snippets(sources: list[dict], max_snippets: int = 3) -> list[str]:
+    snippets: list[str] = []
+    for src in sources or []:
+        if not isinstance(src, dict):
+            continue
+        for key in ("quote", "snippet", "content"):
+            text = src.get(key)
+            if isinstance(text, str) and text.strip():
+                snippets.append(text.strip())
+                break
+        if len(snippets) >= max_snippets:
+            break
+    return snippets
+
+
+def _detect_query_type(claim_text: str, snippets: list[str]) -> str:
+    claim_has_number = bool(re.search(r"\d", claim_text or ""))
+    snippets_have_number = any(re.search(r"\d", s or "") for s in snippets)
+    if claim_has_number and not snippets_have_number:
+        return "numeric_resolution"
+
+    claim_has_time = bool(re.search(r"\b(19|20)\d{2}\b", claim_text or ""))
+    snippets_have_time = any(re.search(r"\b(19|20)\d{2}\b", s or "") for s in snippets)
+    if claim_has_time and not snippets_have_time:
+        return "temporal_disambiguation"
+
+    if re.search(r"\b(announced|said|stated|according to|statement)\b", claim_text.lower() if claim_text else ""):
+        return "find_primary"
+
+    if any(re.search(r"\b(refute|deny|contradict|false)\b", s.lower() if s else "") for s in snippets):
+        return "counterevidence_probe"
+
+    return "clarify_entity"
+
+
+def _build_query_from_snippet(snippet: str, query_type: str) -> str:
+    words = re.findall(r"[A-Za-z0-9]+", snippet or "")
+    base = " ".join(words[:12]).strip()
+    if not base:
+        return ""
+
+    if query_type == "find_primary":
+        return f"{base} official statement"
+    if query_type == "numeric_resolution":
+        return f"{base} exact number"
+    if query_type == "temporal_disambiguation":
+        return f"{base} timeline date"
+    if query_type == "counterevidence_probe":
+        return f"{base} contradicting evidence"
+    return f"{base} source details"
+
+
+def generate_followup_query_from_evidence(
+    claim_text: str,
+    sources: list[dict],
+) -> dict[str, str] | None:
+    """
+    Build a follow-up query from evidence snippets, not the original article text.
+    """
+    snippets = _extract_snippets(sources)
+    if not snippets:
+        return None
+
+    query_type = _detect_query_type(claim_text, snippets)
+    if query_type not in FOLLOWUP_QUERY_TYPES:
+        query_type = "clarify_entity"
+
+    query = _build_query_from_snippet(snippets[0], query_type)
+    if not query:
+        return None
+
+    return {
+        "query": query,
+        "query_type": query_type,
+    }
 
 class QuerySkill(BaseSkill):
     def __init__(self, config, llm_client):

@@ -30,9 +30,12 @@ from spectrue_core.verification.execution_plan import (
 )
 from spectrue_core.verification.sufficiency import (
     check_sufficiency_for_claim,
+    judge_sufficiency_for_claim,
+    SufficiencyDecision,
     SufficiencyStatus,
     get_domain_tier,
 )
+from spectrue_core.agents.skills.query import generate_followup_query_from_evidence
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.schema.claim_metadata import EvidenceChannel
@@ -58,6 +61,18 @@ class PhaseSearchResult:
     error: str | None = None
 
 
+@dataclass
+class RetrievalHop:
+    """Minimal hop state for iterative retrieval."""
+    hop_index: int
+    query: str
+    decision: SufficiencyDecision
+    reason: str
+    phase_id: str | None = None
+    query_type: str | None = None
+    results: list[dict] | None = None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase Runner
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,6 +92,12 @@ class PhaseRunner:
         *,
         max_concurrent: int = 3,
         progress_callback=None,
+        use_retrieval_loop: bool = False,
+        policy_profile=None,
+        can_add_search=None,
+        gpt_model: str | None = None,
+        search_type: str | None = None,
+        max_cost: int | None = None,
     ) -> None:
         """
         Initialize PhaseRunner.
@@ -90,6 +111,12 @@ class PhaseRunner:
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.execution_state = ExecutionState()
         self.progress_callback = progress_callback
+        self.use_retrieval_loop = use_retrieval_loop
+        self.policy_profile = policy_profile
+        self.can_add_search = can_add_search
+        self.gpt_model = gpt_model
+        self.search_type = search_type
+        self.max_cost = max_cost
     
     async def run_all_claims(
         self,
@@ -115,6 +142,12 @@ class PhaseRunner:
         # Initialize state and evidence
         claim_map = {c.get("id"): c for c in claims}
         evidence: dict[str, list[dict]] = {c.get("id"): [] for c in claims}
+
+        if self.use_retrieval_loop:
+            return await self._run_claims_with_loop(
+                claims=claims,
+                execution_plan=execution_plan,
+            )
         
         # Determine phase order (collect all unique phases in order)
         phase_order = ["A-light", "A", "A-origin", "B", "C", "D"]
@@ -220,6 +253,164 @@ class PhaseRunner:
                         })
         
         return evidence
+
+    async def _run_claims_with_loop(
+        self,
+        *,
+        claims: list[Claim],
+        execution_plan: ExecutionPlan,
+    ) -> dict[str, list[dict]]:
+        """
+        Run bounded retrieval loops per claim (replaces linear waterfall).
+        """
+        evidence: dict[str, list[dict]] = {c.get("id"): [] for c in claims}
+        tasks = []
+        for claim in claims:
+            claim_id = claim.get("id")
+            phases = execution_plan.get_phases(claim_id)
+            tasks.append(self._run_retrieval_loop_for_claim(claim, phases))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for idx, result in enumerate(results):
+            claim_id = claims[idx].get("id", "unknown")
+            state = self.execution_state.get_or_create(claim_id)
+            if isinstance(result, Exception):
+                state.error = str(result)
+                continue
+
+            sources, hops, decision, reason = result
+            evidence[claim_id] = sources
+
+            for hop in hops:
+                if hop.phase_id:
+                    state.mark_completed(hop.phase_id)
+
+            if decision == SufficiencyDecision.ENOUGH:
+                remaining = []
+                if hops:
+                    last_phase = hops[-1].phase_id
+                    claim_phases = execution_plan.get_phases(claim_id)
+                    if last_phase:
+                        last_idx = next(
+                            (i for i, p in enumerate(claim_phases) if p.phase_id == last_phase),
+                            -1,
+                        )
+                        remaining = [p.phase_id for p in claim_phases[last_idx + 1:]]
+                state.mark_sufficient(reason=reason, remaining_phases=remaining)
+            elif decision == SufficiencyDecision.STOP:
+                state.sufficiency_reason = reason
+
+        return evidence
+
+    async def _run_retrieval_loop_for_claim(
+        self,
+        claim: Claim,
+        phases: list[Phase],
+    ) -> tuple[list[dict], list[RetrievalHop], SufficiencyDecision, str]:
+        """
+        Execute bounded iterative retrieval for a single claim.
+        """
+        claim_id = claim.get("id", "unknown")
+        claim_text = claim.get("normalized_text", "") or claim.get("text", "")
+        all_sources: list[dict] = []
+        hops: list[RetrievalHop] = []
+
+        if not phases:
+            return all_sources, hops, SufficiencyDecision.STOP, "no_phases"
+
+        max_hops = 1
+        if self.policy_profile is not None:
+            max_hops = self.policy_profile.stop_conditions.max_hops or 1
+        else:
+            max_hops = max(len(phases), 1)
+
+        next_query = None
+        next_query_type = None
+        decision = SufficiencyDecision.NEED_FOLLOWUP
+        reason = ""
+
+        for hop_index in range(max_hops):
+            if not self._budget_allows_hop():
+                decision = SufficiencyDecision.STOP
+                reason = "budget_ceiling"
+                break
+
+            phase = phases[min(hop_index, len(phases) - 1)] if phases else None
+            phase_id = phase.phase_id if phase else None
+
+            query = next_query or self._select_claim_query(claim)
+            if not query:
+                decision = SufficiencyDecision.STOP
+                reason = "missing_query"
+                break
+
+            Trace.event("retrieval.hop.started", {
+                "claim_id": claim_id,
+                "hop": hop_index,
+                "phase_id": phase_id,
+                "query_type": next_query_type or "initial",
+            })
+
+            async with self.semaphore:
+                sources = await self._search_by_phase(claim, phase, query_override=query)
+
+            if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
+                sources = await self.search_mgr.apply_evidence_acquisition_ladder(sources)
+
+            all_sources.extend(sources)
+
+            judge = judge_sufficiency_for_claim(
+                claim=claim,
+                sources=all_sources,
+                policy_profile=self.policy_profile,
+                use_policy_by_channel=getattr(phase, "use_policy_by_channel", {}),
+            )
+
+            decision = judge.decision
+            reason = judge.reason
+
+            hop_state = RetrievalHop(
+                hop_index=hop_index,
+                query=query,
+                decision=decision,
+                reason=reason,
+                phase_id=phase_id,
+                query_type=next_query_type,
+                results=sources,
+            )
+            hops.append(hop_state)
+
+            Trace.event("retrieval.hop.completed", {
+                "claim_id": claim_id,
+                "hop": hop_index,
+                "decision": decision.value,
+                "reason": reason,
+                "results_count": len(sources),
+            })
+
+            if decision == SufficiencyDecision.ENOUGH:
+                break
+            if decision == SufficiencyDecision.STOP:
+                break
+
+            followup = generate_followup_query_from_evidence(claim_text, sources)
+            if not followup:
+                decision = SufficiencyDecision.STOP
+                reason = "followup_failed"
+                break
+
+            next_query = followup["query"]
+            next_query_type = followup["query_type"]
+
+        return all_sources, hops, decision, reason
+
+    def _budget_allows_hop(self) -> bool:
+        if not self.can_add_search:
+            return True
+        if not self.gpt_model or not self.search_type:
+            return True
+        return bool(self.can_add_search(self.gpt_model, self.search_type, self.max_cost))
     
     def _get_claims_needing_phase(
         self,
@@ -344,11 +535,22 @@ class PhaseRunner:
                     sources=[],
                     error=str(e),
                 )
+
+    def _select_claim_query(self, claim: Claim) -> str:
+        queries = claim.get("search_queries", [])
+        if not queries:
+            candidates = claim.get("query_candidates", [])
+            if candidates:
+                queries = [c.get("text") for c in candidates if c.get("text")]
+        if not queries:
+            queries = [claim.get("normalized_text", "") or claim.get("text", "")]
+        return queries[0] if queries else ""
     
     async def _search_by_phase(
         self,
         claim: Claim,
-        phase: Phase,
+        phase: Phase | None,
+        query_override: str | None = None,
     ) -> list[dict]:
         """
         T18: Execute search for a phase.
@@ -360,19 +562,7 @@ class PhaseRunner:
         - Phase.max_results → k parameter
         """
         # Get query from claim
-        queries = claim.get("search_queries", [])
-        if not queries:
-            # Try query_candidates
-            candidates = claim.get("query_candidates", [])
-            if candidates:
-                queries = [c.get("text") for c in candidates if c.get("text")]
-        
-        if not queries:
-            # Fallback to normalized text
-            queries = [claim.get("normalized_text", "") or claim.get("text", "")]
-        
-        # Use first query (or could combine)
-        query = queries[0] if queries else ""
+        query = query_override if query_override is not None else self._select_claim_query(claim)
         if not query:
             return []
         
@@ -383,14 +573,17 @@ class PhaseRunner:
         if claim_method in ("news", "general_search"):
             topic = "news" if claim_method == "news" else "general"
         else:
-            topic = "general" if phase.search_depth == "advanced" else "news"
+            if phase:
+                topic = "general" if phase.search_depth == "advanced" else "news"
+            else:
+                topic = "news"
 
         # Map phase search depth to Tavily depth.
-        depth = "advanced" if phase.search_depth == "advanced" else "basic"
+        depth = "advanced" if phase and phase.search_depth == "advanced" else "basic"
 
         # Optional include_domains derived from the phase channels.
         include_domains: list[str] | None = None
-        chan_set = set(phase.channels or [])
+        chan_set = set(phase.channels or []) if phase else set()
         if chan_set and chan_set.issubset({EvidenceChannel.AUTHORITATIVE, EvidenceChannel.REPUTABLE_NEWS}):
             # Restrict to vetted domains for high-quality phases.
             # NOTE: This is a registry-based restriction; TLD-based authority (e.g. .gov) is
@@ -409,7 +602,7 @@ class PhaseRunner:
                 query,
                 topic=topic,
                 depth=depth,
-                max_results=phase.max_results,
+                max_results=phase.max_results if phase else 3,
                 include_domains=include_domains,
             )
         else:
@@ -439,7 +632,7 @@ class PhaseRunner:
         normalized = canonicalize_sources(sources)
 
         # Apply channel filtering (best-effort).
-        if phase.channels:
+        if phase and phase.channels:
             allowed = set(phase.channels)
             filtered: list[dict] = []
             for src in normalized:
@@ -453,7 +646,7 @@ class PhaseRunner:
             normalized = filtered
         
         # Limit results to phase.max_results
-        if len(normalized) > phase.max_results:
+        if phase and len(normalized) > phase.max_results:
             normalized = normalized[:phase.max_results]
         
         return normalized

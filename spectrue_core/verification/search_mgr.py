@@ -3,6 +3,10 @@ from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.verification.evidence_pack import OracleCheckResult
+from spectrue_core.verification.evidence import (
+    needs_evidence_acquisition_ladder,
+    extract_quote_candidates,
+)
 from spectrue_core.verification.types import SearchResponse
 from spectrue_core.verification.search_policy import (
     build_context_from_sources,
@@ -80,6 +84,46 @@ class SearchManager:
         if content:
             self.page_fetches += 1
         return content
+
+    async def apply_evidence_acquisition_ladder(
+        self,
+        sources: list[dict],
+        *,
+        max_fetches: int = 2,
+    ) -> list[dict]:
+        """
+        EAL: Enrich snippet-only sources with content + quote candidates.
+        """
+        if not needs_evidence_acquisition_ladder(sources):
+            return sources
+
+        fetch_count = 0
+        # Prefer higher relevance scores.
+        candidates = sorted(
+            [s for s in sources if isinstance(s, dict)],
+            key=lambda s: float(s.get("relevance_score", 0.0) or 0.0),
+            reverse=True,
+        )
+
+        for src in candidates:
+            if fetch_count >= max_fetches:
+                break
+            if src.get("quote") or src.get("content"):
+                continue
+            url = src.get("url") or src.get("link")
+            if not url:
+                continue
+            content = await self.fetch_url_content(url)
+            if not content:
+                continue
+            src["content"] = content
+            quotes = extract_quote_candidates(content)
+            if quotes:
+                src["quote"] = quotes[0]
+            src["eal_enriched"] = True
+            fetch_count += 1
+
+        return sources
 
     async def check_oracle(self, query: str) -> dict | None:
         """Check Google Fact Check API (legacy method)."""
