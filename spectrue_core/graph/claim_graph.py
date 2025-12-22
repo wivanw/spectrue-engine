@@ -30,6 +30,7 @@ from spectrue_core.graph.types import (
     STRUCTURAL_RELATIONS,
     TypedEdge,
 )
+from spectrue_core.graph.quality_gates import check_kept_ratio_within_topic
 from spectrue_core.graph.embedding_util import EmbeddingClient
 
 if TYPE_CHECKING:
@@ -596,73 +597,19 @@ class ClaimGraphBuilder:
     # ─────────────────────────────────────────────────────────────────────────
     
     def _quality_gate(
-        self, 
+        self,
         num_candidates: int,
         candidates: list[CandidateEdge],
         kept_edges: list[TypedEdge],
         result: GraphResult,  # M75: Pass result to update metrics
     ) -> bool:
-        """
-        Check if kept_ratio is within acceptable bounds.
-        
-        M75: Exclude cross-topic edges from the ratio calculation.
-        """
-        # Identify cross-topic pairs
-        cross_topic_pairs = {
-            (c.src_id, c.dst_id) 
-            for c in candidates 
-            if c.cross_topic
-        }
-        
-        # Filter numerator: kept edges that are NOT cross-topic
-        kept_within = [
-            e for e in kept_edges 
-            if (e.src_id, e.dst_id) not in cross_topic_pairs
-        ]
-        
-        # Filter denominator: candidates that are NOT cross-topic
-        cand_within = [c for c in candidates if not c.cross_topic]
-        
-        # M75: Track metrics
-        result.within_topic_edges_count = len(cand_within)
-        result.cross_topic_edges_count = len(candidates) - len(cand_within)
-        
-        if not cand_within:
-            # If no within-topic candidates (rare), we can't calculate valid ratio.
-            # Fallback to passing if we have specific cross-topic edges or fail?
-            # Safe default: if we have NO within-topic candidates, maybe the whole graph is cross-topic?
-            # Let's use overall ratio as fallback.
-            numerator = len(kept_edges)
-            denominator = len(candidates)
-            logger.debug("[M75] No within-topic candidates, using overall ratio")
-        else:
-            numerator = len(kept_within)
-            denominator = len(cand_within)
-            
-        kept_ratio = numerator / denominator if denominator > 0 else 0
-        result.kept_ratio_within_topic = kept_ratio
-        
-        # Check constraints
-        # Check constraints
-        if kept_ratio < self.config.min_kept_ratio:
-            # M76: Sparse Graph Resilience
-            # If we processed candidates but kept very few (ratio < min), it might just be a sparse/disconnected graph.
-            # Instead of disabling (which logs a warning and triggers fallback), we treat it as valid but sparse.
-            logger.info(
-                "[M76] Quality gate: kept_ratio %.3f < min %.3f. Treating as SPARSE graph (valid).",
-                kept_ratio, self.config.min_kept_ratio
-            )
-            result.sparse_graph = True # Signal that graph is valid but weak
-            return True
-
-        if kept_ratio > self.config.max_kept_ratio:
-            logger.warning(
-                "[M72] Quality gate: kept_ratio %.3f > max %.3f (within-focus)",
-                kept_ratio, self.config.max_kept_ratio
-            )
-            return False
-        
-        return True
+        return check_kept_ratio_within_topic(
+            min_kept_ratio=self.config.min_kept_ratio,
+            max_kept_ratio=self.config.max_kept_ratio,
+            candidates=candidates,
+            kept_edges=kept_edges,
+            result=result,
+        )
     
     # ─────────────────────────────────────────────────────────────────────────
     # Step 8: Graph Ranking (PageRank)

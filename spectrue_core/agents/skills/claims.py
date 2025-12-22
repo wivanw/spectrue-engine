@@ -1,6 +1,7 @@
 from spectrue_core.verification.evidence_pack import Claim, ClaimAnchor, EvidenceRequirement, ArticleIntent
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.text_chunking import TextChunk
+from spectrue_core.utils.trace import Trace
 from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 
@@ -16,6 +17,23 @@ from spectrue_core.schema import (
     LocationQualifier,
 )
 from spectrue_core.schema.evidence import EvidenceNeedType
+
+# M80: Import claim metadata types
+from spectrue_core.schema.claim_metadata import (
+    ClaimMetadata,
+    ClaimRole,
+    VerificationTarget,
+    EvidenceChannel,
+    MetadataConfidence,
+    SearchLocalePlan,
+    RetrievalPolicy,
+    default_claim_metadata,
+)
+
+from spectrue_core.agents.skills.claim_metadata_parser import (
+    parse_claim_metadata as parse_claim_metadata_v1,
+    default_channels as default_channels_v1,
+)
 
 # M62: Available topic groups for claim classification
 TOPIC_GROUPS = [
@@ -127,14 +145,19 @@ Your goal is to extract verifiable claims AND develop optimal SEARCH STRATEGIES 
 ## STEP 1: EXTRACT CLAIMS & ASSESS HARM (Impact-First)
 For each claim in the article:
 1. Extract the core factual assertion.
-2. **Assess Harm Potential (1-5)**:
+2. **SPLIT COMPOUND CLAIMS**:
+   - If a sentence contains multiple distinct facts (e.g. "He did X, AND she did Y"), SPLIT them into separate claims!
+   - Example: "The earthquake hit at 5 PM; tsunami followed at 6 PM" → Claim 1 (earthquake time), Claim 2 (tsunami time).
+   - Do not combine verifiable facts into one "megaclaim" unless they are inseparable.
+
+3. **Assess Harm Potential (1-5)**:
    - **5 (Critical)**: "Cures cancer", "Drink bleach", "Do not vaccinate", "Violent call to action". Immediate safety risk.
    - **4 (High)**: Medical/financial advice, "XYZ is toxic", political accusations without proof.
    - **3 (Medium)**: Controversial political statements, economic figures, historical revisionism.
    - **2 (Low)**: Attribution ("He said X"), timeline events ("Meeting held on Y").
    - **1 (Neutral)**: Definitions, physical constants ("Water boils at 100C"), background info.
 
-3. **Prioritize Extraction**: Focus on Levels 4-5.
+4. **Prioritize Extraction**: Focus on Levels 4-5.
    - If an article has dangerous claims, extracted them FIRST.
    - Avoid filling slots with Level 1 trivia if Level 3+ claims exist.
 
@@ -153,6 +176,61 @@ Also provide **satire_likelihood** (0.0-1.0):
 - 0.9-1.0: Definitely satire (skip verification)
 
 **ROUTING RULE**: If satire_likelihood >= 0.8, do NOT generate search queries. Mark as SATIRE.
+
+## STEP 1.6: CLAIM METADATA FOR ORCHESTRATION (M80/M81)
+For each claim, provide orchestration metadata:
+
+1. **verification_target** (CRITICAL - READ CAREFULLY):
+   - **"attribution"**: Use when the claim reports what someone SAID/STATED/CLAIMED.
+     * MARKERS: "said", "stated", "claimed", "announced", "told", "revealed", "explained",
+       "in an interview", "according to X", "X mentioned", "X recalled", "X shared"
+     * For INTERVIEW articles: MOST claims should be "attribution"!
+     * Verification = "Did person X actually say this?"
+   - **"reality"**: Factual claim about external events/data that can be verified 
+     INDEPENDENTLY of what someone said.
+     * External events: "earthquake killed 50 people", "stock rose 5%"
+     * Scientific facts: "vaccine is 95% effective" (needs study, not quote)
+     * Historical facts: "WWII ended in 1945"
+   - **"existence"**: Verify that a source/document/recording exists.
+   - **"none"**: NOT VERIFIABLE:
+     * Predictions/forecasts ("will happen", "expected to")
+     * Horoscopes, astrology, subjective opinions
+
+   ⚠️ ATTRIBUTION DETECTION RULE:
+   If text contains phrases like "розповіла", "сказала", "заявила", "повідомив",
+   "в інтерв'ю", "said", "told", "announced", "according to", "recalled"
+   → DEFAULT to verification_target="attribution", NOT "reality"!
+
+2. **claim_role** (STRICT LIMITS):
+   - **"core"**: Central claim of the article. **MAXIMUM 2 per article!**
+   - **"support"**: Evidence supporting a core claim.
+   - **"context"**: Background info (not a fact to verify).
+   - **"attribution"**: Quote attribution (what someone said).
+   - **"meta"**: Info about the article/source itself.
+   - **"aggregated"**: Summary from multiple sources.
+   - **"subclaim"**: Subordinate detail.
+   
+   ⚠️ ROLE DISTRIBUTION RULE:
+   For a 5-claim article: max 2 "core", rest must be "support"/"context"/"attribution".
+   If ALL claims are "core", you are doing it WRONG!
+
+3. **search_locale_plan**:
+   - primary: Main search language ("en" for science, article language for local news)
+   - fallback: Backup languages ["en", ...]
+
+4. **retrieval_policy**:
+   - channels_allowed: ["authoritative", "reputable_news", "local_media", "social", "low_reliability_web"]
+   - For high harm_potential (>=4): use ONLY ["authoritative"]
+   - For verification_target="none": use [] (no search needed)
+   - For verification_target="attribution": prioritize ["reputable_news"] (interview sources)
+
+5. **metadata_confidence** (CALIBRATED):
+   - **"high"**: Claim has direct, checkable data points (dates, numbers, official records)
+   - **"medium"**: Interview/quote-based claims without primary source access
+   - **"low"**: Vague, context-dependent, or unverifiable without specialized sources
+   
+   ⚠️ CONFIDENCE RULE: Interview quotes = "medium" (no primary source), NOT "high"!
+
 
 ## STEP 2: THINK LIKE A SEARCH STRATEGIST (Chain of Thought)
 For each **FACTUAL** claim, REASON about:
@@ -176,6 +254,12 @@ For each **FACTUAL** claim, REASON about:
 
 ## STEP 3: GENERATE QUERY CANDIDATES
 Generate 2-3 query candidates for each **FACTUAL** claim.
+
+**ATTRIBUTION QUERY RULE:**
+If `verification_target="attribution"` (someone said X):
+- You MUST include attribution markers: "interview", "quote", "said", "transcript", "statement".
+- If the source entity is known (e.g. "BBC", "CNN"), include it: "Kate Winslet BBC interview".
+- DO NOT search for the fact itself as if it happened (e.g. "Did paparazzi follow Kate") -> Search for the STATEMENTS ("Kate Winslet interview paparazzi quotes").
 
 **SPECIAL RULE for HEALTH/MEDICAL claims:**
 If harm_potential >= 4, you MUST include:
@@ -218,6 +302,17 @@ Also assign:
       "importance": 0.9,
       "check_worthiness": 0.9,
       "harm_potential": 3,
+      "verification_target": "reality",
+      "claim_role": "core",
+      "search_locale_plan": {{
+        "primary": "en",
+        "fallback": ["en"]
+      }},
+      "retrieval_policy": {{
+        "channels_allowed": ["authoritative", "reputable_news"],
+        "use_policy_by_channel": {{"social": "lead_only", "low_reliability_web": "lead_only"}}
+      }},
+      "metadata_confidence": "high",
       "search_strategy": {{
         "intent": "official_statement",
         "reasoning": "Needs official confirmation",
@@ -236,6 +331,69 @@ Also assign:
 }}
 ```
 
+**EVIDENCE NEED RULES:**
+- If verification_target="attribution" → MUST use "primary_source" or "quote_verification".
+- If verification_target="reality" (science/health) → "empirical_study" or "expert_opinion".
+- If verification_target="reality" (news) → "news_report".
+
+**EXAMPLE: HOROSCOPE (verification_target=none)**
+```json
+{{
+  "text": "Водоліям сьогодні пощастить у фінансах",
+  "verification_target": "none",
+  "claim_role": "context",
+  "claim_category": "OPINION",
+  "satire_likelihood": 0.0,
+  "check_worthiness": 0.1,
+  "search_locale_plan": {{"primary": "en", "fallback": []}},
+  "retrieval_policy": {{"channels_allowed": []}},
+  "metadata_confidence": "high",
+  "query_candidates": [],
+  "search_queries": []
+}}
+```
+
+**EXAMPLE: INTERVIEW ARTICLE (verification_target=attribution)**
+For an article about Kate Winslet interview:
+```json
+{{
+  "article_intent": "news",
+  "claims": [
+    {{
+      "text": "Вінслет розповіла, що папараці стежили за нею після Титаніка",
+      "normalized_text": "Kate Winslet said paparazzi followed her after Titanic",
+      "type": "attribution",
+      "verification_target": "attribution",
+      "claim_role": "core",
+      "metadata_confidence": "medium",
+      "check_worthiness": 0.7,
+      "search_queries": ["Kate Winslet interview paparazzi Titanic"]
+    }},
+    {{
+      "text": "Акторка згадала, що їй радили схуднути",
+      "normalized_text": "The actress mentioned being told to lose weight",
+      "type": "attribution",
+      "verification_target": "attribution",
+      "claim_role": "support",
+      "metadata_confidence": "medium",
+      "check_worthiness": 0.5,
+      "search_queries": ["Kate Winslet weight pressure interview"]
+    }},
+    {{
+      "text": "Титанік заробив понад 2 мільярди доларів",
+      "normalized_text": "Titanic earned over 2 billion dollars",
+      "type": "numeric",
+      "verification_target": "reality",
+      "claim_role": "support",
+      "metadata_confidence": "high",
+      "check_worthiness": 0.8,
+      "search_queries": ["Titanic box office revenue"]
+    }}
+  ]
+}}
+```
+Note: 2 of 3 claims are "attribution" (what she said), only 1 is "reality" (box office data).
+
 You MUST respond in valid JSON.
 
 {UNIVERSAL_METHODOLOGY_APPENDIX}
@@ -250,8 +408,8 @@ ARTICLE:
 Return the result in JSON format.
 """
         try:
-            # M78: Updated cache key for satire detection prompt
-            cache_key = f"claim_strategist_v4_{lang}"
+            # M81: Updated cache key to force prompt refresh with calibration rules
+            cache_key = f"claim_strategist_v6_{lang}"
 
             # M73.5: Dynamic timeout based on input size
             dynamic_timeout = self._calculate_timeout(len(text_excerpt))
@@ -318,17 +476,25 @@ Return the result in JSON format.
                 satire_likelihood = float(rc.get("satire_likelihood", 0.0))
                 satire_likelihood = max(0.0, min(1.0, satire_likelihood))  # Clamp 0-1
 
+                # M80: Parse ClaimMetadata
+                metadata = self._parse_claim_metadata(rc, lang, harm_potential, claim_category, satire_likelihood)
+
                 # M62+: Extract search strategy if present
                 strategy = rc.get("search_strategy", {})
                 
-                # M78: Satire Routing - clear search data if high satire likelihood
+                # M78+M80: Satire/Non-verifiable Routing - clear search data
                 search_queries = rc.get("search_queries", [])
                 query_candidates = rc.get("query_candidates", [])
-                if satire_likelihood >= 0.8 or claim_category == "SATIRE":
-                    search_queries = []  # Skip search for satire
+                should_skip_search = (
+                    satire_likelihood >= 0.8 or 
+                    claim_category == "SATIRE" or
+                    metadata.should_skip_search
+                )
+                if should_skip_search:
+                    search_queries = []  # Skip search
                     query_candidates = []
-                    logger.info("[M78] Satire detected (%.2f): skipping search for claim: %s", 
-                               satire_likelihood, normalized[:50])
+                    reason = "satire" if satire_likelihood >= 0.8 else f"target={metadata.verification_target.value}"
+                    logger.info("[M80] Skip search (%s): %s", reason, normalized[:50])
                 
                 c = Claim(
                     id=f"c{idx+1}",
@@ -356,6 +522,8 @@ Return the result in JSON format.
                     # M78: Satire
                     claim_category=claim_category,
                     satire_likelihood=satire_likelihood,
+                    # M80: Orchestration Metadata
+                    metadata=metadata,
                 )
                 
                 # Log strategy for debugging
@@ -391,6 +559,12 @@ Return the result in JSON format.
             
             # M63: Log intent for debugging
             logger.info("[Claims] Article intent: %s (check_oracle=%s)", article_intent, check_oracle)
+            
+            # M81/T4: Trace extracted claims for debugging
+            self._trace_extracted_claims(claims)
+            
+            # M80/T8: Trace metadata distribution for debugging
+            self._trace_metadata_distribution(claims)
             
             return claims, check_oracle, article_intent
             
@@ -848,3 +1022,118 @@ Return structured ClaimUnits in JSON format.
             logger.info("[Dedup] Merged %d → %d claims", len(claims), len(deduped))
         
         return deduped
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # M80: Metadata Parsing
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _parse_claim_metadata(
+        self,
+        rc: dict,
+        lang: str,
+        harm_potential: int,
+        claim_category: str,
+        satire_likelihood: float,
+    ) -> ClaimMetadata:
+        """
+        M80: Parse Claim metadata from LLM response with safe fallback defaults.
+
+        Delegated to `spectrue_core.agents.skills.claim_metadata_parser.parse_claim_metadata`
+        to keep this file readable.
+        """
+        return parse_claim_metadata_v1(
+            rc,
+            lang=lang,
+            harm_potential=harm_potential,
+            claim_category=claim_category,
+            satire_likelihood=satire_likelihood,
+        )
+
+    def _trace_extracted_claims(self, claims: list[Claim]) -> None:
+        """
+        M81/T4: Emit trace event with individual claim details for debugging.
+        
+        Logs first 100 chars of each claim text with metadata.
+        Critical for diagnosing attribution/reality misclassification.
+        """
+        if not claims:
+            return
+        
+        claims_data = []
+        for c in claims[:7]:  # Max 7 claims
+            metadata = c.get("metadata")
+            claims_data.append({
+                "id": c.get("id", "?"),
+                "text": c.get("text", "")[:100],  # First 100 chars
+                "verification_target": metadata.verification_target.value if metadata else "?",
+                "claim_role": metadata.claim_role.value if metadata else "?",
+                "check_worthiness": c.get("check_worthiness", 0),
+                "metadata_confidence": metadata.metadata_confidence.value if metadata else "?",
+            })
+        
+        Trace.event("claim_extraction.claims_extracted", {
+            "count": len(claims),
+            "claims": claims_data,
+        })
+
+    def _trace_metadata_distribution(self, claims: list[Claim]) -> None:
+        """
+        M80/T8: Emit trace event with metadata distribution for debugging.
+        
+        Logs distribution counts for:
+        - verification_target: {reality: N, attribution: M, existence: K, none: L}
+        - claim_role: {core: N, support: M, context: K, ...}
+        - metadata_confidence: {low: N, medium: M, high: K}
+        """
+        if not claims:
+            return
+        
+        # Count verification_target distribution
+        target_dist: dict[str, int] = {"reality": 0, "attribution": 0, "existence": 0, "none": 0}
+        role_dist: dict[str, int] = {}
+        confidence_dist: dict[str, int] = {"low": 0, "medium": 0, "high": 0}
+        skip_search_count = 0
+        
+        for claim in claims:
+            metadata = claim.get("metadata")
+            if metadata:
+                # Target distribution
+                target = metadata.verification_target.value
+                target_dist[target] = target_dist.get(target, 0) + 1
+                
+                # Role distribution
+                role = metadata.claim_role.value
+                role_dist[role] = role_dist.get(role, 0) + 1
+                
+                # Confidence distribution
+                confidence = metadata.metadata_confidence.value
+                confidence_dist[confidence] = confidence_dist.get(confidence, 0) + 1
+                
+                # Skip search count
+                if metadata.should_skip_search:
+                    skip_search_count += 1
+        
+        # Emit trace event
+        Trace.event("claim_extraction.metadata_distribution", {
+            "total_claims": len(claims),
+            "verification_target": target_dist,
+            "claim_role": role_dist,
+            "metadata_confidence": confidence_dist,
+            "skip_search_count": skip_search_count,
+        })
+        
+        # Also log summary
+        logger.info(
+            "[M80] Metadata: targets=%s, roles=%s, confidence=%s, skip_search=%d",
+            target_dist, role_dist, confidence_dist, skip_search_count
+        )
+
+    def _default_channels(
+        self,
+        harm_potential: int,
+        verification_target: VerificationTarget,
+    ) -> list[EvidenceChannel]:
+        return default_channels_v1(
+            harm_potential=harm_potential,
+            verification_target=verification_target,
+        )

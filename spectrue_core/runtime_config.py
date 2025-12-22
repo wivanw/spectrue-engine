@@ -81,6 +81,8 @@ class EngineFeatureFlags:
     trace_safe_payloads: bool = True
     # M76
     clean_md_output: bool = True
+    # M80: Claim-Centric Orchestration (progressive widening, metadata-driven routing)
+    claim_orchestration: bool = True
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,8 @@ class EngineSearchConfig:
     # None means "auto" (depth/domain-filter aware); otherwise forced on/off.
     tavily_include_raw_content: Optional[bool] = None
     tavily_raw_max_results: int = 4
+    # M80: Phase runner concurrency limit
+    max_concurrent_searches: int = 3
 
 
 @dataclass(frozen=True)
@@ -229,6 +233,8 @@ class EngineRuntimeConfig:
             trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=True),
             # M76
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
+            # M80 Claim Orchestration
+            claim_orchestration=_parse_bool(os.getenv("FEATURE_CLAIM_ORCHESTRATION"), default=True),
         )
 
         # Search knobs
@@ -247,6 +253,8 @@ class EngineRuntimeConfig:
             tavily_exclude_domains=_parse_csv_domains(os.getenv("SPECTRUE_TAVILY_EXCLUDE_DOMAINS", "")),
             tavily_include_raw_content=include_raw,
             tavily_raw_max_results=_parse_int(os.getenv("SPECTRUE_TAVILY_RAW_MAX_RESULTS"), default=4, min_v=1, max_v=10),
+            # M80: Phase runner concurrency limit
+            max_concurrent_searches=_parse_int(os.getenv("M80_MAX_CONCURRENT_SEARCHES"), default=3, min_v=1, max_v=10),
         )
 
         tunables = EngineTunableConfig(

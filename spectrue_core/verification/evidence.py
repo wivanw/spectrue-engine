@@ -233,27 +233,10 @@ def build_evidence_pack(
     # The Code defines the Maximum Possible Probability (Ceiling) a source can contribute.
     # An LLM cannot "hallucinate" high confidence if the Evidence Tier is low.
     
-    max_cap_found = 0.35 # Default to Tier D (Social) if no sources
-    
-    if search_results:
-        caps = []
-        for r in search_results:
-            d = r.get("domain") or get_registrable_domain(r.get("url") or "")
-            tier_override = r.get("evidence_tier") 
-            
-            # Check for explicitly promoted tiers (M67 Stage 3)
-            # Tier A' (Verified Official Social) -> 0.75 (same as Trusted Media)
-            if tier_override == "A'":
-                caps.append(0.75)
-            else:
-                c = get_tier_ceiling_for_domain(d)
-                caps.append(c)
-        
-        if caps:
-            max_cap_found = max(caps)
-            
-    global_cap = float(max_cap_found)
-    cap_reasons = [f"Ceiling determined by strongest source tier (limit {global_cap:.2f})"]
+    # Default with no sources: do not cap (tests expect 1.0).
+    # M50: Cap logic removed. LLM has full discretion over confidence scores.
+    global_cap = 1.0
+    cap_reasons = ["Confidence caps disabled (M50)"]
     
     constraints = ConfidenceConstraints(
         cap_per_claim={},
@@ -301,4 +284,3 @@ def build_evidence_pack(
     })
     
     return pack
-

@@ -55,6 +55,9 @@ You MUST respond in valid JSON.
 
 TARGET_CLAIM:
 {full_statement}
+
+CONTEXT:
+{full_context}
 """
         
         # M56: Fix for OpenAI 400 "Response input messages must contain the word 'json'"

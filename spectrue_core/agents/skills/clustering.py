@@ -177,7 +177,7 @@ Return the result in JSON format with key "matrix".
                 reasoning_effort="low",
                 cache_key=cache_key,
                 timeout=cluster_timeout,
-                trace_kind="evidence_matrix",
+                trace_kind="stance_clustering",
             )
             
             matrix = result.get("matrix", [])
@@ -385,4 +385,3 @@ Return the result in JSON format with key "matrix".
                 )
                 fallback_results.append(res)
             return fallback_results
-

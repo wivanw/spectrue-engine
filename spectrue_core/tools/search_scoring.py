@@ -199,8 +199,25 @@ def relevance_score(
         except Exception:
             pass
 
+    # T5: Date freshness heuristic from URL path (cheap, deterministic).
+    # - current year => +0.08
+    # - older than 2 years => -0.12
+    freshness_adjust = 0.0
+    try:
+        now_year = datetime.datetime.now().year
+        m = re.search(r"/(20\d{2})(?:/|\\b)", url or "")
+        if m:
+            year = int(m.group(1))
+            if year == now_year:
+                freshness_adjust = 0.08
+            elif year <= now_year - 3:
+                freshness_adjust = -0.12
+    except Exception:
+        pass
+
     final_score += trusted_bonus
     final_score -= length_penalty
+    final_score += freshness_adjust
 
     return max(0.0, min(1.0, final_score))
 
@@ -225,13 +242,46 @@ def rank_and_filter(query: str, results: list[dict]) -> list[dict]:
     Returns:
         Filtered and ranked list of results (max 10)
     """
+    def _is_archive_like(url: str) -> bool:
+        u = (url or "").lower()
+        if not u:
+            return False
+        if u.endswith(".pdf"):
+            return True
+        if "/publications/" in u:
+            return True
+        if "digitallibrary.un.org/record/" in u:
+            return True
+        if "docs.un.org/record/" in u:
+            return True
+        return False
+
+    def _has_news_signal(title: str, content: str, url: str) -> bool:
+        blob = f"{title} {content} {url}".lower()
+        if any(k in blob for k in ("breaking", "news", "update", "today", "current")):
+            return True
+        try:
+            now_year = datetime.datetime.now().year
+            years = {int(y) for y in re.findall(r"\\b(20\\d{2})\\b", blob)}
+            return any(y >= now_year for y in years)
+        except Exception:
+            return False
+
     scored: list[dict] = []
     for obj in results:
+        url = obj.get("url", "") or ""
+        title = obj.get("title", "") or ""
+        content = obj.get("content", "") or ""
+
+        # T5: Filter archive/PDF-ish sources unless they look like fresh news.
+        if _is_archive_like(url) and not _has_news_signal(title, content, url):
+            continue
+
         s = relevance_score(
             query,
-            obj.get("title", ""),
-            obj.get("content", ""),
-            obj.get("url", ""),
+            title,
+            content,
+            url,
             tavily_score=obj.get("score"),
         )
         item = dict(obj)

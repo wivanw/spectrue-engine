@@ -63,6 +63,19 @@ from spectrue_core.schema.verdict_contract import (
     Verdict,
 )
 
+# M80: Claim Metadata for Orchestration
+from spectrue_core.schema.claim_metadata import (
+    ClaimRole,
+    VerificationTarget,
+    EvidenceChannel,
+    UsePolicy,
+    MetadataConfidence,
+    SearchLocalePlan,
+    RetrievalPolicy,
+    ClaimMetadata,
+    default_claim_metadata,
+)
+
 
 __all__ = [
     # M70: Claims
@@ -81,4 +94,9 @@ __all__ = [
     "RetrievalSignals", "CoverageSignals", "TimelinessSignals", "EvidenceSignals",
     # M71: Verdict Contract
     "ContractVerdictStatus", "VerdictHighlight", "Verdict",
+    # M80: Claim Metadata
+    "ClaimRole", "VerificationTarget", "EvidenceChannel", "UsePolicy",
+    "MetadataConfidence", "SearchLocalePlan", "RetrievalPolicy",
+    "ClaimMetadata", "default_claim_metadata",
 ]
+

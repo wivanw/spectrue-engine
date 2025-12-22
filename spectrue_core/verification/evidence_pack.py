@@ -201,6 +201,10 @@ class Claim(TypedDict, total=False):
     # M78: Claim Category (Satire Detection)
     claim_category: Literal["FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"]
     satire_likelihood: float  # 0.0-1.0, probability claim is satirical
+    # M80: Claim-Centric Orchestration Metadata
+    # Optional: When present, enables metadata-driven routing
+    # Import: from spectrue_core.schema.claim_metadata import ClaimMetadata
+    metadata: Any  # ClaimMetadata | None (use Any to avoid circular import)
 
 
 

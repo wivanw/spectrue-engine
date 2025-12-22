@@ -3,6 +3,7 @@ from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.verification.evidence_pack import OracleCheckResult
+from spectrue_core.verification.types import SearchResponse
 import logging
 
 logger = logging.getLogger(__name__)
@@ -111,7 +112,7 @@ class SearchManager:
             out.append(r)
         return out
 
-    async def search_unified(self, query: str, topic: str = "general", intent: str = "news", article_intent: str = "news") -> tuple[str, list[dict]]:
+    async def search_unified(self, query: str, topic: str = "general", intent: str = "news", article_intent: str = "news") -> SearchResponse:
         """
         M65: Unified search replacing Tier 1/2 split.
         Performs single search (limit=5) and filters garbage.
@@ -186,6 +187,36 @@ class SearchManager:
         new_context = "\n".join([format_source(obj) for obj in filtered])
         
         return new_context, filtered
+
+    async def search_phase(
+        self,
+        query: str,
+        *,
+        topic: str = "general",
+        depth: str = "basic",
+        max_results: int = 5,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> SearchResponse:
+        """
+        M83: PhaseRunner search primitive.
+        
+        Unlike `search_unified` (legacy pipeline with topic fallback ladder and
+        additional filtering for older Tavily response shapes), this is a thin
+        wrapper around `WebSearchTool.search()` that:
+        - respects `depth` and `max_results`
+        - supports `include_domains`/`exclude_domains`
+        - returns the canonical tuple `(context, sources)`
+        """
+        self.tavily_calls += 1
+        return await self.web_tool.search(
+            query,
+            num_results=max_results,
+            depth=depth,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            topic=topic,
+        )
 
     async def search_tier1(self, query: str, domains: list[str]) -> tuple[str, list[dict]]:
         """Perform Tier 1 search on trusted domains (Legacy/Fallback)."""

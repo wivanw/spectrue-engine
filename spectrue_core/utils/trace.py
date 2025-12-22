@@ -149,13 +149,17 @@ def _sanitize(
             limit = _trace_max_head_var.get() if is_sensitive else _trace_max_inline_var.get()
             
             if len(s) > limit:
-                # Force head-only (no tail)
-                return {
+                # Safe mode:
+                # - Sensitive keys (prompt/content/text/etc): head-only + sha256 (no tail)
+                # - Non-sensitive keys: keep head+tail + sha256 for debugging
+                out = {
                     "len": len(s),
                     "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest(),
                     "head": s[:limit],
-                    # Absolutely NO tail in safe mode
                 }
+                if not is_sensitive:
+                    out["tail"] = s[-limit:] if limit else ""
+                return out
             return s
             
         # Legacy/Unsafe Mode (keep existing behavior for backward compat if flag is off)

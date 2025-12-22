@@ -25,6 +25,12 @@ from typing import Tuple
 from urllib.parse import urlparse
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.utils.trace import Trace
+from spectrue_core.tools.url_utils import (
+    is_valid_public_http_url,
+    clean_url_for_cache,
+    canonical_url_for_dedupe,
+    normalize_host,
+)
 
 
 # M61: Import scoring functions from separate module
@@ -81,18 +87,7 @@ class WebSearchTool:
         return depth, max(1, min(m, 5))
 
     def _is_valid_url(self, url: str) -> bool:
-        try:
-            if not url:
-                return False
-            u = urlparse(str(url).strip())
-            if u.scheme not in ("http", "https"):
-                return False
-            host = (u.hostname or "").lower()
-            if host in ("127.0.0.1", "localhost"):
-                return False
-            return True
-        except Exception:
-            return False
+        return is_valid_public_http_url(url)
 
     def _clean_results(self, results: list[dict]) -> list[dict]:
         """Filter Tavily results: drop invalid/localhost/empty links, dedupe, and ensure title fallback."""
@@ -118,8 +113,7 @@ class WebSearchTool:
 
             # Improved deduplication by canonical URL (Step 287 fix)
             # Remove protocol, www, query params, and fragment
-            u = urlparse(url)
-            clean_url = re.sub(r'^(www\.)?', '', (u.netloc or "").lower()) + (u.path or "").rstrip('/')
+            clean_url = canonical_url_for_dedupe(url)
             
             if clean_url in seen:
                 # If we've seen this URL, keep the one with better title/content?
@@ -227,23 +221,7 @@ class WebSearchTool:
 
     def _clean_url_key(self, url: str) -> str:
         """Strip tracking params/fragments for cache key reuse."""
-        try:
-            u = urlparse(url)
-            # Filter query params
-            q = []
-            if u.query:
-                # remove common tracking garbage
-                ignored = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"}
-                pairs = u.query.split('&')
-                valid_pairs = [p for p in pairs if p.split('=')[0].lower() not in ignored]
-                q = "&".join(sorted(valid_pairs))
-            
-            # Reconstruct without fragment
-            # scheme://netloc/path;params?query
-            qs = f"?{q}" if q else ""
-            return f"{u.scheme}://{u.netloc}{u.path}{qs}"
-        except Exception:
-            return url
+        return clean_url_for_cache(url)
 
     async def _fetch_extract_text(self, url: str) -> str | None:
         """
@@ -697,8 +675,7 @@ class WebSearchTool:
             # If we got <3 unique domains, try excluding the dominant domain once.
             def _domain(u: str) -> str:
                 try:
-                    d = (urlparse(u).netloc or "").lower()
-                    return d[4:] if d.startswith("www.") else d
+                    return normalize_host(urlparse(u).netloc or "")
                 except Exception:
                     return ""
 
