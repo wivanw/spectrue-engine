@@ -269,6 +269,15 @@ class ClaimMetadata:
     
     search_locale_plan: SearchLocalePlan = field(default_factory=SearchLocalePlan)
     """Language strategy for search queries."""
+
+    time_signals: list[dict[str, Any]] = field(default_factory=list)
+    """LLM-extracted temporal anchors (may be empty)."""
+
+    locale_signals: list[dict[str, Any]] = field(default_factory=list)
+    """LLM-extracted locale anchors (may be empty)."""
+
+    time_sensitive: bool = False
+    """True when claim includes explicit temporal anchors or recency signals."""
     
     retrieval_policy: RetrievalPolicy = field(default_factory=RetrievalPolicy)
     """Allowed channels and usage modes."""
@@ -285,6 +294,15 @@ class ClaimMetadata:
             self.search_locale_plan = SearchLocalePlan(**self.search_locale_plan)
         if isinstance(self.retrieval_policy, dict):
             self.retrieval_policy = RetrievalPolicy(**self.retrieval_policy)
+
+        if isinstance(self.time_signals, dict):
+            self.time_signals = [self.time_signals]
+        if isinstance(self.locale_signals, dict):
+            self.locale_signals = [self.locale_signals]
+        if self.time_signals is None:
+            self.time_signals = []
+        if self.locale_signals is None:
+            self.locale_signals = []
     
     @property
     def should_skip_search(self) -> bool:
@@ -331,6 +349,9 @@ class ClaimMetadata:
                 "primary": self.search_locale_plan.primary,
                 "fallback": self.search_locale_plan.fallback,
             },
+            "time_signals": self.time_signals,
+            "locale_signals": self.locale_signals,
+            "time_sensitive": self.time_sensitive,
             "retrieval_policy": {
                 "channels_allowed": [c.value for c in self.retrieval_policy.channels_allowed],
                 "use_policy_by_channel": {
@@ -405,12 +426,22 @@ class ClaimMetadata:
             metadata_confidence = MetadataConfidence(mc_raw)
         except ValueError:
             metadata_confidence = MetadataConfidence.MEDIUM
-        
+
+        time_signals_raw = data.get("time_signals", []) or []
+        locale_signals_raw = data.get("locale_signals", []) or []
+        if isinstance(time_signals_raw, dict):
+            time_signals_raw = [time_signals_raw]
+        if isinstance(locale_signals_raw, dict):
+            locale_signals_raw = [locale_signals_raw]
+
         return cls(
             verification_target=verification_target,
             claim_role=claim_role,
             check_worthiness=float(data.get("check_worthiness", 0.5)),
             search_locale_plan=search_locale_plan,
+            time_signals=[s for s in time_signals_raw if isinstance(s, dict)],
+            locale_signals=[s for s in locale_signals_raw if isinstance(s, dict)],
+            time_sensitive=bool(data.get("time_sensitive", False)),
             retrieval_policy=retrieval_policy,
             metadata_confidence=metadata_confidence,
         )
@@ -436,6 +467,9 @@ def default_claim_metadata(
         claim_role=ClaimRole.CORE,
         check_worthiness=0.5,
         search_locale_plan=SearchLocalePlan(primary="en", fallback=["en"]),
+        time_signals=[],
+        locale_signals=[],
+        time_sensitive=False,
         retrieval_policy=RetrievalPolicy(),
         metadata_confidence=confidence,
     )

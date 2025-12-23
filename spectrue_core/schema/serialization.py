@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import enum
 import inspect
 from typing import Any, TypeVar
@@ -66,6 +67,8 @@ def load_schema(model_cls: type[T], data: dict[str, Any]) -> T:
 def _json_safe(value: Any) -> Any:
     if isinstance(value, enum.Enum):
         return value.value
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
     if isinstance(value, dict):
         return {str(k): _json_safe(v) for k, v in value.items()}
     if isinstance(value, list):

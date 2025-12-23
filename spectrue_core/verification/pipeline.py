@@ -128,6 +128,15 @@ class ValidationPipeline:
             lang=lang,
             progress_callback=progress_callback,
         )
+        anchor_claim_id = None
+        if claims:
+            core_claims = [c for c in claims if c.get("type") == "core"]
+            anchor_claim = (
+                max(core_claims, key=lambda c: c.get("importance", 0))
+                if core_claims
+                else claims[0]
+            )
+            anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
         final_sources = await self._verify_inline_sources(
             inline_sources=inline_sources,
@@ -233,6 +242,17 @@ class ValidationPipeline:
             claims=claims,
             sources=final_sources,
         )
+        locale_decisions = getattr(search_state, "locale_decisions", {}) or {}
+        locale_payload = None
+        if anchor_claim_id and anchor_claim_id in locale_decisions:
+            locale_payload = locale_decisions[anchor_claim_id]
+        elif len(locale_decisions) == 1:
+            locale_payload = next(iter(locale_decisions.values()))
+        if locale_payload:
+            result["locale_decision"] = locale_payload
+            audit = result.get("audit") or {}
+            audit["locale_decision"] = locale_payload
+            result["audit"] = audit
         Trace.event("pipeline.run.completed", {"outcome": "scored"})
         return result
 

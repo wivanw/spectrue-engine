@@ -5,6 +5,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from spectrue_core.constants import (
+    DEFAULT_FALLBACK_LOCALES,
+    DEFAULT_LOCALE_MAX_FALLBACKS,
+    DEFAULT_PRIMARY_LOCALE,
+    DEFAULT_RELATIVE_WINDOW_DAYS,
+)
 
 def _parse_bool(raw: Any, *, default: bool) -> bool:
     if raw is None:
@@ -58,6 +64,20 @@ def _parse_csv_domains(raw: str) -> list[str]:
         if d and d not in out:
             out.append(d)
         if len(out) >= 150:
+            break
+    return out
+
+
+def _parse_csv_locales(raw: str) -> list[str]:
+    s = (raw or "").strip()
+    if not s:
+        return []
+    parts = [p.strip().lower() for p in re.split(r"[,\n]", s) if p.strip()]
+    out: list[str] = []
+    for loc in parts:
+        if loc and loc not in out:
+            out.append(loc)
+        if len(out) >= 20:
             break
     return out
 
@@ -126,6 +146,20 @@ class EngineSearchConfig:
 
 
 @dataclass(frozen=True)
+class TemporalPolicyConfig:
+    relative_window_days: int = DEFAULT_RELATIVE_WINDOW_DAYS
+
+
+@dataclass(frozen=True)
+class LocalePolicyConfig:
+    default_primary_locale: str = DEFAULT_PRIMARY_LOCALE
+    default_fallback_locales: list[str] = field(
+        default_factory=lambda: list(DEFAULT_FALLBACK_LOCALES)
+    )
+    max_fallbacks: int = DEFAULT_LOCALE_MAX_FALLBACKS
+
+
+@dataclass(frozen=True)
 class EngineTunableConfig:
     langdetect_min_prob: float = 0.80
     max_claims_deep: int = 2
@@ -188,6 +222,8 @@ class EngineRuntimeConfig:
     features: EngineFeatureFlags
     debug: EngineDebugFlags
     search: EngineSearchConfig
+    temporal: TemporalPolicyConfig
+    locale: LocalePolicyConfig
     tunables: EngineTunableConfig
     claim_graph: ClaimGraphConfig
 
@@ -255,6 +291,28 @@ class EngineRuntimeConfig:
             max_concurrent_searches=_parse_int(os.getenv("M80_MAX_CONCURRENT_SEARCHES"), default=3, min_v=1, max_v=10),
         )
 
+        temporal = TemporalPolicyConfig(
+            relative_window_days=_parse_int(
+                os.getenv("SPECTRUE_TEMPORAL_RELATIVE_DAYS"),
+                default=DEFAULT_RELATIVE_WINDOW_DAYS,
+                min_v=1,
+                max_v=3650,
+            ),
+        )
+
+        fallback_locales = _parse_csv_locales(os.getenv("SPECTRUE_LOCALE_FALLBACKS", ""))
+        locale = LocalePolicyConfig(
+            default_primary_locale=(os.getenv("SPECTRUE_LOCALE_PRIMARY") or DEFAULT_PRIMARY_LOCALE).strip().lower()
+            or DEFAULT_PRIMARY_LOCALE,
+            default_fallback_locales=fallback_locales or list(DEFAULT_FALLBACK_LOCALES),
+            max_fallbacks=_parse_int(
+                os.getenv("SPECTRUE_LOCALE_MAX_FALLBACKS"),
+                default=DEFAULT_LOCALE_MAX_FALLBACKS,
+                min_v=0,
+                max_v=5,
+            ),
+        )
+
         tunables = EngineTunableConfig(
             langdetect_min_prob=_parse_float(
                 os.getenv("SPECTRUE_LANGDETECT_MIN_PROB"), default=0.80, min_v=0.0, max_v=1.0
@@ -303,6 +361,8 @@ class EngineRuntimeConfig:
             features=features,
             debug=debug,
             search=search,
+            temporal=temporal,
+            locale=locale,
             tunables=tunables,
             claim_graph=claim_graph,
         )
@@ -348,6 +408,14 @@ class EngineRuntimeConfig:
                 "tavily_exclude_domains_preview": exclude_preview + ([f"...(+{more} more)"] if more else []),
                 "tavily_include_raw_content": self.search.tavily_include_raw_content,
                 "tavily_raw_max_results": int(self.search.tavily_raw_max_results),
+            },
+            "temporal": {
+                "relative_window_days": int(self.temporal.relative_window_days),
+            },
+            "locale": {
+                "default_primary_locale": self.locale.default_primary_locale,
+                "default_fallback_locales": list(self.locale.default_fallback_locales),
+                "max_fallbacks": int(self.locale.max_fallbacks),
             },
             "tunables": {
                 "langdetect_min_prob": float(self.tunables.langdetect_min_prob),

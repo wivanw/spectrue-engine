@@ -7,7 +7,9 @@ Pragmatic strictness: critical invariants only.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, List
+
+from enum import Enum
 
 from pydantic import Field, model_validator
 
@@ -94,3 +96,32 @@ class EvidenceSignals(SchemaModel):
     def coverage_ratio(self) -> float:
         """Fraction of assertions covered (0-1). Safe division (total >= 1)."""
         return self.coverage.assertions_covered / self.coverage.assertions_total
+
+
+class TimeGranularity(str, Enum):
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+    YEAR = "year"
+    RANGE = "range"
+    RELATIVE = "relative"
+
+
+class TimeWindow(SchemaModel):
+    """Interpreted time window for a claim."""
+
+    start_date: str | None = None
+    end_date: str | None = None
+    granularity: TimeGranularity | None = None
+    source_signal: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class LocaleDecision(SchemaModel):
+    """Recorded locale selection decision for retrieval."""
+
+    primary_locale: str
+    fallback_locales: List[str] = Field(default_factory=list)
+    used_locales: List[str] = Field(default_factory=list)
+    reason_codes: List[str] = Field(default_factory=list)
+    sufficiency_triggered: bool = False

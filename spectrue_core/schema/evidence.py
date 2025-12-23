@@ -44,6 +44,14 @@ class EvidenceStance(str, Enum):
     """Additional context preserved for data retention (M77)."""
 
 
+class TimelinessStatus(str, Enum):
+    """Timeliness of evidence relative to claim time window."""
+
+    IN_WINDOW = "in_window"
+    OUTDATED = "outdated"
+    UNKNOWN_DATE = "unknown_date"
+
+
 class EvidenceNeedType(str, Enum):
     """
     M73 Layer 4: Evidence type classification for routing.
@@ -149,6 +157,9 @@ class EvidenceItem(SchemaModel):
 
     published_at: str | None = None
     """Publication date if available."""
+
+    timeliness_status: TimelinessStatus = TimelinessStatus.UNKNOWN_DATE
+    """Timeliness relative to the claim's time window."""
 
     # Quality signals
     is_primary: bool = False

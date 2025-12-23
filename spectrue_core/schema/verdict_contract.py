@@ -19,7 +19,7 @@ from spectrue_core.schema.policy import (
     VerdictPolicy,
     DEFAULT_POLICY,
 )
-from spectrue_core.schema.signals import EvidenceSignals
+from spectrue_core.schema.signals import EvidenceSignals, LocaleDecision, TimeWindow
 
 
 class VerdictStatus(str, Enum):
@@ -66,6 +66,9 @@ class Verdict(SchemaModel):
     error_state: ErrorState = Field(default=ErrorState.OK)
     decision_path: DecisionPath = Field(default=DecisionPath.WEB)
     signals: EvidenceSignals = Field(default_factory=EvidenceSignals)
+
+    time_window: TimeWindow | None = None
+    locale_decision: LocaleDecision | None = None
     
     summary: str = Field(default="")
     rationale: str = Field(default="")

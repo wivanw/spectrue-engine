@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Awaitable, Callable
 
 import asyncio
 import logging
 
+from spectrue_core.schema.signals import TimeWindow
+from spectrue_core.verification.temporal import (
+    label_evidence_timeliness,
+    normalize_time_window,
+)
 from spectrue_core.verification.source_utils import canonicalize_sources
 from spectrue_core.verification.trusted_sources import is_social_platform
 from spectrue_core.verification.evidence import (
@@ -72,6 +78,51 @@ async def run_evidence_flow(
     current_cost = search_mgr.calculate_cost(inp.gpt_model, inp.search_type)
 
     sources = canonicalize_sources(sources)
+
+    time_windows: dict[str, TimeWindow] = {}
+    if claims:
+        default_relative_days = getattr(
+            getattr(getattr(search_mgr, "config", None), "runtime", None),
+            "temporal",
+            None,
+        )
+        default_days = getattr(default_relative_days, "relative_window_days", None)
+        default_days = int(default_days) if isinstance(default_days, int) else None
+
+        for claim in claims:
+            claim_id = str(claim.get("id") or "c1")
+            metadata = claim.get("metadata")
+            time_signals = []
+            time_sensitive = False
+            if metadata:
+                time_signals = list(getattr(metadata, "time_signals", []) or [])
+                time_sensitive = bool(getattr(metadata, "time_sensitive", False))
+
+            req = claim.get("evidence_requirement") or {}
+            if isinstance(req, dict) and req.get("is_time_sensitive"):
+                time_sensitive = True
+            if isinstance(req, dict) and req.get("needs_recent_source"):
+                time_sensitive = True
+
+            if time_signals or time_sensitive:
+                time_windows[claim_id] = normalize_time_window(
+                    time_signals,
+                    reference_date=date.today(),
+                    default_relative_days=default_days or 30,
+                )
+            else:
+                time_windows[claim_id] = normalize_time_window(
+                    [],
+                    reference_date=date.today(),
+                    default_relative_days=default_days or 30,
+                )
+
+        for claim_id, window in time_windows.items():
+            claim_sources = [s for s in sources if s.get("claim_id") == claim_id]
+            if not claim_sources and len(time_windows) == 1:
+                label_evidence_timeliness(sources, time_window=window)
+            else:
+                label_evidence_timeliness(claim_sources, time_window=window)
 
     clustered_results = None
     if claims and sources:
@@ -229,6 +280,28 @@ async def run_evidence_flow(
         }
         if anchor_claim_id and anchor_claim_id in verdict_state_by_claim:
             result["verdict_state"] = verdict_state_by_claim[anchor_claim_id]
+        if anchor_claim_id and anchor_claim_id in time_windows:
+            result["time_window"] = time_windows[anchor_claim_id].to_dict()
+
+    timeliness_labels: list[dict] = []
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        status = src.get("timeliness_status")
+        url = src.get("url") or src.get("link")
+        if status and url:
+            timeliness_labels.append(
+                {"source_url": url, "timeliness_status": status}
+            )
+    if timeliness_labels:
+        result["timeliness_labels"] = timeliness_labels
+    if result.get("time_window") or timeliness_labels:
+        audit = result.get("audit") or {}
+        if result.get("time_window"):
+            audit["time_window"] = result.get("time_window")
+        if timeliness_labels:
+            audit["timeliness_labels"] = timeliness_labels
+        result["audit"] = audit
 
     verified = result.get("verified_score", -1.0)
     if verified < 0:

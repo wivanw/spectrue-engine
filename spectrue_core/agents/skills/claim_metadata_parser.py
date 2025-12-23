@@ -101,6 +101,22 @@ def parse_claim_metadata(
         search_locale_plan = SearchLocalePlan(primary=lang, fallback=["en"])
         missing_count += 1
 
+    # 3.5) temporal/locale signals
+    time_signals_raw = rc.get("time_signals") or rc.get("temporal_signals") or []
+    if isinstance(time_signals_raw, dict):
+        time_signals_raw = [time_signals_raw]
+    time_signals = [s for s in time_signals_raw if isinstance(s, dict)]
+
+    locale_signals_raw = rc.get("locale_signals") or []
+    if isinstance(locale_signals_raw, dict):
+        locale_signals_raw = [locale_signals_raw]
+    locale_signals = [s for s in locale_signals_raw if isinstance(s, dict)]
+
+    time_sensitive_raw = rc.get("time_sensitive")
+    if time_sensitive_raw is None:
+        time_sensitive_raw = rc.get("is_time_sensitive")
+    time_sensitive = bool(time_sensitive_raw) or bool(time_signals)
+
     # 4) retrieval_policy
     rp_raw = rc.get("retrieval_policy", {})
     if isinstance(rp_raw, dict) and rp_raw:
@@ -152,7 +168,9 @@ def parse_claim_metadata(
         claim_role=claim_role,
         check_worthiness=check_worthiness,
         search_locale_plan=search_locale_plan,
+        time_signals=time_signals,
+        locale_signals=locale_signals,
+        time_sensitive=time_sensitive,
         retrieval_policy=retrieval_policy,
         metadata_confidence=metadata_confidence,
     )
-

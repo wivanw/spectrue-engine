@@ -241,6 +241,16 @@ def build_evidence_pack(
                 search_queries=[],
             )
         ]
+
+    time_sensitive_by_claim: dict[str, bool] = {}
+    for claim in claims:
+        claim_id = claim.get("id", "c1")
+        metadata = claim.get("metadata")
+        time_sensitive = bool(getattr(metadata, "time_sensitive", False)) if metadata else False
+        req = claim.get("evidence_requirement") or {}
+        if isinstance(req, dict) and (req.get("is_time_sensitive") or req.get("needs_recent_source")):
+            time_sensitive = True
+        time_sensitive_by_claim[claim_id] = time_sensitive
     
     # 3. Convert sources to SearchResult format with enrichments
     search_results: list[SearchResult] = []
@@ -301,6 +311,7 @@ def build_evidence_pack(
                 source_type=source_type,  # type: ignore
                 stance=stance,  # type: ignore
                 relevance_score=float(s.get("relevance_score", 0.0) or 0.0),
+                timeliness_status=s.get("timeliness_status"),
                 key_snippet=None,
                 quote_matches=[],
                 is_trusted=bool(s.get("is_trusted")),
@@ -308,6 +319,16 @@ def build_evidence_pack(
                 duplicate_of=None,
             )
             search_results.append(search_result)
+
+    for r in search_results:
+        claim_id = r.get("claim_id", "c1")
+        if not time_sensitive_by_claim.get(claim_id):
+            continue
+        status = str(r.get("timeliness_status") or "").lower()
+        stance = str(r.get("stance") or "").lower()
+        if status == "outdated" and stance == "support":
+            r["stance"] = "context"
+            r["timeliness_excluded"] = True
     
     # 4. Compute metrics
     unique_domains = len(seen_domains)

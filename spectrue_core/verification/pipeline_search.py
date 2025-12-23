@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 import logging
@@ -16,6 +16,7 @@ from spectrue_core.verification.search_policy import (
 from spectrue_core.verification.search_policy_adapter import (
     apply_search_policy_to_plan,
     budget_class_for_profile,
+    evaluate_locale_decision,
 )
 from spectrue_core.verification.source_utils import canonicalize_sources
 
@@ -47,6 +48,7 @@ class SearchFlowState:
     used_orchestration: bool
     hard_reject: bool = False
     reject_reason: str | None = None
+    locale_decisions: dict[str, dict] = field(default_factory=dict)
 
 
 async def run_search_flow(
@@ -84,6 +86,31 @@ async def run_search_flow(
             budget_class = budget_class_for_profile(profile)
             execution_plan = orchestrator.build_plan(inp.claims, budget_class=budget_class)
             execution_plan = apply_search_policy_to_plan(execution_plan, profile=profile)
+            locale_config = getattr(getattr(config, "runtime", None), "locale", None)
+            default_primary = getattr(locale_config, "default_primary_locale", inp.lang)
+            default_fallbacks = getattr(locale_config, "default_fallback_locales", ["en"])
+            max_fallbacks = getattr(locale_config, "max_fallbacks", 0)
+
+            locale_decisions = {}
+            for claim in inp.claims:
+                claim_id = str(claim.get("id") or "c1")
+                decision = evaluate_locale_decision(
+                    claim,
+                    profile,
+                    default_primary_locale=default_primary,
+                    default_fallback_locales=list(default_fallbacks or []),
+                    max_fallbacks=int(max_fallbacks) if max_fallbacks is not None else 0,
+                )
+                locale_decisions[claim_id] = decision
+                Trace.event(
+                    "search.locale_decision",
+                    {
+                        "claim_id": claim_id,
+                        "primary_locale": decision.primary_locale,
+                        "fallback_locales": decision.fallback_locales,
+                        "reason_codes": decision.reason_codes,
+                    },
+                )
 
             Trace.event(
                 "search.policy.applied",
@@ -129,6 +156,27 @@ async def run_search_flow(
             phase_evidence = await runner.run_all_claims(inp.claims, execution_plan)
 
             for claim_id, sources in phase_evidence.items():
+                decision = locale_decisions.get(claim_id)
+                if decision:
+                    phases_completed = runner.execution_state.get_or_create(claim_id).phases_completed
+                    used_locales = []
+                    for phase_id in phases_completed:
+                        phase = next(
+                            (p for p in execution_plan.get_phases(claim_id) if p.phase_id == phase_id),
+                            None,
+                        )
+                        if phase and phase.locale and phase.locale not in used_locales:
+                            used_locales.append(phase.locale)
+                    decision.used_locales = used_locales or decision.used_locales or [decision.primary_locale]
+                    fallback_used = any(loc in decision.fallback_locales for loc in used_locales)
+                    decision.sufficiency_triggered = fallback_used
+                    if fallback_used:
+                        if "fallback_used" not in decision.reason_codes:
+                            decision.reason_codes.append("fallback_used")
+                    else:
+                        if decision.fallback_locales and "fallback_skipped_sufficient" not in decision.reason_codes:
+                            decision.reason_codes.append("fallback_skipped_sufficient")
+
                 for src in canonicalize_sources(sources):
                     if "url" not in src:
                         continue
@@ -156,6 +204,9 @@ async def run_search_flow(
                 total_sources,
                 len(phase_evidence),
             )
+            state.locale_decisions = {
+                cid: decision.to_dict() for cid, decision in locale_decisions.items()
+            }
 
         except Exception as e:
             logger.error("[M81] CRITICAL: Orchestrator crashed: %s", e, exc_info=True)
@@ -335,6 +386,15 @@ async def run_search_flow(
                             "is_trusted": False,
                         }
                     )
+        state.locale_decisions = {
+            "c1": {
+                "primary_locale": inp.lang,
+                "fallback_locales": [],
+                "used_locales": [inp.lang],
+                "reason_codes": ["legacy_unified_search"],
+                "sufficiency_triggered": False,
+            }
+        }
 
     state.used_orchestration = use_orchestration
     return state

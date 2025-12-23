@@ -247,6 +247,28 @@ class PhaseRunner:
                                 "[M80] Claim %s sufficient after Phase %s (rule=%s), skipping %s",
                                 claim_id, result.phase_id, sufficiency.rule_matched, remaining
                             )
+                        elif sufficiency.status == SufficiencyStatus.SKIP:
+                            claim_phases = execution_plan.get_phases(claim_id)
+                            current_idx = next(
+                                (i for i, p in enumerate(claim_phases) if p.phase_id == result.phase_id),
+                                -1,
+                            )
+                            remaining = [p.phase_id for p in claim_phases[current_idx + 1:]]
+                            claim_state.mark_sufficient(
+                                reason=sufficiency.reason,
+                                remaining_phases=remaining,
+                            )
+                            Trace.event("phase.stopped", {
+                                "claim_id": claim_id,
+                                "phase_id": result.phase_id,
+                                "reason": "sufficiency_skip",
+                                "rule": sufficiency.rule_matched,
+                                "skipped_phases": remaining,
+                            })
+                            logger.info(
+                                "[M80] Claim %s skipped after Phase %s (reason=%s), skipping %s",
+                                claim_id, result.phase_id, sufficiency.reason, remaining
+                            )
                         else:
                             # T20: Trace continue
                             Trace.event("phase.continue", {
@@ -789,6 +811,16 @@ class PhaseRunner:
                         "claim_id": claim_id,
                         "phase_id": phase.phase_id,
                         "reason": "sufficiency_met",
+                        "rule": sufficiency.rule_matched,
+                        "skipped_phases": remaining,
+                    })
+                    break
+                if sufficiency.status == SufficiencyStatus.SKIP:
+                    remaining = [p.phase_id for p in phases if phases.index(p) > phases.index(phase)]
+                    Trace.event("phase.stopped", {
+                        "claim_id": claim_id,
+                        "phase_id": phase.phase_id,
+                        "reason": "sufficiency_skip",
                         "rule": sufficiency.rule_matched,
                         "skipped_phases": remaining,
                     })

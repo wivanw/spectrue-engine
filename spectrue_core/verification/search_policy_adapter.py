@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from spectrue_core.schema.claim_metadata import UsePolicy
+from spectrue_core.constants import (
+    DEFAULT_FALLBACK_LOCALES,
+    DEFAULT_LOCALE_MAX_FALLBACKS,
+    DEFAULT_PRIMARY_LOCALE,
+)
+from spectrue_core.schema.claim_metadata import SearchLocalePlan, UsePolicy
+from spectrue_core.schema.signals import LocaleDecision
 from spectrue_core.verification.execution_plan import BudgetClass, ExecutionPlan, Phase
 from spectrue_core.verification.search_policy import LocalePolicy, SearchPolicyProfile
 
@@ -18,6 +24,62 @@ def _resolve_locale(phase_id: str, locale_policy: LocalePolicy, current: str) ->
         return locale_policy.primary
 
     return current
+
+
+def evaluate_locale_decision(
+    claim: dict,
+    profile: SearchPolicyProfile,
+    *,
+    default_primary_locale: str = DEFAULT_PRIMARY_LOCALE,
+    default_fallback_locales: list[str] | None = None,
+    max_fallbacks: int = DEFAULT_LOCALE_MAX_FALLBACKS,
+) -> LocaleDecision:
+    metadata = claim.get("metadata")
+    plan = None
+    if metadata and getattr(metadata, "search_locale_plan", None):
+        plan = metadata.search_locale_plan
+    if plan is None:
+        plan = SearchLocalePlan(
+            primary=default_primary_locale,
+            fallback=list(default_fallback_locales or DEFAULT_FALLBACK_LOCALES),
+        )
+
+    primary = profile.locale_policy.primary or plan.primary or default_primary_locale
+
+    fallback = (
+        profile.locale_policy.fallback
+        if profile.locale_policy.fallback is not None
+        else plan.fallback
+    ) or []
+    fallback = [loc for loc in fallback if loc and loc != primary]
+    if max_fallbacks >= 0:
+        fallback = fallback[:max_fallbacks]
+
+    reason_codes: list[str] = []
+    if profile.locale_policy.primary is not None:
+        reason_codes.append("primary_policy_override")
+    elif metadata:
+        reason_codes.append("primary_claim_signal")
+    else:
+        reason_codes.append("primary_default")
+
+    if profile.locale_policy.fallback is not None:
+        reason_codes.append("fallback_policy_override")
+    elif metadata:
+        reason_codes.append("fallback_claim_signal")
+    else:
+        reason_codes.append("fallback_default")
+
+    if not fallback:
+        reason_codes.append("fallbacks_empty")
+
+    return LocaleDecision(
+        primary_locale=primary,
+        fallback_locales=fallback,
+        used_locales=[primary] if primary else [],
+        reason_codes=reason_codes,
+        sufficiency_triggered=False,
+    )
 
 
 def _cap_search_depth(phase: Phase, search_depth: str) -> None:

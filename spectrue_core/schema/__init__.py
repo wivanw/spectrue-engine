@@ -31,6 +31,7 @@ from spectrue_core.schema.evidence import (
     EvidenceStance,
     ContentStatus,
     EvidenceItem,
+    TimelinessStatus,
 )
 
 # M70: Verdict (keep as primary for backward compat)
@@ -57,6 +58,9 @@ from spectrue_core.schema.signals import (
     CoverageSignals,
     TimelinessSignals,
     EvidenceSignals,
+    TimeGranularity,
+    TimeWindow,
+    LocaleDecision,
 )
 
 # M71: Verdict Contract (new contract, explicit import)
@@ -89,6 +93,7 @@ __all__ = [
     "ClaimUnit",
     # M70: Evidence
     "EvidenceStance", "ContentStatus", "EvidenceItem",
+    "TimelinessStatus",
     # M70: Verdict (backward compat)
     "VerdictStatus", "VerdictState", "AssertionVerdict", "ClaimVerdict",
     "StructuredDebug", "StructuredVerdict",
@@ -96,6 +101,7 @@ __all__ = [
     "ErrorState", "DecisionPath", "VerdictPolicy", "DEFAULT_POLICY",
     # M71: Signals
     "RetrievalSignals", "CoverageSignals", "TimelinessSignals", "EvidenceSignals",
+    "TimeGranularity", "TimeWindow", "LocaleDecision",
     # M71: Verdict Contract
     "ContractVerdictStatus", "VerdictHighlight", "Verdict",
     # M80: Claim Metadata

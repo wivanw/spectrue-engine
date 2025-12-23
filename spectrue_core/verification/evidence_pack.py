@@ -248,6 +248,7 @@ class SearchResult(TypedDict, total=False):
     source_type: SourceType
     stance: Stance                  # Position relative to claim
     relevance_score: float          # 0-1, how relevant to claim
+    timeliness_status: str | None   # in_window | outdated | unknown_date
     key_snippet: str | None         # Most relevant quote from content
     quote_matches: list[str]        # Exact quotes that match claim
     is_trusted: bool                # From trusted sources registry
