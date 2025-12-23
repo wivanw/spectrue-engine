@@ -253,6 +253,12 @@ class SearchResult(TypedDict, total=False):
     is_trusted: bool                # From trusted sources registry
     is_duplicate: bool              # Content duplicate of another result
     duplicate_of: str | None        # URL of original if duplicate
+    evidence_tier: str | None       # A, A', B, C, D (if known)
+    pass_type: str | None           # SUPPORT_ONLY, REFUTE_ONLY, SINGLE_PASS
+    quote_span: str | None          # Quote aligned to SUPPORT
+    contradiction_span: str | None  # Quote aligned to REFUTE
+    evidence_refs: list[str]        # Source URLs or references
+    stance_confidence: str | None   # "low" for low-tier SUPPORT
     
     # M70: Assertion-level mapping
     assertion_key: str | None       # Which assertion this evidence maps to (e.g., "event.location.city")

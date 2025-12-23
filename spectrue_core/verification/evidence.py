@@ -10,6 +10,107 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+HIGH_TIER_SET = {"A", "A'", "B"}
+LOW_TIER_SET = {"C", "D"}
+TIER_RANK = {"D": 1, "C": 2, "B": 3, "A'": 4, "A": 4}
+
+
+def _normalize_tier(*, tier_raw: str | None, source_type: str | None) -> str:
+    if tier_raw:
+        return str(tier_raw).strip().upper()
+    stype = (source_type or "").strip().lower()
+    if stype == "primary":
+        return "A"
+    if stype == "official":
+        return "A'"
+    if stype == "independent_media":
+        return "B"
+    if stype == "social":
+        return "D"
+    return "C"
+
+
+def _tier_rank(tier: str) -> int:
+    return TIER_RANK.get(tier, 0)
+
+
+def merge_stance_passes(
+    *,
+    support_results: list[SearchResult],
+    refute_results: list[SearchResult],
+    original_sources: list[dict],
+) -> list[SearchResult]:
+    if not support_results:
+        return refute_results
+    if not refute_results:
+        return support_results
+    if len(support_results) != len(refute_results):
+        logger.warning(
+            "[StanceMerge] Pass count mismatch: support=%d refute=%d",
+            len(support_results),
+            len(refute_results),
+        )
+        return support_results
+
+    merged: list[SearchResult] = []
+    for idx, support in enumerate(support_results):
+        refute = refute_results[idx]
+        src = original_sources[idx] if idx < len(original_sources) else {}
+
+        support_quote = support.get("quote_span") or support.get("key_snippet")
+        refute_quote = refute.get("contradiction_span") or refute.get("key_snippet")
+
+        support_tier = _normalize_tier(
+            tier_raw=support.get("evidence_tier") or src.get("evidence_tier"),
+            source_type=support.get("source_type") or src.get("source_type"),
+        )
+        refute_tier = _normalize_tier(
+            tier_raw=refute.get("evidence_tier") or src.get("evidence_tier"),
+            source_type=refute.get("source_type") or src.get("source_type"),
+        )
+
+        support_rank = _tier_rank(support_tier)
+        refute_rank = _tier_rank(refute_tier)
+
+        support_has = (support.get("stance") == "support") and bool(support_quote)
+        refute_has = (refute.get("stance") == "refute") and bool(refute_quote)
+
+        if refute_has and refute_rank >= support_rank:
+            merged_result = dict(refute)
+            merged_result["stance"] = "refute"
+            merged_result["pass_type"] = "REFUTE_ONLY"
+            merged_result["contradiction_span"] = refute_quote
+            merged_result["evidence_tier"] = refute_tier
+        elif support_has:
+            merged_result = dict(support)
+            merged_result["stance"] = "support"
+            merged_result["pass_type"] = "SUPPORT_ONLY"
+            merged_result["quote_span"] = support_quote
+            merged_result["evidence_tier"] = support_tier
+            if support_tier in LOW_TIER_SET:
+                merged_result["stance_confidence"] = "low"
+        elif refute_has:
+            merged_result = dict(refute)
+            merged_result["stance"] = "refute"
+            merged_result["pass_type"] = "REFUTE_ONLY"
+            merged_result["contradiction_span"] = refute_quote
+            merged_result["evidence_tier"] = refute_tier
+        else:
+            merged_result = dict(support)
+            merged_result["stance"] = "context"
+            merged_result["pass_type"] = "SUPPORT_ONLY"
+
+        if merged_result.get("stance") not in ("support", "refute"):
+            merged_result["quote_span"] = None
+            merged_result["contradiction_span"] = None
+
+        url = merged_result.get("url") or src.get("url") or src.get("link")
+        if url:
+            merged_result["evidence_refs"] = [url]
+
+        merged.append(merged_result)  # type: ignore
+
+    return merged
 
 def needs_evidence_acquisition_ladder(sources: list[dict]) -> bool:
     """
@@ -294,6 +395,9 @@ def build_evidence_pack(
             scored_sources.append(r)
         else:
             context_sources.append(r)
+
+    stance_failure = bool(search_results) and not scored_sources
+    evidence_metrics["stance_failure"] = stance_failure
     
     # 6. Build final Evidence Pack
     pack = EvidencePack(

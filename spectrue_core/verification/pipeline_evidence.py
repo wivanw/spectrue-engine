@@ -12,6 +12,10 @@ from spectrue_core.verification.rgba_aggregation import (
     apply_dependency_penalties,
     recompute_verified_score,
 )
+from spectrue_core.verification.search_policy import (
+    resolve_profile_name,
+    resolve_stance_pass_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +59,13 @@ async def run_evidence_flow(
     if claims and sources:
         if inp.progress_callback:
             await inp.progress_callback("clustering_evidence")
-        clustered_results = await agent.cluster_evidence(claims, sources)
+        profile_name = resolve_profile_name(inp.search_type)
+        stance_pass_mode = resolve_stance_pass_mode(profile_name)
+        clustered_results = await agent.cluster_evidence(
+            claims,
+            sources,
+            stance_pass_mode=stance_pass_mode,
+        )
 
     anchor_claim = None
     if claims:

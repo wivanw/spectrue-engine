@@ -105,6 +105,7 @@ def _context_fallback_result(r: dict) -> SearchResult:
         duplicate_of=None,
         assertion_key=None,
         content_status=r.get("content_status", "available"),
+        evidence_tier=r.get("evidence_tier"),
     )
 
 
@@ -222,6 +223,7 @@ def postprocess_evidence_matrix(
                 duplicate_of=None,
                 assertion_key=akey,
                 content_status=r.get("content_status", "available"),
+                evidence_tier=r.get("evidence_tier"),
             )
         )
 
@@ -261,4 +263,3 @@ def exception_fallback_all_context(*, search_results: list[dict], error: Excepti
 
 def build_valid_claim_ids(claims_lite: Iterable[dict]) -> set[str]:
     return {c.get("id") for c in (claims_lite or []) if c.get("id")}
-

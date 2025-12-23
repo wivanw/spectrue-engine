@@ -1,5 +1,10 @@
 import json
 
+STANCE_PASS_SUPPORT_ONLY = "SUPPORT_ONLY"
+STANCE_PASS_REFUTE_ONLY = "REFUTE_ONLY"
+STANCE_PASS_SINGLE = "SINGLE_PASS"
+STANCE_PASS_TYPES = {STANCE_PASS_SUPPORT_ONLY, STANCE_PASS_REFUTE_ONLY, STANCE_PASS_SINGLE}
+
 
 def build_score_evidence_instructions(*, lang_name: str, lang: str) -> str:
     return f"""You are the Spectrue Verdict Engine.
@@ -161,3 +166,78 @@ Remember: CONTEXT cannot refute FACT. Score each assertion independently.
 Return JSON.
 """
 
+
+def build_stance_matrix_instructions(*, num_sources: int, pass_type: str) -> str:
+    normalized = (pass_type or "").strip().upper()
+    if normalized not in STANCE_PASS_TYPES:
+        normalized = STANCE_PASS_SINGLE
+
+    pass_rules = ""
+    if normalized == STANCE_PASS_SUPPORT_ONLY:
+        pass_rules = """PASS MODE: SUPPORT_ONLY
+- You MUST NOT output REFUTE or MIXED.
+- Output SUPPORT only if a direct quote/span explicitly supports the claim/assertion.
+- If support is unclear or only contextual, output CONTEXT (or IRRELEVANT if unrelated).
+"""
+    elif normalized == STANCE_PASS_REFUTE_ONLY:
+        pass_rules = """PASS MODE: REFUTE_ONLY
+- You MUST NOT output SUPPORT or MIXED.
+- Output REFUTE only if a direct quote/span explicitly contradicts the claim/assertion.
+- If contradiction is unclear or only contextual, output CONTEXT (or IRRELEVANT if unrelated).
+"""
+    else:
+        pass_rules = """PASS MODE: SINGLE_PASS (attempt-to-refute)
+- First, attempt to find explicit contradictions. If found, output REFUTE with the contradiction quote.
+- If no contradiction exists, output SUPPORT only if a direct quote/span explicitly supports the claim.
+- If neither applies, output CONTEXT (or IRRELEVANT if unrelated).
+"""
+
+    return f"""You are an Evidence Analyst.
+Your task is to map each Search Source to its BEST matching Claim AND Assertion.
+
+## CRITICAL CONTRACT
+- You MUST output EXACTLY {num_sources} matrix rows, one for each source_index from 0 to {num_sources - 1}.
+- NEVER return an empty matrix. If unsure about a source, output a row with stance="CONTEXT".
+- Every row MUST include: source_index, claim_id (or null), stance, quote (string or null), and optional assertion_key.
+
+{pass_rules}
+
+## Relevance Scoring
+- Assign `relevance` (0.0-1.0).
+- If relevance < 0.4, you MUST mark stance as `IRRELEVANT` or `CONTEXT`.
+- If content is [UNAVAILABLE], judge relevance based on title/snippet.
+
+## Quote Requirements
+- For `SUPPORT` or `REFUTE`: quote MUST be non-empty and directly relevant.
+- For `CONTEXT`, `IRRELEVANT`, `MENTION`: quote can be null or empty string.
+
+## Output JSON Schema
+```json
+{{
+  "matrix": [
+    {{
+      "source_index": 0,
+      "claim_id": "c1",
+      "assertion_key": "event.location.city", // or null
+      "stance": "SUPPORT",
+      "relevance": 0.9,
+      "quote": "Direct quote from text...",
+      "reason": "Explain why..."
+    }}
+  ]
+}}
+```
+"""
+
+
+def build_stance_matrix_prompt(*, claims_lite: list[dict], sources_lite: list[dict]) -> str:
+    return f"""Build the Evidence Matrix for these sources.
+
+CLAIMS:
+{json.dumps(claims_lite, indent=2)}
+
+SOURCES:
+{json.dumps(sources_lite, indent=2)}
+
+Return the result in JSON format with key "matrix".
+"""

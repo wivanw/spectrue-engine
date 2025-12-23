@@ -51,6 +51,7 @@ class SearchPolicyProfile:
     search_depth: str = "basic"
     max_results: int = 3
     max_hops: int = 2
+    stance_pass_mode: str = "single"
     channels_allowed: list[EvidenceChannel] = field(default_factory=list)
     use_policy_by_channel: dict[str, UsePolicy] = field(default_factory=dict)
     locale_policy: LocalePolicy = field(default_factory=LocalePolicy)
@@ -74,6 +75,7 @@ class SearchPolicyProfile:
             "search_depth": self.search_depth,
             "max_results": self.max_results,
             "max_hops": self.max_hops,
+            "stance_pass_mode": self.stance_pass_mode,
             "channels_allowed": [c.value for c in self.channels_allowed],
             "use_policy_by_channel": {
                 k: v.value for k, v in (self.use_policy_by_channel or {}).items()
@@ -127,6 +129,7 @@ def default_search_policy() -> SearchPolicy:
             search_depth="basic",
             max_results=3,
             max_hops=1,
+            stance_pass_mode="single",
             channels_allowed=main_channels,
             use_policy_by_channel=use_policy_by_channel,
             locale_policy=LocalePolicy(primary=None, fallback=None),
@@ -141,6 +144,7 @@ def default_search_policy() -> SearchPolicy:
             search_depth="advanced",
             max_results=7,
             max_hops=3,
+            stance_pass_mode="two_pass",
             channels_allowed=deep_channels,
             use_policy_by_channel=use_policy_by_channel,
             locale_policy=LocalePolicy(primary=None, fallback=None),
@@ -152,6 +156,11 @@ def default_search_policy() -> SearchPolicy:
         ),
     }
     return SearchPolicy(profiles=profiles)
+
+
+def resolve_stance_pass_mode(profile_name: str) -> str:
+    normalized = (profile_name or "main").strip().lower()
+    return "two_pass" if normalized == "deep" else "single"
 
 
 def filter_search_results(

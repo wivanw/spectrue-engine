@@ -50,8 +50,18 @@ class FactCheckerAgent:
         """Extract claims with article intent for M63 Oracle triggering."""
         return await self.claims_skill.extract_claims(text, lang=lang, max_claims=max_claims)
 
-    async def cluster_evidence(self, claims: list[Claim], search_results: list[dict]) -> list:
-        return await self.clustering_skill.cluster_evidence(claims, search_results)
+    async def cluster_evidence(
+        self,
+        claims: list[Claim],
+        search_results: list[dict],
+        *,
+        stance_pass_mode: str = "single",
+    ) -> list:
+        return await self.clustering_skill.cluster_evidence(
+            claims,
+            search_results,
+            stance_pass_mode=stance_pass_mode,
+        )
 
     async def score_evidence(self, pack: EvidencePack, *, model: str = "gpt-5.2", lang: str = "en") -> dict:
         return await self.scoring_skill.score_evidence(pack, model=model, lang=lang)

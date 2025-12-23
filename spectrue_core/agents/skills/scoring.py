@@ -69,7 +69,11 @@ class ScoringSkill(BaseSkill):
             raw_snippet = r.get("content_excerpt") or r.get("snippet") or ""
             safe_snippet = sanitize_snippet(raw_snippet, limit=MAX_SNIPPET_LEN)
             
-            key_snippet = r.get("key_snippet")
+            key_snippet = (
+                r.get("quote_span")
+                or r.get("contradiction_span")
+                or r.get("key_snippet")
+            )
             stance = r.get("stance", "")
             
             # Visual cue: Highlight quotes found by Clustering
@@ -135,7 +139,13 @@ class ScoringSkill(BaseSkill):
                 timeout=float(self.runtime.llm.timeout_sec),
                 trace_kind="score_evidence",
             )
-            return clamp_score_evidence_result(result)
+            clamped = clamp_score_evidence_result(result)
+            metrics = pack.get("metrics", {})
+            if isinstance(metrics, dict) and metrics.get("stance_failure") is True:
+                current = clamped.get("explainability_score", -1.0)
+                clamped["explainability_score"] = 0.2 if current < 0 else min(current, 0.4)
+                clamped["stance_fallback"] = "context"
+            return clamped
 
         except Exception as e:
             logger.exception("[Scoring] Failed: %s", e)
@@ -341,7 +351,12 @@ class ScoringSkill(BaseSkill):
             raw_content = e.get("content_excerpt") or e.get("snippet") or ""
             safe_content = sanitize_snippet(raw_content, limit=MAX_SNIPPET_LEN)
             
-            key_snippet = e.get("key_snippet") or e.get("quote")
+            key_snippet = (
+                e.get("quote_span")
+                or e.get("contradiction_span")
+                or e.get("key_snippet")
+                or e.get("quote")
+            )
             stance = e.get("stance", "MENTION")
             
             if key_snippet and stance in ["SUPPORT", "REFUTE", "MIXED"]:
