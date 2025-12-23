@@ -34,6 +34,58 @@ def _tier_rank(tier: str) -> int:
     return TIER_RANK.get(tier, 0)
 
 
+def is_strong_tier(tier: str | None) -> bool:
+    if not tier:
+        return False
+    return tier in HIGH_TIER_SET
+
+
+def strongest_tiers_by_claim(
+    scored_sources: list[SearchResult],
+) -> dict[str, dict[str, str | int | None]]:
+    """
+    Determine strongest support/refute tiers per claim from scored sources.
+    """
+    by_claim: dict[str, dict[str, str | int | None]] = {}
+
+    for src in scored_sources:
+        if not isinstance(src, dict):
+            continue
+        claim_id = str(src.get("claim_id") or "").strip()
+        if not claim_id:
+            claim_id = "c1"
+
+        stance = (src.get("stance") or "").lower()
+        if stance not in ("support", "refute", "contradict"):
+            continue
+
+        tier = _normalize_tier(
+            tier_raw=src.get("evidence_tier"),
+            source_type=src.get("source_type"),
+        )
+        rank = _tier_rank(tier)
+        entry = by_claim.setdefault(
+            claim_id,
+            {
+                "support_tier": None,
+                "support_rank": 0,
+                "refute_tier": None,
+                "refute_rank": 0,
+            },
+        )
+
+        if stance == "support":
+            if rank > int(entry["support_rank"] or 0):
+                entry["support_rank"] = rank
+                entry["support_tier"] = tier
+        else:
+            if rank > int(entry["refute_rank"] or 0):
+                entry["refute_rank"] = rank
+                entry["refute_tier"] = tier
+
+    return by_claim
+
+
 def merge_stance_passes(
     *,
     support_results: list[SearchResult],

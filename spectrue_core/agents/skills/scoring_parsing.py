@@ -4,6 +4,7 @@ from spectrue_core.schema import (
     StructuredDebug,
     StructuredVerdict,
     VerdictStatus,
+    VerdictState,
 )
 from spectrue_core.agents.skills.scoring_sanitization import maybe_drop_style_section, strip_internal_source_markers
 
@@ -61,6 +62,18 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
             return VerdictStatus.UNVERIFIED
         return VerdictStatus.AMBIGUOUS
 
+    def parse_state(s: str | None) -> VerdictState:
+        s_lower = (s or "").lower().strip()
+        if s_lower in ("supported", "support"):
+            return VerdictState.SUPPORTED
+        if s_lower in ("refuted", "refute"):
+            return VerdictState.REFUTED
+        if s_lower in ("conflicted", "conflict"):
+            return VerdictState.CONFLICTED
+        if s_lower in ("insufficient_evidence", "insufficient evidence", "insufficient"):
+            return VerdictState.INSUFFICIENT_EVIDENCE
+        return VerdictState.INSUFFICIENT_EVIDENCE
+
     claim_verdicts: list[ClaimVerdict] = []
     raw_claims = raw.get("claim_verdicts", [])
 
@@ -103,6 +116,7 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
                 ClaimVerdict(
                     claim_id=rc.get("claim_id", ""),
                     status=parse_status(rc.get("status", "")),
+                    verdict_state=parse_state(rc.get("verdict_state")),
                     verdict_score=safe_score(rc.get("verdict_score"), default=-1.0),
                     assertion_verdicts=assertion_verdicts,
                     evidence_count=int(rc.get("evidence_count", 0)),
@@ -143,4 +157,3 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
         structured_debug=debug,
         overall_confidence=verified,
     )
-

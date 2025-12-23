@@ -31,6 +31,15 @@ class VerdictStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+class VerdictState(str, Enum):
+    """Tier-dominant verdict state independent from score."""
+
+    SUPPORTED = "supported"
+    REFUTED = "refuted"
+    CONFLICTED = "conflicted"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
 class VerdictHighlight(SchemaModel):
     """Minimal structured explanation for one assertion."""
     
@@ -51,6 +60,8 @@ class Verdict(SchemaModel):
     veracity_score: float = Field(default=0.5, ge=0.0, le=1.0)
     # M71 Critical Fix: Default confidence is 0.0 (Blind until proven seeing)
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    verdict_state: VerdictState | None = None
     
     error_state: ErrorState = Field(default=ErrorState.OK)
     decision_path: DecisionPath = Field(default=DecisionPath.WEB)

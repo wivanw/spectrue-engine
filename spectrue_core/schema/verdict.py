@@ -42,6 +42,14 @@ class VerdictStatus(str, Enum):
     """M78: Content identified as satire/parody. Not a factual claim."""
 
 
+class VerdictState(str, Enum):
+    """Tier-dominant verdict state independent from score."""
+    SUPPORTED = "supported"
+    REFUTED = "refuted"
+    CONFLICTED = "conflicted"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
 
 class AssertionVerdict(SchemaModel):
     """
@@ -86,6 +94,9 @@ class ClaimVerdict(SchemaModel):
 
     status: VerdictStatus = VerdictStatus.AMBIGUOUS
     """Overall claim verdict."""
+
+    verdict_state: VerdictState = VerdictState.INSUFFICIENT_EVIDENCE
+    """Tier-dominant verdict state derived in code."""
 
     verdict_score: float = Field(default=0.5, ge=0.0, le=1.0)
     """Aggregated verification score."""

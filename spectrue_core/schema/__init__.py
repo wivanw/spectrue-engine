@@ -36,6 +36,7 @@ from spectrue_core.schema.evidence import (
 # M70: Verdict (keep as primary for backward compat)
 from spectrue_core.schema.verdict import (
     VerdictStatus,  # M70 VerdictStatus (has PARTIALLY_VERIFIED)
+    VerdictState,
     AssertionVerdict,
     ClaimVerdict,
     StructuredDebug,
@@ -89,7 +90,7 @@ __all__ = [
     # M70: Evidence
     "EvidenceStance", "ContentStatus", "EvidenceItem",
     # M70: Verdict (backward compat)
-    "VerdictStatus", "AssertionVerdict", "ClaimVerdict",
+    "VerdictStatus", "VerdictState", "AssertionVerdict", "ClaimVerdict",
     "StructuredDebug", "StructuredVerdict",
     # M71: Policy
     "ErrorState", "DecisionPath", "VerdictPolicy", "DEFAULT_POLICY",

@@ -230,6 +230,15 @@ def recompute_verified_score(claim_verdicts: list[dict]) -> float | None:
     return sum(scores) / len(scores)
 
 
+def apply_conflict_explainability_penalty(
+    explainability_score: float,
+    *,
+    penalty: float = 0.15,
+) -> float:
+    """Reduce explainability when strong evidence conflicts are detected."""
+    return max(0.0, explainability_score - penalty)
+
+
 def apply_dependency_penalties(
     claim_verdicts: list[dict],
     claims: list[dict],

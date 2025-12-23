@@ -8,8 +8,13 @@ import logging
 
 from spectrue_core.verification.source_utils import canonicalize_sources
 from spectrue_core.verification.trusted_sources import is_social_platform
+from spectrue_core.verification.evidence import (
+    is_strong_tier,
+    strongest_tiers_by_claim,
+)
 from spectrue_core.verification.rgba_aggregation import (
     apply_dependency_penalties,
+    apply_conflict_explainability_penalty,
     recompute_verified_score,
 )
 from spectrue_core.verification.search_policy import (
@@ -20,6 +25,19 @@ from spectrue_core.verification.search_policy import (
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str], Awaitable[None]]
+
+REFUTE_CAP = 0.2
+SUPPORT_FLOOR = 0.8
+CONFLICT_MIN = 0.35
+CONFLICT_MAX = 0.65
+
+
+def _state_from_score(score: float) -> str:
+    if score <= REFUTE_CAP:
+        return "refuted"
+    if score >= SUPPORT_FLOOR:
+        return "supported"
+    return "insufficient_evidence"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +86,7 @@ async def run_evidence_flow(
         )
 
     anchor_claim = None
+    anchor_claim_id = None
     if claims:
         core_claims = [c for c in claims if c.get("type") == "core"]
         anchor_claim = (
@@ -75,6 +94,7 @@ async def run_evidence_flow(
             if core_claims
             else claims[0]
         )
+        anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
     # M67: Inline Social Verification (Tier A')
     if claims and sources:
@@ -138,6 +158,61 @@ async def run_evidence_flow(
             if recalculated is not None:
                 result["verified_score"] = recalculated
 
+    conflict_detected = False
+    verdict_state_by_claim: dict[str, str] = {}
+    if isinstance(claim_verdicts, list):
+        tier_summary = strongest_tiers_by_claim(pack.get("scored_sources", []))
+        for cv in claim_verdicts:
+            if not isinstance(cv, dict):
+                continue
+            claim_id = str(cv.get("claim_id") or "").strip()
+            if not claim_id and claims:
+                claim_id = str(claims[0].get("id") or "c1")
+                cv["claim_id"] = claim_id
+
+            tiers = tier_summary.get(claim_id, {})
+            support_tier = tiers.get("support_tier")
+            refute_tier = tiers.get("refute_tier")
+
+            score = float(cv.get("verdict_score", 0.5) or 0.5)
+
+            if support_tier is None and refute_tier is None:
+                verdict_state = _state_from_score(score)
+                cv["verdict_state"] = verdict_state
+                verdict_state_by_claim[claim_id] = verdict_state
+                continue
+
+            support_strong = is_strong_tier(support_tier)
+            refute_strong = is_strong_tier(refute_tier)
+
+            if support_strong and refute_strong:
+                conflict_detected = True
+                score = min(max(score, CONFLICT_MIN), CONFLICT_MAX)
+                cv["verdict_score"] = score
+                verdict_state = "conflicted"
+            elif refute_strong:
+                cv["verdict_score"] = min(score, REFUTE_CAP)
+                verdict_state = "refuted"
+            elif support_strong:
+                cv["verdict_score"] = max(score, SUPPORT_FLOOR)
+                verdict_state = "supported"
+            else:
+                verdict_state = "insufficient_evidence"
+
+            cv["verdict_state"] = verdict_state
+            verdict_state_by_claim[claim_id] = verdict_state
+
+        recalculated = recompute_verified_score(claim_verdicts)
+        if recalculated is not None:
+            result["verified_score"] = recalculated
+
+    if conflict_detected:
+        explainability = result.get("explainability_score", -1.0)
+        if isinstance(explainability, (int, float)) and explainability >= 0:
+            result["explainability_score"] = apply_conflict_explainability_penalty(
+                float(explainability),
+            )
+
     if inp.progress_callback:
         await inp.progress_callback("finalizing")
 
@@ -152,6 +227,8 @@ async def run_evidence_flow(
             "type": anchor_claim.get("type", "core"),
             "importance": anchor_claim.get("importance", 1.0),
         }
+        if anchor_claim_id and anchor_claim_id in verdict_state_by_claim:
+            result["verdict_state"] = verdict_state_by_claim[anchor_claim_id]
 
     verified = result.get("verified_score", -1.0)
     if verified < 0:
