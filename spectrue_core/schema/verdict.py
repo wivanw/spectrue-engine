@@ -95,11 +95,23 @@ class ClaimVerdict(SchemaModel):
     status: VerdictStatus = VerdictStatus.AMBIGUOUS
     """Overall claim verdict."""
 
+    verdict: VerdictStatus = VerdictStatus.AMBIGUOUS
+    """Alias for status to match external contract."""
+
     verdict_state: VerdictState = VerdictState.INSUFFICIENT_EVIDENCE
     """Tier-dominant verdict state derived in code."""
 
     verdict_score: float = Field(default=0.5, ge=0.0, le=1.0)
     """Aggregated verification score."""
+
+    confidence: str = "low"
+    """Confidence label: low, medium, high."""
+
+    reasons_short: list[str] = Field(default_factory=list)
+    """Short bullet reasons for the verdict."""
+
+    reasons_expert: dict[str, Any] = Field(default_factory=dict)
+    """Expert-level evidence references and penalties."""
 
     # Per-assertion breakdown
     assertion_verdicts: list[AssertionVerdict] = Field(default_factory=list)

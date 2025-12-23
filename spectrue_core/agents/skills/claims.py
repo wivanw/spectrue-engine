@@ -224,6 +224,31 @@ class ClaimExtractionSkill(BaseSkill):
                     # M93: Claim structure + role
                     claim_role=claim_role,
                     structure=structure,
+                    # M97: Core data contract alignment
+                    verification_target=(
+                        metadata.verification_target.value
+                        if metadata
+                        else str(rc.get("verification_target", "reality")).lower()
+                    ),
+                    role=claim_role,
+                    temporality=rc.get("temporality"),
+                    locale_plan=rc.get("locale_plan")
+                    or (
+                        {
+                            "ui_locale": lang,
+                            "content_lang": lang,
+                            "context_lang": lang,
+                            "primary": metadata.search_locale_plan.primary,
+                            "fallbacks": metadata.search_locale_plan.fallback,
+                            "justification": "derived from claim metadata",
+                        }
+                        if metadata
+                        else None
+                    ),
+                    metadata_confidence=metadata.metadata_confidence.value if metadata else "medium",
+                    priority_score=rc.get("priority_score"),
+                    centrality=rc.get("centrality"),
+                    tension=rc.get("tension"),
                 )
                 
                 # Log strategy for debugging

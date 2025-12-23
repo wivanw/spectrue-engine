@@ -1,6 +1,7 @@
 from spectrue_core.verification.evidence_pack import (
     ArticleContext, Claim, ClaimMetrics, ConfidenceConstraints,
-    EvidenceMetrics, EvidencePack, SearchResult, AssertionMetrics
+    EvidenceItem, EvidenceMetrics, EvidencePack, EvidencePackStats,
+    SearchResult, AssertionMetrics
 )
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trace import Trace
@@ -329,6 +330,14 @@ def build_evidence_pack(
         if status == "outdated" and stance == "support":
             r["stance"] = "context"
             r["timeliness_excluded"] = True
+
+    # Enforce quote requirement for SUPPORT/REFUTE
+    for r in search_results:
+        stance = str(r.get("stance") or "").lower()
+        quote = r.get("quote_span") or r.get("contradiction_span") or r.get("key_snippet")
+        if stance in ("support", "refute", "contradict") and not quote:
+            r["stance"] = "context"
+            r["quote_missing"] = True
     
     # 4. Compute metrics
     unique_domains = len(seen_domains)
@@ -472,7 +481,92 @@ def build_evidence_pack(
     stance_failure = bool(search_results) and not scored_sources
     evidence_metrics["stance_failure"] = stance_failure
     
-    # 6. Build final Evidence Pack
+    # 6. Build canonical evidence items for deterministic scoring
+    evidence_items: list[EvidenceItem] = []
+    tiers_present: dict[str, int] = {}
+    support_count = 0
+    refute_count = 0
+    context_count = 0
+    outdated_count = 0
+    item_domains: set[str] = set()
+
+    for r in search_results:
+        tier = _normalize_tier(
+            tier_raw=r.get("evidence_tier"),
+            source_type=r.get("source_type"),
+        )
+        stance_raw = str(r.get("stance") or "").lower()
+        if stance_raw in ("support",):
+            stance = "SUPPORT"
+        elif stance_raw in ("refute", "contradict"):
+            stance = "REFUTE"
+        elif stance_raw in ("irrelevant",):
+            stance = "IRRELEVANT"
+        else:
+            stance = "CONTEXT"
+
+        quote = r.get("quote_span") or r.get("contradiction_span") or r.get("key_snippet")
+        if stance in ("SUPPORT", "REFUTE") and not quote:
+            stance = "CONTEXT"
+
+        temporal_flag = str(r.get("timeliness_status") or "unknown").lower()
+        if temporal_flag not in ("in_window", "outdated", "unknown"):
+            temporal_flag = "unknown"
+
+        source_type = str(r.get("source_type") or "").lower()
+        if source_type in ("primary", "official"):
+            channel = "authoritative"
+        elif source_type in ("independent_media",):
+            channel = "reputable_news"
+        elif source_type in ("social",):
+            channel = "social"
+        elif source_type in ("aggregator",):
+            channel = "local_media"
+        else:
+            channel = "low_reliability"
+
+        domain = r.get("domain") or get_registrable_domain(r.get("url") or "")
+        if domain:
+            item_domains.add(domain)
+
+        evidence_items.append(EvidenceItem(
+            url=r.get("url") or "",
+            domain=domain or "",
+            title=r.get("title"),
+            snippet=r.get("snippet"),
+            channel=channel,  # type: ignore[arg-type]
+            tier=tier,  # type: ignore[arg-type]
+            tier_reason=None,
+            claim_id=r.get("claim_id") or "c1",
+            stance=stance,  # type: ignore[arg-type]
+            quote=quote,
+            relevance=float(r.get("relevance_score", 0.0) or 0.0),
+            published_at=r.get("published_at"),
+            temporal_flag=temporal_flag,  # type: ignore[arg-type]
+            fetched=r.get("content_status") == "available",
+            raw_text_chars=len(r.get("content_excerpt") or ""),
+        ))
+
+        tiers_present[tier] = tiers_present.get(tier, 0) + 1
+        if stance == "SUPPORT":
+            support_count += 1
+        elif stance == "REFUTE":
+            refute_count += 1
+        elif stance == "CONTEXT":
+            context_count += 1
+        if temporal_flag == "outdated":
+            outdated_count += 1
+
+    stats = EvidencePackStats(
+        domain_diversity=len(item_domains),
+        tiers_present=tiers_present,
+        support_count=support_count,
+        refute_count=refute_count,
+        context_count=context_count,
+        outdated_ratio=(outdated_count / len(evidence_items)) if evidence_items else 0.0,
+    )
+
+    # 7. Build final Evidence Pack
     pack = EvidencePack(
         article=article_context,
         original_fact=fact,
@@ -483,6 +577,11 @@ def build_evidence_pack(
         context_sources=context_sources, # M78.1: For transparency/UX
         metrics=evidence_metrics,
         constraints=constraints,
+        claim_id=(claims[0].get("id") if claims else "c1"),
+        items=evidence_items,
+        stats=stats,
+        global_cap=global_cap,
+        cap_reasons=cap_reasons,
     )
     
     Trace.event("evidence_pack.built", {

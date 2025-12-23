@@ -82,6 +82,24 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
             if not isinstance(rc, dict):
                 continue
 
+            raw_conf = rc.get("confidence")
+            if isinstance(raw_conf, str):
+                confidence_label = raw_conf.lower().strip()
+            elif isinstance(rc.get("confidence_label"), str):
+                confidence_label = str(rc.get("confidence_label")).lower().strip()
+            else:
+                confidence_label = "low"
+            if confidence_label not in ("low", "medium", "high"):
+                confidence_label = "low"
+
+            reasons_short = rc.get("reasons_short", [])
+            if not isinstance(reasons_short, list):
+                reasons_short = []
+
+            reasons_expert = rc.get("reasons_expert", {})
+            if not isinstance(reasons_expert, dict):
+                reasons_expert = {}
+
             assertion_verdicts: list[AssertionVerdict] = []
             raw_assertions = rc.get("assertion_verdicts", [])
 
@@ -116,6 +134,7 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
                 ClaimVerdict(
                     claim_id=rc.get("claim_id", ""),
                     status=parse_status(rc.get("status", "")),
+                    verdict=parse_status(rc.get("verdict", rc.get("status", ""))),
                     verdict_state=parse_state(rc.get("verdict_state")),
                     verdict_score=safe_score(rc.get("verdict_score"), default=-1.0),
                     assertion_verdicts=assertion_verdicts,
@@ -124,6 +143,9 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
                     fact_assertions_total=fact_total,
                     reason=rc.get("reason", ""),
                     key_evidence=rc.get("key_evidence", []),
+                    confidence=confidence_label,
+                    reasons_short=reasons_short,
+                    reasons_expert=reasons_expert,
                 )
             )
 

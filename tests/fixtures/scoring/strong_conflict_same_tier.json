@@ -1,0 +1,47 @@
+{
+  "claim_id": "c1",
+  "claim": {
+    "id": "c1",
+    "text": "The company reported a 15% revenue increase in Q2.",
+    "verification_target": "reality",
+    "type": "atomic",
+    "role": "core",
+    "check_worthiness": 0.8,
+    "metadata_confidence": "high"
+  },
+  "evidence_pack": {
+    "claim_id": "c1",
+    "items": [
+      {
+        "url": "https://news.example.com/report",
+        "domain": "example.com",
+        "channel": "reputable_news",
+        "tier": "B",
+        "stance": "SUPPORT",
+        "quote": "Revenue increased by 15% in Q2.",
+        "relevance": 0.9,
+        "temporal_flag": "in_window"
+      },
+      {
+        "url": "https://news.example.org/analysis",
+        "domain": "example.org",
+        "channel": "reputable_news",
+        "tier": "B",
+        "stance": "REFUTE",
+        "quote": "The company reported a decline, not an increase.",
+        "relevance": 0.9,
+        "temporal_flag": "in_window"
+      }
+    ],
+    "stats": {
+      "domain_diversity": 2,
+      "tiers_present": {
+        "B": 2
+      },
+      "support_count": 1,
+      "refute_count": 1,
+      "context_count": 0,
+      "outdated_ratio": 0.0
+    }
+  }
+}

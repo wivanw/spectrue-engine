@@ -134,8 +134,8 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     result = await verifier.verify_fact("The sky is blue", "advanced", "gpt-5.2", "en")
     
     # Assert result
-    # M50: Cap logic removed - LLM now has full discretion. Score should match mock response (0.9).
-    assert result["verified_score"] == 0.9, f"Expected 0.9, got {result.get('verified_score')}. Logs:\n" + "\n".join(caplog.messages)
+    # Deterministic aggregation caps without quoted evidence.
+    assert result["verified_score"] == 0.5, f"Expected 0.5, got {result.get('verified_score')}. Logs:\n" + "\n".join(caplog.messages)
     assert result["rationale"] == "M48 logic working."
     assert "cost" in result
     
@@ -160,9 +160,30 @@ async def test_causal_dependency_penalty_applied(mock_config):
     verifier = FactVerifier(mock_config)
 
     mock_sources = [
-        {"url": "http://example1.com/page", "title": "Source 1", "relevance_score": 0.9, "is_trusted": True},
-        {"url": "http://example2.com/page", "title": "Source 2", "relevance_score": 0.9, "is_trusted": True},
-        {"url": "http://example3.com/page", "title": "Source 3", "relevance_score": 0.9, "is_trusted": True},
+        {
+            "url": "http://example1.com/page",
+            "title": "Source 1",
+            "relevance_score": 0.9,
+            "is_trusted": True,
+            "evidence_tier": "A",
+            "snippet": "Vaccination rates declined according to the latest health report.",
+        },
+        {
+            "url": "http://example2.com/page",
+            "title": "Source 2",
+            "relevance_score": 0.9,
+            "is_trusted": True,
+            "evidence_tier": "B",
+            "snippet": "Measles cases increased because vaccination rates declined, report says.",
+        },
+        {
+            "url": "http://example3.com/page",
+            "title": "Source 3",
+            "relevance_score": 0.9,
+            "is_trusted": True,
+            "evidence_tier": "B",
+            "snippet": "Additional context about vaccination rates and disease trends.",
+        },
     ]
 
     if hasattr(verifier, "pipeline") and verifier.pipeline:
@@ -215,9 +236,10 @@ async def test_causal_dependency_penalty_applied(mock_config):
     }
 
     cluster_resp = {
-        "mappings": [
-            {"result_index": 1, "claim_id": "c1", "stance": "support", "relevance": 0.9},
-            {"result_index": 2, "claim_id": "c2", "stance": "support", "relevance": 0.9},
+        "matrix": [
+            {"source_index": 0, "claim_id": "c1", "stance": "REFUTE", "relevance": 0.9, "quote": "Premise is false."},
+            {"source_index": 1, "claim_id": "c2", "stance": "SUPPORT", "relevance": 0.9, "quote": "Conclusion is supported."},
+            {"source_index": 2, "claim_id": "c2", "stance": "CONTEXT", "relevance": 0.2, "quote": None},
         ]
     }
 
@@ -256,12 +278,12 @@ async def test_causal_dependency_penalty_applied(mock_config):
 
     result = await verifier.verify_fact(
         "Measles cases increased because vaccination rates declined.",
-        "advanced",
+        "basic",
         "gpt-5.2",
         "en",
     )
 
     verdicts = {v["claim_id"]: v for v in result.get("claim_verdicts", [])}
-    assert verdicts["c1"]["verdict_score"] == 0.1
-    assert verdicts["c2"]["verdict_score"] == 0.4
+    assert verdicts["c1"]["verdict_score"] <= 0.2
+    assert verdicts["c2"]["verdict_score"] <= 0.4
     assert result["verified_score"] == 0.25

@@ -14,10 +14,7 @@ from spectrue_core.verification.temporal import (
 )
 from spectrue_core.verification.source_utils import canonicalize_sources
 from spectrue_core.verification.trusted_sources import is_social_platform
-from spectrue_core.verification.evidence import (
-    is_strong_tier,
-    strongest_tiers_by_claim,
-)
+from spectrue_core.verification.scoring_aggregation import aggregate_claim_verdict
 from spectrue_core.verification.rgba_aggregation import (
     apply_dependency_penalties,
     apply_conflict_explainability_penalty,
@@ -32,18 +29,6 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str], Awaitable[None]]
 
-REFUTE_CAP = 0.2
-SUPPORT_FLOOR = 0.8
-CONFLICT_MIN = 0.35
-CONFLICT_MAX = 0.65
-
-
-def _state_from_score(score: float) -> str:
-    if score <= REFUTE_CAP:
-        return "refuted"
-    if score >= SUPPORT_FLOOR:
-        return "supported"
-    return "insufficient_evidence"
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,7 +197,6 @@ async def run_evidence_flow(
     conflict_detected = False
     verdict_state_by_claim: dict[str, str] = {}
     if isinstance(claim_verdicts, list):
-        tier_summary = strongest_tiers_by_claim(pack.get("scored_sources", []))
         for cv in claim_verdicts:
             if not isinstance(cv, dict):
                 continue
@@ -221,41 +205,43 @@ async def run_evidence_flow(
                 claim_id = str(claims[0].get("id") or "c1")
                 cv["claim_id"] = claim_id
 
-            tiers = tier_summary.get(claim_id, {})
-            support_tier = tiers.get("support_tier")
-            refute_tier = tiers.get("refute_tier")
+            claim_obj = next((c for c in (claims or []) if c.get("id") == claim_id), None)
+            temporality = claim_obj.get("temporality") if isinstance(claim_obj, dict) else None
 
-            score = float(cv.get("verdict_score", 0.5) or 0.5)
+            agg = aggregate_claim_verdict(
+                pack,
+                policy={},
+                claim_id=claim_id,
+                temporality=temporality if isinstance(temporality, dict) else None,
+            )
 
-            if support_tier is None and refute_tier is None:
-                verdict_state = _state_from_score(score)
-                cv["verdict_state"] = verdict_state
-                verdict_state_by_claim[claim_id] = verdict_state
-                continue
+            cv["verdict_score"] = agg.get("verdict_score", 0.5)
+            cv["verdict"] = agg.get("verdict", "ambiguous")
+            cv["status"] = agg.get("verdict", "ambiguous")
+            cv["reasons_expert"] = agg.get("reasons_expert", {})
+            cv["reasons_short"] = cv.get("reasons_short", []) or []
 
-            support_strong = is_strong_tier(support_tier)
-            refute_strong = is_strong_tier(refute_tier)
-
-            if support_strong and refute_strong:
-                conflict_detected = True
-                score = min(max(score, CONFLICT_MIN), CONFLICT_MAX)
-                cv["verdict_score"] = score
-                verdict_state = "conflicted"
-            elif refute_strong:
-                cv["verdict_score"] = min(score, REFUTE_CAP)
-                verdict_state = "refuted"
-            elif support_strong:
-                cv["verdict_score"] = max(score, SUPPORT_FLOOR)
+            verdict_state = "insufficient_evidence"
+            if cv["verdict"] == "verified":
                 verdict_state = "supported"
-            else:
-                verdict_state = "insufficient_evidence"
+            elif cv["verdict"] == "refuted":
+                verdict_state = "refuted"
+            elif cv["verdict"] == "ambiguous":
+                verdict_state = "conflicted"
 
             cv["verdict_state"] = verdict_state
             verdict_state_by_claim[claim_id] = verdict_state
 
+            conflict_detected = conflict_detected or bool(
+                (cv.get("reasons_expert") or {}).get("conflict")
+            )
+
+        changed = apply_dependency_penalties(claim_verdicts, claims)
         recalculated = recompute_verified_score(claim_verdicts)
         if recalculated is not None:
             result["verified_score"] = recalculated
+        if changed:
+            result["dependency_penalty_applied"] = True
 
     if conflict_detected:
         explainability = result.get("explainability_score", -1.0)

@@ -34,6 +34,62 @@ class LocalePolicy:
 
 
 @dataclass(frozen=True)
+class LocaleStrategy:
+    use_primary_first: bool = True
+    allow_fallbacks: bool = True
+    fallback_on: str = "insufficient"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "use_primary_first": self.use_primary_first,
+            "allow_fallbacks": self.allow_fallbacks,
+            "fallback_on": self.fallback_on,
+        }
+
+
+@dataclass(frozen=True)
+class SufficiencyThresholds:
+    min_support_quotes: int = 1
+    min_domain_diversity: int = 1
+    min_tier: str = "C"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "min_support_quotes": self.min_support_quotes,
+            "min_domain_diversity": self.min_domain_diversity,
+            "min_tier": self.min_tier,
+        }
+
+
+@dataclass(frozen=True)
+class BudgetPolicy:
+    cost_ceiling_credits: float = 0.0
+    per_hop_cost: float = 0.0
+    per_fetch_cost: float = 0.0
+    per_llm_pass_cost: float = 0.0
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "cost_ceiling_credits": self.cost_ceiling_credits,
+            "per_hop_cost": self.per_hop_cost,
+            "per_fetch_cost": self.per_fetch_cost,
+            "per_llm_pass_cost": self.per_llm_pass_cost,
+        }
+
+
+@dataclass(frozen=True)
+class SafetyKnobs:
+    max_confidence_without_quotes: float = 0.5
+    forbid_context_as_support: bool = True
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "max_confidence_without_quotes": self.max_confidence_without_quotes,
+            "forbid_context_as_support": self.forbid_context_as_support,
+        }
+
+
+@dataclass(frozen=True)
 class StopConditions:
     stop_on_sufficiency: bool = True
     max_hops: int | None = None
@@ -55,8 +111,12 @@ class SearchPolicyProfile:
     channels_allowed: list[EvidenceChannel] = field(default_factory=list)
     use_policy_by_channel: dict[str, UsePolicy] = field(default_factory=dict)
     locale_policy: LocalePolicy = field(default_factory=LocalePolicy)
+    locale_strategy: LocaleStrategy = field(default_factory=LocaleStrategy)
     quality_thresholds: QualityThresholds = field(default_factory=QualityThresholds)
     stop_conditions: StopConditions = field(default_factory=StopConditions)
+    sufficiency_thresholds: SufficiencyThresholds = field(default_factory=SufficiencyThresholds)
+    budget_policy: BudgetPolicy = field(default_factory=BudgetPolicy)
+    safety_knobs: SafetyKnobs = field(default_factory=SafetyKnobs)
 
     def __post_init__(self) -> None:
         if self.stop_conditions.max_hops is None:
@@ -81,8 +141,12 @@ class SearchPolicyProfile:
                 k: v.value for k, v in (self.use_policy_by_channel or {}).items()
             },
             "locale_policy": self.locale_policy.to_dict(),
+            "locale_strategy": self.locale_strategy.to_dict(),
             "quality_thresholds": self.quality_thresholds.to_dict(),
             "stop_conditions": self.stop_conditions.to_dict(),
+            "sufficiency_thresholds": self.sufficiency_thresholds.to_dict(),
+            "budget_policy": self.budget_policy.to_dict(),
+            "safety_knobs": self.safety_knobs.to_dict(),
         }
 
 

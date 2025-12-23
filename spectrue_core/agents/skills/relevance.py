@@ -27,7 +27,10 @@ class RelevanceSkill(BaseSkill):
             
         # Prepare context for LLM
         # Use top 3 claims
-        claims_text = "\n".join([f"- {c.get('text', '')}" for c in claims[:3]])
+        claims_text = "\n".join([
+            f"- {c.get('normalized_text') or c.get('text', '')}"
+            for c in claims[:3]
+        ])
         
         # Use top 3 search snippets
         snippets_text = "\n".join([

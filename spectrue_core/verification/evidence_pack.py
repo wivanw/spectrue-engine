@@ -18,7 +18,20 @@ from typing import Literal, TypedDict, Any
 # Claim Types
 # ─────────────────────────────────────────────────────────────────────────────
 
-ClaimType = Literal["core", "numeric", "timeline", "attribution", "sidefact"]
+ClaimType = Literal[
+    "core",
+    "numeric",
+    "timeline",
+    "attribution",
+    "sidefact",
+    "atomic",
+    "causal",
+    "comparative",
+    "policy_plan",
+    "definition",
+    "future",
+    "existence",
+]
 """
 Claim types for multi-claim extraction:
 - core: Main factual assertion
@@ -31,17 +44,29 @@ Claim types for multi-claim extraction:
 ClaimRoleType = Literal[
     "core", "support", "context", "meta", "attribution", "aggregated", "subclaim",
     "thesis", "background", "example", "hedge", "counterclaim",
+    "peripheral",
 ]
 """Role of a claim in document structure."""
 
 ClaimStructureType = Literal[
     "empirical_numeric", "event", "causal", "attribution",
     "definition", "policy_plan", "forecast", "meta_scientific",
+    "comparative", "future", "existence",
 ]
 """Logical structure type of a claim."""
 
 Stance = Literal["support", "contradict", "neutral", "unclear", "context", "irrelevant", "mention"]
 """Position of a source relative to a claim. Upper/Lowercase handled by runtime normalization."""
+
+VerificationTarget = Literal["reality", "attribution", "existence", "none"]
+
+EvidenceChannel = Literal["authoritative", "reputable_news", "local_media", "social", "low_reliability"]
+
+EvidenceStance = Literal["SUPPORT", "REFUTE", "CONTEXT", "IRRELEVANT"]
+
+ConfidenceLevel = Literal["low", "medium", "high"]
+
+VerdictLabel = Literal["verified", "refuted", "ambiguous", "insufficient"]
 
 SourceType = Literal[
     "primary",        # Original source (official website, press release)
@@ -158,9 +183,27 @@ class ArticleContext(TypedDict, total=False):
 # Claim Structure
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Claim Structure
-# ─────────────────────────────────────────────────────────────────────────────
+class TemporalAnchor(TypedDict, total=False):
+    """Normalized time window for a claim."""
+    window: dict[str, str | None]
+    granularity: Literal["day", "month", "year", "relative", "unknown"]
+    claim_time_label: Literal["past", "present", "future", "atemporal"] | None
+    is_time_sensitive: bool
+
+
+class LocalePlan(TypedDict, total=False):
+    """Locale preferences for UI, content, and context."""
+    ui_locale: str | None
+    content_lang: str | None
+    context_lang: str | None
+    primary: str
+    fallbacks: list[str]
+    justification: str
+
+
+class EvidenceNeed(TypedDict, total=False):
+    """Claim-level signal for evidence depth needs."""
+    level: str | None
 
 class ClaimAnchor(TypedDict, total=False):
     """M74: Tracks claim's position in original text."""
@@ -228,6 +271,15 @@ class Claim(TypedDict, total=False):
     # Optional: When present, enables metadata-driven routing
     # Import: from spectrue_core.schema.claim_metadata import ClaimMetadata
     metadata: Any  # ClaimMetadata | None (use Any to avoid circular import)
+    # M97: Core data contract alignment
+    verification_target: VerificationTarget
+    role: ClaimRoleType
+    temporality: TemporalAnchor
+    locale_plan: LocalePlan
+    metadata_confidence: ConfidenceLevel
+    priority_score: float
+    centrality: float
+    tension: float
 
 
 
@@ -267,6 +319,39 @@ class SearchResult(TypedDict, total=False):
     # M70: Content availability status
     content_status: Literal["available", "unavailable", "blocked", "error"]
     unavailable_reason: str | None  # Why content couldn't be retrieved
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Evidence Item (Canonical Scoring Contract)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EvidenceItem(TypedDict, total=False):
+    """Canonical evidence item for deterministic scoring."""
+    url: str
+    domain: str
+    title: str | None
+    snippet: str | None
+    channel: EvidenceChannel
+    tier: Literal["A", "B", "C", "D"]
+    tier_reason: str | None
+    claim_id: str | None
+    stance: EvidenceStance
+    quote: str | None
+    relevance: float
+    published_at: str | None
+    temporal_flag: Literal["in_window", "outdated", "unknown"]
+    fetched: bool | None
+    raw_text_chars: int | None
+
+
+class EvidencePackStats(TypedDict, total=False):
+    """Aggregate statistics for an evidence pack."""
+    domain_diversity: int
+    tiers_present: dict[str, int]
+    support_count: int
+    refute_count: int
+    context_count: int
+    outdated_ratio: float
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -368,6 +453,13 @@ class EvidencePack(TypedDict, total=False):
     # Constraints (code-enforced)
     constraints: ConfidenceConstraints
 
+    # M97: Canonical scoring inputs
+    claim_id: str
+    items: list[EvidenceItem]
+    stats: EvidencePackStats
+    global_cap: float
+    cap_reasons: list[str]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LLM Scoring Output
@@ -376,13 +468,17 @@ class EvidencePack(TypedDict, total=False):
 class ClaimVerdict(TypedDict, total=False):
     """Verdict for a single claim from LLM."""
     claim_id: str
-    verdict: Literal["verified", "refuted", "unverified", "partially_verified"]
+    verdict: VerdictLabel | Literal["unverified", "partially_verified"]
     evidence_strength: float        # 0-1, how well supported
     source_independence: float      # 0-1, are sources independent?
     attribution_integrity: float    # 0-1, is attribution correct?
-    confidence: float               # 0-1, overall confidence (must respect cap)
+    confidence: float | ConfidenceLevel  # 0-1 legacy or label
     rationale: str                  # Explanation with source citations
     key_evidence: list[str]         # URLs of key supporting sources
+    verdict_score: float
+    confidence_label: ConfidenceLevel
+    reasons_short: list[str]
+    reasons_expert: dict[str, Any]
 
 
 class LLMScoringOutput(TypedDict, total=False):

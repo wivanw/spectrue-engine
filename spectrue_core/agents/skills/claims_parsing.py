@@ -49,6 +49,13 @@ CLAIM_TYPE_MAPPING = {
     "timeline": ClaimType.TIMELINE,
     "attribution": ClaimType.ATTRIBUTION,
     "sidefact": ClaimType.OTHER,
+    "atomic": ClaimType.OTHER,
+    "causal": ClaimType.OTHER,
+    "comparative": ClaimType.COMPARISON,
+    "policy_plan": ClaimType.POLICY,
+    "definition": ClaimType.DEFINITION,
+    "future": ClaimType.TIMELINE,
+    "existence": ClaimType.OTHER,
 }
 
 
@@ -82,4 +89,3 @@ def normalize_claim_category(category: str | None, *, default: str = "FACTUAL") 
     v = (category or default) or default
     allowed = {"FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"}
     return v if v in allowed else default
-

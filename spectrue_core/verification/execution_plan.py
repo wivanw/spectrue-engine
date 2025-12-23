@@ -331,6 +331,33 @@ class ExecutionPlan:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
+class RetrievalHop:
+    """A single retrieval hop for a claim."""
+    hop_index: int
+    query: str
+    locale: str
+    channels: list[EvidenceChannel]
+    search_depth: str
+    results_count: int
+    decision: str
+    decision_reason: str
+    cost_credits: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "hop_index": self.hop_index,
+            "query": self.query,
+            "locale": self.locale,
+            "channels": [c.value for c in self.channels],
+            "search_depth": self.search_depth,
+            "results_count": self.results_count,
+            "decision": self.decision,
+            "decision_reason": self.decision_reason,
+            "cost_credits": self.cost_credits,
+        }
+
+
+@dataclass
 class ClaimExecutionState:
     """
     Runtime state for a claim's execution.
@@ -343,13 +370,19 @@ class ClaimExecutionState:
     
     phases_completed: list[str] = field(default_factory=list)
     """Phase IDs that have completed."""
-    
+
+    hops: list[RetrievalHop] = field(default_factory=list)
+    """Retrieval hops executed for this claim."""
+
     is_sufficient: bool = False
     """True if sufficient evidence found (stop early)."""
-    
+
     sufficiency_reason: str = ""
     """Why sufficiency was reached (for logging)."""
-    
+
+    stop_reason: str | None = None
+    """Optional stop reason for execution termination."""
+
     phases_skipped: list[str] = field(default_factory=list)
     """Phase IDs skipped due to sufficiency."""
     
@@ -365,6 +398,7 @@ class ClaimExecutionState:
         """Mark as sufficient and record skipped phases."""
         self.is_sufficient = True
         self.sufficiency_reason = reason
+        self.stop_reason = "sufficiency_met"
         self.phases_skipped = remaining_phases
     
     def to_dict(self) -> dict[str, Any]:
@@ -372,8 +406,10 @@ class ClaimExecutionState:
         return {
             "claim_id": self.claim_id,
             "phases_completed": self.phases_completed,
+            "hops": [hop.to_dict() for hop in self.hops],
             "is_sufficient": self.is_sufficient,
             "sufficiency_reason": self.sufficiency_reason,
+            "stop_reason": self.stop_reason,
             "phases_skipped": self.phases_skipped,
             "error": self.error,
         }
