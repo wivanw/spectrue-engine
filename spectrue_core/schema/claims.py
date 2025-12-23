@@ -22,6 +22,7 @@ from typing import Any
 from pydantic import Field
 
 from spectrue_core.schema.serialization import SchemaModel
+from spectrue_core.schema.claim_metadata import ClaimRole
 
 
 # Type aliases to avoid shadowing
@@ -99,6 +100,34 @@ class ClaimType(str, Enum):
     """Facts about a person."""
 
     OTHER = "other"
+
+
+class ClaimStructureType(str, Enum):
+    """Logical structure type of the claim."""
+    EMPIRICAL_NUMERIC = "empirical_numeric"
+    EVENT = "event"
+    CAUSAL = "causal"
+    ATTRIBUTION = "attribution"
+    DEFINITION = "definition"
+    POLICY_PLAN = "policy_plan"
+    FORECAST = "forecast"
+    META_SCIENTIFIC = "meta_scientific"
+    OTHER = "other"
+
+
+class ClaimStructure(SchemaModel):
+    """Structured representation of claim logic."""
+    type: ClaimStructureType = ClaimStructureType.OTHER
+    """Structure type for the claim."""
+
+    premises: list[str] = Field(default_factory=list)
+    """Premises that support the conclusion."""
+
+    conclusion: str | None = None
+    """Conclusion derived from premises."""
+
+    dependencies: list[str] = Field(default_factory=list)
+    """Claim IDs that must be verified before this claim."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -313,6 +342,12 @@ class ClaimUnit(SchemaModel):
 
     claim_type: ClaimType = ClaimType.OTHER
     """Type of claim: event, attribution, numeric, etc."""
+
+    claim_role: ClaimRole = ClaimRole.CORE
+    """Role of this claim in document structure."""
+
+    structure: ClaimStructure | None = None
+    """Optional logical structure (premises/conclusion/dependencies)."""
 
     # Subject-Predicate-Object structure
     subject: str | None = None

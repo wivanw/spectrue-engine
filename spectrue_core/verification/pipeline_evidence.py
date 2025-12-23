@@ -8,6 +8,10 @@ import logging
 
 from spectrue_core.verification.source_utils import canonicalize_sources
 from spectrue_core.verification.trusted_sources import is_social_platform
+from spectrue_core.verification.rgba_aggregation import (
+    apply_dependency_penalties,
+    recompute_verified_score,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +118,15 @@ async def run_evidence_flow(
         await inp.progress_callback("score_evidence")
 
     result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
+
+    # M93: Apply dependency penalties after scoring
+    claim_verdicts = result.get("claim_verdicts")
+    if isinstance(claim_verdicts, list):
+        changed = apply_dependency_penalties(claim_verdicts, claims)
+        if changed:
+            recalculated = recompute_verified_score(claim_verdicts)
+            if recalculated is not None:
+                result["verified_score"] = recalculated
 
     if inp.progress_callback:
         await inp.progress_callback("finalizing")

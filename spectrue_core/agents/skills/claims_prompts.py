@@ -70,17 +70,16 @@ For each claim, provide orchestration metadata:
    → DEFAULT to verification_target="attribution", NOT "reality"!
 
 2. **claim_role** (STRICT LIMITS):
-   - **"core"**: Central claim of the article. **MAXIMUM 2 per article!**
-   - **"support"**: Evidence supporting a core claim.
-   - **"context"**: Background info (not a fact to verify).
-   - **"attribution"**: Quote attribution (what someone said).
-   - **"meta"**: Info about the article/source itself.
-   - **"aggregated"**: Summary from multiple sources.
-   - **"subclaim"**: Subordinate detail.
+   - **"thesis"**: Main thesis or conclusion. **MAXIMUM 2 per article!**
+   - **"support"**: Evidence supporting a thesis claim.
+   - **"background"**: Background context (explain-only).
+   - **"example"**: Illustrative example for another claim.
+   - **"hedge"**: Qualified/uncertain statement ("may", "might").
+   - **"counterclaim"**: Opposing or rebuttal claim.
    
    ⚠️ ROLE DISTRIBUTION RULE:
-   For a 5-claim article: max 2 "core", rest must be "support"/"context"/"attribution".
-   If ALL claims are "core", you are doing it WRONG!
+   For a 5-claim article: max 2 "thesis", rest must be "support"/"background"/"example"/"hedge"/"counterclaim".
+   If ALL claims are "thesis", you are doing it WRONG!
 
 3. **search_locale_plan**:
    - primary: Main search language ("en" for science, article language for local news)
@@ -99,6 +98,14 @@ For each claim, provide orchestration metadata:
    
    ⚠️ CONFIDENCE RULE: Interview quotes = "medium" (no primary source), NOT "high"!
 
+## STEP 1.7: CLAIM STRUCTURE (M93)
+For each claim, provide a `structure` object:
+- **type**: empirical_numeric | event | causal | attribution | definition | policy_plan | forecast | meta_scientific
+- **premises**: list of premise statements (can be empty)
+- **conclusion**: the conclusion statement (usually the main claim text)
+- **dependencies**: list of claim IDs (e.g., ["c1", "c3"]) that must be verified first
+
+Only add dependencies when the conclusion logically depends on other claims.
 
 ## STEP 2: THINK LIKE A SEARCH STRATEGIST (Chain of Thought)
 For each **FACTUAL** claim, REASON about:
@@ -171,7 +178,13 @@ Also assign:
       "check_worthiness": 0.9,
       "harm_potential": 3,
       "verification_target": "reality",
-      "claim_role": "core",
+      "claim_role": "thesis",
+      "structure": {{
+        "type": "policy_plan",
+        "premises": ["Policy X targets imports from China"],
+        "conclusion": "Trump announced tariffs on China in 2025",
+        "dependencies": ["c2"]
+      }},
       "search_locale_plan": {{
         "primary": "en",
         "fallback": ["en"]
@@ -209,10 +222,16 @@ Also assign:
 {{
   "text": "Водоліям сьогодні пощастить у фінансах",
   "verification_target": "none",
-  "claim_role": "context",
+  "claim_role": "background",
   "claim_category": "OPINION",
   "satire_likelihood": 0.0,
   "check_worthiness": 0.1,
+  "structure": {{
+    "type": "forecast",
+    "premises": [],
+    "conclusion": "Водоліям сьогодні пощастить у фінансах",
+    "dependencies": []
+  }},
   "search_locale_plan": {{"primary": "en", "fallback": []}},
   "retrieval_policy": {{"channels_allowed": []}},
   "metadata_confidence": "high",
@@ -232,7 +251,7 @@ For an article about Kate Winslet interview:
       "normalized_text": "Kate Winslet said paparazzi followed her after Titanic",
       "type": "attribution",
       "verification_target": "attribution",
-      "claim_role": "core",
+      "claim_role": "thesis",
       "metadata_confidence": "medium",
       "check_worthiness": 0.7,
       "search_queries": ["Kate Winslet interview paparazzi Titanic"]
@@ -317,6 +336,13 @@ Time zone references are NOT location claims!
       "id": "c1",
       "domain": "sports|science|politics|health|finance|news|other",
       "claim_type": "event|attribution|numeric|definition|timeline|other",
+      "claim_role": "thesis|support|background|example|hedge|counterclaim",
+      "structure": {{
+        "type": "empirical_numeric|event|causal|attribution|definition|policy_plan|forecast|meta_scientific",
+        "premises": [],
+        "conclusion": "Short conclusion sentence",
+        "dependencies": []
+      }},
       
       "subject": "Anthony Joshua",
       "predicate": "scheduled_fight_against", 

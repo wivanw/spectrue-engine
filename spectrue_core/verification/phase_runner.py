@@ -148,109 +148,112 @@ class PhaseRunner:
                 claims=claims,
                 execution_plan=execution_plan,
             )
-        
+
+        dependency_layers = self._get_dependency_layers(claims)
+
         # Determine phase order (collect all unique phases in order)
         phase_order = ["A-light", "A", "A-origin", "B", "C", "D"]
         
         for phase_id in phase_order:
-            # Get claims that need this phase (and aren't already sufficient)
-            claims_for_phase = self._get_claims_needing_phase(
-                claims=claims,
-                execution_plan=execution_plan,
-                phase_id=phase_id,
-            )
-            
-            if not claims_for_phase:
-                continue
-            
-            logger.info(
-                "[M80] Running Phase %s for %d claim(s)",
-                phase_id, len(claims_for_phase)
-            )
-            
-            # Emit progress: searching_phase_X
-            if self.progress_callback:
-                status_key = f"searching_phase_{phase_id.lower().replace('-', '_')}"
-                try:
-                    await self.progress_callback(status_key)
-                except Exception as e:
-                    logger.warning("[M80] Progress callback failed: %s", e)
-            
-            # Execute phase in parallel for all eligible claims
-            phase_results = await self._run_phase_parallel(
-                claims=claims_for_phase,
-                execution_plan=execution_plan,
-                phase_id=phase_id,
-            )
-            
-            # Process results and check sufficiency
-            for result in phase_results:
-                claim_id = result.claim_id
-                claim_state = self.execution_state.get_or_create(claim_id)
+            for layer in dependency_layers:
+                # Get claims that need this phase (and aren't already sufficient)
+                claims_for_phase = self._get_claims_needing_phase(
+                    claims=layer,
+                    execution_plan=execution_plan,
+                    phase_id=phase_id,
+                )
                 
-                if result.error:
-                    claim_state.error = result.error
-                    Trace.event("phase.error", {
-                        "claim_id": claim_id,
-                        "phase_id": result.phase_id,
-                        "error": result.error,
-                    })
+                if not claims_for_phase:
                     continue
                 
-                # Accumulate sources
-                evidence[claim_id].extend(result.sources)
-                claim_state.mark_completed(result.phase_id)
+                logger.info(
+                    "[M80] Running Phase %s for %d claim(s)",
+                    phase_id, len(claims_for_phase)
+                )
                 
-                # T20: Trace phase completion
-                Trace.event("phase.completed", {
-                    "claim_id": claim_id,
-                    "phase_id": result.phase_id,
-                    "results_count": len(result.sources),
-                    "total_sources": len(evidence[claim_id]),
-                })
+                # Emit progress: searching_phase_X
+                if self.progress_callback:
+                    status_key = f"searching_phase_{phase_id.lower().replace('-', '_')}"
+                    try:
+                        await self.progress_callback(status_key)
+                    except Exception as e:
+                        logger.warning("[M80] Progress callback failed: %s", e)
                 
-                # Check sufficiency
-                claim = claim_map.get(claim_id)
-                if claim and isinstance(claim, dict):
-                    sufficiency = check_sufficiency_for_claim(
-                        claim=claim,
-                        sources=evidence[claim_id],
-                    )
+                # Execute phase in parallel for all eligible claims
+                phase_results = await self._run_phase_parallel(
+                    claims=claims_for_phase,
+                    execution_plan=execution_plan,
+                    phase_id=phase_id,
+                )
+                
+                # Process results and check sufficiency
+                for result in phase_results:
+                    claim_id = result.claim_id
+                    claim_state = self.execution_state.get_or_create(claim_id)
                     
-                    if sufficiency.status == SufficiencyStatus.SUFFICIENT:
-                        # Determine remaining phases for this claim
-                        claim_phases = execution_plan.get_phases(claim_id)
-                        current_idx = next(
-                            (i for i, p in enumerate(claim_phases) if p.phase_id == result.phase_id),
-                            -1
-                        )
-                        remaining = [p.phase_id for p in claim_phases[current_idx + 1:]]
-                        
-                        claim_state.mark_sufficient(
-                            reason=sufficiency.reason,
-                            remaining_phases=remaining,
-                        )
-                        
-                        # T20: Trace early exit
-                        Trace.event("phase.stopped", {
+                    if result.error:
+                        claim_state.error = result.error
+                        Trace.event("phase.error", {
                             "claim_id": claim_id,
                             "phase_id": result.phase_id,
-                            "reason": "sufficiency_met",
-                            "rule": sufficiency.rule_matched,
-                            "skipped_phases": remaining,
+                            "error": result.error,
                         })
-                        
-                        logger.info(
-                            "[M80] Claim %s sufficient after Phase %s (rule=%s), skipping %s",
-                            claim_id, result.phase_id, sufficiency.rule_matched, remaining
+                        continue
+                    
+                    # Accumulate sources
+                    evidence[claim_id].extend(result.sources)
+                    claim_state.mark_completed(result.phase_id)
+                    
+                    # T20: Trace phase completion
+                    Trace.event("phase.completed", {
+                        "claim_id": claim_id,
+                        "phase_id": result.phase_id,
+                        "results_count": len(result.sources),
+                        "total_sources": len(evidence[claim_id]),
+                    })
+                    
+                    # Check sufficiency
+                    claim = claim_map.get(claim_id)
+                    if claim and isinstance(claim, dict):
+                        sufficiency = check_sufficiency_for_claim(
+                            claim=claim,
+                            sources=evidence[claim_id],
                         )
-                    else:
-                        # T20: Trace continue
-                        Trace.event("phase.continue", {
-                            "claim_id": claim_id,
-                            "phase_id": result.phase_id,
-                            "reason": sufficiency.reason,
-                        })
+                        
+                        if sufficiency.status == SufficiencyStatus.SUFFICIENT:
+                            # Determine remaining phases for this claim
+                            claim_phases = execution_plan.get_phases(claim_id)
+                            current_idx = next(
+                                (i for i, p in enumerate(claim_phases) if p.phase_id == result.phase_id),
+                                -1
+                            )
+                            remaining = [p.phase_id for p in claim_phases[current_idx + 1:]]
+                            
+                            claim_state.mark_sufficient(
+                                reason=sufficiency.reason,
+                                remaining_phases=remaining,
+                            )
+                            
+                            # T20: Trace early exit
+                            Trace.event("phase.stopped", {
+                                "claim_id": claim_id,
+                                "phase_id": result.phase_id,
+                                "reason": "sufficiency_met",
+                                "rule": sufficiency.rule_matched,
+                                "skipped_phases": remaining,
+                            })
+                            
+                            logger.info(
+                                "[M80] Claim %s sufficient after Phase %s (rule=%s), skipping %s",
+                                claim_id, result.phase_id, sufficiency.rule_matched, remaining
+                            )
+                        else:
+                            # T20: Trace continue
+                            Trace.event("phase.continue", {
+                                "claim_id": claim_id,
+                                "phase_id": result.phase_id,
+                                "reason": sufficiency.reason,
+                            })
         
         return evidence
 
@@ -264,44 +267,129 @@ class PhaseRunner:
         Run bounded retrieval loops per claim (replaces linear waterfall).
         """
         evidence: dict[str, list[dict]] = {c.get("id"): [] for c in claims}
-        tasks = []
-        for claim in claims:
-            claim_id = claim.get("id")
-            phases = execution_plan.get_phases(claim_id)
-            tasks.append(self._run_retrieval_loop_for_claim(claim, phases))
+        dependency_layers = self._get_dependency_layers(claims)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for layer in dependency_layers:
+            tasks = []
+            for claim in layer:
+                claim_id = claim.get("id")
+                phases = execution_plan.get_phases(claim_id)
+                tasks.append(self._run_retrieval_loop_for_claim(claim, phases))
 
-        for idx, result in enumerate(results):
-            claim_id = claims[idx].get("id", "unknown")
-            state = self.execution_state.get_or_create(claim_id)
-            if isinstance(result, Exception):
-                state.error = str(result)
-                continue
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            sources, hops, decision, reason = result
-            evidence[claim_id] = sources
+            for idx, result in enumerate(results):
+                claim_id = layer[idx].get("id", "unknown")
+                state = self.execution_state.get_or_create(claim_id)
+                if isinstance(result, Exception):
+                    state.error = str(result)
+                    continue
 
-            for hop in hops:
-                if hop.phase_id:
-                    state.mark_completed(hop.phase_id)
+                sources, hops, decision, reason = result
+                evidence[claim_id] = sources
 
-            if decision == SufficiencyDecision.ENOUGH:
-                remaining = []
-                if hops:
-                    last_phase = hops[-1].phase_id
-                    claim_phases = execution_plan.get_phases(claim_id)
-                    if last_phase:
-                        last_idx = next(
-                            (i for i, p in enumerate(claim_phases) if p.phase_id == last_phase),
-                            -1,
-                        )
-                        remaining = [p.phase_id for p in claim_phases[last_idx + 1:]]
-                state.mark_sufficient(reason=reason, remaining_phases=remaining)
-            elif decision == SufficiencyDecision.STOP:
-                state.sufficiency_reason = reason
+                for hop in hops:
+                    if hop.phase_id:
+                        state.mark_completed(hop.phase_id)
+
+                if decision == SufficiencyDecision.ENOUGH:
+                    remaining = []
+                    if hops:
+                        last_phase = hops[-1].phase_id
+                        claim_phases = execution_plan.get_phases(claim_id)
+                        if last_phase:
+                            last_idx = next(
+                                (i for i, p in enumerate(claim_phases) if p.phase_id == last_phase),
+                                -1,
+                            )
+                            remaining = [p.phase_id for p in claim_phases[last_idx + 1:]]
+                    state.mark_sufficient(reason=reason, remaining_phases=remaining)
+                elif decision == SufficiencyDecision.STOP:
+                    state.sufficiency_reason = reason
 
         return evidence
+
+    def _get_dependency_layers(self, claims: list[Claim]) -> list[list[Claim]]:
+        """
+        M93: Build dependency-ordered layers of claims.
+
+        Claims with dependencies are placed after their prerequisites.
+        Claims without dependencies remain in the first available layer.
+        """
+        claim_map: dict[str, Claim] = {}
+        claim_order: list[str] = []
+        no_id_claims: list[Claim] = []
+
+        for claim in claims:
+            claim_id = claim.get("id")
+            if not claim_id:
+                no_id_claims.append(claim)
+                continue
+            claim_map[claim_id] = claim
+            claim_order.append(claim_id)
+
+        deps_by_id: dict[str, list[str]] = {cid: [] for cid in claim_order}
+        has_deps = False
+        for cid in claim_order:
+            claim = claim_map.get(cid, {})
+            structure = claim.get("structure")
+            if not isinstance(structure, dict):
+                continue
+            deps_raw = structure.get("dependencies", [])
+            if not isinstance(deps_raw, list):
+                continue
+            deps = [
+                d for d in deps_raw
+                if isinstance(d, str) and d in claim_map and d != cid
+            ]
+            if deps:
+                has_deps = True
+            deps_by_id[cid] = deps
+
+        if not has_deps:
+            return [claims]
+
+        indegree: dict[str, int] = {cid: 0 for cid in claim_order}
+        outgoing: dict[str, list[str]] = {cid: [] for cid in claim_order}
+        for cid, deps in deps_by_id.items():
+            for dep in deps:
+                outgoing.setdefault(dep, []).append(cid)
+                indegree[cid] += 1
+
+        layers: list[list[Claim]] = []
+        visited: set[str] = set()
+        available = [cid for cid in claim_order if indegree[cid] == 0]
+
+        while available:
+            layer_ids = [cid for cid in claim_order if cid in available]
+            layer_claims = [claim_map[cid] for cid in layer_ids]
+            layers.append(layer_claims)
+
+            for cid in layer_ids:
+                visited.add(cid)
+                for nxt in outgoing.get(cid, []):
+                    indegree[nxt] -= 1
+
+            available = [
+                cid for cid in claim_order
+                if cid not in visited and indegree[cid] == 0
+            ]
+
+        if len(visited) != len(claim_order):
+            remaining = [cid for cid in claim_order if cid not in visited]
+            logger.warning(
+                "[M93] Dependency cycle detected among claims: %s",
+                ", ".join(remaining),
+            )
+            layers.append([claim_map[cid] for cid in remaining])
+
+        if no_id_claims:
+            if not layers:
+                layers = [list(no_id_claims)]
+            else:
+                layers[0].extend(no_id_claims)
+
+        return layers
 
     async def _run_retrieval_loop_for_claim(
         self,

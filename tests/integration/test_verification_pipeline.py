@@ -150,3 +150,118 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     # We returned 5 sources.
     assert "stance_clustering" in kinds, f"Kinds found: {kinds}. Logs:\n" + "\n".join(caplog.messages)
     assert "score_evidence" in kinds, f"Kinds found: {kinds}. Logs:\n" + "\n".join(caplog.messages)
+
+
+@pytest.mark.asyncio
+async def test_causal_dependency_penalty_applied(mock_config):
+    """
+    M93: If a premise is refuted, dependent conclusions are capped.
+    """
+    verifier = FactVerifier(mock_config)
+
+    mock_sources = [
+        {"url": "http://example1.com/page", "title": "Source 1", "relevance_score": 0.9, "is_trusted": True},
+        {"url": "http://example2.com/page", "title": "Source 2", "relevance_score": 0.9, "is_trusted": True},
+        {"url": "http://example3.com/page", "title": "Source 3", "relevance_score": 0.9, "is_trusted": True},
+    ]
+
+    if hasattr(verifier, "pipeline") and verifier.pipeline:
+        target_web = verifier.pipeline.search_mgr.web_tool
+        target_oracle = verifier.pipeline.search_mgr.oracle_tool
+    else:
+        target_web = verifier.search_tool
+        target_oracle = verifier.google_tool
+
+    target_web.search = AsyncMock(return_value=("Context", mock_sources))
+    target_oracle.search = AsyncMock(return_value=None)
+
+    verifier.agent.llm_client.call_json = AsyncMock()
+
+    claim_resp = {
+        "claims": [
+            {
+                "text": "Vaccination rates declined.",
+                "normalized_text": "Vaccination rates declined.",
+                "type": "core",
+                "importance": 0.9,
+                "check_worthiness": 0.9,
+                "topic_group": "Health",
+                "claim_role": "thesis",
+                "structure": {
+                    "type": "event",
+                    "premises": [],
+                    "conclusion": "Vaccination rates declined.",
+                    "dependencies": [],
+                },
+                "search_queries": ["vaccination rates decline"],
+            },
+            {
+                "text": "Measles cases increased because vaccination rates declined.",
+                "normalized_text": "Measles cases increased because vaccination rates declined.",
+                "type": "core",
+                "importance": 0.8,
+                "check_worthiness": 0.8,
+                "topic_group": "Health",
+                "claim_role": "thesis",
+                "structure": {
+                    "type": "causal",
+                    "premises": ["Vaccination rates declined."],
+                    "conclusion": "Measles cases increased because vaccination rates declined.",
+                    "dependencies": ["c1"],
+                },
+                "search_queries": ["measles cases increased"],
+            },
+        ]
+    }
+
+    cluster_resp = {
+        "mappings": [
+            {"result_index": 1, "claim_id": "c1", "stance": "support", "relevance": 0.9},
+            {"result_index": 2, "claim_id": "c2", "stance": "support", "relevance": 0.9},
+        ]
+    }
+
+    score_resp = {
+        "claim_verdicts": [
+            {
+                "claim_id": "c1",
+                "verdict_score": 0.1,
+                "verdict": "refuted",
+                "reason": "Premise is refuted",
+            },
+            {
+                "claim_id": "c2",
+                "verdict_score": 0.9,
+                "verdict": "verified",
+                "reason": "Conclusion appears supported",
+            },
+        ],
+        "danger_score": 0.0,
+        "rationale": "Premise refuted.",
+        "explainability_score": 0.6,
+        "style_score": 0.7,
+    }
+
+    async def side_effect(*args, **kwargs):
+        kind = kwargs.get("trace_kind")
+        if kind == "claim_extraction":
+            return claim_resp
+        if kind == "stance_clustering":
+            return cluster_resp
+        if kind == "score_evidence":
+            return score_resp
+        return {}
+
+    verifier.agent.llm_client.call_json.side_effect = side_effect
+
+    result = await verifier.verify_fact(
+        "Measles cases increased because vaccination rates declined.",
+        "advanced",
+        "gpt-5.2",
+        "en",
+    )
+
+    verdicts = {v["claim_id"]: v for v in result.get("claim_verdicts", [])}
+    assert verdicts["c1"]["verdict_score"] == 0.1
+    assert verdicts["c2"]["verdict_score"] == 0.4
+    assert result["verified_score"] == 0.25

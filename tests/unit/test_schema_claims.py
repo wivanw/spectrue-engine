@@ -11,6 +11,9 @@ from spectrue_core.schema import (
     Assertion,
     Dimension,
     ClaimType,
+    ClaimStructure,
+    ClaimStructureType,
+    ClaimRole,
     EventQualifiers,
     LocationQualifier,
 )
@@ -52,6 +55,27 @@ class TestClaimUnitSchema:
         assert len(claim.get_fact_assertions()) == 2
         assert claim.subject == "Joshua"
         assert claim.object == "Paul"
+
+    def test_claim_structure_and_role(self):
+        """Test claim structure and role fields."""
+        structure = ClaimStructure(
+            type=ClaimStructureType.CAUSAL,
+            premises=["Vaccination rates declined"],
+            conclusion="Measles cases increased",
+            dependencies=["c1"],
+        )
+        claim = ClaimUnit(
+            id="c2",
+            claim_type=ClaimType.OTHER,
+            claim_role=ClaimRole.THESIS,
+            structure=structure,
+            assertions=[],
+        )
+
+        assert claim.structure is not None
+        assert claim.structure.type == ClaimStructureType.CAUSAL
+        assert claim.structure.dependencies == ["c1"]
+        assert claim.claim_role == ClaimRole.THESIS
 
 
 class TestTimeReferenceDistinction:

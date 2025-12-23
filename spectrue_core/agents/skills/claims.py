@@ -31,6 +31,9 @@ from spectrue_core.schema import (
     EvidenceRequirementSpec,
     EventQualifiers,
     LocationQualifier,
+    ClaimStructure,
+    ClaimStructureType,
+    ClaimRole,
 )
 
 # M80: Import claim metadata types
@@ -164,6 +167,17 @@ class ClaimExtractionSkill(BaseSkill):
 
                 # M62+: Extract search strategy if present
                 strategy = rc.get("search_strategy", {})
+
+                # M93: Parse claim structure (premises/conclusion/dependencies)
+                structure = self._parse_claim_structure(
+                    rc,
+                    fallback_conclusion=normalized or rc.get("text", ""),
+                )
+                claim_role = (
+                    metadata.claim_role.value
+                    if metadata
+                    else str(rc.get("claim_role", "core")).lower()
+                )
                 
                 # M78+M80: Satire/Non-verifiable Routing - clear search data
                 search_queries = rc.get("search_queries", [])
@@ -207,6 +221,9 @@ class ClaimExtractionSkill(BaseSkill):
                     satire_likelihood=satire_likelihood,
                     # M80: Orchestration Metadata
                     metadata=metadata,
+                    # M93: Claim structure + role
+                    claim_role=claim_role,
+                    structure=structure,
                 )
                 
                 # Log strategy for debugging
@@ -414,11 +431,37 @@ class ClaimExtractionSkill(BaseSkill):
                         domain = cd
                         break
 
+                # Parse claim role
+                raw_role = rc.get("claim_role", "")
+                try:
+                    claim_role = ClaimRole(str(raw_role).lower())
+                except ValueError:
+                    claim_role = ClaimRole.CORE
+
+                # Parse structure
+                structure_data = self._parse_claim_structure(
+                    rc,
+                    fallback_conclusion=rc.get("normalized_text", rc.get("text", "")),
+                )
+                structure = None
+                if structure_data:
+                    try:
+                        structure = ClaimStructure(
+                            type=ClaimStructureType(structure_data["type"]),
+                            premises=structure_data.get("premises", []),
+                            conclusion=structure_data.get("conclusion"),
+                            dependencies=structure_data.get("dependencies", []),
+                        )
+                    except ValueError:
+                        structure = None
+
                 # Create ClaimUnit
                 claim_unit = ClaimUnit(
                     id=claim_id,
                     domain=domain,
                     claim_type=claim_type,
+                    claim_role=claim_role,
+                    structure=structure,
                     subject=rc.get("subject"),
                     predicate=rc.get("predicate", ""),
                     object=rc.get("object"),
@@ -451,6 +494,17 @@ class ClaimExtractionSkill(BaseSkill):
                 "[M70] Extracted %d claims: %d FACT assertions, %d CONTEXT assertions",
                 len(claim_units), total_facts, total_context
             )
+
+            # M93: Filter dependencies to known claim IDs
+            known_ids = {c.id for c in claim_units}
+            for c in claim_units:
+                if not c.structure:
+                    continue
+                deps = [
+                    d for d in c.structure.dependencies
+                    if d in known_ids and d != c.id
+                ]
+                c.structure.dependencies = deps
 
             # Check oracle from query_candidates
             check_oracle = any(
@@ -528,6 +582,7 @@ class ClaimExtractionSkill(BaseSkill):
         
         # Group by normalized_text (lowercased, stripped)
         seen: dict[str, Claim] = {}
+        key_to_ids: dict[str, list[str]] = {}
         
         for c in claims:
             # Normalize key: lowercase, strip, collapse whitespace
@@ -542,6 +597,9 @@ class ClaimExtractionSkill(BaseSkill):
                 bucket = c["anchor"]["char_start"] // 200
                 key = f"{base_key}|loc:{bucket}"
             
+            if c.get("id"):
+                key_to_ids.setdefault(key, []).append(c["id"])
+
             if key in seen:
                 # Merge: take max importance
                 existing = seen[key]
@@ -569,10 +627,36 @@ class ClaimExtractionSkill(BaseSkill):
             else:
                 seen[key] = c
         
-        # Re-assign IDs (c1, c2, ...)
-        deduped = list(seen.values())
-        for idx, c in enumerate(deduped):
-            c["id"] = f"c{idx + 1}"
+        # Re-assign IDs (c1, c2, ...) and build old->new mapping
+        deduped_items = list(seen.items())
+        deduped: list[Claim] = []
+        id_map: dict[str, str] = {}
+        for idx, (key, c) in enumerate(deduped_items):
+            new_id = f"c{idx + 1}"
+            old_ids = key_to_ids.get(key, [])
+            for old_id in old_ids:
+                id_map[old_id] = new_id
+            c["id"] = new_id
+            deduped.append(c)
+
+        # Remap structure dependencies to new IDs
+        known_ids = {c.get("id") for c in deduped if c.get("id")}
+        for c in deduped:
+            structure = c.get("structure")
+            if not isinstance(structure, dict):
+                continue
+            deps = structure.get("dependencies", [])
+            if not isinstance(deps, list):
+                structure["dependencies"] = []
+                continue
+            remapped: list[str] = []
+            for dep in deps:
+                if not isinstance(dep, str):
+                    continue
+                new_dep = id_map.get(dep, dep)
+                if new_dep in known_ids and new_dep != c.get("id"):
+                    remapped.append(new_dep)
+            structure["dependencies"] = remapped
         
         # Log dedup stats
         if len(claims) != len(deduped):
@@ -605,6 +689,58 @@ class ClaimExtractionSkill(BaseSkill):
             claim_category=claim_category,
             satire_likelihood=satire_likelihood,
         )
+
+    def _parse_claim_structure(
+        self,
+        rc: dict,
+        *,
+        fallback_conclusion: str,
+    ) -> dict | None:
+        """
+        M93: Parse claim structure fields with safe fallback.
+
+        Returns None when structure is missing/invalid (atomic fallback).
+        """
+        raw = rc.get("structure")
+        if not isinstance(raw, dict):
+            return None
+
+        allowed_types = {
+            t.value for t in ClaimStructureType
+            if t != ClaimStructureType.OTHER
+        }
+
+        try:
+            raw_type = str(raw.get("type", "")).lower().strip()
+            if raw_type not in allowed_types:
+                return None
+
+            premises_raw = raw.get("premises", [])
+            premises = [
+                p.strip()
+                for p in premises_raw
+                if isinstance(p, str) and p.strip()
+            ]
+
+            conclusion = raw.get("conclusion")
+            if not isinstance(conclusion, str) or not conclusion.strip():
+                conclusion = fallback_conclusion
+
+            deps_raw = raw.get("dependencies", [])
+            dependencies = [
+                d.strip()
+                for d in deps_raw
+                if isinstance(d, str) and d.strip()
+            ]
+
+            return {
+                "type": raw_type,
+                "premises": premises,
+                "conclusion": conclusion,
+                "dependencies": dependencies,
+            }
+        except Exception:
+            return None
 
     def _trace_extracted_claims(self, claims: list[Claim]) -> None:
         """

@@ -28,6 +28,18 @@ Claim types for multi-claim extraction:
 - sidefact: Secondary supporting facts
 """
 
+ClaimRoleType = Literal[
+    "core", "support", "context", "meta", "attribution", "aggregated", "subclaim",
+    "thesis", "background", "example", "hedge", "counterclaim",
+]
+"""Role of a claim in document structure."""
+
+ClaimStructureType = Literal[
+    "empirical_numeric", "event", "causal", "attribution",
+    "definition", "policy_plan", "forecast", "meta_scientific",
+]
+"""Logical structure type of a claim."""
+
 Stance = Literal["support", "contradict", "neutral", "unclear", "context", "irrelevant", "mention"]
 """Position of a source relative to a claim. Upper/Lowercase handled by runtime normalization."""
 
@@ -167,6 +179,14 @@ class EvidenceRequirement(TypedDict, total=False):
     max_age_days: int | None        # Max acceptable source age
 
 
+class ClaimStructure(TypedDict, total=False):
+    """Structured representation of claim logic."""
+    type: ClaimStructureType
+    premises: list[str]
+    conclusion: str | None
+    dependencies: list[str]
+
+
 class Claim(TypedDict, total=False):
     """A single atomic claim extracted from the article."""
     id: str                         # Unique claim ID (c1, c2, ...)
@@ -201,6 +221,9 @@ class Claim(TypedDict, total=False):
     # M78: Claim Category (Satire Detection)
     claim_category: Literal["FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"]
     satire_likelihood: float  # 0.0-1.0, probability claim is satirical
+    # M93: Claim structure + role
+    claim_role: ClaimRoleType
+    structure: ClaimStructure
     # M80: Claim-Centric Orchestration Metadata
     # Optional: When present, enables metadata-driven routing
     # Import: from spectrue_core.schema.claim_metadata import ClaimMetadata
@@ -377,4 +400,3 @@ class LLMScoringOutput(TypedDict, total=False):
 
     # Mapping to existing RGBA (for backward compatibility)
     verified_score: float           # G channel (0-1)
-

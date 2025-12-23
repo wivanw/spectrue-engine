@@ -204,3 +204,94 @@ def claim_to_score(
         check_worthiness=check_worthiness,
         evidence_quality=evidence_quality,
     )
+
+
+def _safe_score(value: Any) -> float | None:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if score < 0.0 or score > 1.0:
+        return None
+    return score
+
+
+def recompute_verified_score(claim_verdicts: list[dict]) -> float | None:
+    """Recompute overall verified_score from claim verdicts."""
+    scores = []
+    for cv in claim_verdicts:
+        if not isinstance(cv, dict):
+            continue
+        score = _safe_score(cv.get("verdict_score"))
+        if score is not None:
+            scores.append(score)
+    if not scores:
+        return None
+    return sum(scores) / len(scores)
+
+
+def apply_dependency_penalties(
+    claim_verdicts: list[dict],
+    claims: list[dict],
+    *,
+    refute_threshold: float = 0.2,
+    cap_on_refute: float = 0.4,
+) -> bool:
+    """
+    M93: Propagate premise failures to dependent conclusions.
+
+    If any dependency is refuted (score <= refute_threshold),
+    cap the dependent claim's verdict_score to cap_on_refute.
+    """
+    if not claim_verdicts or not claims:
+        return False
+
+    verdict_by_id: dict[str, dict] = {}
+    for cv in claim_verdicts:
+        if not isinstance(cv, dict):
+            continue
+        cid = cv.get("claim_id")
+        if cid:
+            verdict_by_id[str(cid)] = cv
+
+    changed = False
+
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        claim_id = claim.get("id")
+        if not claim_id:
+            continue
+        structure = claim.get("structure")
+        if not isinstance(structure, dict):
+            continue
+        deps = structure.get("dependencies", [])
+        if not isinstance(deps, list) or not deps:
+            continue
+
+        refuted = False
+        for dep_id in deps:
+            dep_verdict = verdict_by_id.get(dep_id)
+            if not dep_verdict:
+                continue
+            dep_score = _safe_score(dep_verdict.get("verdict_score"))
+            if dep_score is not None and dep_score <= refute_threshold:
+                refuted = True
+                break
+
+        if not refuted:
+            continue
+
+        verdict = verdict_by_id.get(str(claim_id))
+        if not verdict:
+            continue
+        current_score = _safe_score(verdict.get("verdict_score"))
+        if current_score is None:
+            continue
+
+        if current_score > cap_on_refute:
+            verdict["verdict_score"] = cap_on_refute
+            verdict["dependency_penalty"] = "premise_refuted"
+            changed = True
+
+    return changed

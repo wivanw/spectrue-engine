@@ -57,6 +57,22 @@ class ClaimRole(str, Enum):
     SUBCLAIM = "subclaim"
     """Subordinate detail within a larger claim."""
 
+    # M93: Structured document roles
+    THESIS = "thesis"
+    """Main thesis or conclusion of the article."""
+
+    BACKGROUND = "background"
+    """Background context for the topic."""
+
+    EXAMPLE = "example"
+    """Illustrative example supporting another claim."""
+
+    HEDGE = "hedge"
+    """Hedged/qualified statement ("may", "might", "possibly")."""
+
+    COUNTERCLAIM = "counterclaim"
+    """Counterpoint or opposing claim."""
+
 
 class VerificationTarget(str, Enum):
     """
@@ -281,7 +297,7 @@ class ClaimMetadata:
     @property
     def is_explain_only(self) -> bool:
         """Check if claim is explain-only (doesn't affect RGBA)."""
-        return self.claim_role in {ClaimRole.CONTEXT, ClaimRole.META}
+        return self.claim_role in {ClaimRole.CONTEXT, ClaimRole.META, ClaimRole.BACKGROUND}
     
     @property
     def role_weight(self) -> float:
@@ -294,6 +310,11 @@ class ClaimMetadata:
             ClaimRole.SUBCLAIM: 0.5,
             ClaimRole.CONTEXT: 0.0,  # Explain-only
             ClaimRole.META: 0.0,      # Explain-only
+            ClaimRole.THESIS: 1.0,
+            ClaimRole.BACKGROUND: 0.0,  # Explain-only
+            ClaimRole.EXAMPLE: 0.5,
+            ClaimRole.HEDGE: 0.2,
+            ClaimRole.COUNTERCLAIM: 0.7,
         }
         # If verification_target is NONE, weight is 0 regardless of role
         if self.verification_target == VerificationTarget.NONE:

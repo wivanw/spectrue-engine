@@ -14,6 +14,8 @@ from spectrue_core.schema.claims import (
     VerificationScope,
     ClaimDomain,
     ClaimType,
+    ClaimStructureType,
+    ClaimStructure,
     Assertion,
     SourceSpan,
     EvidenceRequirementSpec,
@@ -80,6 +82,7 @@ from spectrue_core.schema.claim_metadata import (
 __all__ = [
     # M70: Claims
     "Dimension", "VerificationScope", "ClaimDomain", "ClaimType",
+    "ClaimStructureType", "ClaimStructure",
     "Assertion", "SourceSpan", "EvidenceRequirementSpec",
     "LocationQualifier", "EventRules", "BroadcastInfo", "EventQualifiers",
     "ClaimUnit",
@@ -99,4 +102,3 @@ __all__ = [
     "MetadataConfidence", "SearchLocalePlan", "RetrievalPolicy",
     "ClaimMetadata", "default_claim_metadata",
 ]
-
