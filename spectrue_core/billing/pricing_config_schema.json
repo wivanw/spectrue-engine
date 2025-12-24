@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Spectrue Credit Pricing Policy",
+  "type": "object",
+  "required": [
+    "usd_per_spectrue_credit",
+    "tavily_usd_per_credit",
+    "tavily_usd_multiplier",
+    "llm_safety_multiplier",
+    "rounding",
+    "llm_prices"
+  ],
+  "properties": {
+    "usd_per_spectrue_credit": {
+      "type": "number",
+      "minimum": 0
+    },
+    "tavily_usd_per_credit": {
+      "type": "number",
+      "minimum": 0
+    },
+    "tavily_usd_multiplier": {
+      "type": "number",
+      "minimum": 0
+    },
+    "llm_safety_multiplier": {
+      "type": "number",
+      "minimum": 0
+    },
+    "rounding": {
+      "type": "string",
+      "enum": ["ceil", "round_up_to_5", "bankers"]
+    },
+    "min_delta_to_show": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "emit_cost_deltas": {
+      "type": "boolean"
+    },
+    "llm_prices": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["usd_per_input_token", "usd_per_output_token"],
+        "properties": {
+          "usd_per_input_token": { "type": "number", "minimum": 0 },
+          "usd_per_output_token": { "type": "number", "minimum": 0 },
+          "usd_per_reasoning_token": { "type": ["number", "null"], "minimum": 0 }
+        }
+      }
+    }
+  }
+}

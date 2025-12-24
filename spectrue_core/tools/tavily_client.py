@@ -7,6 +7,7 @@ import random
 import httpx
 
 from spectrue_core.utils.trace import Trace
+from spectrue_core.billing.metering import TavilyMeter
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +26,12 @@ class TavilyClient:
         timeout_s: float = 12.0,
         concurrency: int = 8,
         global_exclude_domains: list[str] | None = None,
+        meter: TavilyMeter | None = None,
     ):
         self.api_key = api_key
         self._sem = asyncio.Semaphore(max(1, min(int(concurrency or 8), 16)))
         self._global_exclude_domains = list(global_exclude_domains or [])
+        self._meter = meter
 
         self._client = httpx.AsyncClient(
             timeout=float(timeout_s),
@@ -174,12 +177,12 @@ class TavilyClient:
                     payload=payload,
                     trace_event_prefix="tavily",
                 )
-                return r.json()
+                result = r.json()
                 
             except httpx.HTTPStatusError as e:
                 # Special handling for 400 Bad Request: retry with minimal payload
                 if e.response is not None and e.response.status_code == 400:
-                    return await self._handle_400_with_minimal_payload(
+                    result = await self._handle_400_with_minimal_payload(
                         url=url,
                         query=query,
                         depth=depth,
@@ -189,7 +192,15 @@ class TavilyClient:
                         original_payload=payload,
                         original_error=e,
                     )
-                raise
+                else:
+                    raise
+
+            if self._meter:
+                try:
+                    self._meter.record_search(response=result)
+                except Exception as exc:
+                    logger.warning("[Tavily] Metering failed: %s", exc)
+            return result
 
     async def _handle_400_with_minimal_payload(
         self,
@@ -265,5 +276,10 @@ class TavilyClient:
                 payload=payload,
                 trace_event_prefix="tavily.extract",
             )
-            return r.json()
-
+            result = r.json()
+            if self._meter:
+                try:
+                    self._meter.record_extract(response=result)
+                except Exception as exc:
+                    logger.warning("[Tavily] Metering failed: %s", exc)
+            return result

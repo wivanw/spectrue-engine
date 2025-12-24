@@ -4,7 +4,12 @@ from spectrue_core.verification.source_utils import canonicalize_source
 from spectrue_core.utils.text_processing import clean_article_text, normalize_search_query
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trust_utils import enrich_sources_with_trust
-from spectrue_core.utils.trace import Trace
+from spectrue_core.billing.cost_ledger import CostLedger
+from spectrue_core.billing.estimation import CostEstimator
+from spectrue_core.billing.metering import LLMMeter, TavilyMeter
+from spectrue_core.billing.progress_emitter import CostProgressEmitter
+from spectrue_core.billing.config_loader import load_pricing_policy
+from spectrue_core.utils.trace import Trace, current_trace_id
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 from spectrue_core.graph import ClaimGraphBuilder
@@ -104,157 +109,216 @@ class ValidationPipeline:
             },
         )
 
-        if progress_callback:
-            await progress_callback("analyzing_input")
+        policy = load_pricing_policy()
+        ledger = CostLedger(run_id=current_trace_id())
+        tavily_meter = TavilyMeter(ledger=ledger, policy=policy)
+        llm_meter = LLMMeter(ledger=ledger, policy=policy)
+        progress_emitter = CostProgressEmitter(
+            ledger=ledger,
+            min_delta_to_show=policy.min_delta_to_show,
+            emit_cost_deltas=policy.emit_cost_deltas,
+        )
+
+        prior_llm_meter = getattr(self.agent.llm_client, "_meter", None)
+        prior_tavily_meter = getattr(self.search_mgr.web_tool._tavily, "_meter", None)
+        self.agent.llm_client._meter = llm_meter
+        self.search_mgr.web_tool._tavily._meter = tavily_meter
+
+        async def _progress(stage: str) -> None:
+            if progress_callback:
+                await progress_callback(stage)
+            payload = progress_emitter.maybe_emit(stage=stage)
+            if payload:
+                Trace.progress_cost_delta(
+                    stage=payload.stage,
+                    delta=payload.delta,
+                    total=payload.total,
+                )
+
+        def _attach_cost_summary(payload: dict) -> dict:
+            payload["cost_summary"] = ledger.get_summary().to_dict()
+            return payload
+
+        await _progress("analyzing_input")
 
         self.search_mgr.reset_metrics()
 
-        prepared = await self._prepare_input(
-            fact=fact,
-            preloaded_context=preloaded_context,
-            preloaded_sources=preloaded_sources,
-            needs_cleaning=needs_cleaning,
-            source_url=source_url,
-            progress_callback=progress_callback,
-        )
-        fact = prepared.fact
-        original_fact = prepared.original_fact
-        final_context = prepared.final_context
-        final_sources = prepared.final_sources
-        inline_sources = prepared.inline_sources
-
-        claims, should_check_oracle, article_intent, fast_query = await self._extract_claims(
-            fact=fact,
-            lang=lang,
-            progress_callback=progress_callback,
-        )
-        anchor_claim_id = None
-        if claims:
-            core_claims = [c for c in claims if c.get("type") == "core"]
-            anchor_claim = (
-                max(core_claims, key=lambda c: c.get("importance", 0))
-                if core_claims
-                else claims[0]
+        try:
+            prepared = await self._prepare_input(
+                fact=fact,
+                preloaded_context=preloaded_context,
+                preloaded_sources=preloaded_sources,
+                needs_cleaning=needs_cleaning,
+                source_url=source_url,
+                progress_callback=_progress,
             )
-            anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
+            fact = prepared.fact
+            original_fact = prepared.original_fact
+            final_context = prepared.final_context
+            final_sources = prepared.final_sources
+            inline_sources = prepared.inline_sources
 
-        final_sources = await self._verify_inline_sources(
-            inline_sources=inline_sources,
-            claims=claims,
-            fact=fact,
-            final_sources=final_sources,
-            progress_callback=progress_callback,
-        )
-
-        oracle_flow = await run_oracle_flow(
-            self.search_mgr,
-            inp=OracleFlowInput(
-                original_fact=original_fact,
-                fast_query=fast_query,
-                lang=lang,
-                article_intent=article_intent,
-                should_check_oracle=should_check_oracle,
-                claims=claims,
-                oracle_check_intents=ORACLE_CHECK_INTENTS,
-                oracle_skip_intents=ORACLE_SKIP_INTENTS,
-                progress_callback=progress_callback,
-            ),
-            finalize_jackpot=lambda oracle_result: self._finalize_oracle_hybrid(
-                oracle_result,
-                original_fact,
-                lang=lang,
-                progress_callback=progress_callback,
-            ),
-            create_evidence_source=self._create_oracle_source,
-        )
-
-        if oracle_flow.early_result:
-            Trace.event("pipeline.run.completed", {"outcome": "oracle_early"})
-            return oracle_flow.early_result
-
-        if oracle_flow.evidence_source:
-            canonical = canonicalize_source(oracle_flow.evidence_source)
-            final_sources.append(canonical or oracle_flow.evidence_source)
-
-        await run_claim_graph_flow(
-            self._claim_graph,
-            claims=claims,
-            runtime_config=self.config.runtime,
-            progress_callback=progress_callback,
-        )
-
-        search_queries = self._select_diverse_queries(claims, max_queries=3, fact_fallback=fact)
-
-        search_state = await run_search_flow(
-            config=self.config,
-            search_mgr=self.search_mgr,
-            agent=self.agent,
-            can_add_search=self._can_add_search,
-            inp=SearchFlowInput(
+            claims, should_check_oracle, article_intent, fast_query = await self._extract_claims(
                 fact=fact,
                 lang=lang,
-                gpt_model=gpt_model,
-                search_type=search_type,
-                max_cost=max_cost,
-                article_intent=article_intent,
-                search_queries=search_queries,
+                progress_callback=_progress,
+            )
+            anchor_claim_id = None
+            if claims:
+                core_claims = [c for c in claims if c.get("type") == "core"]
+                anchor_claim = (
+                    max(core_claims, key=lambda c: c.get("importance", 0))
+                    if core_claims
+                    else claims[0]
+                )
+                anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
+
+            final_sources = await self._verify_inline_sources(
+                inline_sources=inline_sources,
                 claims=claims,
-                preloaded_context=preloaded_context,
-                progress_callback=progress_callback,
-            ),
-            state=SearchFlowState(
-                final_context=final_context,
+                fact=fact,
                 final_sources=final_sources,
-                preloaded_context=preloaded_context,
-                used_orchestration=False,
-            ),
-        )
-        final_context = search_state.final_context
-        final_sources = search_state.final_sources
+                progress_callback=_progress,
+            )
 
-        if getattr(search_state, "hard_reject", False):
-            reason = getattr(search_state, "reject_reason", "irrelevant")
-            Trace.event("pipeline.run.completed", {"outcome": "hard_reject", "reason": reason})
-            return {
-                "verified_score": 0.0,
-                "analysis": f"Search results are irrelevant to the claim: {reason}",
-                "rationale": reason,
-                "cost": self.search_mgr.calculate_cost(gpt_model, search_type),
-                "text": fact,
-                "search_meta": self.search_mgr.get_search_meta(),
-                "sources": [],
-            }
+            oracle_flow = await run_oracle_flow(
+                self.search_mgr,
+                inp=OracleFlowInput(
+                    original_fact=original_fact,
+                    fast_query=fast_query,
+                    lang=lang,
+                    article_intent=article_intent,
+                    should_check_oracle=should_check_oracle,
+                    claims=claims,
+                    oracle_check_intents=ORACLE_CHECK_INTENTS,
+                    oracle_skip_intents=ORACLE_SKIP_INTENTS,
+                    progress_callback=_progress,
+                ),
+                finalize_jackpot=lambda oracle_result: self._finalize_oracle_hybrid(
+                    oracle_result,
+                    original_fact,
+                    lang=lang,
+                    progress_callback=_progress,
+                ),
+                create_evidence_source=self._create_oracle_source,
+            )
 
-        result = await run_evidence_flow(
-            agent=self.agent,
-            search_mgr=self.search_mgr,
-            build_evidence_pack=build_evidence_pack,
-            enrich_sources_with_trust=enrich_sources_with_trust,
-            inp=EvidenceFlowInput(
-                fact=fact,
-                original_fact=original_fact,
-                lang=lang,
-                content_lang=content_lang,
-                gpt_model=gpt_model,
-                search_type=search_type,
-                progress_callback=progress_callback,
-            ),
-            claims=claims,
-            sources=final_sources,
+            if oracle_flow.early_result:
+                Trace.event("pipeline.run.completed", {"outcome": "oracle_early"})
+                return _attach_cost_summary(oracle_flow.early_result)
+
+            if oracle_flow.evidence_source:
+                canonical = canonicalize_source(oracle_flow.evidence_source)
+                final_sources.append(canonical or oracle_flow.evidence_source)
+
+            await run_claim_graph_flow(
+                self._claim_graph,
+                claims=claims,
+                runtime_config=self.config.runtime,
+                progress_callback=_progress,
+            )
+
+            search_queries = self._select_diverse_queries(claims, max_queries=3, fact_fallback=fact)
+
+            search_state = await run_search_flow(
+                config=self.config,
+                search_mgr=self.search_mgr,
+                agent=self.agent,
+                can_add_search=self._can_add_search,
+                inp=SearchFlowInput(
+                    fact=fact,
+                    lang=lang,
+                    gpt_model=gpt_model,
+                    search_type=search_type,
+                    max_cost=max_cost,
+                    article_intent=article_intent,
+                    search_queries=search_queries,
+                    claims=claims,
+                    preloaded_context=preloaded_context,
+                    progress_callback=_progress,
+                ),
+                state=SearchFlowState(
+                    final_context=final_context,
+                    final_sources=final_sources,
+                    preloaded_context=preloaded_context,
+                    used_orchestration=False,
+                ),
+            )
+            final_context = search_state.final_context
+            final_sources = search_state.final_sources
+
+            if getattr(search_state, "hard_reject", False):
+                reason = getattr(search_state, "reject_reason", "irrelevant")
+                Trace.event("pipeline.run.completed", {"outcome": "hard_reject", "reason": reason})
+                return _attach_cost_summary({
+                    "verified_score": 0.0,
+                    "analysis": f"Search results are irrelevant to the claim: {reason}",
+                    "rationale": reason,
+                    "cost": self.search_mgr.calculate_cost(gpt_model, search_type),
+                    "text": fact,
+                    "search_meta": self.search_mgr.get_search_meta(),
+                    "sources": [],
+                })
+
+            result = await run_evidence_flow(
+                agent=self.agent,
+                search_mgr=self.search_mgr,
+                build_evidence_pack=build_evidence_pack,
+                enrich_sources_with_trust=enrich_sources_with_trust,
+                inp=EvidenceFlowInput(
+                    fact=fact,
+                    original_fact=original_fact,
+                    lang=lang,
+                    content_lang=content_lang,
+                    gpt_model=gpt_model,
+                    search_type=search_type,
+                    progress_callback=_progress,
+                ),
+                claims=claims,
+                sources=final_sources,
+            )
+            locale_decisions = getattr(search_state, "locale_decisions", {}) or {}
+            locale_payload = None
+            if anchor_claim_id and anchor_claim_id in locale_decisions:
+                locale_payload = locale_decisions[anchor_claim_id]
+            elif len(locale_decisions) == 1:
+                locale_payload = next(iter(locale_decisions.values()))
+            if locale_payload:
+                result["locale_decision"] = locale_payload
+                audit = result.get("audit") or {}
+                audit["locale_decision"] = locale_payload
+                result["audit"] = audit
+            Trace.event("pipeline.run.completed", {"outcome": "scored"})
+            return _attach_cost_summary(result)
+        finally:
+            self.agent.llm_client._meter = prior_llm_meter
+            self.search_mgr.web_tool._tavily._meter = prior_tavily_meter
+
+    def estimate_cost_range(
+        self,
+        *,
+        claim_count: int,
+        search_count: int,
+        search_type: str,
+    ) -> dict:
+        policy = load_pricing_policy()
+        estimator = CostEstimator(
+            policy,
+            standard_model="gpt-5-nano-2025-08-07",
+            pro_model="gpt-5",
+            standard_search_credits=1,
+            pro_search_credits=2,
         )
-        locale_decisions = getattr(search_state, "locale_decisions", {}) or {}
-        locale_payload = None
-        if anchor_claim_id and anchor_claim_id in locale_decisions:
-            locale_payload = locale_decisions[anchor_claim_id]
-        elif len(locale_decisions) == 1:
-            locale_payload = next(iter(locale_decisions.values()))
-        if locale_payload:
-            result["locale_decision"] = locale_payload
-            audit = result.get("audit") or {}
-            audit["locale_decision"] = locale_payload
-            result["audit"] = audit
-        Trace.event("pipeline.run.completed", {"outcome": "scored"})
-        return result
+        # Treat advanced/pro searches as higher cost estimates.
+        if search_type in ("advanced", "pro"):
+            return estimator.estimate_range(
+                claim_count=claim_count,
+                search_count=max(1, search_count),
+            )
+        return estimator.estimate_range(
+            claim_count=claim_count,
+            search_count=max(1, search_count),
+        )
 
     async def _prepare_input(
         self,
