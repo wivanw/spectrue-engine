@@ -35,6 +35,7 @@ from typing import Literal
 
 from openai import AsyncOpenAI
 
+from spectrue_core.billing.metering import LLMMeter
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ class LLMClient:
         default_timeout: float = 30.0,
         max_retries: int = 3,
         cache_retention: CacheRetention = "in_memory", # M56: Fix default
+        meter: LLMMeter | None = None,
     ):
         """
         Initialize LLM client.
@@ -87,6 +89,7 @@ class LLMClient:
         self.max_retries = max_retries
         self.cache_retention = cache_retention
         self._sem = asyncio.Semaphore(8)  # Concurrency limit
+        self._meter = meter
     
     async def call(
         self,
@@ -100,6 +103,7 @@ class LLMClient:
         timeout: float | None = None,
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
+        stage: str | None = None,
     ) -> dict:
         """
         Execute LLM call using Responses API.
@@ -273,6 +277,19 @@ class LLMClient:
                     "cache_status": cache_status, 
                     "usage": usage,
                 }
+
+                if self._meter:
+                    try:
+                        self._meter.record_completion(
+                            model=response.model,
+                            stage=stage or trace_kind,
+                            usage=usage,
+                            input_text=input,
+                            output_text=content,
+                            instructions=instructions,
+                        )
+                    except Exception as exc:
+                        logger.warning("[LLMClient] Metering failed: %s", exc)
                 
                 Trace.event(f"{trace_kind}.response", {
                     "model": response.model,

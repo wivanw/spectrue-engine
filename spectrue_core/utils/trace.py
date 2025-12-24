@@ -270,6 +270,17 @@ class Trace:
         if not tid:
             return
 
+    @staticmethod
+    def progress_cost_delta(*, stage: str, delta: int, total: int) -> None:
+        Trace.event(
+            "progress.cost_delta",
+            {
+                "stage": stage,
+                "delta": int(delta),
+                "total": int(total),
+            },
+        )
+
         rec = {
             "ts_ms": _now_ms(),
             "trace_id": tid,
