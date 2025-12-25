@@ -17,14 +17,21 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_tavily_credits(response: dict[str, Any] | None) -> float:
+    """Extract Tavily credits used from response.
+    
+    Note: Tavily API doesn't always return credits in the response body.
+    Returns FALLBACK_CREDITS_PER_CALL (1.0) if credits not found.
+    """
+    FALLBACK_CREDITS_PER_CALL = 1.0  # Tavily charges 1 credit per search/extract
+    
     if not response:
-        return 0.0
+        return FALLBACK_CREDITS_PER_CALL  # Assume 1 credit was used
     for key in ("credits", "credits_used", "creditsUsed", "total_credits"):
         if key in response:
             try:
                 return float(response[key])
             except (TypeError, ValueError):
-                return 0.0
+                return FALLBACK_CREDITS_PER_CALL
     usage = response.get("usage")
     if isinstance(usage, dict):
         for key in ("credits", "credits_used", "total_credits"):
@@ -32,8 +39,8 @@ def _extract_tavily_credits(response: dict[str, Any] | None) -> float:
                 try:
                     return float(usage[key])
                 except (TypeError, ValueError):
-                    return 0.0
-    return 0.0
+                    return FALLBACK_CREDITS_PER_CALL
+    return FALLBACK_CREDITS_PER_CALL  # Fallback: 1 Tavily credit per call
 
 
 class TavilyMeter:
