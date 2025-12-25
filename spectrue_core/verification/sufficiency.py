@@ -404,26 +404,27 @@ def evidence_sufficiency(
         if isinstance(source, str):
             url = source
             has_quote = False
+            has_text_content = False
         else:
             url = source.get("url", "") or source.get("link", "")
-            # T003: Retrieval loop sufficiency now uses structural signals (content presence) 
-            # instead of semantic labels (stance) because stance is computed in a later stage.
-            # This prevents a forward-dependency bug where retrieval stops or continues 
-            # based on data that doesn't exist yet.
-            has_quote = bool(source.get("quote") or source.get("snippet") or source.get("content"))
+            # M103: Strict quote contract - only actual quote field counts as "having quote"
+            # for sufficiency rules that require "sources with quotes".
+            has_quote = bool(source.get("quote"))
+            # T003: has_text_content is used for evidence candidacy (can potentially be scored)
+            has_text_content = bool(source.get("quote") or source.get("snippet") or source.get("content"))
         
         if not url:
             continue
             
         domain = _extract_domain(url)
         
-        # Track quotes
+        # Track quotes (strict: only real quote field)
         if has_quote:
             has_quotes = True
         
         # Track candidate evidence (T003: replaces support_refute_count during retrieval)
-        # We assume sources with quotes/content are candidates for support/refutation.
-        if has_quote:
+        # Sources with any text content are candidates for support/refutation.
+        if has_text_content:
             context_only = False
             result.support_refute_count += 1
             if domain:

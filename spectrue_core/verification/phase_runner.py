@@ -328,6 +328,7 @@ class PhaseRunner:
                     state.mark_sufficient(reason=reason, remaining_phases=remaining)
                 elif decision == SufficiencyDecision.STOP:
                     state.sufficiency_reason = reason
+                    state.stop_reason = reason  # M103: Ensure stop_reason is set for terminal states
 
         return evidence
 
