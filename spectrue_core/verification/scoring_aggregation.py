@@ -14,7 +14,6 @@ for temporal mismatch and consistency gaps.
 
 from __future__ import annotations
 
-import logging
 import warnings
 from typing import Any
 
