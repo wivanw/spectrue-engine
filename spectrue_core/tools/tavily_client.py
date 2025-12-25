@@ -197,9 +197,16 @@ class TavilyClient:
 
             if self._meter:
                 try:
-                    self._meter.record_search(response=result)
+                    event = self._meter.record_search(response=result)
+                    Trace.event("tavily.metering.recorded", {
+                        "type": "search",
+                        "cost_credits": str(event.cost_credits),
+                    })
                 except Exception as exc:
                     logger.warning("[Tavily] Metering failed: %s", exc)
+                    Trace.event("tavily.metering.failed", {"error": str(exc)[:200]})
+            else:
+                Trace.event("tavily.metering.skipped", {"reason": "no_meter"})
             return result
 
     async def _handle_400_with_minimal_payload(
@@ -279,7 +286,14 @@ class TavilyClient:
             result = r.json()
             if self._meter:
                 try:
-                    self._meter.record_extract(response=result)
+                    event = self._meter.record_extract(response=result)
+                    Trace.event("tavily.metering.recorded", {
+                        "type": "extract",
+                        "cost_credits": str(event.cost_credits),
+                    })
                 except Exception as exc:
                     logger.warning("[Tavily] Metering failed: %s", exc)
+                    Trace.event("tavily.metering.failed", {"error": str(exc)[:200]})
+            else:
+                Trace.event("tavily.metering.skipped", {"reason": "no_meter"})
             return result
