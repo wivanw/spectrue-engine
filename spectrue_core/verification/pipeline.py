@@ -140,7 +140,13 @@ class ValidationPipeline:
                 )
 
         def _attach_cost_summary(payload: dict) -> dict:
-            payload["cost_summary"] = ledger.get_summary().to_dict()
+            summary = ledger.get_summary().to_dict()
+            payload["cost_summary"] = summary
+            Trace.event("cost_summary.attached", {
+                "total_credits": summary.get("total_credits"),
+                "total_usd": summary.get("total_usd"),
+                "event_count": len(summary.get("events", [])),
+            })
             return payload
 
         await _progress("analyzing_input")
