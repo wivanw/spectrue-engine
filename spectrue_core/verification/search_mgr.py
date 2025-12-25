@@ -93,6 +93,10 @@ class SearchManager:
     ) -> list[dict]:
         """
         EAL: Enrich snippet-only sources with content + quote candidates.
+        
+        M104: Two-phase approach:
+        1. If source has content but no quote, extract quote from existing content
+        2. If source has no content, fetch URL and extract quote
         """
         if not needs_evidence_acquisition_ladder(sources):
             return sources
@@ -106,9 +110,21 @@ class SearchManager:
         )
 
         for src in candidates:
+            # M104: If already has quote, skip entirely
+            if src.get("quote"):
+                continue
+            
+            # M104: If has content but no quote, extract quote from existing content
+            existing_content = src.get("content") or src.get("snippet")
+            if existing_content and len(existing_content) >= 50:
+                quotes = extract_quote_candidates(existing_content)
+                if quotes:
+                    src["quote"] = quotes[0]
+                    src["eal_enriched"] = True
+                continue  # Don't count as fetch, just extraction
+            
+            # If no content at all, fetch URL (up to max_fetches)
             if fetch_count >= max_fetches:
-                break
-            if src.get("quote") or src.get("content"):
                 continue
             url = src.get("url") or src.get("link")
             if not url:

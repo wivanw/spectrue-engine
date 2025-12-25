@@ -168,19 +168,19 @@ def merge_stance_passes(
 def needs_evidence_acquisition_ladder(sources: list[dict]) -> bool:
     """
     Determine whether to escalate via the Evidence Acquisition Ladder (EAL).
+    
+    M104: EAL is needed if any source lacks a `quote` field.
+    Content/snippet alone is not sufficient for evidence scoring.
     """
     if not sources:
         return False
-    has_quote = any(
-        isinstance(s, dict) and (s.get("quote") or s.get("snippet") or s.get("content"))
+    
+    # M104: EAL needed if ANY source lacks quote
+    any_missing_quote = any(
+        isinstance(s, dict) and not s.get("quote")
         for s in sources
     )
-    has_support_refute = any(
-        isinstance(s, dict)
-        and (s.get("stance", "") or "").lower() in ("support", "refute", "contradict")
-        for s in sources
-    )
-    return (not has_quote) or (not has_support_refute)
+    return any_missing_quote
 
 
 def extract_quote_candidates(content: str, max_quotes: int = 2) -> list[str]:
