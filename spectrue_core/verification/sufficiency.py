@@ -403,11 +403,13 @@ def evidence_sufficiency(
     for source in sources:
         if isinstance(source, str):
             url = source
-            stance = ""
             has_quote = False
         else:
             url = source.get("url", "") or source.get("link", "")
-            stance = (source.get("stance", "") or "").lower()
+            # T003: Retrieval loop sufficiency now uses structural signals (content presence) 
+            # instead of semantic labels (stance) because stance is computed in a later stage.
+            # This prevents a forward-dependency bug where retrieval stops or continues 
+            # based on data that doesn't exist yet.
             has_quote = bool(source.get("quote") or source.get("snippet") or source.get("content"))
         
         if not url:
@@ -419,8 +421,9 @@ def evidence_sufficiency(
         if has_quote:
             has_quotes = True
         
-        # Track stance
-        if stance in ("support", "refute", "contradict"):
+        # Track candidate evidence (T003: replaces support_refute_count during retrieval)
+        # We assume sources with quotes/content are candidates for support/refutation.
+        if has_quote:
             context_only = False
             result.support_refute_count += 1
             if domain:
@@ -441,12 +444,12 @@ def evidence_sufficiency(
         
         if tier == EvidenceChannel.AUTHORITATIVE:
             result.authoritative_count += 1
-            if stance in ("support", "refute", "contradict") and has_quote:
+            if has_quote:
                 authoritative_sources.append(source)
         
         elif tier in (EvidenceChannel.REPUTABLE_NEWS, EvidenceChannel.LOCAL_MEDIA):
             result.reputable_count += 1
-            if stance in ("support", "refute", "contradict") and has_quote:
+            if has_quote:
                 reputable_sources.append(source)
         
         # Check for origin source (attribution/existence claims).
@@ -501,7 +504,7 @@ def evidence_sufficiency(
     if lead_only_count > 0 and (lead_only_count == len(sources)):
         result.reason = "All sources are lead-only (social/low_reliability_web); no usable evidence chunks"
     elif context_only:
-        result.reason = "All sources have CONTEXT stance only, no SUPPORT/REFUTE"
+        result.reason = "All sources lack usable evidence chunks (quotes/content)"
     elif result.authoritative_count == 0 and result.reputable_count < 2:
         result.reason = f"Need authoritative or 2+ reputable sources. Have: {result.authoritative_count} auth, {result.reputable_count} reputable"
     elif not has_quotes:
@@ -612,7 +615,9 @@ def judge_sufficiency_for_claim(
             use_policy_by_channel=use_policy_by_channel,
         )
 
-        degraded = "lead-only" in sufficiency.reason.lower() or "context stance" in sufficiency.reason.lower()
+        # T003: Removed 'context stance' from degraded logic because we no longer 
+        # check for stance during retrieval. 'lack usable evidence' replaces it.
+        degraded = "lead-only" in sufficiency.reason.lower() or "lack usable evidence" in sufficiency.reason.lower()
 
         if sufficiency.status == SufficiencyStatus.SKIP:
             decision = SufficiencyDecision.STOP
