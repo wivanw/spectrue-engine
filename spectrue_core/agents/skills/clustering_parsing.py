@@ -65,15 +65,13 @@ def build_claims_lite(claims: list[Union[ClaimUnit, dict]]) -> list[dict]:
     M103/M105: Build lightweight claim dicts for stance clustering LLM.
     
     Includes search_query to help LLM match sources to claims.
-    Claims have queries in both search_queries and query_candidates fields.
+    Claims have queries in both search_queries (strings) and query_candidates (dicts).
     """
     claims_lite: list[dict] = []
     for c in (claims or []):
         if isinstance(c, ClaimUnit):
             assertions_lite = [{"key": a.key, "value": str(a.value)[:50]} for a in c.assertions]
-            # M105: Get search query from search_queries or query_candidates
-            search_queries = getattr(c, "search_queries", None) or getattr(c, "query_candidates", None) or []
-            search_query = search_queries[0] if search_queries else (c.normalized_text or c.text)[:100]
+            search_query = _extract_search_query(c)
             claims_lite.append(
                 {
                     "id": c.id,
@@ -83,9 +81,7 @@ def build_claims_lite(claims: list[Union[ClaimUnit, dict]]) -> list[dict]:
                 }
             )
         else:
-            # M105: Get search query from search_queries or query_candidates
-            search_queries = c.get("search_queries") or c.get("query_candidates") or []
-            search_query = search_queries[0] if search_queries else c.get("text", "")[:100]
+            search_query = _extract_search_query(c)
             claims_lite.append({
                 "id": c.get("id"),
                 "text": c.get("text"),
@@ -93,6 +89,44 @@ def build_claims_lite(claims: list[Union[ClaimUnit, dict]]) -> list[dict]:
                 "search_query": search_query,
             })
     return claims_lite
+
+
+def _extract_search_query(claim) -> str:
+    """
+    Extract best search query from claim.
+    
+    Priority:
+    1. search_queries[0] (plain strings)
+    2. query_candidates[0]["text"] (dicts with text key)
+    3. Fallback to claim text[:100]
+    """
+    # Try search_queries first (list of strings)
+    if hasattr(claim, "search_queries"):
+        sq = claim.search_queries
+    else:
+        sq = claim.get("search_queries") if isinstance(claim, dict) else []
+    
+    if sq and len(sq) > 0:
+        return sq[0] if isinstance(sq[0], str) else str(sq[0])
+    
+    # Try query_candidates (list of dicts with "text" key)
+    if hasattr(claim, "query_candidates"):
+        qc = claim.query_candidates
+    else:
+        qc = claim.get("query_candidates") if isinstance(claim, dict) else []
+    
+    if qc and len(qc) > 0:
+        first = qc[0]
+        if isinstance(first, dict):
+            return first.get("text", "")[:100]
+        return str(first)[:100]
+    
+    # Fallback to claim text
+    if hasattr(claim, "normalized_text"):
+        return (claim.normalized_text or claim.text or "")[:100]
+    if isinstance(claim, dict):
+        return claim.get("text", "")[:100]
+    return ""
 
 
 def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]]:
