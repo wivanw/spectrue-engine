@@ -201,6 +201,15 @@ The engine is designed to gracefully degrade:
 - **Search failure**: Continue to next phase, don't crash
 - **LLM failure**: Return partial results with reduced confidence
 
+### Resource Accounting
+
+The engine provides cost-aware execution with transparent measurement:
+- **Deterministic accounting**: All resource consumption tracked with `Decimal` precision
+- **Continuous measurement**: No intermediate rounding during a verification run
+- **Transparent finalization**: Callers receive exact fractional values and may apply settlement rules
+
+See [docs/RESOURCE_ACCOUNTING.md](docs/RESOURCE_ACCOUNTING.md) for full semantics.
+
 ## 📋 Requirements
 
 - **Python**: 3.10–3.12 (3.10+ supported)

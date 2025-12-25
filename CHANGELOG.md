@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Horoscopes and predictions now get `verification_target=none` and skip search
 - RGBA aggregation uses weighted average (context claims weight=0)
 - Improved fail-soft behavior in search pipeline
+- Docs: Clarified resource accounting and finalization semantics
+  - New document: `docs/RESOURCE_ACCOUNTING.md`
+  - Updated ARCHITECTURE.md with cost-aware execution principles
+  - Updated README.md design philosophy section
 
 ## [0.9.0] - 2024-12-21
 

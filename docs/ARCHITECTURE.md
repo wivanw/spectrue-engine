@@ -63,6 +63,19 @@ Not all claims are equal:
 - **Context claims**: Zero weight (horoscopes, predictions)
 - **Importance weighting**: Higher check_worthiness = more impact
 
+### 5. Cost-Aware Resource Accounting
+
+The engine measures all resource consumption during verification:
+
+- **Unified units**: Search and LLM operations normalized to SC (Spectrue Credit)
+- **Deterministic measurement**: Usage tracked with `Decimal` precision
+- **Continuous accounting**: No intermediate rounding during a run
+- **Transparent finalization**: Exact fractional values available to the caller
+
+> **Separation of concerns:** The engine measures resources; economic policy (pricing, billing) lives outside the engine.
+
+See [Resource Accounting](./RESOURCE_ACCOUNTING.md) for detailed semantics.
+
 ---
 
 ## Core Components

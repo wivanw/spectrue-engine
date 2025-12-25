@@ -5,12 +5,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from spectrue_core.billing.cost_event import CostEvent, RunCostSummary
 
 
 @dataclass(slots=True)
 class CostLedger:
+    """Tracks cost events during a run and produces a summary.
+    
+    All credit values are accumulated as Decimal for fractional SC precision.
+    No intermediate rounding - ceiling is applied only at final charge.
+    """
+    
     run_id: str | None = None
     events: list[CostEvent] = field(default_factory=list)
 
@@ -19,26 +26,26 @@ class CostLedger:
 
     def get_summary(self) -> RunCostSummary:
         by_stage_usd: dict[str, float] = {}
-        by_stage_credits: dict[str, int] = {}
+        by_stage_credits: dict[str, Decimal] = {}
         by_provider_usd: dict[str, float] = {}
-        by_provider_credits: dict[str, int] = {}
+        by_provider_credits: dict[str, Decimal] = {}
 
         total_usd = 0.0
-        total_credits = 0
+        total_credits = Decimal("0")
 
         for event in self.events:
             total_usd += event.cost_usd
-            total_credits += event.cost_credits
+            total_credits += event.cost_credits  # Decimal accumulation
 
             by_stage_usd[event.stage] = by_stage_usd.get(event.stage, 0.0) + event.cost_usd
             by_stage_credits[event.stage] = (
-                by_stage_credits.get(event.stage, 0) + event.cost_credits
+                by_stage_credits.get(event.stage, Decimal("0")) + event.cost_credits
             )
             by_provider_usd[event.provider] = (
                 by_provider_usd.get(event.provider, 0.0) + event.cost_usd
             )
             by_provider_credits[event.provider] = (
-                by_provider_credits.get(event.provider, 0) + event.cost_credits
+                by_provider_credits.get(event.provider, Decimal("0")) + event.cost_credits
             )
 
         return RunCostSummary(
