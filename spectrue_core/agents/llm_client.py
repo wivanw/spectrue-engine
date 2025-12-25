@@ -280,7 +280,7 @@ class LLMClient:
 
                 if self._meter:
                     try:
-                        self._meter.record_completion(
+                        event = self._meter.record_completion(
                             model=response.model,
                             stage=stage or trace_kind,
                             usage=usage,
@@ -288,8 +288,15 @@ class LLMClient:
                             output_text=content,
                             instructions=instructions,
                         )
+                        Trace.event("llm.metering.recorded", {
+                            "stage": stage or trace_kind,
+                            "cost_credits": str(event.cost_credits),
+                        })
                     except Exception as exc:
                         logger.warning("[LLMClient] Metering failed: %s", exc)
+                        Trace.event("llm.metering.failed", {"error": str(exc)[:200]})
+                else:
+                    Trace.event("llm.metering.skipped", {"reason": "no_meter"})
                 
                 Trace.event(f"{trace_kind}.response", {
                     "model": response.model,
