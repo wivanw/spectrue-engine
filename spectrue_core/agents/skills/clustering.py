@@ -1,9 +1,11 @@
+import logging
 from typing import Union
 
 from spectrue_core.schema import ClaimUnit
 from spectrue_core.verification.evidence_pack import SearchResult
 from spectrue_core.utils.trace import Trace
 
+from spectrue_core.verification.evidence import merge_stance_passes
 from .base_skill import BaseSkill
 from .clustering_contract import VALID_STANCES
 from .clustering_parsing import (
@@ -20,7 +22,8 @@ from .scoring_contract import (
     build_stance_matrix_instructions,
     build_stance_matrix_prompt,
 )
-from spectrue_core.verification.evidence import merge_stance_passes
+
+logger = logging.getLogger(__name__)
 
 class ClusteringSkill(BaseSkill):
     """
