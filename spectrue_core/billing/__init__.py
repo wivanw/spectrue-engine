@@ -14,6 +14,10 @@ from spectrue_core.billing.pricing import (
     tavily_usd_to_credits,
 )
 from spectrue_core.billing.types import CreditPricingPolicy, ModelPrice
+from spectrue_core.billing.products import ProductType, ProductConfig
+from spectrue_core.billing.models import FreeSubsidyPool, DailyBonusState
+from spectrue_core.billing.pool_manager import FreePoolAllocator
+from spectrue_core.billing.bonus_algo import BonusAlgoConfig, DailyBonusCalculator
 
 __all__ = [
     "CostEvent",
@@ -28,4 +32,11 @@ __all__ = [
     "llm_usage_to_credits",
     "apply_rounding",
     "load_pricing_policy",
+    "ProductType",
+    "ProductConfig",
+    "FreeSubsidyPool",
+    "DailyBonusState",
+    "FreePoolAllocator",
+    "BonusAlgoConfig",
+    "DailyBonusCalculator",
 ]
