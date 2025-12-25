@@ -1,12 +1,36 @@
+"""Inactivity burn manager for free tier credits.
+
+Burn Logic:
+- Users with ACTIVE paid plans are NEVER burned (even if inactive)
+- Users without plan: burn after `days_threshold` days of inactivity
+- Users with EXPIRED plan: burn after `days_threshold` days AFTER plan expiry
+
+This protects purchased credits from unfair burn.
+"""
 from datetime import datetime, timedelta
 from firebase_admin import firestore
 
+
 def burn_inactive_users(db, days_threshold: int = 365) -> int:
-    cutoff = datetime.utcnow() - timedelta(days=days_threshold)
+    """Burn credits from inactive users.
+    
+    Args:
+        db: Firestore client
+        days_threshold: Days of inactivity before burn (default: 365)
+        
+    Returns:
+        Number of users burned
+        
+    Note:
+        Users with active paid plans are NEVER burned.
+        For users with expired plans, the threshold starts from plan_expires_at.
+    """
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=days_threshold)
     users_ref = db.collection("users")
     
     # Query: last_seen_at < cutoff AND balance_sc > 0
-    # Requires composite index.
+    # We filter active plans in code (Firestore doesn't support OR well)
     query = users_ref.where("last_seen_at", "<", cutoff).where("balance_sc", ">", 0)
     
     batch = db.batch()
@@ -15,6 +39,24 @@ def burn_inactive_users(db, days_threshold: int = 365) -> int:
     
     for doc in query.stream():
         data = doc.to_dict()
+        
+        # --- SKIP: Users with active paid plans ---
+        plan_expires_at = data.get("plan_expires_at")
+        if plan_expires_at:
+            # Convert to datetime if needed
+            if hasattr(plan_expires_at, 'timestamp'):
+                plan_expires_at = plan_expires_at
+            
+            # If plan is still active, NEVER burn
+            if plan_expires_at > now:
+                continue
+            
+            # Plan expired - check if threshold passed since expiry
+            burn_cutoff_for_expired = plan_expires_at + timedelta(days=days_threshold)
+            if now < burn_cutoff_for_expired:
+                continue  # Not enough time passed since plan expiry
+        
+        # --- BURN: Free user or plan expired + threshold passed ---
         balance = data.get("balance_sc", 0)
         
         # Burn
