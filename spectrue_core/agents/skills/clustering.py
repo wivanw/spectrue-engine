@@ -2,6 +2,7 @@ from typing import Union
 
 from spectrue_core.schema import ClaimUnit
 from spectrue_core.verification.evidence_pack import SearchResult
+from spectrue_core.utils.trace import Trace
 
 from .base_skill import BaseSkill
 from .clustering_contract import VALID_STANCES
@@ -49,6 +50,21 @@ class ClusteringSkill(BaseSkill):
 
         claims_lite = build_claims_lite(claims)
         sources_lite, unreadable_indices = build_sources_lite(search_results)
+
+        # M103: Quote contract audit trace
+        Trace.event("stance_clustering.quote_audit", {
+            "total_sources": len(sources_lite),
+            "sources_with_quote": sum(1 for s in sources_lite if s.get("has_quote")),
+            "per_source": [
+                {
+                    "index": s["index"],
+                    "has_quote": s.get("has_quote", False),
+                    "text_len": len(s.get("text", "")),
+                    "fields_present": s.get("fields_present", []),
+                }
+                for s in sources_lite
+            ],
+        })
 
         num_sources = len(sources_lite)
         prompt = build_stance_matrix_prompt(claims_lite=claims_lite, sources_lite=sources_lite)

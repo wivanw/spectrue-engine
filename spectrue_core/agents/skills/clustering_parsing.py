@@ -21,6 +21,45 @@ UNREADABLE_MARKERS = [
 ]
 
 
+def get_source_text_for_llm(source: dict, *, max_len: int = 800) -> tuple[str, bool, list[str]]:
+    """
+    M103: Return canonical text for LLM and metadata about source fields.
+
+    Priority: quote > snippet > content/extracted_content
+
+    Args:
+        source: Source dict from search results
+        max_len: Maximum length of returned text
+
+    Returns:
+        Tuple of (text, has_quote_flag, fields_present)
+    """
+    fields_present: list[str] = []
+
+    quote = (source.get("quote") or "").strip()
+    if quote:
+        fields_present.append("quote")
+
+    snippet = (source.get("snippet") or "").strip()
+    if snippet:
+        fields_present.append("snippet")
+
+    content = (source.get("content") or source.get("extracted_content") or "").strip()
+    if content:
+        fields_present.append("content")
+
+    # Priority: quote > snippet > content
+    if quote:
+        return quote[:max_len], True, fields_present
+
+    if snippet:
+        return snippet[:max_len], False, fields_present
+
+    return content[:max_len], False, fields_present
+
+
+
+
 def build_claims_lite(claims: list[Union[ClaimUnit, dict]]) -> list[dict]:
     claims_lite: list[dict] = []
     for c in (claims or []):
@@ -39,6 +78,12 @@ def build_claims_lite(claims: list[Union[ClaimUnit, dict]]) -> list[dict]:
 
 
 def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]]:
+    """
+    M103: Build lightweight source dicts for LLM with quote-carrying contract.
+
+    Uses get_source_text_for_llm() for canonical text extraction.
+    Adds has_quote and fields_present for contract audit.
+    """
     results_lite: list[dict] = []
     unreadable_indices: set[int] = set()
 
@@ -47,17 +92,16 @@ def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]
         if r.get("content_status") == "unavailable":
             status_hint = "[CONTENT UNAVAILABLE - JUDGE BY SNIPPET/TITLE]"
 
-        raw_content = r.get("content") or r.get("extracted_content") or ""
-        snippet = r.get("snippet") or ""
-        text_preview = f"{snippet} {raw_content}".strip()
+        # M103: Use canonical text extraction with quote priority
+        source_text, has_quote, fields_present = get_source_text_for_llm(r, max_len=800)
 
+        # Check for unreadable content markers
         is_unreadable = False
-        if len(raw_content) < 100:
-            if not snippet or len(snippet) < 50:
-                is_unreadable = True
-                status_hint = "[UNREADABLE: Content too short]"
+        if len(source_text) < 50:
+            is_unreadable = True
+            status_hint = "[UNREADABLE: Content too short]"
 
-        content_lower = text_preview.lower()
+        content_lower = source_text.lower()
         for marker in UNREADABLE_MARKERS:
             if marker in content_lower:
                 is_unreadable = True
@@ -72,7 +116,10 @@ def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]
                 "index": i,
                 "domain": r.get("domain") or r.get("url"),
                 "title": r.get("title", ""),
-                "text": f"{status_hint} {text_preview[:800]}".strip(),
+                "text": f"{status_hint} {source_text}".strip(),
+                # M103: Quote contract audit fields
+                "has_quote": has_quote,
+                "fields_present": fields_present,
             }
         )
 
