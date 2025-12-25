@@ -22,13 +22,13 @@ DEFAULT_STAGE_ESTIMATES: dict[str, StageTokenEstimate] = {
     "extract": StageTokenEstimate(input_tokens=800, output_tokens=400),
     "clean": StageTokenEstimate(input_tokens=1200, output_tokens=600),
     "claims": StageTokenEstimate(
-        input_tokens=1500, output_tokens=800, per_claim_input=200, per_claim_output=100
+        input_tokens=2500, output_tokens=600, per_claim_input=200, per_claim_output=100
     ),
     "clustering": StageTokenEstimate(
-        input_tokens=700, output_tokens=350, per_claim_input=100, per_claim_output=50
+        input_tokens=800, output_tokens=300, per_claim_input=100, per_claim_output=50
     ),
     "scoring": StageTokenEstimate(
-        input_tokens=900, output_tokens=450, per_claim_input=150, per_claim_output=75
+        input_tokens=800, output_tokens=400, per_claim_input=150, per_claim_output=75
     ),
 }
 
@@ -73,22 +73,39 @@ class CostEstimator:
             reasoning_tokens=None,
         )
 
-    def estimate_min(self, *, claim_count: int, search_count: int) -> int:
-        return self.estimate_range(claim_count=claim_count, search_count=search_count)["min"]
+    def estimate_min(
+        self, *, claim_count: int, search_count: int, input_type: str = "text"
+    ) -> int:
+        return self.estimate_range(
+            claim_count=claim_count, search_count=search_count, input_type=input_type
+        )["min"]
 
-    def estimate_max(self, *, claim_count: int, search_count: int) -> int:
-        return self.estimate_range(claim_count=claim_count, search_count=search_count)["max"]
+    def estimate_max(
+        self, *, claim_count: int, search_count: int, input_type: str = "text"
+    ) -> int:
+        return self.estimate_range(
+            claim_count=claim_count, search_count=search_count, input_type=input_type
+        )["max"]
 
     def estimate_range(
         self,
         *,
         claim_count: int,
         search_count: int,
+        input_type: str = "text",
     ) -> dict:
         min_by_stage: dict[str, int] = {}
         max_by_stage: dict[str, int] = {}
 
-        for stage in self._stage_estimates:
+        # If input is just text/query, we skip extraction and cleaning stages
+        stages_to_run = list(self._stage_estimates.keys())
+        if input_type == "text":
+            if "extract" in stages_to_run:
+                stages_to_run.remove("extract")
+            if "clean" in stages_to_run:
+                stages_to_run.remove("clean")
+
+        for stage in stages_to_run:
             min_by_stage[stage] = self._estimate_llm_stage(
                 model=self._standard_model,
                 stage=stage,
