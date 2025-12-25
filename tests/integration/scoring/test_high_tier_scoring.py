@@ -1,9 +1,7 @@
-import pytest
 import math
 from spectrue_core.scoring.priors import calculate_prior
 from spectrue_core.scoring.belief import (
     BeliefState, 
-    update_belief, 
     process_updates, 
     log_odds_to_prob, 
     calculate_evidence_impact,

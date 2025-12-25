@@ -7,7 +7,6 @@ have contradictory relationships.
 Scenario: A thesis is supported by one claim but contradicted by another.
 The final belief should reflect the combined influence.
 """
-import pytest
 from spectrue_core.graph.context import ClaimContextGraph
 from spectrue_core.graph.propagation import propagate_belief
 from spectrue_core.schema.scoring import (
@@ -116,7 +115,7 @@ def test_support_raises_thesis_belief():
     )
     graph.add_edge(edge_ab)
     
-    trace = propagate_belief(graph)
+    propagate_belief(graph)
     
     thesis_node = graph.get_node("b")
     assert thesis_node is not None
@@ -184,7 +183,7 @@ def test_conflicting_evidence_net_effect():
         weight=0.8,
     ))
     
-    trace = propagate_belief(graph)
+    propagate_belief(graph)
     
     thesis_node = graph.get_node("thesis")
     assert thesis_node is not None
@@ -250,7 +249,7 @@ def test_chain_propagation():
         weight=0.7,
     ))
     
-    trace = propagate_belief(graph)
+    propagate_belief(graph)
     
     # B should have received A's influence
     node_b = graph.get_node("b")

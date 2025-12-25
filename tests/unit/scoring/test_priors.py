@@ -1,4 +1,3 @@
-import pytest
 from spectrue_core.scoring.priors import calculate_prior
 
 def test_calculate_prior_tier_1_neutral_brand():

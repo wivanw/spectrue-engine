@@ -1,4 +1,3 @@
-import pytest
 import math
 from spectrue_core.scoring.belief import prob_to_log_odds, log_odds_to_prob, update_belief
 from spectrue_core.schema.scoring import BeliefState

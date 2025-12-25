@@ -1,4 +1,3 @@
-import pytest
 import math
 from spectrue_core.scoring.belief import sigmoid_impact, calculate_evidence_impact
 

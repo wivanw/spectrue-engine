@@ -4,7 +4,6 @@ Unit tests for clustering_parsing.py — specifically build_claims_lite.
 These tests ensure that search_query is correctly extracted from claims
 to help LLM match sources to claims during stance clustering.
 """
-import pytest
 from spectrue_core.agents.skills.clustering_parsing import build_claims_lite
 
 

@@ -1,4 +1,3 @@
-import pytest
 from spectrue_core.scoring.belief import BeliefState, process_updates, calculate_evidence_impact
 
 def test_noise_tolerance():
