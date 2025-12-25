@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from datetime import datetime
 
 @dataclass

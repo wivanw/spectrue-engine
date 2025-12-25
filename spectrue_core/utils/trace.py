@@ -31,7 +31,6 @@ from spectrue_core.runtime_config import EngineRuntimeConfig
 
 _trace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("spectrue_trace_id", default=None)
 _trace_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_enabled", default=False)
-_trace_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_enabled", default=False)
 _redact_pii_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_redact_pii", default=False)
 _trace_safe_payloads_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_safe_payloads", default=True)
 _trace_max_head_var: contextvars.ContextVar[int] = contextvars.ContextVar("spectrue_trace_max_head", default=120)
@@ -231,7 +230,6 @@ class Trace:
         enabled = bool(is_local_run() and runtime.features.trace_enabled)
         _trace_id_var.set(trace_id)
         _trace_enabled_var.set(enabled)
-        _trace_enabled_var.set(enabled)
         _redact_pii_enabled_var.set(runtime.features.log_redaction)
         _trace_safe_payloads_var.set(runtime.features.trace_safe_payloads)
         _trace_max_head_var.set(runtime.debug.trace_max_head_chars)
@@ -270,17 +268,6 @@ class Trace:
         if not tid:
             return
 
-    @staticmethod
-    def progress_cost_delta(*, stage: str, delta: int, total: int) -> None:
-        Trace.event(
-            "progress.cost_delta",
-            {
-                "stage": stage,
-                "delta": int(delta),
-                "total": int(total),
-            },
-        )
-
         rec = {
             "ts_ms": _now_ms(),
             "trace_id": tid,
@@ -296,3 +283,14 @@ class Trace:
         except Exception:
             # Tracing must never break the main flow.
             return
+
+    @staticmethod
+    def progress_cost_delta(*, stage: str, delta: int, total: int) -> None:
+        Trace.event(
+            "progress.cost_delta",
+            {
+                "stage": stage,
+                "delta": int(delta),
+                "total": int(total),
+            },
+        )

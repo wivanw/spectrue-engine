@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta
 from typing import Iterator
-from firebase_admin import firestore
 from spectrue_core.auth.models import User
 
 def get_active_users(db, days_threshold: int = 7) -> Iterator[User]:
