@@ -110,34 +110,42 @@ class SearchManager:
         )
 
         for src in candidates:
-            # M104: If already has quote, skip entirely
+            # M104: If already has quote, we still might want to fetch fulltext if we have budget?
+            # User requirement: "Search -> Deterministic Extract" for top-K.
+            # But if we have a quote, we are technically "sufficient".
+            # For efficiency/safety, let's assume if we have a quote, we are good.
             if src.get("quote"):
                 continue
+
+            # Check if we should fetch content (Fix C)
+            # Fetch if we have budget AND (no content OR content is just a snippet/short)
+            should_fetch = False
+            current_content = src.get("content") or src.get("snippet") or ""
             
-            # M104: If has content but no quote, extract quote from existing content
-            existing_content = src.get("content") or src.get("snippet")
-            if existing_content and len(existing_content) >= 50:
-                quotes = extract_quote_candidates(existing_content)
+            if fetch_count < max_fetches:
+                # If explicitly marked as fulltext, don't re-fetch
+                if src.get("fulltext"):
+                    should_fetch = False
+                # If content is very short (likely snippet) or missing, fetch
+                elif len(current_content) < 2000:
+                    should_fetch = True
+            
+            if should_fetch:
+                url = src.get("url") or src.get("link")
+                if url:
+                    fetched = await self.fetch_url_content(url)
+                    if fetched:
+                        src["content"] = fetched
+                        src["fulltext"] = True
+                        current_content = fetched
+                        fetch_count += 1
+            
+            # Now extract quote from whatever content we have (newly fetched or existing)
+            if current_content and len(current_content) >= 50:
+                quotes = extract_quote_candidates(current_content)
                 if quotes:
                     src["quote"] = quotes[0]
                     src["eal_enriched"] = True
-                continue  # Don't count as fetch, just extraction
-            
-            # If no content at all, fetch URL (up to max_fetches)
-            if fetch_count >= max_fetches:
-                continue
-            url = src.get("url") or src.get("link")
-            if not url:
-                continue
-            content = await self.fetch_url_content(url)
-            if not content:
-                continue
-            src["content"] = content
-            quotes = extract_quote_candidates(content)
-            if quotes:
-                src["quote"] = quotes[0]
-            src["eal_enriched"] = True
-            fetch_count += 1
 
         return sources
 
