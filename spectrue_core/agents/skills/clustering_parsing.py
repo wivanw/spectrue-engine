@@ -65,27 +65,32 @@ def build_claims_lite(claims: list[Union[ClaimUnit, dict]]) -> list[dict]:
     M103/M105: Build lightweight claim dicts for stance clustering LLM.
     
     Includes search_query to help LLM match sources to claims.
+    Claims have queries in both search_queries and query_candidates fields.
     """
     claims_lite: list[dict] = []
     for c in (claims or []):
         if isinstance(c, ClaimUnit):
             assertions_lite = [{"key": a.key, "value": str(a.value)[:50]} for a in c.assertions]
+            # M105: Get search query from search_queries or query_candidates
+            search_queries = getattr(c, "search_queries", None) or getattr(c, "query_candidates", None) or []
+            search_query = search_queries[0] if search_queries else (c.normalized_text or c.text)[:100]
             claims_lite.append(
                 {
                     "id": c.id,
                     "text": c.normalized_text or c.text,
                     "assertions": assertions_lite,
-                    # M105: Add query for LLM matching context
-                    "search_query": getattr(c, "query_text", None) or (c.normalized_text or c.text)[:100],
+                    "search_query": search_query,
                 }
             )
         else:
+            # M105: Get search query from search_queries or query_candidates
+            search_queries = c.get("search_queries") or c.get("query_candidates") or []
+            search_query = search_queries[0] if search_queries else c.get("text", "")[:100]
             claims_lite.append({
                 "id": c.get("id"),
                 "text": c.get("text"),
                 "assertions": [],
-                # M105: Add query for LLM matching context
-                "search_query": c.get("query_text") or c.get("text", "")[:100],
+                "search_query": search_query,
             })
     return claims_lite
 
