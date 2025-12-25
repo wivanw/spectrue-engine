@@ -5,9 +5,17 @@ All notable changes to Spectrue Engine will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
 ## [Unreleased]
 
 ### Added
+- M105: Pipeline Evidence & Billing Fixes
+  - Fixed "100% CONTEXT" degradation in Evidence Matrix (added `search_query` to LLM context)
+  - Fixed Frontend Cost Display showing "0 credits" (now reads `total_credits` from engine cost summary)
+  - Added comprehensive metering for Tavily API calls (search + extracts)
+  - Added `cost_summary.attached` trace event for billing observability
+  - Fixed ClaimGraph role mapping (thesis->core, background->support)
+
 - M89: Open Source Readiness
   - Offline core test suite guard (`SPECTRUE_TEST_OFFLINE=1`) that blocks sockets during tests
   - CI workflow runs an explicit allowlist of offline tests (unit + key integrations)
