@@ -109,6 +109,7 @@ class SearchManager:
             reverse=True,
         )
 
+        processed_urls = set()
         for src in candidates:
             # M104: If already has quote, we still might want to fetch fulltext if we have budget?
             # User requirement: "Search -> Deterministic Extract" for top-K.
@@ -133,7 +134,13 @@ class SearchManager:
             if should_fetch:
                 url = src.get("url") or src.get("link")
                 if url:
+                    # M105: Deduplication to avoid wasted fetches
+                    if url in processed_urls:
+                        continue
+                    
                     fetched = await self.fetch_url_content(url)
+                    processed_urls.add(url)
+                    
                     if fetched:
                         src["content"] = fetched
                         src["fulltext"] = True

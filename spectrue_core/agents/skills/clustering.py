@@ -67,31 +67,51 @@ class ClusteringSkill(BaseSkill):
         })
 
         num_sources = len(sources_lite)
-        prompt = build_stance_matrix_prompt(claims_lite=claims_lite, sources_lite=sources_lite)
-        cache_key = build_ev_mat_cache_key(claims_lite=claims_lite, sources_lite=sources_lite)
-
+        
+        # M105: Batching to prevent context overflow
+        STANCE_BATCH_SIZE = 10
+        
         cluster_timeout = float(getattr(self.runtime.llm, "cluster_timeout_sec", 35.0) or 35.0)
         cluster_timeout = max(35.0, cluster_timeout)
-
+        
         async def run_pass(pass_type: str, trace_suffix: str) -> list[SearchResult]:
-            instructions = build_stance_matrix_instructions(
-                num_sources=num_sources,
-                pass_type=pass_type,
-            )
-            result = await self.llm_client.call_json(
-                model="gpt-5-nano",
-                input=prompt,
-                instructions=instructions,
-                reasoning_effort="low",
-                cache_key=f"{cache_key}_{trace_suffix}",
-                timeout=cluster_timeout,
-                trace_kind="stance_clustering",
-            )
-            matrix = result.get("matrix", [])
+            all_matrix_rows = []
+            
+            # Process in batches
+            for i in range(0, num_sources, STANCE_BATCH_SIZE):
+                batch_sources = sources_lite[i : i + STANCE_BATCH_SIZE]
+                batch_suffix = f"{trace_suffix}_b{i // STANCE_BATCH_SIZE}"
+                
+                prompt = build_stance_matrix_prompt(claims_lite=claims_lite, sources_lite=batch_sources)
+                batch_cache_key = build_ev_mat_cache_key(claims_lite=claims_lite, sources_lite=batch_sources)
+                
+                instructions = build_stance_matrix_instructions(
+                    num_sources=len(batch_sources),
+                    pass_type=pass_type,
+                )
+                
+                try:
+                    result = await self.llm_client.call_json(
+                        model="gpt-5-nano",
+                        input=prompt,
+                        instructions=instructions,
+                        reasoning_effort="low",
+                        cache_key=f"{batch_cache_key}_{batch_suffix}",
+                        timeout=cluster_timeout,
+                        trace_kind="stance_clustering",
+                    )
+                    batch_matrix = result.get("matrix", [])
+                    # Add to total matrix
+                    if batch_matrix:
+                        all_matrix_rows.extend(batch_matrix)
+                except Exception as e:
+                    logger.warning("[Clustering] Batch %d failed: %s", i, e)
+                    # Proceed with partial results
+
             clustered_results, _stats = postprocess_evidence_matrix(
                 search_results=search_results,
                 claims_lite=claims_lite,
-                matrix=matrix,
+                matrix=all_matrix_rows,
                 unreadable_indices=unreadable_indices,
                 valid_scoring_stances=VALID_STANCES,
             )
@@ -105,6 +125,7 @@ class ClusteringSkill(BaseSkill):
 
         try:
             if (stance_pass_mode or "").lower() == "two_pass":
+                # Note: two_pass is legacy/slow, but we support it with batching internally too
                 support_results = await run_pass(STANCE_PASS_SUPPORT_ONLY, "support")
                 refute_results = await run_pass(STANCE_PASS_REFUTE_ONLY, "refute")
                 return merge_stance_passes(

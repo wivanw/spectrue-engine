@@ -21,7 +21,7 @@ UNREADABLE_MARKERS = [
 ]
 
 
-def get_source_text_for_llm(source: dict, *, max_len: int = 800) -> tuple[str, bool, list[str]]:
+def get_source_text_for_llm(source: dict, *, max_len: int = 350) -> tuple[str, bool, list[str]]:
     """
     M103: Return canonical text for LLM and metadata about source fields.
 
@@ -93,7 +93,7 @@ def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]
             status_hint = "[CONTENT UNAVAILABLE - JUDGE BY SNIPPET/TITLE]"
 
         # M103: Use canonical text extraction with quote priority
-        source_text, has_quote, fields_present = get_source_text_for_llm(r, max_len=800)
+        source_text, has_quote, fields_present = get_source_text_for_llm(r, max_len=350)
 
         # Check for unreadable content markers
         is_unreadable = False
