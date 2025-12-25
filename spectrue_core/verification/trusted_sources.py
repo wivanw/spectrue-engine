@@ -258,6 +258,30 @@ def get_domains_for_language(lang: str) -> list[str]:
     return get_trusted_domains_by_lang(lang)
 
 
+# M105: Academic domains for evidence_need == 'academic'
+def get_academic_domains() -> list[str]:
+    """
+    Returns domains for academic/research claims.
+    Used when evidence_need == 'academic' for better source coverage.
+    
+    Includes:
+    - Astronomy Tier A (arxiv, ADS, observatories)
+    - Science & Health journals
+    - Academic databases (semantic scholar, pubmed, jstor)
+    """
+    return (
+        TRUSTED_SOURCES.get("astronomy_tier_a", []) +
+        TRUSTED_SOURCES.get("science_and_health", []) +
+        [
+            "scholar.google.com",
+            "semanticscholar.org",
+            "pubmed.ncbi.nlm.nih.gov",
+            "jstor.org",
+            "researchgate.net",
+        ]
+    )
+
+
 # M45: LLM-based topic detection
 # Available topics for LLM to choose from during query generation.
 # LLM receives this list and selects ALL matching topics for the claim.

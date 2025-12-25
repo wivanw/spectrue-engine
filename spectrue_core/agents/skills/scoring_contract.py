@@ -200,6 +200,11 @@ Your task is to map each Search Source to its BEST matching Claim AND Assertion.
 - NEVER return an empty matrix. If unsure about a source, output a row with stance="CONTEXT".
 - Every row MUST include: source_index, claim_id (or null), stance, quote (string or null), and optional assertion_key.
 
+## MATCHING SOURCES TO CLAIMS
+- Each claim has a `search_query` field showing what search query was used to retrieve sources.
+- If a source's content/title matches the topic of a claim's `search_query`, assign that `claim_id`.
+- Sources were retrieved FOR specific claims - use this context.
+
 {pass_rules}
 
 ## Relevance Scoring

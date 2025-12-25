@@ -41,8 +41,14 @@ async def run_claim_graph_flow(
     if claim_graph and claims and len(claims) >= 2:
         core_support_count = 0
         unique_topics = set()
+        
+        # M105: Role alias mapping (claim extraction uses thesis/background, graph expects core/support)
+        ROLE_ALIASES = {"thesis": "core", "background": "support"}
+        
         for c in claims:
-            role = c.get("type", "core")
+            # Check both claim_role (M80+) and type (legacy) fields
+            role = c.get("claim_role") or c.get("type", "core")
+            role = ROLE_ALIASES.get(role, role)  # Apply alias
             if role in ("core", "support"):
                 core_support_count += 1
             topic = c.get("topic_group", "Other")

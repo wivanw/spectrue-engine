@@ -315,28 +315,28 @@ TierDominantAggregation(sources):
 
 | Algorithm | Paper | How We Use It |
 |-----------|-------|---------------|
-| **Belief Propagation** | Pearl (1988) | Log-odds updates, DAG message passing |
-| **ReAct** | arXiv:2210.03629 | Interleaved reasoning + search |
-| **Self-RAG** | arXiv:2310.11511 | Adaptive retrieval, reflection tokens |
+| **Belief Propagation** | [Pearl (1988)](https://www.sciencedirect.com/book/9780080514895/probabilistic-reasoning-in-intelligent-systems) | Log-odds updates, DAG message passing |
+| **ReAct** | [arXiv:2210.03629](https://arxiv.org/abs/2210.03629) | Interleaved reasoning + search |
+| **Self-RAG** | [arXiv:2310.11511](https://arxiv.org/abs/2310.11511) | Adaptive retrieval, reflection tokens |
 
 ### Fact Verification Datasets
 
 | Dataset | Paper | Relevance |
 |---------|-------|-----------|
-| **FEVER** | arXiv:1803.05355 | SUPPORTED/REFUTED/NEI classification |
-| **HotpotQA** | arXiv:1809.09600 | Multi-hop reasoning, explainability |
-| **HoVer** | arXiv:2011.03088 | Multi-hop claim verification |
-| **SciFact** | arXiv:2004.14974 | Scientific claim verification |
+| **FEVER** | [arXiv:1803.05355](https://arxiv.org/abs/1803.05355) | SUPPORTED/REFUTED/NEI classification |
+| **HotpotQA** | [arXiv:1809.09600](https://arxiv.org/abs/1809.09600) | Multi-hop reasoning, explainability |
+| **HoVer** | [arXiv:2011.03088](https://arxiv.org/abs/2011.03088) | Multi-hop claim verification |
+| **SciFact** | [arXiv:2004.14974](https://arxiv.org/abs/2004.14974) | Scientific claim verification |
 
 ### Full References
 
-1. Pearl, J. (1988). *Probabilistic Reasoning in Intelligent Systems: Networks of Plausible Inference*. Morgan Kaufmann.
-2. Yao, S. et al. (2022). ReAct: Synergizing Reasoning and Acting in Language Models. arXiv:2210.03629.
-3. Asai, A. et al. (2023). Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection. arXiv:2310.11511.
-4. Thorne, J. et al. (2018). FEVER: A Large-scale Dataset for Fact Extraction and VERification. arXiv:1803.05355.
-5. Yang, Z. et al. (2018). HotpotQA: A Dataset for Diverse, Explainable Multi-hop Question Answering. arXiv:1809.09600.
-6. Jiang, Y. et al. (2020). HoVer: A Dataset for Many-Hop Fact Extraction and Claim Verification. arXiv:2011.03088.
-7. Wadden, D. et al. (2020). Fact or Fiction: Verifying Scientific Claims. arXiv:2004.14974.
+1. Pearl, J. (1988). *Probabilistic Reasoning in Intelligent Systems: Networks of Plausible Inference*. Morgan Kaufmann. [Book](https://www.sciencedirect.com/book/9780080514895/probabilistic-reasoning-in-intelligent-systems)
+2. Yao, S. et al. (2022). ReAct: Synergizing Reasoning and Acting in Language Models. [arXiv:2210.03629](https://arxiv.org/abs/2210.03629)
+3. Asai, A. et al. (2023). Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection. [arXiv:2310.11511](https://arxiv.org/abs/2310.11511)
+4. Thorne, J. et al. (2018). FEVER: A Large-scale Dataset for Fact Extraction and VERification. [arXiv:1803.05355](https://arxiv.org/abs/1803.05355)
+5. Yang, Z. et al. (2018). HotpotQA: A Dataset for Diverse, Explainable Multi-hop Question Answering. [arXiv:1809.09600](https://arxiv.org/abs/1809.09600)
+6. Jiang, Y. et al. (2020). HoVer: A Dataset for Many-Hop Fact Extraction and Claim Verification. [arXiv:2011.03088](https://arxiv.org/abs/2011.03088)
+7. Wadden, D. et al. (2020). Fact or Fiction: Verifying Scientific Claims. [arXiv:2004.14974](https://arxiv.org/abs/2004.14974)
 
 ---
 

@@ -61,6 +61,11 @@ def get_source_text_for_llm(source: dict, *, max_len: int = 350) -> tuple[str, b
 
 
 def build_claims_lite(claims: list[Union[ClaimUnit, dict]]) -> list[dict]:
+    """
+    M103/M105: Build lightweight claim dicts for stance clustering LLM.
+    
+    Includes search_query to help LLM match sources to claims.
+    """
     claims_lite: list[dict] = []
     for c in (claims or []):
         if isinstance(c, ClaimUnit):
@@ -70,10 +75,18 @@ def build_claims_lite(claims: list[Union[ClaimUnit, dict]]) -> list[dict]:
                     "id": c.id,
                     "text": c.normalized_text or c.text,
                     "assertions": assertions_lite,
+                    # M105: Add query for LLM matching context
+                    "search_query": getattr(c, "query_text", None) or (c.normalized_text or c.text)[:100],
                 }
             )
         else:
-            claims_lite.append({"id": c.get("id"), "text": c.get("text"), "assertions": []})
+            claims_lite.append({
+                "id": c.get("id"),
+                "text": c.get("text"),
+                "assertions": [],
+                # M105: Add query for LLM matching context
+                "search_query": c.get("query_text") or c.get("text", "")[:100],
+            })
     return claims_lite
 
 
