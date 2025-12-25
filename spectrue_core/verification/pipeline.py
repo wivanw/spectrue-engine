@@ -4,6 +4,10 @@ from spectrue_core.verification.source_utils import canonicalize_source
 from spectrue_core.utils.text_processing import clean_article_text, normalize_search_query
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trust_utils import enrich_sources_with_trust
+from spectrue_core.verification.trusted_sources import get_tier_ceiling_for_domain
+from spectrue_core.scoring.priors import calculate_prior
+from spectrue_core.schema.scoring import BeliefState, ClaimNode, ClaimEdge, ClaimRole, RelationType
+from spectrue_core.graph.context import ClaimContextGraph
 from spectrue_core.billing.cost_ledger import CostLedger
 from spectrue_core.billing.estimation import CostEstimator
 from spectrue_core.billing.metering import LLMMeter, TavilyMeter
@@ -211,12 +215,55 @@ class ValidationPipeline:
                 canonical = canonicalize_source(oracle_flow.evidence_source)
                 final_sources.append(canonical or oracle_flow.evidence_source)
 
-            await run_claim_graph_flow(
+            graph_flow_result = await run_claim_graph_flow(
                 self._claim_graph,
                 claims=claims,
                 runtime_config=self.config.runtime,
                 progress_callback=_progress,
             )
+
+            # M104: Build Context Graph for Belief Propagation
+            context_graph = None
+            if graph_flow_result and graph_flow_result.graph_result and not graph_flow_result.graph_result.disabled:
+                context_graph = ClaimContextGraph()
+                gr = graph_flow_result.graph_result
+                
+                # Add nodes
+                for c in claims:
+                    role_str = c.get("type", "support").lower()
+                    # Map simplified type to ClaimRole
+                    role = ClaimRole.SUPPORT
+                    if role_str == "core":
+                        role = ClaimRole.THESIS
+                    elif role_str == "background":
+                        role = ClaimRole.BACKGROUND
+                    elif role_str == "counter":
+                        role = ClaimRole.COUNTER
+                    
+                    node = ClaimNode(
+                        claim_id=c.get("id"),
+                        text=c.get("text", ""),
+                        role=role
+                    )
+                    context_graph.add_node(node)
+                
+                # Add edges
+                if getattr(gr, "typed_edges", None):
+                    for te in gr.typed_edges:
+                        rel_val = te.relation.value.lower()
+                        rel_type = RelationType.SUPPORTS
+                        if "contradict" in rel_val or "conflict" in rel_val:
+                            rel_type = RelationType.CONTRADICTS
+                        elif "entail" in rel_val:
+                            rel_type = RelationType.ENTAILS
+                        
+                        edge = ClaimEdge(
+                            source_id=te.src_id,
+                            target_id=te.dst_id,
+                            relation=rel_type,
+                            weight=te.score
+                        )
+                        context_graph.add_edge(edge)
 
             search_queries = self._select_diverse_queries(claims, max_queries=3, fact_fallback=fact)
 
@@ -260,6 +307,21 @@ class ValidationPipeline:
                     "sources": [],
                 })
 
+            # M104: Calculate Prior
+            prior_log_odds = 0.0
+            if source_url:
+                domain = get_registrable_domain(source_url)
+                ceiling = get_tier_ceiling_for_domain(domain)
+                tier_int = 3
+                if ceiling >= 0.9:
+                    tier_int = 1
+                elif ceiling >= 0.75:
+                    tier_int = 2
+                
+                prior_log_odds = calculate_prior(tier=tier_int, brand_trust=50.0)
+            
+            prior_belief = BeliefState(log_odds=prior_log_odds)
+
             result = await run_evidence_flow(
                 agent=self.agent,
                 search_mgr=self.search_mgr,
@@ -273,6 +335,8 @@ class ValidationPipeline:
                     gpt_model=gpt_model,
                     search_type=search_type,
                     progress_callback=_progress,
+                    prior_belief=prior_belief,
+                    context_graph=context_graph,
                 ),
                 claims=claims,
                 sources=final_sources,

@@ -8,6 +8,16 @@ import asyncio
 import logging
 
 from spectrue_core.schema.signals import TimeWindow
+from spectrue_core.schema.scoring import BeliefState
+from spectrue_core.graph.context import ClaimContextGraph
+from spectrue_core.graph.propagation import propagate_belief
+from spectrue_core.scoring.belief import (
+    calculate_evidence_impact, 
+    update_belief, 
+    log_odds_to_prob,
+    apply_consensus_bound
+)
+from spectrue_core.scoring.consensus import calculate_consensus
 from spectrue_core.verification.temporal import (
     label_evidence_timeliness,
     normalize_time_window,
@@ -40,6 +50,8 @@ class EvidenceFlowInput:
     gpt_model: str
     search_type: str
     progress_callback: ProgressCallback | None
+    prior_belief: BeliefState | None = None
+    context_graph: ClaimContextGraph | None = None
 
 
 async def run_evidence_flow(
@@ -242,6 +254,70 @@ async def run_evidence_flow(
             result["verified_score"] = recalculated
         if changed:
             result["dependency_penalty_applied"] = True
+
+    # M104: Bayesian Scoring
+    if inp.prior_belief:
+        current_belief = inp.prior_belief
+        
+        # Consensus Calculation
+        evidence_list = []
+        raw_evidence = getattr(pack, "evidence", []) if not isinstance(pack, dict) else pack.get("evidence", [])
+        
+        # Helper to wrap dicts if needed
+        class MockEvidence:
+            def __init__(self, d):
+                self.domain = d.get("domain")
+                self.stance = d.get("stance")
+                
+        for e in raw_evidence:
+            if isinstance(e, dict):
+                evidence_list.append(MockEvidence(e))
+            else:
+                evidence_list.append(e)
+                
+        consensus = calculate_consensus(evidence_list)
+        
+        # Claim Graph Propagation
+        if inp.context_graph and isinstance(claim_verdicts, list):
+            for cv in claim_verdicts:
+                cid = cv.get("claim_id")
+                node = inp.context_graph.get_node(cid)
+                if node:
+                    v = cv.get("verdict", "ambiguous")
+                    conf = cv.get("confidence", 1.0)
+                    if not isinstance(conf, (int, float)):
+                        conf = 1.0
+                    impact = calculate_evidence_impact(v, confidence=conf)
+                    node.local_belief = BeliefState(log_odds=impact)
+            
+            propagate_belief(inp.context_graph)
+            
+            # Update from Anchor
+            if anchor_claim_id:
+                anchor_node = inp.context_graph.get_node(anchor_claim_id)
+                if anchor_node and anchor_node.propagated_belief:
+                    current_belief = update_belief(current_belief, anchor_node.propagated_belief.log_odds)
+        
+        elif isinstance(claim_verdicts, list):
+             # Fallback: Sum updates
+             for cv in claim_verdicts:
+                 v = cv.get("verdict", "ambiguous")
+                 impact = calculate_evidence_impact(v)
+                 current_belief = update_belief(current_belief, impact)
+                 
+        # Apply Consensus
+        current_belief = apply_consensus_bound(current_belief, consensus)
+        
+        # Set Result
+        result["verified_score"] = log_odds_to_prob(current_belief.log_odds)
+        
+        # Trace
+        result["bayesian_trace"] = {
+            "prior_log_odds": inp.prior_belief.log_odds,
+            "consensus_score": consensus.score,
+            "posterior_log_odds": current_belief.log_odds,
+            "final_probability": result["verified_score"]
+        }
 
     if conflict_detected:
         explainability = result.get("explainability_score", -1.0)

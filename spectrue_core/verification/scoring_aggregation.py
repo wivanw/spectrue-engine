@@ -5,11 +5,27 @@ Deterministic claim verdict aggregation.
 
 Implements tier-dominant, conflict-aware scoring with penalties
 for temporal mismatch and consistency gaps.
+
+.. deprecated:: M104
+    This module is deprecated. Use :mod:`spectrue_core.scoring.belief` for
+    Bayesian scoring instead. This module will be removed in a future version.
+    See FR-010: All arithmetic averaging must be removed from the scoring pipeline.
 """
 
 from __future__ import annotations
 
+import logging
+import warnings
 from typing import Any
+
+# Deprecation warning at module import time (only once)
+warnings.warn(
+    "spectrue_core.verification.scoring_aggregation is deprecated. "
+    "Migrate to spectrue_core.scoring.belief (Bayesian scoring). "
+    "See M104 FR-010.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 TIER_RANK = {"D": 1, "C": 2, "B": 3, "A'": 3, "A": 4}
 TIER_CEILING = {"D": 0.35, "C": 0.55, "B": 0.75, "A'": 0.75, "A": 0.90}
