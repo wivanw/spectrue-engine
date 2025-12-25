@@ -125,20 +125,25 @@ class TestSufficiencyRule1:
         assert result.status == SufficiencyStatus.INSUFFICIENT
         assert result.authoritative_count == 1
     
-    def test_authoritative_context_stance_insufficient(self):
-        """Authoritative with CONTEXT stance is not sufficient."""
+    def test_authoritative_with_quote_sufficient_regardless_of_stance(self):
+        """T003: Authoritative source with quote IS sufficient during retrieval.
+        
+        After T003, sufficiency uses structural signals (quote/content presence)
+        not semantic stance labels, because stance is computed in a later stage.
+        """
         sources = [
             {
                 "url": "https://nasa.gov/article",
-                "stance": "context",  # Not SUPPORT/REFUTE
+                "stance": "context",  # Stance is ignored during retrieval sufficiency
                 "quote": "Some background information.",
             }
         ]
         
         result = evidence_sufficiency("c1", sources, VerificationTarget.REALITY)
         
-        assert result.status == SufficiencyStatus.INSUFFICIENT
-        assert "CONTEXT stance" in result.reason
+        # T003: With quote present, authoritative source satisfies Rule1
+        assert result.status == SufficiencyStatus.SUFFICIENT
+        assert result.rule_matched == "Rule1"
 
 
 class TestSufficiencyRule2:
@@ -272,25 +277,32 @@ class TestSufficiencyNotSufficient:
         assert result.authoritative_count == 0
         assert result.reputable_count == 0
     
-    def test_only_context_stance_insufficient(self):
-        """T17: Only CONTEXT stance sources is insufficient."""
+    def test_sources_with_quotes_sufficient_regardless_of_stance(self):
+        """T003: Sources with quotes ARE sufficient during retrieval.
+        
+        After T003, retrieval sufficiency uses structural signals (quote/content)
+        not semantic stance labels. Two reputable sources with quotes from 
+        different domains satisfy Rule2.
+        """
         sources = [
             {
                 "url": "https://bbc.com/background",
-                "stance": "context",
+                "stance": "context",  # Stance is ignored during retrieval
                 "quote": "Background information only.",
             },
             {
                 "url": "https://reuters.com/explainer",
-                "stance": "context",
+                "stance": "context",  # Stance is ignored during retrieval
                 "quote": "More context.",
             },
         ]
         
         result = evidence_sufficiency("c1", sources, VerificationTarget.REALITY)
         
-        assert result.status == SufficiencyStatus.INSUFFICIENT
-        assert "CONTEXT stance" in result.reason
+        # T003: With quotes present, sources satisfy sufficiency rules
+        # Note: reuters.com is Tier A (global news agency), so Rule1 may match first
+        assert result.status == SufficiencyStatus.SUFFICIENT
+        assert result.rule_matched in ("Rule1", "Rule2")  # Either rule is acceptable
     
     def test_empty_sources_insufficient(self):
         """No sources is insufficient."""

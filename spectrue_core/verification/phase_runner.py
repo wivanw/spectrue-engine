@@ -513,6 +513,18 @@ class PhaseRunner:
             next_query = followup["query"]
             next_query_type = followup["query_type"]
 
+        # T010: Enforce max_hops contract. If loop finished naturally (all hops exhausted)
+        # and decision is still NEED_FOLLOWUP, convert to STOP with explicit reason.
+        # This ensures the caller knows WHY we stopped (limit reached, not sufficiency).
+        if decision == SufficiencyDecision.NEED_FOLLOWUP:
+            decision = SufficiencyDecision.STOP
+            reason = "max_hops_reached"
+            Trace.event("retrieval.max_hops_reached", {
+                "claim_id": claim_id,
+                "max_hops": max_hops,
+                "hops_completed": len(hops),
+            })
+
         return all_sources, hops, decision, reason
 
     def _budget_allows_hop(self) -> bool:
