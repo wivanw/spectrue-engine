@@ -283,7 +283,6 @@ async def test_causal_dependency_penalty_applied(mock_config):
         "en",
     )
 
-    verdicts = {v["claim_id"]: v for v in result.get("claim_verdicts", [])}
     # M104: Bayesian scoring doesn't apply the old tier-based penalties in the same way.
     # Without properly structured EvidenceSignals, scores default to 0.5 (uncertain).
     # The causal dependency penalty is now applied via belief propagation in ClaimContextGraph.
