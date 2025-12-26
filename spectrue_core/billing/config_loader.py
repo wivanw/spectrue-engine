@@ -54,7 +54,7 @@ def load_pricing_policy(config_path: str | Path | None = None) -> CreditPricingP
     tavily_multiplier = float(
         os.environ.get(
             "SPECTRUE_TAVILY_MULTIPLIER",
-            data.get("tavily_usd_multiplier", 10.0),
+            data.get("tavily_usd_multiplier", 1.0),
         )
     )
     llm_safety = float(
