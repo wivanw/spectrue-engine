@@ -70,7 +70,9 @@ class TestValidationPipeline:
         # So check_oracle_hybrid should be called.
         mock_search_mgr.check_oracle_hybrid.assert_called()
         
-        assert result["verified_score"] == 0.8
+        # M104: Without quoted evidence in sources, Bayesian scoring defaults to 0.5 (uncertain)
+        # The LLM's verified_score is now only one signal, not the final score
+        assert result["verified_score"] == 0.5
         assert len(result["sources"]) >= 1
 
     @pytest.mark.asyncio
