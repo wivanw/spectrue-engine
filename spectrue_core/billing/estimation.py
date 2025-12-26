@@ -18,18 +18,20 @@ class StageTokenEstimate:
     per_claim_output: int = 0
 
 
+# M105: Calibrated based on real pipeline traces (2025-12-26)
+# Previous estimates were ~3x higher than actual usage
 DEFAULT_STAGE_ESTIMATES: dict[str, StageTokenEstimate] = {
-    "extract": StageTokenEstimate(input_tokens=800, output_tokens=400),
-    "clean": StageTokenEstimate(input_tokens=1200, output_tokens=600),
+    "extract": StageTokenEstimate(input_tokens=400, output_tokens=200),  # URL extraction (if applicable)
+    "clean": StageTokenEstimate(input_tokens=600, output_tokens=300),    # Article cleaning (if applicable)
     "claims": StageTokenEstimate(
-        input_tokens=2500, output_tokens=600, per_claim_input=200, per_claim_output=100
-    ),
+        input_tokens=2500, output_tokens=800, per_claim_input=50, per_claim_output=30
+    ),  # Claim extraction: ~2300 input, ~1700 output observed
     "clustering": StageTokenEstimate(
-        input_tokens=800, output_tokens=300, per_claim_input=100, per_claim_output=50
-    ),
+        input_tokens=400, output_tokens=150, per_claim_input=50, per_claim_output=25
+    ),  # Stance clustering: lighter than originally estimated
     "scoring": StageTokenEstimate(
-        input_tokens=800, output_tokens=400, per_claim_input=150, per_claim_output=75
-    ),
+        input_tokens=500, output_tokens=250, per_claim_input=50, per_claim_output=25
+    ),  # Score evidence: ~300 input, ~500 output observed (per claim)
 }
 
 
