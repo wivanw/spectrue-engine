@@ -90,3 +90,39 @@ class TestEvidenceBuilder:
         metrics = pack["metrics"]["per_claim"]["c1"]
         assert metrics["coverage"] == 0.5 # 1 relevant out of 2
         assert metrics["independent_domains"] == 2
+
+    def test_clustered_evidence_tier_fix(self):
+        """Test fix for clustered evidence defaulting to Tier C when trusted."""
+        # sources=... is empty, we act as if clustering ran
+        clustered_results = [
+            {
+                "url": "https://phys.org/news/123",
+                "domain": "phys.org",
+                "title": "Test",
+                "snippet": "Test snippet",
+                "source_type": "unknown",  # This triggers the default fallback logic we want to bypass if is_trusted
+                "is_trusted": True,
+                "evidence_tier": None,
+                "stance": "support",
+                "quote_span": "quote",
+                "relevance_score": 1.0, 
+                "timeliness_status": "in_window",
+                "content_status": "available",
+                "claim_id": "c1",
+            }
+        ]
+        
+        pack = build_evidence_pack(
+            fact="The universe is old.",
+            claims=None,
+            sources=[], 
+            search_results_clustered=clustered_results,
+        )
+        
+        item = pack["items"][0]
+        
+        # Verification
+        # is_trusted=True -> independent_media -> Tier B
+        # Before fix: source_type="unknown" -> Tier C
+        assert item["tier"] == "B", f"Expected Tier B, got {item['tier']}"
+        assert item["channel"] == "reputable_news", f"Expected reputable_news, got {item['channel']}"

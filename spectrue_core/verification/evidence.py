@@ -252,7 +252,7 @@ def build_evidence_pack(
         if isinstance(req, dict) and (req.get("is_time_sensitive") or req.get("needs_recent_source")):
             time_sensitive = True
         time_sensitive_by_claim[claim_id] = time_sensitive
-    
+
     # 3. Convert sources to SearchResult format with enrichments
     search_results: list[SearchResult] = []
         
@@ -260,7 +260,7 @@ def build_evidence_pack(
     # Only fallback to raw sources if it returned None (error/timeout).
     if search_results_clustered is not None:
         search_results = search_results_clustered
-        logger.info("Using clustered evidence: %d items", len(search_results))
+        logger.debug("Using clustered evidence: %d items", len(search_results))
         seen_domains = set()
         for r in search_results:
             d = r.get("domain") or get_registrable_domain(r.get("url") or "")
@@ -270,6 +270,11 @@ def build_evidence_pack(
                 r["is_duplicate"] = is_dup
                 r["domain"] = d
                 seen_domains.add(d)
+            if not r.get("source_type") or r.get("source_type") == "unknown":
+                if r.get("is_primary"):
+                    r["source_type"] = "primary"
+                elif r.get("is_trusted"):
+                    r["source_type"] = "independent_media"
     else:
         seen_domains = set()
         for s in (sources or []):
@@ -338,7 +343,17 @@ def build_evidence_pack(
         if stance in ("support", "refute", "contradict") and not quote:
             r["stance"] = "context"
             r["quote_missing"] = True
-    
+
+    seen_domains = set()
+    for r in search_results:
+        d = r.get("domain") or get_registrable_domain(r.get("url") or "")
+        if d:
+            is_dup = d in seen_domains
+            r["is_duplicate"] = is_dup
+            r["domain"] = d
+            if not is_dup:
+                seen_domains.add(d)
+
     # 4. Compute metrics
     unique_domains = len(seen_domains)
     total_sources = len(search_results)
@@ -489,6 +504,7 @@ def build_evidence_pack(
     context_count = 0
     outdated_count = 0
     item_domains: set[str] = set()
+    per_claim_stats: dict[str, dict[str, int]] = {}
 
     for r in search_results:
         tier = _normalize_tier(
@@ -547,6 +563,20 @@ def build_evidence_pack(
             raw_text_chars=len(r.get("content_excerpt") or ""),
         ))
 
+        claim_id = r.get("claim_id") or "c1"
+        claim_stats = per_claim_stats.setdefault(
+            str(claim_id),
+            {"support": 0, "refute": 0, "context": 0, "with_quote": 0},
+        )
+        if stance == "SUPPORT":
+            claim_stats["support"] += 1
+        elif stance == "REFUTE":
+            claim_stats["refute"] += 1
+        else:
+            claim_stats["context"] += 1
+        if quote:
+            claim_stats["with_quote"] += 1
+
         tiers_present[tier] = tiers_present.get(tier, 0) + 1
         if stance == "SUPPORT":
             support_count += 1
@@ -593,5 +623,15 @@ def build_evidence_pack(
         "global_cap": round(global_cap, 2),
         "cap_reasons": cap_reasons,
     })
+
+    Trace.event(
+        "evidence.items.summary",
+        {
+            "per_claim": per_claim_stats,
+            "support_total": support_count,
+            "refute_total": refute_count,
+            "context_total": context_count,
+        },
+    )
     
     return pack
