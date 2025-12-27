@@ -258,6 +258,7 @@ def build_evidence_pack(
         
     # If clustering ran and returned a list (even empty), use it.
     # Only fallback to raw sources if it returned None (error/timeout).
+    default_claim_id = claims[0].get("id") if claims else "c1"
     if search_results_clustered is not None:
         search_results = search_results_clustered
         logger.debug("Using clustered evidence: %d items", len(search_results))
@@ -275,6 +276,15 @@ def build_evidence_pack(
                     r["source_type"] = "primary"
                 elif r.get("is_trusted"):
                     r["source_type"] = "independent_media"
+            if not r.get("claim_id"):
+                r["claim_id"] = default_claim_id
+                Trace.event(
+                    "evidence.claim_id.missing",
+                    {
+                        "assigned_claim_id": default_claim_id,
+                        "source_url": r.get("url") or r.get("link"),
+                    },
+                )
     else:
         seen_domains = set()
         for s in (sources or []):
@@ -307,7 +317,7 @@ def build_evidence_pack(
             
             # Build SearchResult
             search_result = SearchResult(
-                claim_id="c1",
+                claim_id=default_claim_id,
                 url=url,
                 domain=domain,
                 title=s.get("title", ""),

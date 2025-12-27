@@ -4,8 +4,6 @@ from spectrue_core.verification.source_utils import canonicalize_source, has_evi
 from spectrue_core.utils.text_processing import clean_article_text, normalize_search_query
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trust_utils import enrich_sources_with_trust
-from spectrue_core.verification.trusted_sources import get_tier_ceiling_for_domain
-from spectrue_core.scoring.priors import calculate_prior
 from spectrue_core.schema.scoring import BeliefState, ClaimNode, ClaimEdge, ClaimRole, RelationType
 from spectrue_core.graph.context import ClaimContextGraph
 from spectrue_core.billing.cost_ledger import CostLedger
@@ -634,18 +632,8 @@ class ValidationPipeline:
                     "sources": [],
                 })
 
-            # M104: Calculate Prior
+            # M104: Neutral prior (tier does not influence veracity)
             prior_log_odds = 0.0
-            if source_url:
-                domain = get_registrable_domain(source_url)
-                ceiling = get_tier_ceiling_for_domain(domain)
-                tier_int = 3
-                if ceiling >= 0.9:
-                    tier_int = 1
-                elif ceiling >= 0.75:
-                    tier_int = 2
-                
-                prior_log_odds = calculate_prior(tier=tier_int, brand_trust=50.0)
             
             prior_belief = BeliefState(log_odds=prior_log_odds)
 

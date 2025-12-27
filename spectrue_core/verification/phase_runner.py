@@ -455,41 +455,17 @@ class PhaseRunner:
         # CRITICAL SHORTCUT: Check inline sources first (M109)
         if self.inline_sources:
             logger.debug("[M109] Checking inline sources shortcut for claim %s", claim_id)
+            for src in self.inline_sources:
+                if isinstance(src, dict) and not src.get("claim_id"):
+                    src["claim_id"] = claim_id
             sufficient, stats = verdict_ready_for_claim(
-                self.inline_sources, 
+                self.inline_sources,
                 claim_id=claim_id,
-                claim_text=claim_text
             )
-            
-            # Fallback: If not sufficient by embeddings (e.g. content fetch failed),
-            # BUT we have a verified PRIMARY source, trust the LLM's verification from Pipeline.
-            if not sufficient:
-                 primary_sources = [s for s in self.inline_sources if s.get("is_primary")]
-                 if primary_sources:
-                     sufficient = True
-                     logger.info("[M109] Inline primary source found (fallback) for %s. Trusting agent verification.", claim_id)
-                     stats = {"semantic_matches": len(primary_sources), "primary_fallback": True}
 
             if sufficient:
                 logger.info("[M109] Inline sources sufficient (shortcut) for %s. Stats: %s", claim_id, stats)
-                
-                # M109 FIX: Ensure stance is set to SUPPORT for high-similarity inline sources
-                # Because verdict_ready_for_claim uses semantic matching (sim > 0.35), 
-                # we must propagate this as explicit STANCE so Scoring doesn't ignore it.
-                combined = []
-                for s in self.inline_sources:
-                    # If snippet matches high relevance, force SUPPORT
-                    # We re-use logic similar to verdict_ready_for_claim to identify WHICH source matched
-                    # But for simplicity, we just add them all, and let Scoring filter?
-                    # Better: Set SUPPORT for sources that are relevant.
-                    s_copy = s.copy()
-                    if s_copy.get("is_relevant") or s_copy.get("relevance_score", 0) > 0.35:
-                         s_copy["stance"] = "SUPPORT"
-                         # boost relevance to ensure it survives
-                         s_copy["relevance_score"] = max(s_copy.get("relevance_score", 0), 0.85)
-                    combined.append(s_copy)
-                
-                return combined, hops, SufficiencyDecision.ENOUGH, "inline_sufficient"
+                return list(self.inline_sources), hops, SufficiencyDecision.ENOUGH, "inline_sufficient"
 
         if not phases:
             return all_sources, hops, SufficiencyDecision.STOP, "no_phases"
@@ -593,35 +569,8 @@ class PhaseRunner:
             claim_sources = [s for s in all_sources if isinstance(s, dict) and s.get("claim_id") == claim_id]
             
             # M109: Include inline sources in potential evidence
-            # They may not have claim_id set yet, but embeddings/relevance will catch them
+            # They may not have claim_id set yet; verdict_ready uses strict claim_id matching
             potential_evidence = claim_sources + self.inline_sources
-            quote_keys = ("quote", "quote_value", "quote_span", "contradiction_span", "key_snippet")
-            Trace.event(
-                "verdict.ready.input_summary",
-                {
-                    "claim_id": claim_id,
-                    "sources_total": len(potential_evidence),
-                    "sources_with_claim_id": sum(
-                        1 for s in potential_evidence if isinstance(s, dict) and s.get("claim_id")
-                    ),
-                    "sources_with_quote": sum(
-                        1
-                        for s in potential_evidence
-                        if isinstance(s, dict) and any(s.get(k) for k in quote_keys)
-                    ),
-                    "sources_with_relevance": sum(
-                        1
-                        for s in potential_evidence
-                        if isinstance(s, dict) and float(s.get("relevance_score") or 0) >= 0.7
-                    ),
-                    "sample_keys": [
-                        sorted(k for k in s.keys() if isinstance(k, str))[:12]
-                        for s in potential_evidence[:2]
-                        if isinstance(s, dict)
-                    ],
-                },
-            )
-            
             logger.debug(
                 "[M109] verdict_ready call: claim_id=%s sources=%d (claim=%d + inline=%d)",
                 claim_id, len(potential_evidence), len(claim_sources), len(self.inline_sources)
@@ -629,16 +578,6 @@ class PhaseRunner:
             ready, ready_stats = verdict_ready_for_claim(
                 potential_evidence,
                 claim_id=str(claim_id),
-                claim_text=claim_text,  # M109: For embedding similarity
-            )
-            Trace.event(
-                "verdict.ready",
-                {
-                    "claim_id": claim_id,
-                    "hop": hop_index,
-                    "ready": ready,
-                    "stats": ready_stats,
-                },
             )
             
             if ready:
@@ -647,35 +586,10 @@ class PhaseRunner:
                     claim_id, ready_stats
                 )
 
-                for src in self.inline_sources:
-                    if isinstance(src, dict):
-                        if not src.get("claim_id"):
-                            src["claim_id"] = claim_id
-                        if claim_text and not src.get("claim_text"):
-                            src["claim_text"] = claim_text
-
                 if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
                     self.inline_sources = await self.search_mgr.apply_evidence_acquisition_ladder(
                         self.inline_sources
                     )
-
-                # M109: Enhance inline sources with stance="SUPPORT" if they led to the match
-                # This ensures Scoring sees them as valid evidence.
-                from spectrue_core.embeddings import EmbedService
-                if EmbedService.is_available():
-                    for src in self.inline_sources:
-                        content = src.get("snippet") or src.get("content") or src.get("quote") or ""
-                        if content and len(content) > 30:
-                            try:
-                                sim = EmbedService.similarity(claim_text, content[:2000])
-                                if sim >= 0.35:
-                                    src["stance"] = "SUPPORT"
-                                    # Also ensure relevance is high enough to be kept
-                                    if float(src.get("relevance_score", 0)) < 0.7:
-                                        src["relevance_score"] = 0.85
-                                    logger.debug("[M109] Auto-set stance=SUPPORT for inline src (sim=%.3f)", sim)
-                            except Exception:
-                                pass
 
                 # IMPORTANT: We must return the inline sources too!
                 # Filter to only unique sources to avoid dupes if they were already in claim_sources
@@ -690,10 +604,6 @@ class PhaseRunner:
             # ─────────────────────────────────────────────────────────────────────────────
             # Retrieval Loop
             # ─────────────────────────────────────────────────────────────────────────────
-            if decision == SufficiencyDecision.ENOUGH and not ready:
-                decision = SufficiencyDecision.NEED_FOLLOWUP
-                reason = "verdict_not_ready"
-
             # M108: Respect retrieval action from confidence evaluation
             # Only sync action with decision - don't blindly override stop_early
             if decision == SufficiencyDecision.ENOUGH:
