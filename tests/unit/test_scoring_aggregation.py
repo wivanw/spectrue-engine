@@ -17,8 +17,8 @@ def test_tier_a_refute_dominates_many_low_support() -> None:
     evidence_pack = fixture["evidence_pack"]
     result = aggregate_claim_verdict(evidence_pack, claim_id=fixture["claim_id"])
 
-    assert result["verdict"] == "refuted"
-    assert result["verdict_score"] <= 0.2
+    assert result["verdict"] == "ambiguous"
+    assert 0.35 <= result["verdict_score"] <= 0.65
 
 
 def test_strong_conflict_same_tier_is_ambiguous() -> None:
@@ -28,3 +28,36 @@ def test_strong_conflict_same_tier_is_ambiguous() -> None:
 
     assert result["verdict"] == "ambiguous"
     assert 0.35 <= result["verdict_score"] <= 0.65
+
+
+def test_tier_does_not_affect_verdict_score() -> None:
+    evidence_pack_a = {
+        "items": [
+            {
+                "claim_id": "c1",
+                "stance": "SUPPORT",
+                "quote": "Direct quote.",
+                "relevance": 0.7,
+                "tier": "A",
+            }
+        ],
+        "stats": {"domain_diversity": 1},
+    }
+    evidence_pack_d = {
+        "items": [
+            {
+                "claim_id": "c1",
+                "stance": "SUPPORT",
+                "quote": "Direct quote.",
+                "relevance": 0.7,
+                "tier": "D",
+            }
+        ],
+        "stats": {"domain_diversity": 1},
+    }
+
+    result_a = aggregate_claim_verdict(evidence_pack_a, claim_id="c1")
+    result_d = aggregate_claim_verdict(evidence_pack_d, claim_id="c1")
+
+    assert result_a["verdict"] == result_d["verdict"]
+    assert result_a["verdict_score"] == result_d["verdict_score"]

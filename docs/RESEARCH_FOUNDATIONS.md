@@ -49,12 +49,10 @@ SufficiencyJudge(claim, sources, policy):
 ```
 
 ```text
-TierDominantAggregation(sources):
-  tier = highest_tier_present(sources)
-  strength = max_relevance_for_tier(sources, tier)
-  score = tier_base(tier) + tier_gain(tier) * strength
+QuoteDrivenAggregation(sources):
+  score = aggregate_from_quoted_support_refute(sources)
   score -= conflict_penalty(sources)
-  return clamp(score, 0, tier_ceiling(tier))
+  return clamp(score, 0, 1)
 ```
 
 ```text

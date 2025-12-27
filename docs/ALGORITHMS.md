@@ -259,7 +259,7 @@ Escalation strategy when evidence is insufficient:
    sound and follows Pearl's framework.
 
 3. **Engineering system with heuristics:** Practical decisions (sigmoid damping, 
-   tier priors, consensus caps) that work empirically but lack theoretical guarantees.
+   source priors when enabled, consensus caps) that work empirically but lack theoretical guarantees.
 
 ### What Spectrue is NOT:
 

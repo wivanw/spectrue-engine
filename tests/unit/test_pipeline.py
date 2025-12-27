@@ -2,6 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from spectrue_core.verification.pipeline import ValidationPipeline
+from spectrue_core.verification.pipeline_evidence import _apply_explainability_tier_cap
 
 @pytest.mark.unit
 class TestValidationPipeline:
@@ -227,3 +228,13 @@ class TestValidationPipeline:
         
         # Verify heavy steps skipped
         mock_agent.score_evidence.assert_not_called()
+
+
+def test_explainability_tier_cap_applies() -> None:
+    score = 0.9
+    post_a, trace_a = _apply_explainability_tier_cap(score, {"A": 1})
+    post_c, trace_c = _apply_explainability_tier_cap(score, {"C": 1})
+
+    assert trace_a["best_tier"] == "A"
+    assert trace_c["best_tier"] == "C"
+    assert post_a > post_c
