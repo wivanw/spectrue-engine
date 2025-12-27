@@ -66,44 +66,6 @@ def _explainability_factor_for_tier(tier: str | None) -> tuple[float, str, float
     return prior / _TIER_PRIOR_BASELINE, "best_tier", prior
 
 
-def _apply_explainability_tier_cap(
-    score: float,
-    tier_counts: dict[str, int],
-) -> tuple[float, dict]:
-    """Apply tier-based explainability cap to a score.
-
-    Args:
-        score: The raw explainability score (0..1).
-        tier_counts: Dict mapping tier names (A, B, C, D) to counts.
-
-    Returns:
-        Tuple of (adjusted_score, trace_dict) where trace_dict contains
-        debugging info including best_tier, factor, pre/post values.
-    """
-    # Find best tier from counts (A > A' > B > C > D)
-    tier_priority = ["A", "A'", "B", "C", "D"]
-    best_tier: str | None = None
-    for tier in tier_priority:
-        if tier_counts.get(tier, 0) > 0:
-            best_tier = tier
-            break
-
-    factor, source, prior = _explainability_factor_for_tier(best_tier)
-    post_score = max(0.0, min(1.0, score * factor))
-
-    trace = {
-        "best_tier": best_tier,
-        "pre_A": score,
-        "prior": prior,
-        "baseline": _TIER_PRIOR_BASELINE,
-        "factor": factor,
-        "post_A": post_score,
-        "source": source,
-    }
-    return post_score, trace
-
-
-
 @dataclass(frozen=True, slots=True)
 class EvidenceFlowInput:
     fact: str

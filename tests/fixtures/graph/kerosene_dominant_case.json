@@ -1,0 +1,14 @@
+{
+  "input_text": "Some intro. Drink kerosene is good for your health. More elaboration. Irrelevant claim about weather. Another sentence supporting the kerosene claim.",
+  "claims": [
+    {"id": "c1", "text": "Some intro."},
+    {"id": "c2", "text": "Drink kerosene is good for your health."},
+    {"id": "c3", "text": "Irrelevant claim about weather."},
+    {"id": "c4", "text": "Another sentence supporting the kerosene claim."}
+  ],
+  "expected": {
+    "dominant_claim_id": "c2",
+    "selected_must_include": ["c2"],
+    "rank_top3_must_include": ["c2"]
+  }
+}

@@ -13,6 +13,8 @@ It only identifies WHICH claims to prioritize for verification.
 
 from spectrue_core.graph.types import (
     ClaimNode,
+    ClaimPreGraphMeta,
+    ClaimPostGraphMeta,
     CandidateEdge,
     TypedEdge,
     RankedClaim,
@@ -25,6 +27,8 @@ from spectrue_core.graph.claim_graph import ClaimGraphBuilder
 __all__ = [
     "ClaimGraphBuilder",
     "ClaimNode",
+    "ClaimPreGraphMeta",
+    "ClaimPostGraphMeta",
     "CandidateEdge",
     "TypedEdge",
     "RankedClaim",

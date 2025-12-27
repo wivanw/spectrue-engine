@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
+from typing import Dict, Literal
 
 
 class EdgeRelation(str, Enum):
@@ -36,6 +36,31 @@ STRUCTURAL_RELATIONS: set[EdgeRelation] = {
     EdgeRelation.SUPPORTS,
     EdgeRelation.DEPENDS_ON,
 }
+
+
+@dataclass
+class ClaimPreGraphMeta:
+    """Pre-graph metadata computed from embeddings and positional priors."""
+    claim_id: str
+    position_rank: int
+    pos_prior: float
+    support_mass: float
+    novelty: float
+    uncertainty_proxy: float
+    importance_prior: float = 0.0
+    harm_prior: float = 0.0
+    node_prior: float = 0.0
+
+
+@dataclass
+class ClaimPostGraphMeta:
+    """Post-graph metadata used for explainability and tracing only."""
+    pagerank: float = 0.0
+    centrality_rank: int = -1
+    selected: bool = False
+    selection_gain: float = 0.0
+    selection_cost: float = 0.0
+    debug: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -183,6 +208,14 @@ class GraphResult:
     disabled_reason: str | None = None  # "budget_exceeded_preflight" | "quality_gate_failed"
     fallback_used: bool = False  # M74: Fallback Key Claims used when graph disabled
     sparse_graph: bool = False  # M76: Graph valid but has few/no edges (kept_ratio < min)
+    confidence_scalar: float = 1.0
+
+    # M109: Pre/Post metadata and similarity edges (post-graph metadata is explainability-only)
+    pre_meta: dict[str, ClaimPreGraphMeta] = field(default_factory=dict)
+    post_meta: dict[str, ClaimPostGraphMeta] = field(default_factory=dict)
+    sim_edges: list[tuple[str, str, float]] = field(default_factory=list)
+    mst_edges: list[tuple[str, str, float]] = field(default_factory=list)
+    selection_trace: list[dict[str, float]] = field(default_factory=list)
     
     @property
     def key_claim_ids(self) -> list[str]:
@@ -234,4 +267,5 @@ class GraphResult:
             "sample_edges": [e.to_trace_dict() for e in self.typed_edges[:10]],
             "latency_ms": self.latency_ms,
             "cost_usd": round(self.cost_usd, 4),
+            "confidence_scalar": round(self.confidence_scalar, 3),
         }
