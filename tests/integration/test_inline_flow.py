@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+import pytest
+from unittest.mock import MagicMock, AsyncMock
+
+from spectrue_core.verification.pipeline_search import run_search_flow, SearchFlowInput, SearchFlowState
+from spectrue_core.verification.search_mgr import SearchManager
+from spectrue_core.verification.search_policy import default_search_policy
+from spectrue_core.embeddings import EmbedService
+
+@pytest.mark.asyncio
+async def test_inline_sources_shortcut_flow():
+    """
+    Integration test verifying that:
+    1. Pipeline accepts inline sources
+    2. PhaseRunner uses them for verdict (shortcut)
+    3. Stance is auto-set to SUPPORT for high similarity
+    """
+    if not EmbedService.is_available():
+        pytest.skip("Embeddings not available")
+
+    # Setup Mocks
+    mock_config = MagicMock()
+    mock_config.runtime.features.claim_orchestration = True
+    # Ensure locale config doesn't return a Mock
+    mock_config.runtime.locale = None
+    
+    mock_search_mgr = MagicMock(spec=SearchManager)
+    # Mock calculate_cost to allow search (even if shortcut skips it)
+    mock_search_mgr.calculate_cost.return_value = 0
+    mock_search_mgr.can_afford.return_value = True
+    
+    mock_agent = AsyncMock()
+    
+    # Setup Input
+    claim_text = "The exoplanet PSR J2322-2650b orbits a millisecond pulsar."
+    
+    # Inline source that strongly matches the claim
+    inline_src = {
+        "url": "https://example.com/pulsar-planet",
+        "title": "Pulsar Planet Discovery",
+        "content": "Astronomers confirm that PSR J2322-2650b is indeed an exoplanet orbiting a millisecond pulsar. The planet has a lemon-like shape.",
+        "snippet": "PSR J2322-2650b is indeed an exoplanet orbiting a millisecond pulsar.",
+        "is_primary": True,
+        "is_relevant": True,
+        "relevance_score": 0.9
+    }
+    
+    inp = SearchFlowInput(
+        fact=claim_text,
+        lang="en",
+        gpt_model="gpt-4o",
+        search_type="deep_research",
+        max_cost=100,
+        article_intent="news",
+        search_queries=[claim_text],
+        claims=[{"id": "c1", "text": claim_text, "normalized_text": claim_text}],
+        preloaded_context=None,
+        progress_callback=None,
+        inline_sources=[inline_src]  # This is what we fixed!
+    )
+    
+    state = SearchFlowState(
+        final_context="",
+        final_sources=[],
+        preloaded_context=None,
+        used_orchestration=False
+    )
+    
+    # Run
+    result_state = await run_search_flow(
+        config=mock_config,
+        search_mgr=mock_search_mgr,
+        agent=mock_agent,
+        can_add_search=lambda *args: True,
+        inp=inp,
+        state=state
+    )
+    
+    # Verification
+    # 1. Orchestration should have been used
+    assert result_state.used_orchestration is True, "Orchestration should be enabled"
+    
+    # 2. Execution state should show sufficiency for c1
+    exec_state = result_state.execution_state
+    c1_state = exec_state.get("c1", {})
+    
+    assert c1_state.get("is_sufficient") is True, f"Claim should be sufficient via inline shortcut. State: {c1_state}"
+    assert c1_state.get("sufficiency_reason") == "inline_sufficient", "Reason should be inline_sufficient"
+    
+    # 3. Final sources should contain our source with SUPPORT stance
+    final_sources = result_state.final_sources
+    assert len(final_sources) >= 1, "Final sources should not be empty"
+    
+    found_src = None
+    for s in final_sources:
+        if s.get("url") == inline_src["url"]:
+            found_src = s
+            break
+            
+    assert found_src is not None, "Inline source missing from final output"
+    
+    # This assertion verifies the M109 fix (auto-stance)
+    assert found_src.get("stance") == "SUPPORT", f"Stance should be SUPPORT, got {found_src.get('stance')}"
