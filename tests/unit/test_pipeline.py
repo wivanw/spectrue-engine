@@ -2,7 +2,44 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from spectrue_core.verification.pipeline import ValidationPipeline
-from spectrue_core.verification.pipeline_evidence import _apply_explainability_tier_cap
+from spectrue_core.verification.pipeline_evidence import (
+    _explainability_factor_for_tier,
+    _TIER_PRIOR,
+    _TIER_PRIOR_BASELINE,
+)
+
+
+def _apply_explainability_tier_cap(
+    score: float,
+    tier_counts: dict[str, int],
+) -> tuple[float, dict]:
+    """Test helper: Apply tier-based explainability cap to a score.
+
+    This is a test-only helper that wraps the production logic
+    for easier unit testing of tier cap behavior.
+    """
+    # Find best tier from counts (A > A' > B > C > D)
+    tier_priority = ["A", "A'", "B", "C", "D"]
+    best_tier: str | None = None
+    for tier in tier_priority:
+        if tier_counts.get(tier, 0) > 0:
+            best_tier = tier
+            break
+
+    factor, source, prior = _explainability_factor_for_tier(best_tier)
+    post_score = max(0.0, min(1.0, score * factor))
+
+    trace = {
+        "best_tier": best_tier,
+        "pre_A": score,
+        "prior": prior,
+        "baseline": _TIER_PRIOR_BASELINE,
+        "factor": factor,
+        "post_A": post_score,
+        "source": source,
+    }
+    return post_score, trace
+
 
 @pytest.mark.unit
 class TestValidationPipeline:
