@@ -292,3 +292,46 @@ Replaced by Bayesian Scoring. See `spectrue_core.scoring.belief`.
 
 - **Unit tests:** `tests/unit/scoring/` — belief math, priors, impact functions
 - **Integration tests:** `tests/integration/scoring/` — propagation, consensus bounding
+
+## Tier as a Prior Factor on Explainability (A)
+
+**Tier never clamps truth.** In Spectrue Engine, source tiers are used to adjust **Explainability (A)** only.
+They do **not** cap `verdict_score` or `verified_score`.
+
+We treat tier as a calibrated *prior reliability signal* for how interpretable/defensible the explanation is, given the
+class of sources involved.
+
+Deterministic rule (per-claim):
+
+- `baseline = TierPrior["B"]`
+- `prior = TierPrior[best_tier or "UNKNOWN"]`
+- `factor = prior / baseline`
+- `A_post = clamp(A_pre * factor, 0..1)`
+
+Trace event:
+
+- `verdict.explainability_tier_factor` logs `pre_A`, `prior`, `baseline`, `factor`, `post_A`, `best_tier`, `claim_id`, and `source`.
+
+## Verification Target Selection (Current)
+
+When a run contains many claims, the engine selects up to `max_targets` claims to run retrieval against.
+Non-target claims are **deferred** and can inherit verdicts via evidence sharing.
+
+Current selection score (high-level):
+
+- `check_worthiness` (0..1) and `importance` (0..1) from `ClaimMetadata`
+- optional graph signals (key-claim membership, structural importance, tension)
+- claim role/type boost (`thesis/core` is prioritized)
+
+This is **resource-driven orchestration**, not a truth heuristic: selection only decides *where to spend retrieval budget*.
+All selected claims still require evidence to score high.
+
+Trace event:
+
+- `target_selection.completed` logs chosen targets, deferred claims, and reason codes.
+
+## Roadmap Note
+
+The target selection logic is expected to evolve toward a **Bayesian value-of-information ranking** under a fixed budget:
+maximize expected uncertainty reduction per cost. This will replace hard boosts over time, while keeping determinism and
+traceability.

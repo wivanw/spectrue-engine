@@ -40,6 +40,15 @@
 - **RGBA Analysis**: Returns orthogonal scores for Danger, Veracity, Honesty, and Explainability
 - **Fail-Soft Architecture**: Graceful degradation on component failures
 
+
+## 📚 Documentation
+
+- Engine Architecture: `docs/ARCHITECTURE.md`
+- Algorithms & Contracts: `docs/ALGORITHMS.md`
+- Resource Accounting: `docs/RESOURCE_ACCOUNTING.md`
+- Trace Debugging: `docs/TRACE_GUIDE.md`
+- Media Explainer: `docs/MEDIA_EXPLAINER.md`
+
 ## 🔄 Verification Pipeline
 
 The core verification process follows this pipeline:
