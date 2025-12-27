@@ -16,6 +16,7 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from spectrue_core.verification.types import Source
+from spectrue_core.verification.trusted_sources import get_tier_ceiling_for_domain
 
 
 def extract_domain(url: str) -> str:
@@ -66,5 +67,31 @@ def has_evidence_chunk(source: Any) -> bool:
     """
     if not isinstance(source, dict):
         return False
-    return bool(source.get("quote") or source.get("snippet") or source.get("content"))
+    return bool(
+        source.get("quote")
+        or source.get("snippet")
+        or source.get("content")
+        or source.get("content_excerpt")
+        or source.get("key_snippet")
+    )
 
+
+def score_source_quality(sources: Iterable[Any]) -> float:
+    """
+    Score source quality using tier ceilings (0.35-0.9 scaled to 0-1).
+    """
+    scored = []
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        url = str(src.get("url") or src.get("link") or "")
+        domain = extract_domain(url)
+        if not domain:
+            continue
+        ceiling = float(get_tier_ceiling_for_domain(domain))
+        normalized = max(0.0, min(1.0, (ceiling - 0.35) / 0.55))
+        scored.append(normalized)
+
+    if not scored:
+        return 0.0
+    return sum(scored) / len(scored)

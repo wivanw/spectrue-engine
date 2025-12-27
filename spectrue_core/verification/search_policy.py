@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from spectrue_core.schema.claim_metadata import EvidenceChannel, UsePolicy
+from spectrue_core.schema.claim_metadata import (
+    EvidenceChannel,
+    UsePolicy,
+    MetadataConfidence,
+    ClaimMetadata,
+)
+from spectrue_core.verification.execution_plan import ClaimPolicyDecision, PolicyMode
 
 
 @dataclass(frozen=True)
@@ -220,6 +226,43 @@ def default_search_policy() -> SearchPolicy:
         ),
     }
     return SearchPolicy(profiles=profiles)
+
+
+def decide_claim_policy(metadata: ClaimMetadata | None) -> ClaimPolicyDecision:
+    """
+    Decide per-claim routing mode (SKIP/CHEAP/FULL) based on metadata signals.
+    """
+    if metadata is None:
+        return ClaimPolicyDecision(mode=PolicyMode.FULL, reason_codes=["metadata_missing"])
+
+    if metadata.should_skip_search:
+        return ClaimPolicyDecision(
+            mode=PolicyMode.SKIP,
+            reason_codes=["skip_signal"],
+        )
+
+    if metadata.metadata_confidence == MetadataConfidence.LOW:
+        return ClaimPolicyDecision(
+            mode=PolicyMode.CHEAP,
+            reason_codes=["low_metadata_confidence"],
+        )
+
+    low_threshold = 0.35
+    high_threshold = 0.75
+    worthiness = float(metadata.check_worthiness or 0.0)
+
+    if worthiness <= low_threshold:
+        return ClaimPolicyDecision(
+            mode=PolicyMode.CHEAP,
+            reason_codes=["low_worthiness"],
+        )
+    if worthiness >= high_threshold:
+        return ClaimPolicyDecision(
+            mode=PolicyMode.FULL,
+            reason_codes=["high_worthiness"],
+        )
+
+    return ClaimPolicyDecision(mode=PolicyMode.FULL, reason_codes=["default_worthiness"])
 
 
 def resolve_stance_pass_mode(profile_name: str) -> str:

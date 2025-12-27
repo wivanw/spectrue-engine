@@ -47,7 +47,7 @@ class FactVerifier:
         """
         Execute verification via ValidationPipeline.
         """
-        return await self.pipeline.execute(
+        result = await self.pipeline.execute(
             fact=fact,
             search_type=search_type,
             gpt_model=gpt_model,
@@ -60,3 +60,6 @@ class FactVerifier:
             needs_cleaning=needs_cleaning,
             source_url=source_url,
         )
+        if "audit" not in result:
+            result["audit"] = {}
+        return result

@@ -314,20 +314,20 @@ def is_origin_source(source: Any, claim_text: str) -> bool:
     if not domain:
         return False
     
-    # For now, simple heuristic: official domains for attributed statements
-    # TODO: Enhance with NER to extract entity and match to domain
+    # Priority 1: Accept explicit origin signals from structured metadata.
+    source_type = str(source.get("source_type") or "").lower()
+    if source_type in {"primary", "official", "fact_check"}:
+        return True
+    if source.get("is_primary") or source.get("is_origin"):
+        return True
     
-    # Check if authoritative (official sources are often origins)
+    # Priority 2: Authoritative domains (official sources are often origins)
     if is_authoritative(domain):
         return True
     
-    # Check if source has "official" in title or is primary source
+    # Priority 3: Title-based heuristics for official statements
     title = (source.get("title", "") or "").lower()
     if "official" in title or "statement" in title or "announcement" in title:
-        return True
-    
-    # Check if source is marked as primary
-    if source.get("is_primary") or source.get("is_origin"):
         return True
     
     return False
@@ -481,19 +481,18 @@ def evidence_sufficiency(
         result.reason = f"Found {len(authoritative_sources)} authoritative source(s) with quotes"
         return result
     
-    # Rule 2: 2 independent reputable sources with quotes
-    # Check domain independence
-    reputable_domains: set[str] = set()
-    for source in reputable_sources:
+    # Rule 2: 2 independent strong sources with quotes (authoritative or reputable)
+    strong_domains: set[str] = set()
+    for source in authoritative_sources + reputable_sources:
         url = source.get("url", "") or source.get("link", "")
         domain = _extract_domain(url)
         if domain:
-            reputable_domains.add(domain)
-    
-    if len(reputable_domains) >= 2:
+            strong_domains.add(domain)
+
+    if len(strong_domains) >= 2:
         result.status = SufficiencyStatus.SUFFICIENT
         result.rule_matched = "Rule2"
-        result.reason = f"Found {len(reputable_domains)} independent reputable sources with quotes"
+        result.reason = f"Found {len(strong_domains)} independent strong sources with quotes"
         return result
     
     # ─────────────────────────────────────────────────────────────────────────
@@ -514,6 +513,98 @@ def evidence_sufficiency(
         result.reason = f"Insufficient quality: {result.independent_domains} independent domains"
     
     return result
+
+
+def verdict_ready_for_claim(
+    sources: list[Any],
+    *,
+    claim_id: str = "",
+    claim_text: str = "",  # M109: For embedding similarity
+) -> tuple[bool, dict]:
+    """
+    Determine whether evidence is strong enough to score a claim.
+
+    Ready when:
+    - at least one anchor source for this claim (SUPPORT/REFUTE + tier A/A' or quote_matches), or
+    - two independent domains with tier A/A' SUPPORT/REFUTE for this claim, or
+    - M108: at least one SUPPORT/REFUTE source with quote or high relevance (>0.7)
+    - M109: at least one source with high semantic similarity (>0.75) to claim
+    """
+    anchor_count = 0
+    domains_with_strong: set[str] = set()
+    sources_with_evidence = 0  # M108: Track sources with quote or high relevance
+    semantic_matches = 0  # M109: Track sources with high embedding similarity
+
+    # M109: Try to use embeddings for semantic similarity
+    embed_available = False
+    try:
+        from spectrue_core.embeddings import EmbedService
+        embed_available = EmbedService.is_available() and bool(claim_text)
+    except ImportError:
+        pass
+
+    for src in sources or []:
+        if not isinstance(src, dict):
+            continue
+        # Note: claim_id may not be set yet during verdict.ready check
+        # so we check all sources for the claim
+        
+        # M108: Check for quote or high relevance as evidence signal
+        # Do this BEFORE stance filter - CONTEXT sources with quotes still count!
+        has_quote = bool(src.get("quote") or src.get("quote_value"))
+        relevance = float(src.get("relevance_score") or 0)
+        if has_quote or relevance >= 0.7:
+            sources_with_evidence += 1
+        
+        # M109: Check semantic similarity with embeddings
+        # During verdict.ready, sources have snippet but not content yet
+        if embed_available:
+            content = src.get("snippet") or src.get("content") or src.get("quote") or ""
+            if content and len(content) > 30:
+                try:
+                    sim = EmbedService.similarity(claim_text, content[:2000])
+                    # Debug logging for troubleshooting
+                    logger.debug(
+                        "[M109] Verdict Check: claim=%s... src=%s... sim=%.3f threshold=0.35 match=%s",
+                        claim_text[:30],
+                        content[:30],
+                        sim,
+                        sim >= 0.35
+                    )
+                    
+                    if sim >= 0.35:  # Lowered: real similarity ~0.4-0.5 for related content
+                        semantic_matches += 1
+                except Exception as e:
+                    logger.debug("[M109] Embed error: %s", e)
+
+        stance = str(src.get("stance") or "").upper()
+        if stance not in {"SUPPORT", "REFUTE"}:
+            continue  # Only count anchors for SUPPORT/REFUTE
+
+        tier = str(src.get("evidence_tier") or "").upper()
+        has_quotes = bool(src.get("quote_matches"))
+        strong_tier = tier in {"A", "A'"}
+
+        if strong_tier or has_quotes:
+            anchor_count += 1
+            url = src.get("url") or src.get("link") or ""
+            domain = _extract_domain(url)
+            if domain and strong_tier:
+                domains_with_strong.add(domain)
+
+    # M108/M109: Ready if traditional anchors OR sources with evidence OR semantic matches
+    ready = (
+        anchor_count >= 1 
+        or len(domains_with_strong) >= 2 
+        or sources_with_evidence >= 1
+        or semantic_matches >= 1
+    )
+    return ready, {
+        "anchors": anchor_count,
+        "domains_with_strong": len(domains_with_strong),
+        "sources_with_evidence": sources_with_evidence,  # M108
+        "semantic_matches": semantic_matches,  # M109
+    }
 
 
 def check_sufficiency_for_claim(

@@ -152,3 +152,38 @@ def apply_search_policy_to_plan(
     plan.budget_class = budget_class_for_profile(profile)
 
     return plan
+
+
+def apply_claim_retrieval_policy(plan: ExecutionPlan, *, claims: list[dict]) -> ExecutionPlan:
+    """
+    Apply per-claim retrieval policy as a channel whitelist.
+    """
+    if not claims:
+        return plan
+
+    claims_by_id = {str(c.get("id")): c for c in claims if isinstance(c, dict)}
+
+    for claim_id, phases in plan.claim_phases.items():
+        claim = claims_by_id.get(str(claim_id))
+        metadata = claim.get("metadata") if claim else None
+        retrieval_policy = getattr(metadata, "retrieval_policy", None) if metadata else None
+
+        allowed = None
+        use_policy_by_channel = None
+        if retrieval_policy:
+            allowed = getattr(retrieval_policy, "channels_allowed", None)
+            use_policy_by_channel = getattr(retrieval_policy, "use_policy_by_channel", None)
+
+        if not allowed:
+            continue
+
+        allowed_set = set(allowed)
+        for phase in phases:
+            phase.channels = [c for c in phase.channels if c in allowed_set]
+            if use_policy_by_channel:
+                phase.use_policy_by_channel = {
+                    c.value: use_policy_by_channel.get(c.value, UsePolicy.LEAD_ONLY)
+                    for c in phase.channels
+                }
+
+    return plan
