@@ -6,6 +6,7 @@ from typing import Awaitable, Callable
 
 import asyncio
 import logging
+import math
 
 from spectrue_core.schema.signals import TimeWindow
 from spectrue_core.schema.scoring import BeliefState
@@ -45,6 +46,24 @@ from spectrue_core.utils.trace import Trace
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str], Awaitable[None]]
+
+
+_TIER_PRIOR = {
+    "D": 0.80,
+    "C": 0.85,
+    "B": 0.90,
+    "A'": 0.93,
+    "A": 0.96,
+    "UNKNOWN": 0.90,
+}
+_TIER_PRIOR_BASELINE = _TIER_PRIOR["B"]
+
+
+def _explainability_factor_for_tier(tier: str | None) -> tuple[float, str, float]:
+    if not tier:
+        return _TIER_PRIOR["UNKNOWN"] / _TIER_PRIOR_BASELINE, "unknown_default", _TIER_PRIOR["UNKNOWN"]
+    prior = _TIER_PRIOR.get(str(tier).strip().upper(), _TIER_PRIOR["UNKNOWN"])
+    return prior / _TIER_PRIOR_BASELINE, "best_tier", prior
 
 
 
@@ -252,6 +271,7 @@ async def run_evidence_flow(
                         has_direct_evidence = True
                         break
 
+            agg = None
             if has_direct_evidence:
                 Trace.event(
                     "verdict.override",
@@ -281,7 +301,41 @@ async def run_evidence_flow(
                         "reason": "no_direct_quote_evidence",
                     },
                 )
+                agg = aggregate_claim_verdict(
+                    pack,
+                    policy={},
+                    claim_id=claim_id,
+                    temporality=temporality if isinstance(temporality, dict) else None,
+                )
                 cv["reasons_short"] = cv.get("reasons_short", []) or []
+
+            explainability = result.get("explainability_score", -1.0)
+            if isinstance(explainability, (int, float)) and explainability >= 0:
+                best_tier = agg.get("best_tier") if isinstance(agg, dict) else None
+                pre_a = float(explainability)
+                factor, source, prior = _explainability_factor_for_tier(best_tier)
+                if math.isfinite(pre_a):
+                    post_a = max(0.0, min(1.0, pre_a * factor))
+                    if abs(post_a - pre_a) > 1e-9:
+                        result["explainability_score"] = post_a
+                    Trace.event(
+                        "verdict.explainability_tier_factor",
+                        {
+                            "claim_id": claim_id,
+                            "best_tier": best_tier,
+                            "pre_A": pre_a,
+                            "prior": prior,
+                            "baseline": _TIER_PRIOR_BASELINE,
+                            "factor": factor,
+                            "post_A": post_a,
+                            "source": source,
+                        },
+                    )
+                else:
+                    Trace.event(
+                        "verdict.explainability_missing",
+                        {"claim_id": claim_id, "best_tier": best_tier},
+                    )
 
             verdict_state = "insufficient_evidence"
             if cv["verdict"] == "verified":
@@ -388,6 +442,13 @@ async def run_evidence_flow(
             result["explainability_score"] = apply_conflict_explainability_penalty(
                 float(explainability),
             )
+            audit = result.get("audit") or {}
+            explainability_audit = audit.get("explainability", {})
+            if isinstance(explainability_audit, dict):
+                explainability_audit["conflict_penalty_applied"] = True
+                audit["explainability"] = explainability_audit
+                result["audit"] = audit
+
 
     if inp.progress_callback:
         await inp.progress_callback("finalizing")

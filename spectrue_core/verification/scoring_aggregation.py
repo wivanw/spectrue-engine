@@ -3,7 +3,7 @@
 """
 Deterministic claim verdict aggregation.
 
-Implements tier-dominant, conflict-aware scoring with penalties
+Implements evidence-quoted, conflict-aware scoring with penalties
 for temporal mismatch and consistency gaps.
 
 .. deprecated:: M104
@@ -28,8 +28,6 @@ warnings.warn(
 )
 
 TIER_RANK = {"D": 1, "C": 2, "B": 3, "A'": 3, "A": 4}
-TIER_CEILING = {"D": 0.35, "C": 0.55, "B": 0.75, "A'": 0.75, "A": 0.90}
-REFUTE_SCORE = {"D": 0.45, "C": 0.35, "B": 0.25, "A'": 0.20, "A": 0.10}
 
 AMBIGUOUS_MIN = 0.35
 AMBIGUOUS_MAX = 0.65
@@ -41,34 +39,13 @@ def _tier_rank(tier: str | None) -> int:
     return TIER_RANK.get(str(tier).strip().upper(), 0)
 
 
-def _tier_ceiling(tier: str | None) -> float:
-    if not tier:
-        return 0.5
-    return TIER_CEILING.get(str(tier).strip().upper(), 0.5)
-
-
-def _score_from_tier(tier: str | None, *, refute: bool) -> float:
-    if not tier:
-        return 0.5
-    t = str(tier).strip().upper()
-    if refute:
-        return REFUTE_SCORE.get(t, 0.3)
-    return _tier_ceiling(t)
-
-
-def _is_comparable_tier(a: str | None, b: str | None) -> bool:
-    if not a or not b:
-        return False
-    return abs(_tier_rank(a) - _tier_rank(b)) <= 1
-
-
 def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, value))
 
 
 def _best_evidence(items: list[dict], *, stance: str) -> dict | None:
     best: dict | None = None
-    best_rank = 0
+    best_score = -1.0
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -76,12 +53,25 @@ def _best_evidence(items: list[dict], *, stance: str) -> dict | None:
             continue
         if not item.get("quote"):
             continue
-        tier = str(item.get("tier") or "").upper()
-        rank = _tier_rank(tier)
-        if rank > best_rank:
-            best_rank = rank
+        relevance = item.get("relevance")
+        try:
+            score = float(relevance) if relevance is not None else 0.0
+        except (TypeError, ValueError):
+            score = 0.0
+        if score > best_score:
+            best_score = score
             best = item
     return best
+
+
+def _score_from_quote_counts(*, support_count: int, refute_count: int) -> tuple[str, float]:
+    if support_count > 0 and refute_count == 0:
+        base = 0.75 if support_count == 1 else 0.85
+        return "verified", base
+    if refute_count > 0 and support_count == 0:
+        base = 0.25 if refute_count == 1 else 0.15
+        return "refuted", base
+    return "ambiguous", 0.5
 
 
 def aggregate_claim_verdict(
@@ -116,17 +106,29 @@ def aggregate_claim_verdict(
             },
         }
 
+    support_count = sum(
+        1
+        for i in items
+        if isinstance(i, dict)
+        and str(i.get("stance") or "").upper() == "SUPPORT"
+        and i.get("quote")
+    )
+    refute_count = sum(
+        1
+        for i in items
+        if isinstance(i, dict)
+        and str(i.get("stance") or "").upper() == "REFUTE"
+        and i.get("quote")
+    )
+
     support_tier = support_best.get("tier") if support_best else None
     refute_tier = refute_best.get("tier") if refute_best else None
 
-    conflict = bool(support_best and refute_best and _is_comparable_tier(support_tier, refute_tier))
-
-    if refute_best and (_tier_rank(refute_tier) >= _tier_rank(support_tier) or not support_best):
-        base = _score_from_tier(refute_tier, refute=True)
-        verdict = "refuted"
-    else:
-        base = _score_from_tier(support_tier, refute=False)
-        verdict = "verified"
+    conflict = bool(support_best and refute_best)
+    verdict, base = _score_from_quote_counts(
+        support_count=support_count,
+        refute_count=refute_count,
+    )
 
     penalties: list[str] = []
     if conflict:
@@ -160,15 +162,11 @@ def aggregate_claim_verdict(
         best_tier = refute_tier
 
     pre_ceiling = base
-    ceiling = _tier_ceiling(best_tier)
-    base = _clamp(base, 0.0, ceiling)
+    base = _clamp(base, 0.0, 1.0)
 
     if conflict:
-        support_strength = _tier_rank(support_tier)
-        refute_strength = _tier_rank(refute_tier)
-        if abs(support_strength - refute_strength) <= 0:
-            verdict = "ambiguous"
-            base = _clamp(base, AMBIGUOUS_MIN, AMBIGUOUS_MAX)
+        verdict = "ambiguous"
+        base = _clamp(base, AMBIGUOUS_MIN, AMBIGUOUS_MAX)
     if forced_ambiguous:
         base = _clamp(base, AMBIGUOUS_MIN, AMBIGUOUS_MAX)
 
@@ -180,21 +178,24 @@ def aggregate_claim_verdict(
             "refute_tier": refute_tier,
             "best_tier": best_tier,
             "pre_ceiling_score": pre_ceiling,
-            "ceiling": ceiling,
             "final_score": base,
             "conflict": conflict,
             "forced_ambiguous": forced_ambiguous,
+            "support_quotes": support_count,
+            "refute_quotes": refute_count,
         },
     )
 
     return {
         "verdict": verdict,
         "verdict_score": base,
+        "best_tier": best_tier,
         "reasons_expert": {
             "best_support": _compact_ref(support_best),
             "best_refute": _compact_ref(refute_best),
             "conflict": conflict,
             "penalties": penalties,
+            "best_tier": best_tier,
         },
     }
 
