@@ -183,25 +183,35 @@ class ClaimGraphConfig:
     
     # B-Stage parameters
     k_sim: int = 10              # Top-K by embedding similarity
-    k_adj: int = 2               # ±K adjacent claims in section
-    k_total_cap: int = 20        # Hard cap on candidates per claim
-    
-    # C-Stage parameters
-    tau: float = 0.6             # Edge score threshold
-    batch_size: int = 30         # Edges per LLM batch
-    max_claim_chars: int = 280   # Max chars per claim in prompt
-    
+    max_nodes_for_full_pairwise: int = 50  # When to allow full pairwise MST
+    edge_pos_gamma: float = 0.6   # Position prior for edge weights (exp decay)
+
     # Output parameters
     top_k: int = 12              # Key claims to select
-    
-    # Budget limits
-    max_cost_usd: float = 0.05
-    max_latency_sec: float = 90.0
-    avg_tokens_per_edge: int = 120
-    
+
+    # Priors / PageRank
+    pos_prior_gamma: float = 0.12
+    w_pos: float = 0.35
+    w_supp: float = 0.35
+    w_imp: float = 0.2
+    w_harm: float = 0.1
+    pagerank_alpha: float = 0.85
+    pagerank_eps: float = 1e-8
+    pagerank_max_iter: int = 200
+
+    # Selection parameters
+    selection_budget: float = -1.0  # <=0 means unlimited budget
+    default_claim_cost: float = 0.0  # <=0 means do not inject costs
+    lambda_rank: float = 0.3
+    mu_redundancy: float = 0.1
+
     # Quality gates
     min_kept_ratio: float = 0.05
     max_kept_ratio: float = 0.60
+    trace_top_k: int = 5
+    topic_aware: bool = False
+    beta_prior_alpha: float = 1.0
+    beta_prior_beta: float = 1.0
     
     # M73 Layer 2: Structural Claim Prioritization
     structural_prioritization_enabled: bool = True
@@ -325,7 +335,7 @@ class EngineRuntimeConfig:
             langdetect_min_prob=_parse_float(
                 os.getenv("SPECTRUE_LANGDETECT_MIN_PROB"), default=0.80, min_v=0.0, max_v=1.0
             ),
-            max_claims_deep=_parse_int(os.getenv("SPECTRUE_MAX_CLAIMS"), default=2, min_v=1, max_v=3),
+            max_claims_deep=_parse_int(os.getenv("SPECTRUE_MAX_CLAIMS"), default=2, min_v=1, max_v=1000),
         )
 
         llm = EngineLLMConfig(
@@ -341,18 +351,29 @@ class EngineRuntimeConfig:
         # M72: ClaimGraph configuration
         claim_graph = ClaimGraphConfig(
             enabled=_parse_bool(os.getenv("CLAIM_GRAPH_ENABLED"), default=True),
-            k_sim=_parse_int(os.getenv("CLAIM_GRAPH_K_SIM"), default=10, min_v=1, max_v=50),
-            k_adj=_parse_int(os.getenv("CLAIM_GRAPH_K_ADJ"), default=2, min_v=0, max_v=10),
-            k_total_cap=_parse_int(os.getenv("CLAIM_GRAPH_K_TOTAL_CAP"), default=20, min_v=5, max_v=100),
-            tau=_parse_float(os.getenv("CLAIM_GRAPH_TAU"), default=0.6, min_v=0.0, max_v=1.0),
-            batch_size=_parse_int(os.getenv("CLAIM_GRAPH_BATCH_SIZE"), default=30, min_v=1, max_v=100),
-            max_claim_chars=_parse_int(os.getenv("CLAIM_GRAPH_MAX_CLAIM_CHARS"), default=280, min_v=50, max_v=500),
-            top_k=_parse_int(os.getenv("CLAIM_GRAPH_TOP_K"), default=12, min_v=1, max_v=50),
-            max_cost_usd=_parse_float(os.getenv("CLAIM_GRAPH_MAX_COST_USD"), default=0.05, min_v=0.001, max_v=1.0),
-            max_latency_sec=_parse_float(os.getenv("CLAIM_GRAPH_MAX_LATENCY_SEC"), default=90.0, min_v=10.0, max_v=300.0),
-            avg_tokens_per_edge=_parse_int(os.getenv("CLAIM_GRAPH_AVG_TOKENS_PER_EDGE"), default=120, min_v=50, max_v=500),
+            k_sim=_parse_int(os.getenv("CLAIM_GRAPH_K_SIM"), default=10, min_v=1, max_v=200),
+            max_nodes_for_full_pairwise=_parse_int(
+                os.getenv("CLAIM_GRAPH_MAX_PAIRWISE"), default=50, min_v=2, max_v=500
+            ),
+            edge_pos_gamma=_parse_float(os.getenv("CLAIM_GRAPH_EDGE_POS_GAMMA"), default=0.6, min_v=0.05, max_v=10.0),
+            top_k=_parse_int(os.getenv("CLAIM_GRAPH_TOP_K"), default=12, min_v=1, max_v=200),
+            pos_prior_gamma=_parse_float(os.getenv("CLAIM_GRAPH_POS_GAMMA"), default=0.12, min_v=0.0, max_v=5.0),
+            w_pos=_parse_float(os.getenv("CLAIM_GRAPH_W_POS"), default=0.35, min_v=0.0, max_v=5.0),
+            w_supp=_parse_float(os.getenv("CLAIM_GRAPH_W_SUPP"), default=0.35, min_v=0.0, max_v=5.0),
+            w_imp=_parse_float(os.getenv("CLAIM_GRAPH_W_IMP"), default=0.2, min_v=0.0, max_v=5.0),
+            w_harm=_parse_float(os.getenv("CLAIM_GRAPH_W_HARM"), default=0.1, min_v=0.0, max_v=5.0),
+            pagerank_alpha=_parse_float(os.getenv("CLAIM_GRAPH_PAGERANK_ALPHA"), default=0.85, min_v=0.0, max_v=1.0),
+            pagerank_eps=_parse_float(os.getenv("CLAIM_GRAPH_PAGERANK_EPS"), default=1e-8, min_v=1e-12, max_v=1e-2),
+            pagerank_max_iter=_parse_int(os.getenv("CLAIM_GRAPH_PAGERANK_MAX_ITER"), default=200, min_v=10, max_v=5000),
+            selection_budget=_parse_float(os.getenv("CLAIM_GRAPH_SELECTION_BUDGET"), default=-1.0, min_v=-1e6, max_v=1e6),
+            default_claim_cost=_parse_float(os.getenv("CLAIM_GRAPH_DEFAULT_CLAIM_COST"), default=0.0, min_v=-1e3, max_v=1e3),
+            lambda_rank=_parse_float(os.getenv("CLAIM_GRAPH_LAMBDA_RANK"), default=0.3, min_v=0.0, max_v=5.0),
+            mu_redundancy=_parse_float(os.getenv("CLAIM_GRAPH_MU_REDUNDANCY"), default=0.1, min_v=0.0, max_v=5.0),
             min_kept_ratio=_parse_float(os.getenv("CLAIM_GRAPH_MIN_KEPT_RATIO"), default=0.05, min_v=0.0, max_v=0.5),
             max_kept_ratio=_parse_float(os.getenv("CLAIM_GRAPH_MAX_KEPT_RATIO"), default=0.60, min_v=0.3, max_v=1.0),
+            trace_top_k=_parse_int(os.getenv("CLAIM_GRAPH_TRACE_TOP_K"), default=5, min_v=1, max_v=100),
+            beta_prior_alpha=_parse_float(os.getenv("CLAIM_GRAPH_BETA_PRIOR_ALPHA"), default=1.0, min_v=0.1, max_v=10.0),
+            beta_prior_beta=_parse_float(os.getenv("CLAIM_GRAPH_BETA_PRIOR_BETA"), default=1.0, min_v=0.1, max_v=10.0),
             # M73 Layer 2-4
             structural_prioritization_enabled=_parse_bool(os.getenv("CLAIM_GRAPH_STRUCTURAL_ENABLED"), default=True),
             structural_weight_threshold=_parse_float(os.getenv("CLAIM_GRAPH_STRUCTURAL_THRESHOLD"), default=0.5, min_v=0.0, max_v=2.0),
@@ -435,13 +456,16 @@ class EngineRuntimeConfig:
             "claim_graph": {
                 "enabled": bool(self.claim_graph.enabled),
                 "k_sim": int(self.claim_graph.k_sim),
-                "k_adj": int(self.claim_graph.k_adj),
-                "k_total_cap": int(self.claim_graph.k_total_cap),
-                "tau": float(self.claim_graph.tau),
-                "batch_size": int(self.claim_graph.batch_size),
+                "max_nodes_for_full_pairwise": int(self.claim_graph.max_nodes_for_full_pairwise),
                 "top_k": int(self.claim_graph.top_k),
-                "max_cost_usd": float(self.claim_graph.max_cost_usd),
-                "max_latency_sec": float(self.claim_graph.max_latency_sec),
+                "pos_prior_gamma": float(self.claim_graph.pos_prior_gamma),
+                "pagerank_alpha": float(self.claim_graph.pagerank_alpha),
+                "pagerank_eps": float(self.claim_graph.pagerank_eps),
+                "pagerank_max_iter": int(self.claim_graph.pagerank_max_iter),
+                "selection_budget": float(self.claim_graph.selection_budget),
+                "lambda_rank": float(self.claim_graph.lambda_rank),
+                "mu_redundancy": float(self.claim_graph.mu_redundancy),
+                "trace_top_k": int(self.claim_graph.trace_top_k),
                 # M73
                 "structural_prioritization_enabled": bool(self.claim_graph.structural_prioritization_enabled),
                 "tension_signal_enabled": bool(self.claim_graph.tension_signal_enabled),

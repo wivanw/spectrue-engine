@@ -35,51 +35,7 @@ async def run_claim_graph_flow(
     key_claim_ids: set[str] = set()
     graph_result = None
 
-    # M81/T10: Graph worthiness gate
-    graph_worthy = True
-    graph_skip_reason = None
-
-    if claim_graph and claims and len(claims) >= 2:
-        core_support_count = 0
-        unique_topics = set()
-        
-        # M105: Role alias mapping (claim extraction uses thesis/background, graph expects core/support)
-        ROLE_ALIASES = {"thesis": "core", "background": "support"}
-        
-        for c in claims:
-            # Check both claim_role (M80+) and type (legacy) fields
-            role = c.get("claim_role") or c.get("type", "core")
-            role = ROLE_ALIASES.get(role, role)  # Apply alias
-            if role in ("core", "support"):
-                core_support_count += 1
-            topic = c.get("topic_group", "Other")
-            unique_topics.add(topic)
-
-        if core_support_count < 2:
-            graph_worthy = False
-            graph_skip_reason = "insufficient_core_support_claims"
-        elif len(unique_topics) < 2 and len(claims) > 3:
-            graph_worthy = False
-            graph_skip_reason = "no_topic_diversity"
-
-        if not graph_worthy:
-            logger.debug(
-                "[M81] Skipping ClaimGraph: %s (core_support=%d, topics=%d)",
-                graph_skip_reason,
-                core_support_count,
-                len(unique_topics),
-            )
-            Trace.event(
-                "claim_graph.skipped",
-                {
-                    "reason": graph_skip_reason,
-                    "core_support_count": core_support_count,
-                    "unique_topics": len(unique_topics),
-                    "total_claims": len(claims),
-                },
-            )
-
-    if claim_graph and claims and graph_worthy:
+    if claim_graph and claims:
         if progress_callback:
             await progress_callback("building_claim_graph")
 

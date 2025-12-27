@@ -3,33 +3,136 @@
 """
 ClaimGraph Candidate Generation (B-stage)
 
-Isolated from `ClaimGraphBuilder` so the builder reads as a pipeline of steps.
+Provides similarity-based kNN edges and MST connectivity helpers.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import Dict, List, Tuple
 
 from spectrue_core.graph.types import CandidateEdge, ClaimNode
 
-if TYPE_CHECKING:
-    from spectrue_core.graph.embedding_util import EmbeddingClient
-    from spectrue_core.runtime_config import ClaimGraphConfig
-
 logger = logging.getLogger(__name__)
+
+Edge = Tuple[str, str, float]
+
+
+def build_knn_edges(
+    *,
+    nodes: List[ClaimNode],
+    similarity_matrix: List[List[float]],
+    k: int,
+) -> tuple[List[Edge], Dict[str, List[tuple[str, float]]]]:
+    """
+    Build undirected kNN edges from a similarity matrix.
+
+    Returns:
+        (edges, knn_map) where edges are unique (u, v, sim) tuples and knn_map
+        lists neighbors per node id.
+    """
+    edges: List[Edge] = []
+    knn_map: Dict[str, List[tuple[str, float]]] = {}
+    seen: set[tuple[str, str]] = set()
+
+    for i, node in enumerate(nodes):
+        top_similar = sorted(
+            [
+                (j, similarity_matrix[i][j])
+                for j in range(len(nodes))
+                if j != i
+            ],
+            key=lambda x: x[1],
+            reverse=True,
+        )[:k]
+        neigh = []
+        for j, sim_score in top_similar:
+            other = nodes[j]
+            pair = tuple(sorted((node.claim_id, other.claim_id)))
+            if pair in seen:
+                continue
+            seen.add(pair)
+            edges.append((node.claim_id, other.claim_id, float(sim_score)))
+            neigh.append((other.claim_id, float(sim_score)))
+        knn_map[node.claim_id] = neigh
+
+    return edges, knn_map
+
+
+def _prim_mst(nodes: List[str], edges: List[Edge]) -> List[Edge]:
+    adj: Dict[str, List[tuple[str, float]]] = {n: [] for n in nodes}
+    for u, v, sim in edges:
+        dist = 1.0 - float(sim)
+        adj[u].append((v, dist))
+        adj[v].append((u, dist))
+
+    if not nodes:
+        return []
+
+    start = nodes[0]
+    in_tree = {start}
+    mst: List[Edge] = []
+
+    while len(in_tree) < len(nodes):
+        best = None
+        for u in list(in_tree):
+            for v, dist in adj[u]:
+                if v in in_tree:
+                    continue
+                cand = (dist, u, v)
+                if best is None or cand < best:
+                    best = cand
+        if best is None:
+            # Disconnected graph
+            break
+        dist, u, v = best
+        in_tree.add(v)
+        sim = 1.0 - dist
+        mst.append((u, v, sim))
+
+    return mst
+
+
+def mst_connectivity(
+    *,
+    node_ids: List[str],
+    candidate_edges: List[Edge],
+    similarity_matrix: List[List[float]] | None = None,
+    max_nodes_for_full_pairwise: int = 50,
+) -> List[Edge]:
+    """
+    Add MST edges to guarantee connectivity.
+
+    Uses candidate_edges; if they cannot connect all nodes and the graph is
+    small, falls back to full pairwise distances for MST only.
+    """
+    mst = _prim_mst(node_ids, candidate_edges)
+    if len(mst) >= max(0, len(node_ids) - 1):
+        return mst
+
+    if similarity_matrix is None or len(node_ids) > max_nodes_for_full_pairwise:
+        return mst
+
+    full_edges: List[Edge] = []
+    for i, src in enumerate(node_ids):
+        for j in range(i + 1, len(node_ids)):
+            sim = similarity_matrix[i][j]
+            full_edges.append((src, node_ids[j], float(sim)))
+
+    return _prim_mst(node_ids, full_edges)
 
 
 async def generate_candidate_edges(
     *,
     nodes: list[ClaimNode],
-    config: "ClaimGraphConfig",
-    embedding_client: "EmbeddingClient",
+    config,
+    embedding_client,
 ) -> list[CandidateEdge]:
     """
-    Generate candidate edges using embedding similarity and adjacency.
+    Legacy-compatible candidate generator that now builds kNN edges only.
 
-    MVP: sim + adjacent (keyword overlap is stub/disabled)
+    Returns CandidateEdge objects for compatibility; adjacency/topic caps
+    are removed in favor of deterministic similarity kNN.
     """
     if len(nodes) < 2:
         return []
@@ -38,83 +141,30 @@ async def generate_candidate_edges(
     embeddings = await embedding_client.embed_texts(texts)
     sim_matrix = embedding_client.build_similarity_matrix(embeddings)
 
+    knn_edges, _ = build_knn_edges(nodes=nodes, similarity_matrix=sim_matrix, k=getattr(config, "k_sim", len(nodes)))
     candidates: list[CandidateEdge] = []
-    seen_pairs: set[tuple[str, str]] = set()
-
-    for i, node in enumerate(nodes):
-        node_candidates: list[CandidateEdge] = []
-
-        # Similarity-based candidates (Top-K_SIM)
-        # M74: Topic-aware check
-        top_similar = embedding_client.get_top_k_similar(i, sim_matrix, k=len(nodes))
-
-        sim_count = 0
-        for j, sim_score in top_similar:
-            if sim_count >= config.k_sim:
-                break
-
-            other = nodes[j]
-
-            # M74: Skip cross-topic for SIM edges
-            if config.topic_aware and node.topic_key != other.topic_key:
-                continue
-
-            pair = tuple(sorted([node.claim_id, other.claim_id]))
-            if pair in seen_pairs:
-                continue
-
-            seen_pairs.add(pair)
-            node_candidates.append(
-                CandidateEdge(
-                    src_id=node.claim_id,
-                    dst_id=other.claim_id,
-                    reason="sim",
-                    sim_score=sim_score,
-                    same_section=node.section_id == other.section_id,
-                    cross_topic=False,  # SIM edges are always within-topic here
-                )
+    for src, dst, sim_score in knn_edges:
+        same_section = False
+        try:
+            src_node = next(n for n in nodes if n.claim_id == src)
+            dst_node = next(n for n in nodes if n.claim_id == dst)
+            same_section = src_node.section_id == dst_node.section_id
+        except StopIteration:
+            same_section = False
+        candidates.append(
+            CandidateEdge(
+                src_id=src,
+                dst_id=dst,
+                reason="sim",
+                sim_score=sim_score,
+                same_section=same_section,
+                cross_topic=False,
             )
-            sim_count += 1
-
-        # Adjacency-based candidates (±K_ADJ in same section)
-        for delta in range(-config.k_adj, config.k_adj + 1):
-            if delta == 0:
-                continue
-
-            adj_idx = i + delta
-            if adj_idx < 0 or adj_idx >= len(nodes):
-                continue
-
-            other = nodes[adj_idx]
-            if node.section_id != other.section_id:
-                continue
-
-            pair = tuple(sorted([node.claim_id, other.claim_id]))
-            if pair in seen_pairs:
-                continue
-
-            seen_pairs.add(pair)
-            is_cross_topic = node.topic_key != other.topic_key
-            node_candidates.append(
-                CandidateEdge(
-                    src_id=node.claim_id,
-                    dst_id=other.claim_id,
-                    reason="adjacent",
-                    sim_score=0.0,
-                    same_section=True,
-                    cross_topic=is_cross_topic,
-                )
-            )
-
-        # Apply cap per node
-        if len(node_candidates) > config.k_total_cap:
-            node_candidates.sort(key=lambda e: e.sim_score, reverse=True)
-            node_candidates = node_candidates[: config.k_total_cap]
-
-        candidates.extend(node_candidates)
+        )
 
     logger.debug(
-        "[M72] B-Stage: %d candidate edges from %d nodes", len(candidates), len(nodes)
+        "[M109] B-Stage: %d similarity candidate edges from %d nodes",
+        len(candidates),
+        len(nodes),
     )
     return candidates
-

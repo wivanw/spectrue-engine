@@ -92,7 +92,7 @@ class TestBuildSourcesLiteQuoteContract:
         lite, _ = build_sources_lite(sources)
         assert lite[0]["has_quote"] is True
         assert "Important quote from source" in lite[0]["text"]
-        assert lite[0]["fields_present"] == ["quote", "snippet"]
+        assert lite[0]["fields_present"] == ["quote", "snippet", "quote_value"]
 
     def test_no_quote_uses_snippet(self):
         """Without quote, uses snippet."""

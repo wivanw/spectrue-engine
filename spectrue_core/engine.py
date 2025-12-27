@@ -103,8 +103,9 @@ class SpectrueEngine:
                     await progress_callback("extracting_claims")
 
                 # Cost-aware: cap number of separate claim analyses.
-                max_claims = int(getattr(self.config.runtime.tunables, "max_claims_deep", 2) or 2)
-                max_claims = max(1, min(max_claims, 3))
+                max_claims = max(
+                    1, int(getattr(self.config.runtime.tunables, "max_claims_deep", 2) or 2)
+                )
 
                 # M67: Use pre-segmented sentences if provided, otherwise use spaCy
                 if sentences:

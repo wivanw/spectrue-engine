@@ -12,6 +12,8 @@ Article Cleaner Skill - uses LLM Nano to extract clean article content.
 """
 
 import logging
+
+from spectrue_core.utils.trace import Trace
 import re
 from spectrue_core.agents.llm_client import LLMClient
 from spectrue_core.config import SpectrueConfig
@@ -211,6 +213,14 @@ class ArticleCleanerSkill:
             
             if response and len(response.strip()) > 100:
                 logger.debug("[ArticleCleaner] Cleaned: %d -> %d chars", len(raw_text), len(response))
+                Trace.event(
+                    "article_clean.cleaned",
+                    {
+                        "orig_len": len(raw_text),
+                        "clean_len": len(response),
+                        "text": response,
+                    },
+                )
                 return response.strip()
             else:
                 logger.warning("[ArticleCleaner] LLM returned short response, using fallback")
@@ -275,4 +285,13 @@ class ArticleCleanerSkill:
         merged = sampler.merge(list(cleaned_results))
         
         logger.debug("[M74] Merged length: %d chars", len(merged))
+        Trace.event(
+            "article_clean.cleaned_chunked",
+            {
+                "orig_len": len(raw_text),
+                "chunks": len(chunks),
+                "clean_len": len(merged),
+                "text": merged,
+            },
+        )
         return merged, chunks

@@ -3,68 +3,59 @@
 """
 ClaimGraph Quality Gates
 
-Isolates gate logic from `ClaimGraphBuilder` so the main builder reads as a
-sequence of steps.
+Quality gates degrade confidence instead of disabling the graph.
 """
 
 from __future__ import annotations
 
 import logging
 
-from spectrue_core.graph.types import CandidateEdge, TypedEdge, GraphResult
+from spectrue_core.graph.types import GraphResult
 
 logger = logging.getLogger(__name__)
 
 
-def check_kept_ratio_within_topic(
+def confidence_from_density(
     *,
+    num_candidates: int,
+    num_edges: int,
     min_kept_ratio: float,
     max_kept_ratio: float,
-    candidates: list[CandidateEdge],
-    kept_edges: list[TypedEdge],
+    beta_prior_alpha: float,
+    beta_prior_beta: float,
     result: GraphResult,
-) -> bool:
+) -> tuple[float, dict]:
     """
-    Check if kept_ratio is within acceptable bounds.
+    Compute a confidence scalar based on kept edge density (Beta posterior mean).
 
-    M75: Exclude cross-topic edges from the ratio calculation.
-    M76: If ratio is low, treat as sparse-but-valid (record `result.sparse_graph`)
-         but still fail the gate so the caller can fall back deterministically.
+    Returns:
+        (confidence_scalar, info_dict)
     """
-    cross_topic_pairs = {(c.src_id, c.dst_id) for c in candidates if c.cross_topic}
+    a = max(beta_prior_alpha, 1e-6)
+    b = max(beta_prior_beta, 1e-6)
+    k = max(0, num_edges)
+    n = max(0, num_candidates)
+    if k > n:
+        logger.warning("[M109] quality_gate: num_edges %d > num_candidates %d, clamping", k, n)
+        k = n
 
-    kept_within = [e for e in kept_edges if (e.src_id, e.dst_id) not in cross_topic_pairs]
-    cand_within = [c for c in candidates if not c.cross_topic]
-
-    result.within_topic_edges_count = len(cand_within)
-    result.cross_topic_edges_count = len(candidates) - len(cand_within)
-
-    if not cand_within:
-        numerator = len(kept_edges)
-        denominator = len(candidates)
-        logger.debug("[M75] No within-topic candidates, using overall ratio")
-    else:
-        numerator = len(kept_within)
-        denominator = len(cand_within)
-
-    kept_ratio = numerator / denominator if denominator > 0 else 0.0
+    kept_ratio = k / max(1, n)
     result.kept_ratio_within_topic = kept_ratio
 
+    scalar = (a + k) / (a + b + n)
+    reason = "posterior_mean"
+
     if kept_ratio < min_kept_ratio:
-        logger.warning(
-            "[M72] Quality gate: kept_ratio %.3f < min %.3f (within-focus)",
-            kept_ratio,
-            min_kept_ratio,
-        )
         result.sparse_graph = True
-        return False
+        reason = "below_min_density"
+    elif kept_ratio > max_kept_ratio:
+        reason = "above_max_density"
 
-    if kept_ratio > max_kept_ratio:
-        logger.warning(
-            "[M72] Quality gate: kept_ratio %.3f > max %.3f (within-focus)",
-            kept_ratio,
-            max_kept_ratio,
-        )
-        return False
-
-    return True
+    return scalar, {
+        "kept_ratio": kept_ratio,
+        "reason": reason,
+        "posterior_alpha": a + k,
+        "posterior_beta": b + n - k,
+        "min_kept_ratio": min_kept_ratio,
+        "max_kept_ratio": max_kept_ratio,
+    }
