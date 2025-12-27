@@ -127,3 +127,15 @@ def propagate_belief(graph: ClaimContextGraph) -> List[ScoringTraceStep]:
         
     return trace
 
+
+def propagation_routing_signals(graph: ClaimContextGraph) -> dict[str, float]:
+    """
+    Extract propagation outputs as routing-friendly signals.
+    """
+    signals: dict[str, float] = {}
+    for node_id in graph.topological_sort():
+        node = graph.get_node(node_id)
+        if not node or not node.propagated_belief:
+            continue
+        signals[node_id] = float(node.propagated_belief.log_odds)
+    return signals

@@ -159,7 +159,7 @@ class ArticleCleanerSkill:
         
         cleaned = '\n'.join(filtered_lines).strip()
         
-        logger.info("[ArticleCleaner] Fallback regex clean: %d -> %d chars", len(text), len(cleaned))
+        logger.debug("[ArticleCleaner] Fallback regex clean: %d -> %d chars", len(text), len(cleaned))
         return cleaned
     
     async def clean_article(self, raw_text: str, *, max_input_chars: int = 12000) -> str | None:
@@ -210,7 +210,7 @@ class ArticleCleanerSkill:
             response = result.get("content", "") if isinstance(result, dict) else result
             
             if response and len(response.strip()) > 100:
-                logger.info("[ArticleCleaner] Cleaned: %d -> %d chars", len(raw_text), len(response))
+                logger.debug("[ArticleCleaner] Cleaned: %d -> %d chars", len(raw_text), len(response))
                 return response.strip()
             else:
                 logger.warning("[ArticleCleaner] LLM returned short response, using fallback")
@@ -237,7 +237,7 @@ class ArticleCleanerSkill:
         if not chunks:
             return "", []
             
-        logger.info("[M74] Chunked cleaning: %d chunks for %d chars", len(chunks), len(raw_text))
+        logger.debug("[M74] Chunked cleaning: %d chunks for %d chars", len(chunks), len(raw_text))
         
         sem = asyncio.Semaphore(3)
         # Limit concurrency to 3
@@ -274,5 +274,5 @@ class ArticleCleanerSkill:
         cleaned_results = await asyncio.gather(*[_process_chunk(c) for c in chunks])
         merged = sampler.merge(list(cleaned_results))
         
-        logger.info("[M74] Merged length: %d chars", len(merged))
+        logger.debug("[M74] Merged length: %d chars", len(merged))
         return merged, chunks

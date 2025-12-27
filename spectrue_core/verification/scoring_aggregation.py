@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import warnings
 from typing import Any
+from spectrue_core.utils.trace import Trace
 
 # Deprecation warning at module import time (only once)
 warnings.warn(
@@ -158,7 +159,9 @@ def aggregate_claim_verdict(
     elif refute_tier:
         best_tier = refute_tier
 
-    base = _clamp(base, 0.0, _tier_ceiling(best_tier))
+    pre_ceiling = base
+    ceiling = _tier_ceiling(best_tier)
+    base = _clamp(base, 0.0, ceiling)
 
     if conflict:
         support_strength = _tier_rank(support_tier)
@@ -168,6 +171,21 @@ def aggregate_claim_verdict(
             base = _clamp(base, AMBIGUOUS_MIN, AMBIGUOUS_MAX)
     if forced_ambiguous:
         base = _clamp(base, AMBIGUOUS_MIN, AMBIGUOUS_MAX)
+
+    Trace.event(
+        "verdict.tier_ceiling",
+        {
+            "claim_id": claim_id,
+            "support_tier": support_tier,
+            "refute_tier": refute_tier,
+            "best_tier": best_tier,
+            "pre_ceiling_score": pre_ceiling,
+            "ceiling": ceiling,
+            "final_score": base,
+            "conflict": conflict,
+            "forced_ambiguous": forced_ambiguous,
+        },
+    )
 
     return {
         "verdict": verdict,

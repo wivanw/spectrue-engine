@@ -6,6 +6,7 @@ from typing import Awaitable, Callable
 import logging
 
 from spectrue_core.utils.trace import Trace
+from spectrue_core.graph.claim_graph import build_query_clusters
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ async def run_claim_graph_flow(
             graph_skip_reason = "no_topic_diversity"
 
         if not graph_worthy:
-            logger.info(
+            logger.debug(
                 "[M81] Skipping ClaimGraph: %s (core_support=%d, topics=%d)",
                 graph_skip_reason,
                 core_support_count,
@@ -96,9 +97,9 @@ async def run_claim_graph_flow(
             Trace.event("claim_graph", graph_result.to_trace_dict())
 
             if graph_result.disabled:
-                logger.info("[M72] ClaimGraph disabled: %s", graph_result.disabled_reason)
+                logger.debug("[M72] ClaimGraph disabled: %s", graph_result.disabled_reason)
             else:
-                logger.info(
+                logger.debug(
                     "[M72] ClaimGraph: %d key claims identified", len(key_claim_ids)
                 )
 
@@ -130,6 +131,9 @@ async def run_claim_graph_flow(
                     claim["graph_structural_weight"] = ranked.in_structural_weight
                     claim["graph_tension_score"] = ranked.in_contradict_weight
                     claim["is_key_claim"] = ranked.is_key_claim
+                    metadata = claim.get("metadata")
+                    if metadata is not None:
+                        metadata.is_key_claim = bool(ranked.is_key_claim)
                     enriched_count += 1
 
                     if ranked.in_structural_weight > cfg.structural_weight_threshold:
@@ -166,7 +170,7 @@ async def run_claim_graph_flow(
             )
 
             if enriched_count > 0:
-                logger.info(
+                logger.debug(
                     "[M73] Enriched %d claims with graph signals (%d high-tension)",
                     enriched_count,
                     high_tension_count,
@@ -188,6 +192,21 @@ async def run_claim_graph_flow(
                     {"id": c.get("id"), "evidence_need": c.get("evidence_need", "unknown")}
                     for c in claims[:3]
                 ],
+            },
+        )
+
+    # Graph-aware query grouping (cluster mapping)
+    if claims:
+        clusters = build_query_clusters(claims)
+        for cluster_id, claim_ids in clusters.items():
+            for claim in claims:
+                if claim.get("id") in claim_ids:
+                    claim["cluster_id"] = cluster_id
+        Trace.event(
+            "claim_query_clusters",
+            {
+                "cluster_count": len(clusters),
+                "sample_clusters": list(clusters.items())[:3],
             },
         )
 

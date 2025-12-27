@@ -318,7 +318,7 @@ def rank_and_filter(query: str, results: list[dict]) -> list[dict]:
         logger.debug("[Search] Discarded %d results: %s", len(discarded_reasons), "; ".join(discarded_reasons[:5]))
     if not kept and scored:
         # Last resort fallback to avoid empty result if we had candidates
-        logger.info("[Search] All results below 0.15, keeping top 2 borderline results as fallback")
+        logger.debug("[Search] All results below 0.15, keeping top 2 borderline results as fallback")
         kept = scored[:2]
     
     # M67: Log output stats

@@ -15,10 +15,12 @@ from spectrue_core.verification.search_policy import (
 )
 from spectrue_core.verification.search_policy_adapter import (
     apply_search_policy_to_plan,
+    apply_claim_retrieval_policy,
     budget_class_for_profile,
     evaluate_locale_decision,
 )
 from spectrue_core.verification.source_utils import canonicalize_sources
+from spectrue_core.verification.retrieval_eval import evaluate_retrieval_confidence
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ class SearchFlowInput:
     claims: list[dict]
     preloaded_context: str | None
     progress_callback: ProgressCallback | None
+    inline_sources: list[dict] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -49,6 +52,7 @@ class SearchFlowState:
     hard_reject: bool = False
     reject_reason: str | None = None
     locale_decisions: dict[str, dict] = field(default_factory=dict)
+    execution_state: dict[str, dict] = field(default_factory=dict)
 
 
 async def run_search_flow(
@@ -79,13 +83,14 @@ async def run_search_flow(
     search_mgr.set_policy_profile(profile)
 
     if use_orchestration:
-        logger.info("[M81] Using PhaseRunner for progressive widening (orchestration enabled)")
+        logger.debug("[M81] Using PhaseRunner for progressive widening (orchestration enabled)")
 
         try:
             orchestrator = ClaimOrchestrator()
             budget_class = budget_class_for_profile(profile)
             execution_plan = orchestrator.build_plan(inp.claims, budget_class=budget_class)
             execution_plan = apply_search_policy_to_plan(execution_plan, profile=profile)
+            execution_plan = apply_claim_retrieval_policy(execution_plan, claims=inp.claims)
             locale_config = getattr(getattr(config, "runtime", None), "locale", None)
             default_primary = getattr(locale_config, "default_primary_locale", inp.lang)
             default_fallbacks = getattr(locale_config, "default_fallback_locales", ["en"])
@@ -134,7 +139,7 @@ async def run_search_flow(
                 "orchestration.plan_built",
                 {
                     "claims_count": len(inp.claims),
-                    "budget_class": "standard",
+                    "budget_class": execution_plan.budget_class.value,
                     "phases_per_claim": {
                         c.get("id"): len(execution_plan.get_phases(c.get("id")))
                         for c in inp.claims[:5]
@@ -151,6 +156,7 @@ async def run_search_flow(
                 gpt_model=inp.gpt_model,
                 search_type=inp.search_type,
                 max_cost=inp.max_cost,
+                inline_sources=inp.inline_sources,  # M109: Pass verified inline sources
             )
 
             phase_evidence = await runner.run_all_claims(inp.claims, execution_plan)
@@ -199,7 +205,8 @@ async def run_search_flow(
                 },
             )
 
-            logger.info(
+            state.execution_state = runner.execution_state.to_dict()
+            logger.debug(
                 "[M81] PhaseRunner completed: %d sources from %d claims",
                 total_sources,
                 len(phase_evidence),
@@ -225,7 +232,7 @@ async def run_search_flow(
             )
 
             if primary_query:
-                logger.info("[M81] SafetyNet Search: %s", primary_query[:50])
+                logger.debug("[M81] SafetyNet Search: %s", primary_query[:50])
                 try:
                     u_ctx, u_srcs = await search_mgr.search_unified(
                         primary_query,
@@ -268,7 +275,7 @@ async def run_search_flow(
             current_topic = tavily_topic
 
             for attempt in range(2):
-                logger.info(
+                logger.debug(
                     "[M65/M67] Unified Search (Attempt %d): %s (topic=%s)",
                     attempt + 1,
                     primary_query[:50],
@@ -324,7 +331,7 @@ async def run_search_flow(
 
                 if attempt == 0:
                     new_topic = "general" if current_topic == "news" else "news"
-                    logger.info(
+                    logger.debug(
                         "[M67] Refining Search: Switching topic %s -> %s",
                         current_topic,
                         new_topic,

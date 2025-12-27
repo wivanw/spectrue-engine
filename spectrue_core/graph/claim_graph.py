@@ -181,7 +181,7 @@ class ClaimGraphBuilder:
             result.latency_ms = elapsed_ms
             result.cost_usd = self._estimate_actual_cost(len(nodes), len(candidates))
             
-            logger.info(
+            logger.debug(
                 "[M72] ClaimGraph complete: %d claims, %d edges kept, %d key claims (%.1fs, $%.4f)",
                 len(nodes), len(kept_edges), len(result.key_claims),
                 elapsed_ms / 1000, result.cost_usd
@@ -197,6 +197,7 @@ class ClaimGraphBuilder:
             if 'nodes' in locals() and nodes:
                 return self._apply_fallback(result, nodes)
             return result
+
 
     def _apply_fallback(self, result: GraphResult, nodes: list[ClaimNode]) -> GraphResult:
         """M74/T6: Apply deterministic fallback when graph is disabled."""
@@ -287,7 +288,7 @@ class ClaimGraphBuilder:
         reduction = len(nodes) / len(canonical_claims) if canonical_claims else 1.0
         
         if len(canonical_claims) < len(nodes):
-            logger.info("[M72] Dedup: %d → %d claims (ratio=%.2f)", 
+            logger.debug("[M72] Dedup: %d → %d claims (ratio=%.2f)", 
                        len(nodes), len(canonical_claims), reduction)
         
         return DedupeResult(canonical_claims, dedup_map, reduction)
@@ -516,3 +517,15 @@ class ClaimGraphBuilder:
         """Clear all caches."""
         self.embedding_client.clear_cache()
         self._edge_cache.clear()
+
+
+def build_query_clusters(claims: list[dict]) -> dict[str, list[str]]:
+    """
+    Group claims into clusters for shared query planning.
+    """
+    clusters: dict[str, list[str]] = {}
+    for idx, claim in enumerate(claims or []):
+        claim_id = str(claim.get("id") or f"c{idx + 1}")
+        cluster_key = claim.get("topic_key") or claim.get("topic_group") or "cluster_default"
+        clusters.setdefault(cluster_key, []).append(claim_id)
+    return clusters

@@ -101,14 +101,24 @@ class QuerySkill(BaseSkill):
         context: str = "",
         lang: str = "en",
         content_lang: str = None,
+        search_locale_plan: dict | None = None,
+        time_sensitive: bool | None = None,
     ) -> list[str]:
         """
         Generate search queries using GPT-5 Nano.
         """
-        target_lang_code = (content_lang or lang or "en").lower()
+        primary_locale = (search_locale_plan or {}).get("primary") if search_locale_plan else None
+        fallback_locales = (search_locale_plan or {}).get("fallback") if search_locale_plan else None
+        target_lang_code = (primary_locale or content_lang or lang or "en").lower()
+        fallback_lang_code = None
+        if isinstance(fallback_locales, list) and fallback_locales:
+            fallback_lang_code = fallback_locales[0]
+        elif isinstance(fallback_locales, str):
+            fallback_lang_code = fallback_locales
         
         # Determine language name for prompt
         target_lang_name = SUPPORTED_LANGUAGES.get(target_lang_code, "English")
+        fallback_lang_name = SUPPORTED_LANGUAGES.get(fallback_lang_code, None) if fallback_lang_code else None
         
         # Prepare content
         full_statement = fact if isinstance(fact, str) else str(fact)
@@ -122,13 +132,23 @@ class QuerySkill(BaseSkill):
 
         topics_list_str = ", ".join(AVAILABLE_TOPICS)
         
+        recency_hint = ""
+        if time_sensitive:
+            recency_hint = "- If the claim is time-sensitive, bias queries toward recency (e.g., add year or \"latest\").\n"
+
+        secondary_lang_line = ""
+        if fallback_lang_name:
+            secondary_lang_line = f"  2) {fallback_lang_name}: Pure factual query in fallback language.\n"
+        else:
+            secondary_lang_line = f"  2) {target_lang_name}: Pure factual query in local language.\n"
+
         instructions = f"""You are a fact-checking search query generator.
 Requirements:
 - Output valid JSON (no markdown) with keys: "claim" (object), "queries" (list), and "topics" (list).
 - "topics": select ALL matching topics from this list: [{topics_list_str}].
 - Produce 2 queries:
   1) English: Pure factual query.
-  2) {target_lang_name}: Pure factual query in local language.
+{secondary_lang_line}{recency_hint}
 - Queries MUST be specific.
 - Generate search queries ONLY for the TARGET_CLAIM text.
 - Ignore recipes, history, examples, or background unless explicitly referenced in the claim.

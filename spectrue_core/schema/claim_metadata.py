@@ -284,6 +284,9 @@ class ClaimMetadata:
     
     metadata_confidence: MetadataConfidence = MetadataConfidence.MEDIUM
     """Confidence in this metadata. LOW triggers fail-open."""
+
+    is_key_claim: bool = False
+    """True when graph ranking marks the claim as key."""
     
     def __post_init__(self) -> None:
         # Clamp check_worthiness to [0, 1]
@@ -345,6 +348,7 @@ class ClaimMetadata:
             "verification_target": self.verification_target.value,
             "claim_role": self.claim_role.value,
             "check_worthiness": self.check_worthiness,
+            "is_key_claim": self.is_key_claim,
             "search_locale_plan": {
                 "primary": self.search_locale_plan.primary,
                 "fallback": self.search_locale_plan.fallback,
@@ -438,6 +442,7 @@ class ClaimMetadata:
             verification_target=verification_target,
             claim_role=claim_role,
             check_worthiness=float(data.get("check_worthiness", 0.5)),
+            is_key_claim=bool(data.get("is_key_claim", False)),
             search_locale_plan=search_locale_plan,
             time_signals=[s for s in time_signals_raw if isinstance(s, dict)],
             locale_signals=[s for s in locale_signals_raw if isinstance(s, dict)],
@@ -466,6 +471,7 @@ def default_claim_metadata(
         verification_target=verification_target,
         claim_role=ClaimRole.CORE,
         check_worthiness=0.5,
+        is_key_claim=False,
         search_locale_plan=SearchLocalePlan(primary="en", fallback=["en"]),
         time_signals=[],
         locale_signals=[],

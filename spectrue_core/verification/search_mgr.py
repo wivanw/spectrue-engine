@@ -15,6 +15,7 @@ from spectrue_core.verification.search_policy import (
     should_fallback_news_to_general,
     SearchPolicyProfile,
 )
+from spectrue_core.utils.trace import Trace
 import logging
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ class SearchManager:
         self.google_cse_calls = 0
         self.page_fetches = 0
         self.oracle_calls = 0  # M63: Track Oracle API calls
+        self.global_extracts_used = 0  # M108: Global EAL limit
         self.policy_profile: SearchPolicyProfile | None = None
         
     def reset_metrics(self):
@@ -54,10 +56,52 @@ class SearchManager:
         self.google_cse_calls = 0
         self.page_fetches = 0
         self.oracle_calls = 0
+        self.global_extracts_used = 0  # M108: Global EAL limit
         self.policy_profile = None
 
     def set_policy_profile(self, profile: SearchPolicyProfile | None) -> None:
         self.policy_profile = profile
+
+    def decide_retrieval_action(
+        self,
+        *,
+        retrieval_confidence: float,
+        claim: dict | None = None,
+    ) -> tuple[str, str]:
+        """
+        Decide stop/continue/correction action for retrieval evaluation.
+        """
+        high_threshold = 0.7
+        low_threshold = 0.35
+        if self.policy_profile is not None:
+            base = float(self.policy_profile.quality_thresholds.min_relevance_score or 0.15)
+            low_threshold = max(0.25, min(0.45, base * 2.0))
+            high_threshold = max(0.6, min(0.85, base * 4.0))
+
+        if retrieval_confidence >= high_threshold:
+            return "stop_early", "confidence_high"
+
+        if retrieval_confidence <= low_threshold:
+            metadata = claim.get("metadata") if isinstance(claim, dict) else None
+            tension = 0.0
+            if isinstance(claim, dict):
+                try:
+                    tension = float(claim.get("graph_tension_score") or 0.0)
+                except Exception:
+                    tension = 0.0
+            if tension >= 0.6:
+                return "change_channel", "low_confidence_high_tension"
+            locale_plan = getattr(metadata, "search_locale_plan", None) if metadata else None
+            fallbacks = list(getattr(locale_plan, "fallback", []) or [])
+            if fallbacks:
+                return "change_language", "low_confidence_locale_fallback"
+            retrieval_policy = getattr(metadata, "retrieval_policy", None) if metadata else None
+            allowed = getattr(retrieval_policy, "channels_allowed", None) if retrieval_policy else None
+            if allowed:
+                return "restrict_domains", "low_confidence_restrict_domains"
+            return "refine_query", "low_confidence_refine_query"
+
+        return "continue", "confidence_medium"
 
     def calculate_cost(self, model: str, search_type: str) -> int:
         """Calculate total billed cost based on operations performed."""
@@ -102,6 +146,8 @@ class SearchManager:
             return sources
 
         fetch_count = 0
+        quoted_count = 0
+        enriched_count = 0
         # Prefer higher relevance scores.
         candidates = sorted(
             [s for s in sources if isinstance(s, dict)],
@@ -124,6 +170,13 @@ class SearchManager:
             current_content = src.get("content") or src.get("snippet") or ""
             
             if fetch_count < max_fetches:
+                # M108: Check global limit (across all claims)
+                if self.global_extracts_used >= 4:
+                    Trace.event(
+                        "eal.global_limit_reached",
+                        {"global_extracts_used": self.global_extracts_used, "max": 4},
+                    )
+                    break
                 # If explicitly marked as fulltext, don't re-fetch
                 if src.get("fulltext"):
                     should_fetch = False
@@ -146,13 +199,47 @@ class SearchManager:
                         src["fulltext"] = True
                         current_content = fetched
                         fetch_count += 1
+                        self.global_extracts_used += 1  # M108: Track globally
             
             # Now extract quote from whatever content we have (newly fetched or existing)
             if current_content and len(current_content) >= 50:
-                quotes = extract_quote_candidates(current_content)
-                if quotes:
-                    src["quote"] = quotes[0]
+                # M109: Try semantic quote extraction first
+                claim_text = src.get("claim_text") or ""
+                best_quote = None
+                
+                if claim_text:
+                    try:
+                        from spectrue_core.embeddings import extract_best_quote, EmbedService
+                        if EmbedService.is_available():
+                            best_quote = extract_best_quote(claim_text, current_content)
+                    except ImportError:
+                        pass
+                
+                if best_quote:
+                    src["quote"] = best_quote
+                    src["quote_method"] = "semantic"
+                else:
+                    # Fallback to heuristic extraction
+                    quotes = extract_quote_candidates(current_content)
+                    if quotes:
+                        src["quote"] = quotes[0]
+                        src["quote_method"] = "heuristic"
+                
+                if src.get("quote"):
                     src["eal_enriched"] = True
+                    enriched_count += 1
+                    quoted_count += 1
+
+        Trace.event(
+            "evidence.ladder.summary",
+            {
+                "sources_in": len(sources or []),
+                "candidates": len(candidates),
+                "fetches": fetch_count,
+                "quotes_added": quoted_count,
+                "enriched": enriched_count,
+            },
+        )
 
         return sources
 
@@ -200,7 +287,7 @@ class SearchManager:
         """
         # M76: Force general search for evergreen content
         if article_intent == "evergreen" and topic == "news":
-            logger.info("[SearchMgr] forcing topic='general' for evergreen intent (was 'news')")
+            logger.debug("[SearchMgr] forcing topic='general' for evergreen intent (was 'news')")
             topic = "general"
 
         self.tavily_calls += 1
@@ -216,7 +303,7 @@ class SearchManager:
         should_fallback, fallback_reason, max_score = should_fallback_news_to_general(topic, filtered)
 
         if should_fallback:
-            logger.info(f"[SearchMgr] Fallback triggered: {fallback_reason}. Retrying with topic='general'.")
+            logger.debug(f"[SearchMgr] Fallback triggered: {fallback_reason}. Retrying with topic='general'.")
             
             # Retry with "general"
             self.tavily_calls += 1
@@ -235,12 +322,12 @@ class SearchManager:
             ):
                 fb_count = len(fb_filtered)
                 fb_max_score = max([float(r.get("score", 0) or 0.0) for r in fb_filtered]) if fb_filtered else 0.0
-                logger.info(f"[SearchMgr] Fallback successful. Using general results (count={fb_count}, max={fb_max_score:.2f})")
+                logger.debug(f"[SearchMgr] Fallback successful. Using general results (count={fb_count}, max={fb_max_score:.2f})")
                 filtered = fb_filtered
                 # Reconstruct context from the winner
                 # Note: We reconstruct `context` below based on `filtered`, so just updating `filtered` is enough.
             else:
-                logger.info("[SearchMgr] Fallback yielded no improvement. Keeping original results.")
+                logger.debug("[SearchMgr] Fallback yielded no improvement. Keeping original results.")
 
         new_context = build_context_from_sources(filtered)
         return new_context, filtered

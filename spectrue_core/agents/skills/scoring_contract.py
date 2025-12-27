@@ -14,6 +14,7 @@ Your task is to classify the reliability of claims based *strictly* on the provi
 - **Claims**: Note the `importance` (0.0-1.0). High importance = Core Thesis.
 - **Evidence**: Look for "📌 QUOTE" segments. `stance` is a hint; always verify against the quote/excerpt.
 - **Metadata**: `source_reliability_hint` is context, not a hard rule.
+- **Consistency Rule**: If a claim has `matched_evidence_count > 0`, you MUST NOT say "no sources/evidence". Say the evidence is indirect, insufficient, or lacks direct confirmation.
 
 # SCORING SCALE (0.0 - 1.0)
 - **0.8 - 1.0 (Verified)**: Strong confirmation (direct quotes, official consensus).
@@ -186,10 +187,14 @@ def build_stance_matrix_instructions(*, num_sources: int, pass_type: str) -> str
 - If contradiction is unclear or only contextual, output CONTEXT (or IRRELEVANT if unrelated).
 """
     else:
-        pass_rules = """PASS MODE: SINGLE_PASS (attempt-to-refute)
-- First, attempt to find explicit contradictions. If found, output REFUTE with the contradiction quote.
-- If no contradiction exists, output SUPPORT only if a direct quote/span explicitly supports the claim.
-- If neither applies, output CONTEXT (or IRRELEVANT if unrelated).
+        pass_rules = """PASS MODE: SINGLE_PASS (balanced)
+- SUPPORT if the source reports the same facts/discovery as the claim, even if paraphrased or summarized.
+- SUPPORT if the source is about the same scientific topic and confirms the key details.
+- News articles covering the same research paper or discovery = SUPPORT (not CONTEXT).
+- Output REFUTE only if a direct quote explicitly CONTRADICTS the claim.
+- IRRELEVANT if source is about a completely different topic.
+- CONTEXT only for tangentially related content that neither confirms nor denies.
+- When in doubt between SUPPORT and CONTEXT for related content, prefer SUPPORT.
 """
 
     return f"""You are an Evidence Analyst.

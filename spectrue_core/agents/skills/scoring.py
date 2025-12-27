@@ -51,8 +51,10 @@ class ScoringSkill(BaseSkill):
         # --- 1. PREPARE EVIDENCE (Sanitized & Highlighted) ---
         sources_by_claim = {}
         
-        # Defensive: ensure search_results is a list
-        raw_results = pack.get("search_results")
+        # Prefer scored sources to avoid context-only hallucinations
+        raw_results = pack.get("scored_sources")
+        if not isinstance(raw_results, list):
+            raw_results = pack.get("search_results")
         if not isinstance(raw_results, list):
             raw_results = []
 
@@ -83,12 +85,33 @@ class ScoringSkill(BaseSkill):
                 stance=stance,
             )
             
+            # M109 FIX: Explicitly label PRIMARY sources for LLM
+            if r.get("is_primary"):
+                content_text = f"⭐ [PRIMARY SOURCE / OFFICIAL]\n{content_text}"
+            
             sources_by_claim[cid].append({
                 "domain": r.get("domain"),
                 "source_reliability_hint": "high" if r.get("is_trusted") else "general",
                 "stance": stance, 
                 "excerpt": content_text
             })
+
+        Trace.event(
+            "score_evidence.inputs",
+            {
+                "claims": [
+                    {
+                        "claim_id": cid,
+                        "sources": len(sources),
+                        "stances": [
+                            s.get("stance") for s in sources[:5]
+                        ],
+                    }
+                    for cid, sources in sources_by_claim.items()
+                ],
+                "claims_total": len(sources_by_claim),
+            },
+        )
             
         # --- 2. PREPARE CLAIMS (Sanitized + Importance) ---
         claims_info = []
@@ -111,6 +134,24 @@ class ScoringSkill(BaseSkill):
                 "importance": float(c.get("importance", 0.5)), # Vital for LLM aggregation
                 "matched_evidence_count": len(sources_by_claim.get(cid, []))
             })
+
+        deferred_map = {
+            c.get("id"): bool(c.get("deferred_from_search"))
+            for c in raw_claims
+            if isinstance(c, dict)
+        }
+        no_evidence = [
+            c.get("id") for c in claims_info if c.get("matched_evidence_count", 0) == 0
+        ]
+        Trace.event(
+            "score_evidence.coverage",
+            {
+                "claims_total": len(claims_info),
+                "claims_with_sources": len(claims_info) - len(no_evidence),
+                "claims_no_sources": no_evidence,
+                "deferred_no_sources": [cid for cid in no_evidence if deferred_map.get(cid)],
+            },
+        )
 
         # SECURITY: Sanitize original fact
         safe_original_fact = sanitize_input(pack.get("original_fact", ""))
@@ -145,6 +186,7 @@ class ScoringSkill(BaseSkill):
                 current = clamped.get("explainability_score", -1.0)
                 clamped["explainability_score"] = 0.2 if current < 0 else min(current, 0.4)
                 clamped["stance_fallback"] = "context"
+
             return clamped
 
         except Exception as e:
@@ -364,6 +406,10 @@ class ScoringSkill(BaseSkill):
                 content_text = f'📌 QUOTE: "{safe_quote}"\nℹ️ CONTEXT: {safe_content}'
             else:
                 content_text = safe_content
+
+            # M109 FIX: Explicitly label PRIMARY sources for LLM
+            if e.get("is_primary"):
+                content_text = f"⭐ [PRIMARY SOURCE / OFFICIAL]\n{content_text}"
             
             evidence_by_assertion[map_key].append({
                 "domain": e.get("domain"),

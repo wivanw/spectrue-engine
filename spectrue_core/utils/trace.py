@@ -24,6 +24,7 @@ import time
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+from contextlib import contextmanager
 from typing import Any
 
 from spectrue_core.utils.runtime import is_local_run
@@ -35,6 +36,9 @@ _redact_pii_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("
 _trace_safe_payloads_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_safe_payloads", default=True)
 _trace_max_head_var: contextvars.ContextVar[int] = contextvars.ContextVar("spectrue_trace_max_head", default=120)
 _trace_max_inline_var: contextvars.ContextVar[int] = contextvars.ContextVar("spectrue_trace_max_inline", default=600)
+_trace_phase_starts: contextvars.ContextVar[dict[str, int]] = contextvars.ContextVar(
+    "spectrue_trace_phase_starts", default={}
+)
 
 # M74: PII Regex Patterns
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
@@ -294,3 +298,57 @@ class Trace:
                 "total": int(total),
             },
         )
+
+    @staticmethod
+    def phase_start(phase: str, *, meta: dict[str, Any] | None = None) -> None:
+        if not trace_enabled():
+            return
+        starts = dict(_trace_phase_starts.get() or {})
+        starts[phase] = _now_ms()
+        _trace_phase_starts.set(starts)
+        payload = {"phase": phase}
+        if meta:
+            payload["meta"] = meta
+        Trace.event("phase.start", payload)
+
+    @staticmethod
+    def phase_end(phase: str, *, meta: dict[str, Any] | None = None) -> int | None:
+        if not trace_enabled():
+            return None
+        starts = dict(_trace_phase_starts.get() or {})
+        start_ms = starts.pop(phase, None)
+        _trace_phase_starts.set(starts)
+        duration_ms = _now_ms() - start_ms if start_ms is not None else None
+        payload = {"phase": phase, "duration_ms": duration_ms}
+        if meta:
+            payload["meta"] = meta
+        Trace.event("phase.end", payload)
+        return duration_ms
+
+    @staticmethod
+    def reason_code(
+        *,
+        code: str,
+        phase: str,
+        action: str,
+        label: str | None = None,
+        claim_id: str | None = None,
+    ) -> None:
+        payload = {
+            "code": code,
+            "phase": phase,
+            "action": action,
+            "label": label,
+        }
+        if claim_id:
+            payload["claim_id"] = claim_id
+        Trace.event("reason_code", payload)
+
+    @staticmethod
+    @contextmanager
+    def phase_span(phase: str, *, meta: dict[str, Any] | None = None):
+        Trace.phase_start(phase, meta=meta)
+        try:
+            yield
+        finally:
+            Trace.phase_end(phase, meta=meta)

@@ -103,6 +103,10 @@ class EngineFeatureFlags:
     clean_md_output: bool = True
     # M80: Claim-Centric Orchestration (progressive widening, metadata-driven routing)
     claim_orchestration: bool = True
+    # M109: Embeddings for semantic matching
+    embeddings_verdict_ready: bool = True  # Use embeddings in verdict_ready_for_claim
+    embeddings_clustering: bool = True     # Use embeddings for claim clustering
+    embeddings_quotes: bool = True         # Use embeddings for quote extraction
 
 
 @dataclass(frozen=True)
@@ -269,6 +273,10 @@ class EngineRuntimeConfig:
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
             # M80 Claim Orchestration
             claim_orchestration=_parse_bool(os.getenv("FEATURE_CLAIM_ORCHESTRATION"), default=True),
+            # M109 Embeddings
+            embeddings_verdict_ready=_parse_bool(os.getenv("FEATURE_EMBEDDINGS_VERDICT_READY"), default=True),
+            embeddings_clustering=_parse_bool(os.getenv("FEATURE_EMBEDDINGS_CLUSTERING"), default=True),
+            embeddings_quotes=_parse_bool(os.getenv("FEATURE_EMBEDDINGS_QUOTES"), default=True),
         )
 
         # Search knobs
@@ -383,6 +391,9 @@ class EngineRuntimeConfig:
                 "trace_safe_payloads": bool(self.features.trace_safe_payloads),
                 "clean_md_output": bool(self.features.clean_md_output),
                 "claim_orchestration": bool(self.features.claim_orchestration),
+                "embeddings_verdict_ready": bool(self.features.embeddings_verdict_ready),
+                "embeddings_clustering": bool(self.features.embeddings_clustering),
+                "embeddings_quotes": bool(self.features.embeddings_quotes),
             },
             "debug": {
                 "engine_debug": bool(self.debug.engine_debug),

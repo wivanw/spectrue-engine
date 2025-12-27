@@ -6,6 +6,7 @@ from typing import Iterable, Union
 from spectrue_core.schema import ClaimUnit
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.evidence_pack import SearchResult
+from spectrue_core.verification.source_utils import has_evidence_chunk
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,12 @@ def get_source_text_for_llm(source: dict, *, max_len: int = 350) -> tuple[str, b
     if snippet:
         fields_present.append("snippet")
 
-    content = (source.get("content") or source.get("extracted_content") or "").strip()
+    content = (
+        source.get("content")
+        or source.get("content_excerpt")
+        or source.get("extracted_content")
+        or ""
+    ).strip()
     if content:
         fields_present.append("content")
 
@@ -55,7 +61,20 @@ def get_source_text_for_llm(source: dict, *, max_len: int = 350) -> tuple[str, b
     if snippet:
         return snippet[:max_len], False, fields_present
 
-    return content[:max_len], False, fields_present
+    if content:
+        return content[:max_len], False, fields_present
+
+    title = (source.get("title") or "").strip()
+    if title:
+        fields_present.append("title")
+        return title[:max_len], False, fields_present
+
+    url = (source.get("url") or source.get("link") or "").strip()
+    if url:
+        fields_present.append("url")
+        return url[:max_len], False, fields_present
+
+    return "", False, fields_present
 
 
 
@@ -163,12 +182,18 @@ def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]
         if is_unreadable:
             unreadable_indices.add(i)
 
+        quote_value = (r.get("quote") or "").strip()
+        if quote_value:
+            fields_present.append("quote_value")
+
+        max_quote_len = 350
         results_lite.append(
             {
                 "index": i,
                 "domain": r.get("domain") or r.get("url"),
                 "title": r.get("title", ""),
                 "text": f"{status_hint} {source_text}".strip(),
+                "quote": quote_value[:max_quote_len] if quote_value else "",
                 # M103: Quote contract audit fields
                 "has_quote": has_quote,
                 "fields_present": fields_present,
@@ -224,16 +249,28 @@ def postprocess_evidence_matrix(
         "dropped_bad_id": 0,
         "dropped_no_quote": 0,
         "dropped_missing": 0,
+        "downgraded_low_relevance": 0,
+        "context_promoted": 0,
         "kept_scored": 0,
         "kept_context": 0,
         "context_fallback": 0,
+        "fallback_scored": 0,
+        "quote_filled": 0,
     }
 
     matrix_map = {m.get("source_index"): m for m in (matrix or []) if isinstance(m, dict)}
     valid_claim_ids = {c.get("id") for c in (claims_lite or [])}
-
     mapped_count = len(matrix_map)
     input_count = len(search_results)
+
+    Trace.event(
+        "matrix.summary",
+        {
+            "input_sources": input_count,
+            "mapped_rows": mapped_count,
+            "claim_count": len(claims_lite),
+        },
+    )
 
     if mapped_count == 0 and input_count > 0:
         Trace.event(
@@ -261,10 +298,39 @@ def postprocess_evidence_matrix(
     for i, r in enumerate(search_results):
         match = matrix_map.get(i)
         if not match:
-            stats["context_fallback"] += 1
-            clustered_results.append(_context_fallback_result(r))
+            source_claim_id = r.get("claim_id")
+            if source_claim_id and has_evidence_chunk(r):
+                quote = r.get("quote") or r.get("snippet") or r.get("content") or ""
+                clustered_results.append(
+                    SearchResult(
+                        claim_id=str(source_claim_id),  # type: ignore
+                        url=r.get("url") or r.get("link") or "",
+                        domain=r.get("domain"),
+                        title=r.get("title", ""),
+                        snippet=r.get("snippet", ""),
+                        content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:1500],
+                        published_at=r.get("published_date"),
+                        source_type=r.get("source_type", "unknown"),  # type: ignore
+                        stance="neutral",  # type: ignore
+                        relevance_score=float(r.get("relevance_score", 0.0) or 0.0),
+                        quote_matches=[quote] if quote else [],
+                        key_snippet=quote if quote else r.get("snippet", ""),
+                        is_trusted=bool(r.get("is_trusted")),
+                        is_duplicate=False,
+                        duplicate_of=None,
+                        assertion_key=None,
+                        content_status=r.get("content_status", "available"),
+                        evidence_tier=r.get("evidence_tier"),
+                    )
+                )
+                stats["fallback_scored"] += 1
+                stats["kept_scored"] += 1
+            else:
+                stats["context_fallback"] += 1
+                clustered_results.append(_context_fallback_result(r))
             continue
 
+        source_claim_id = r.get("claim_id")
         cid = match.get("claim_id")
         akey = match.get("assertion_key")
         stance = (match.get("stance") or "IRRELEVANT").upper()
@@ -275,17 +341,36 @@ def postprocess_evidence_matrix(
             relevance = min(relevance, 0.1)
             stats["dropped_unreadable"] = stats.get("dropped_unreadable", 0) + 1
 
-        if not cid or cid not in valid_claim_ids:
-            cid = None
-            stance = "CONTEXT"
-            relevance = 0.0
-            akey = None
-            if not quote:
-                quote = r.get("snippet", "")
+        if source_claim_id and source_claim_id in valid_claim_ids:
+            cid = str(source_claim_id)
+        elif not cid or cid not in valid_claim_ids:
+            source_claim_id = r.get("claim_id")
+            if source_claim_id and has_evidence_chunk(r):
+                cid = str(source_claim_id)
+                stance = "NEUTRAL"
+                if quote is None:
+                    quote = r.get("quote") or r.get("snippet") or r.get("content") or ""
+            else:
+                cid = None
+                stance = "CONTEXT"
+                relevance = 0.0
+                akey = None
+                if not quote:
+                    quote = r.get("snippet", "")
 
-        if stance not in {"CONTEXT", "IRRELEVANT"} and relevance < 0.4:
-            stats["dropped_irrelevant"] += 1
-            continue
+        if (
+            stance in {"CONTEXT", "IRRELEVANT"}
+            and cid
+            and has_evidence_chunk(r)
+        ):
+            stance = "NEUTRAL"
+            stats["context_promoted"] += 1
+            if quote is None:
+                quote = r.get("quote") or r.get("snippet") or r.get("content") or ""
+        if stance in {"SUPPORT", "REFUTE", "MIXED"} and relevance < 0.4:
+            stats["downgraded_low_relevance"] += 1
+            stance = "NEUTRAL"
+            relevance = 0.0
 
         if stance not in valid_scoring_stances:
             if stance == "MENTION":
@@ -294,9 +379,14 @@ def postprocess_evidence_matrix(
                 stats["dropped_irrelevant"] += 1
             continue
 
-        if stance not in {"CONTEXT", "IRRELEVANT"} and (not quote or not str(quote).strip()):
-            stats["dropped_no_quote"] += 1
-            continue
+        if stance in {"SUPPORT", "REFUTE", "MIXED"} and (not quote or not str(quote).strip()):
+            fallback_quote = r.get("quote") or r.get("snippet") or r.get("content") or ""
+            if fallback_quote:
+                quote = fallback_quote
+                stats["quote_filled"] += 1
+            else:
+                stats["dropped_no_quote"] += 1
+                stance = "NEUTRAL"
 
         if stance in {"SUPPORT", "REFUTE", "MIXED"}:
             stats["kept_scored"] += 1
@@ -342,7 +432,7 @@ def postprocess_evidence_matrix(
         )
 
     Trace.event("evidence.synthesis_stats", stats)
-    logger.info("[Clustering] Matrix stats: %s", stats)
+    logger.debug("[Clustering] Matrix stats: %s", stats)
 
     return clustered_results, stats
 

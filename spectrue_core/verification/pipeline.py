@@ -1,6 +1,6 @@
 from spectrue_core.verification.search_mgr import SearchManager, SEARCH_COSTS
 from spectrue_core.verification.evidence import build_evidence_pack
-from spectrue_core.verification.source_utils import canonicalize_source
+from spectrue_core.verification.source_utils import canonicalize_source, has_evidence_chunk
 from spectrue_core.utils.text_processing import clean_article_text, normalize_search_query
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.utils.trust_utils import enrich_sources_with_trust
@@ -9,6 +9,7 @@ from spectrue_core.scoring.priors import calculate_prior
 from spectrue_core.schema.scoring import BeliefState, ClaimNode, ClaimEdge, ClaimRole, RelationType
 from spectrue_core.graph.context import ClaimContextGraph
 from spectrue_core.billing.cost_ledger import CostLedger
+from spectrue_core import __version__, PROMPT_VERSION, SEARCH_STRATEGY_VERSION
 from spectrue_core.billing.estimation import CostEstimator
 from spectrue_core.billing.metering import LLMMeter, TavilyMeter
 from spectrue_core.billing.progress_emitter import CostProgressEmitter
@@ -38,8 +39,28 @@ from spectrue_core.verification.pipeline_queries import (
     is_fuzzy_duplicate,
     normalize_and_sanitize,
     select_diverse_queries,
+    resolve_budgeted_max_queries,
     select_queries_from_claim_units,
 )
+from spectrue_core.verification.ledger_models import (
+    RunLedger,
+    PhaseUsage,
+    PipelineCounts,
+    ReasonCode as LedgerReasonCode,
+    ReasonSummary,
+    ClaimLedgerEntry,
+    ClusterLedgerEntry,
+    BudgetAllocation,
+    RetrievalEvaluation,
+)
+from spectrue_core.verification.reason_codes import ReasonCodes
+from spectrue_core.verification.search_policy import decide_claim_policy
+from spectrue_core.verification.execution_plan import PolicyMode
+from spectrue_core.verification.target_selection import (
+    select_verification_targets,
+    propagate_deferred_verdicts,
+)
+from spectrue_core.verification.costs import summarize_reason_codes, map_stage_costs_to_phases
 import logging
 import asyncio
 from dataclasses import dataclass
@@ -123,6 +144,89 @@ class ValidationPipeline:
             emit_cost_deltas=policy.emit_cost_deltas,
         )
 
+        run_ledger = RunLedger(
+            run_id=current_trace_id(),
+            engine_version=__version__,
+            prompt_version=PROMPT_VERSION,
+            search_strategy=SEARCH_STRATEGY_VERSION,
+            counts=PipelineCounts(),
+        )
+        phase_timings: dict[str, int] = {}
+        phase_reason_codes: dict[str, list[LedgerReasonCode]] = {}
+        reason_events: list[dict] = []
+        claim_entries: dict[str, ClaimLedgerEntry] = {}
+
+        def _start_phase(phase: str) -> None:
+            Trace.phase_start(phase)
+
+        def _end_phase(phase: str) -> None:
+            duration = Trace.phase_end(phase)
+            if duration is not None:
+                phase_timings[phase] = int(duration)
+
+        def _record_reason(
+            spec,
+            *,
+            claim_id: str | None = None,
+            count: int = 1,
+            sc_cost: float = 0.0,
+            tc_cost: float = 0.0,
+        ) -> LedgerReasonCode:
+            code = spec.qualified()
+            entry = LedgerReasonCode(
+                code=code,
+                label=spec.label,
+                phase=spec.phase,
+                action=spec.action,
+                count=count,
+            )
+            phase_reason_codes.setdefault(spec.phase, []).append(entry)
+            reason_events.append(
+                {
+                    "code": code,
+                    "label": spec.label,
+                    "phase": spec.phase,
+                    "action": spec.action,
+                    "count": count,
+                    "sc_cost": sc_cost,
+                    "tc_cost": tc_cost,
+                }
+            )
+            Trace.reason_code(
+                code=code,
+                phase=spec.phase,
+                action=spec.action,
+                label=spec.label,
+                claim_id=claim_id,
+            )
+            return entry
+
+        def _budget_allocation_for_metadata(metadata) -> BudgetAllocation:
+            worthiness = float(getattr(metadata, "check_worthiness", 0.5) or 0.5)
+            if worthiness >= 0.75:
+                return BudgetAllocation(
+                    worthiness_tier="high",
+                    max_queries=3,
+                    max_docs=8,
+                    max_escalations=2,
+                    defer_allowed=False,
+                )
+            if worthiness <= 0.35:
+                return BudgetAllocation(
+                    worthiness_tier="low",
+                    max_queries=1,
+                    max_docs=3,
+                    max_escalations=0,
+                    defer_allowed=True,
+                )
+            return BudgetAllocation(
+                worthiness_tier="medium",
+                max_queries=2,
+                max_docs=5,
+                max_escalations=1,
+                defer_allowed=False,
+            )
+
         prior_llm_meter = getattr(self.agent.llm_client, "_meter", None)
         prior_tavily_meter = getattr(self.search_mgr.web_tool._tavily, "_meter", None)
         self.agent.llm_client._meter = llm_meter
@@ -140,8 +244,60 @@ class ValidationPipeline:
                 )
 
         def _attach_cost_summary(payload: dict) -> dict:
+            summary_obj = ledger.get_summary()
+            phase_costs = map_stage_costs_to_phases(summary_obj.by_stage_credits)
+            phase_order = [
+                "extraction",
+                "graph",
+                "query_build",
+                "retrieval",
+                "evidence_eval",
+                "verdict",
+            ]
+            run_ledger.phase_usage = [
+                PhaseUsage(
+                    phase=phase,
+                    sc_cost=float(phase_costs.get(phase, 0.0)),
+                    tc_cost=0.0,
+                    duration_ms=int(phase_timings.get(phase, 0)),
+                    reason_codes=phase_reason_codes.get(phase, []),
+                )
+                for phase in phase_order
+            ]
+            run_ledger.top_reason_codes = [
+                ReasonSummary(**item) for item in summarize_reason_codes(reason_events)
+            ]
+            run_ledger.claim_entries = list(claim_entries.values())
+            run_ledger.counts.llm_calls_total = len(
+                [e for e in summary_obj.events if e.provider == "openai"]
+            )
+
+            ledger.set_phase_usage([pu.to_dict() for pu in run_ledger.phase_usage])
+            ledger.set_reason_summaries([rs.to_dict() for rs in run_ledger.top_reason_codes])
+
             summary = ledger.get_summary().to_dict()
             payload["cost_summary"] = summary
+            audit = payload.get("audit") or {}
+            audit["usage_ledger"] = run_ledger.to_dict()
+            payload["audit"] = audit
+            Trace.event(
+                "usage_ledger.summary",
+                {
+                    "counts": run_ledger.counts.to_dict(),
+                    "phase_usage": [
+                        {
+                            "phase": pu.phase,
+                            "sc_cost": pu.sc_cost,
+                            "tc_cost": pu.tc_cost,
+                            "duration_ms": pu.duration_ms,
+                        }
+                        for pu in run_ledger.phase_usage
+                    ],
+                    "top_reason_codes": [
+                        rc.to_dict() for rc in run_ledger.top_reason_codes
+                    ],
+                },
+            )
             Trace.event("cost_summary.attached", {
                 "total_credits": summary.get("total_credits"),
                 "total_usd": summary.get("total_usd"),
@@ -154,6 +310,7 @@ class ValidationPipeline:
         self.search_mgr.reset_metrics()
 
         try:
+            _start_phase("extraction")
             prepared = await self._prepare_input(
                 fact=fact,
                 preloaded_context=preloaded_context,
@@ -173,6 +330,7 @@ class ValidationPipeline:
                 lang=lang,
                 progress_callback=_progress,
             )
+            _end_phase("extraction")
             anchor_claim_id = None
             if claims:
                 core_claims = [c for c in claims if c.get("type") == "core"]
@@ -221,6 +379,7 @@ class ValidationPipeline:
                 canonical = canonicalize_source(oracle_flow.evidence_source)
                 final_sources.append(canonical or oracle_flow.evidence_source)
 
+            _start_phase("graph")
             graph_flow_result = await run_claim_graph_flow(
                 self._claim_graph,
                 claims=claims,
@@ -270,9 +429,105 @@ class ValidationPipeline:
                             weight=te.score
                         )
                         context_graph.add_edge(edge)
+            _end_phase("graph")
 
-            search_queries = self._select_diverse_queries(claims, max_queries=3, fact_fallback=fact)
+            _start_phase("query_build")
+            eligible_claims: list[dict] = []
+            for claim in claims:
+                claim_id = str(claim.get("id") or "c1")
+                metadata = claim.get("metadata")
+                decision = decide_claim_policy(metadata)
+                policy_mode = decision.mode.value
+                claim["policy_mode"] = policy_mode
+                budget = _budget_allocation_for_metadata(metadata)
+                claim["budget_allocation"] = budget.to_dict()
 
+                policy_reasons: list[LedgerReasonCode] = []
+                if decision.mode == PolicyMode.SKIP:
+                    policy_reasons.append(_record_reason(ReasonCodes.POLICY_SKIP, claim_id=claim_id))
+                elif decision.mode == PolicyMode.CHEAP:
+                    policy_reasons.append(_record_reason(ReasonCodes.POLICY_CHEAP, claim_id=claim_id))
+                else:
+                    policy_reasons.append(_record_reason(ReasonCodes.POLICY_FULL, claim_id=claim_id))
+
+                if budget.worthiness_tier == "low":
+                    policy_reasons.append(_record_reason(ReasonCodes.BUDGET_LOW, claim_id=claim_id))
+                elif budget.worthiness_tier == "high":
+                    policy_reasons.append(_record_reason(ReasonCodes.BUDGET_HIGH, claim_id=claim_id))
+                else:
+                    policy_reasons.append(_record_reason(ReasonCodes.BUDGET_MEDIUM, claim_id=claim_id))
+
+                claim_entry = ClaimLedgerEntry(
+                    claim_id=claim_id,
+                    policy_mode=policy_mode,
+                    policy_reasons=policy_reasons,
+                    budget_allocation=budget,
+                )
+                claim_entries[claim_id] = claim_entry
+
+                if decision.mode != PolicyMode.SKIP:
+                    eligible_claims.append(claim)
+
+            run_ledger.counts.claims_total = len(claims)
+            run_ledger.counts.claims_eligible = len(eligible_claims)
+
+            cluster_map: dict[str, list[str]] = {}
+            for claim in eligible_claims:
+                cluster_id = claim.get("cluster_id") or claim.get("topic_key") or "cluster_default"
+                cluster_map.setdefault(str(cluster_id), []).append(str(claim.get("id") or "c1"))
+
+            run_ledger.cluster_entries = [
+                ClusterLedgerEntry(
+                    cluster_id=cluster_id,
+                    claim_ids=claim_ids,
+                    shared_query_ids=[],
+                    budget_allocation=None,
+                    duplicate_query_savings=0,
+                )
+                for cluster_id, claim_ids in cluster_map.items()
+            ]
+
+            search_queries = self._select_diverse_queries(eligible_claims, max_queries=3, fact_fallback=fact)
+            
+            # TARGET SELECTION GATE: Only top-K claims get actual Tavily searches
+            # This prevents per-claim search explosion (6 claims × 2 searches = 12 Tavily calls)
+            # Instead, we search for top 2 key claims and share evidence with others
+            budget_class_str = "minimal"  # Default to most cost-effective
+            if search_type == "smart":
+                budget_class_str = "standard"
+            elif search_type == "deep":
+                budget_class_str = "deep"
+            
+            graph_result_for_selection = None
+            if graph_flow_result and graph_flow_result.graph_result:
+                graph_result_for_selection = graph_flow_result.graph_result
+            
+            target_selection = select_verification_targets(
+                claims=eligible_claims,
+                max_targets=2,  # Core limit: max 2 claims trigger Tavily
+                graph_result=graph_result_for_selection,
+                budget_class=budget_class_str,
+            )
+            
+            # Only target claims go through retrieval
+            retrieval_claims = target_selection.targets
+            deferred_claims = target_selection.deferred
+            
+            # Mark deferred claims in ledger
+            for claim in deferred_claims:
+                claim_id = str(claim.get("id") or "c1")
+                reason = target_selection.reasons.get(claim_id, "deferred_no_search")
+                entry = claim_entries.get(claim_id)
+                if entry:
+                    entry.policy_reasons.append(
+                        _record_reason(ReasonCodes.CLAIM_DEFERRED, claim_id=claim_id)
+                    )
+                claim["deferred_from_search"] = True
+                claim["deferred_reason"] = reason
+            
+            _end_phase("query_build")
+
+            _start_phase("retrieval")
             search_state = await run_search_flow(
                 config=self.config,
                 search_mgr=self.search_mgr,
@@ -286,9 +541,10 @@ class ValidationPipeline:
                     max_cost=max_cost,
                     article_intent=article_intent,
                     search_queries=search_queries,
-                    claims=claims,
+                    claims=retrieval_claims,  # Only targets, not all eligible!
                     preloaded_context=preloaded_context,
                     progress_callback=_progress,
+                    inline_sources=prepared.inline_sources,  # M109: Pass verified inline sources
                 ),
                 state=SearchFlowState(
                     final_context=final_context,
@@ -297,8 +553,73 @@ class ValidationPipeline:
                     used_orchestration=False,
                 ),
             )
+            _end_phase("retrieval")
             final_context = search_state.final_context
             final_sources = search_state.final_sources
+
+            run_ledger.counts.docs_total = len(final_sources)
+            run_ledger.counts.evidence_units_total = len(
+                [s for s in final_sources if has_evidence_chunk(s)]
+            )
+
+            if search_state.execution_state:
+                query_total = 0
+                for claim_id, state in search_state.execution_state.items():
+                    hops = state.get("hops", []) if isinstance(state, dict) else []
+                    query_total += len(hops)
+                    entry = claim_entries.get(str(claim_id))
+                    if entry:
+                        entry.queries_used = len(hops)
+                        entry.docs_used = sum(
+                            int(h.get("results_count", 0) or 0) for h in hops
+                        )
+                        if state.get("is_sufficient"):
+                            sufficiency_reason = str(state.get("sufficiency_reason") or "")
+                            if sufficiency_reason != "confidence_high":
+                                entry.stop_reason = _record_reason(
+                                    ReasonCodes.EVIDENCE_SUFFICIENT,
+                                    claim_id=str(claim_id),
+                                )
+                        else:
+                            stop_reason = state.get("stop_reason")
+                            if stop_reason == "max_hops_reached":
+                                entry.stop_reason = _record_reason(
+                                    ReasonCodes.RETRIEVAL_STOP_MAX_HOPS,
+                                    claim_id=str(claim_id),
+                                )
+                            elif stop_reason == "followup_failed":
+                                entry.stop_reason = _record_reason(
+                                    ReasonCodes.RETRIEVAL_STOP_FOLLOWUP_FAILED,
+                                    claim_id=str(claim_id),
+                                )
+                        for hop in hops:
+                            eval_data = hop.get("retrieval_eval", {}) if isinstance(hop, dict) else {}
+                            action = eval_data.get("action", "continue")
+                            reason_spec = ReasonCodes.RETRIEVAL_CONF_MED
+                            if action == "stop_early":
+                                reason_spec = ReasonCodes.RETRIEVAL_STOP_EARLY
+                            elif action in ("refine_query", "change_language", "restrict_domains", "change_channel"):
+                                reason_spec = ReasonCodes.RETRIEVAL_CORRECTION
+                            elif eval_data.get("retrieval_confidence", 0.0) <= 0.35:
+                                reason_spec = ReasonCodes.RETRIEVAL_CONF_LOW
+                            elif eval_data.get("retrieval_confidence", 0.0) >= 0.7:
+                                reason_spec = ReasonCodes.RETRIEVAL_CONF_HIGH
+
+                            reason_code = _record_reason(reason_spec, claim_id=str(claim_id))
+                            entry.retrieval_evaluations.append(
+                                RetrievalEvaluation(
+                                    cycle_index=int(hop.get("hop_index", 0)),
+                                    relevance_score=float(eval_data.get("relevance_score", 0.0)),
+                                    evidence_likeness_score=float(eval_data.get("evidence_likeness_score", 0.0)),
+                                    source_quality_score=float(eval_data.get("source_quality_score", 0.0)),
+                                    retrieval_confidence=float(eval_data.get("retrieval_confidence", 0.0)),
+                                    action=str(action),
+                                    reason_code=reason_code,
+                                )
+                            )
+                run_ledger.counts.queries_total = query_total
+            else:
+                run_ledger.counts.queries_total = len(search_queries)
 
             if getattr(search_state, "hard_reject", False):
                 reason = getattr(search_state, "reject_reason", "irrelevant")
@@ -328,6 +649,19 @@ class ValidationPipeline:
             
             prior_belief = BeliefState(log_odds=prior_log_odds)
 
+            _start_phase("evidence_eval")
+            Trace.event(
+                "evidence_flow.claim_scope",
+                {
+                    "claims_total": len(claims or []),
+                    "retrieval_claims": len(retrieval_claims or []),
+                    "deferred_claims": len(deferred_claims or []),
+                    "retrieval_ids": [c.get("id") for c in (retrieval_claims or [])],
+                    "deferred_ids": [c.get("id") for c in (deferred_claims or [])],
+                    "sources_total": len(final_sources or []),
+                },
+            )
+            claims_for_scoring = retrieval_claims if retrieval_claims else claims
             result = await run_evidence_flow(
                 agent=self.agent,
                 search_mgr=self.search_mgr,
@@ -344,10 +678,21 @@ class ValidationPipeline:
                     prior_belief=prior_belief,
                     context_graph=context_graph,
                 ),
-                claims=claims,
+                claims=claims_for_scoring,
                 sources=final_sources,
             )
+            _end_phase("evidence_eval")
+            
+            # M108: Propagate verdicts to deferred claims (evidence sharing)
+            if target_selection.evidence_sharing and deferred_claims:
+                result = propagate_deferred_verdicts(
+                    result=result,
+                    evidence_sharing=target_selection.evidence_sharing,
+                    deferred_claims=deferred_claims,
+                )
+            
             locale_decisions = getattr(search_state, "locale_decisions", {}) or {}
+            _start_phase("verdict")
             locale_payload = None
             if anchor_claim_id and anchor_claim_id in locale_decisions:
                 locale_payload = locale_decisions[anchor_claim_id]
@@ -359,6 +704,7 @@ class ValidationPipeline:
                 audit["locale_decision"] = locale_payload
                 result["audit"] = audit
             Trace.event("pipeline.run.completed", {"outcome": "scored"})
+            _end_phase("verdict")
             return _attach_cost_summary(result)
         finally:
             self.agent.llm_client._meter = prior_llm_meter
@@ -413,11 +759,11 @@ class ValidationPipeline:
             if fetched_text:
                 url_anchors = self._extract_url_anchors(fetched_text, exclude_url=exclude_url)
                 if url_anchors:
-                    logger.info("[Pipeline] Found %d URL-anchor pairs in raw text", len(url_anchors))
+                    logger.debug("[Pipeline] Found %d URL-anchor pairs in raw text", len(url_anchors))
 
                 if len(fetched_text) > 10000 and progress_callback:
                     await progress_callback("processing_large_text")
-                    logger.info(
+                    logger.debug(
                         "[Pipeline] Large text detected: %d chars, extended timeout",
                         len(fetched_text),
                     )
@@ -429,7 +775,7 @@ class ValidationPipeline:
                 if url_anchors and cleaned_article:
                     inline_sources = self._restore_urls_from_anchors(cleaned_article, url_anchors)
                     if inline_sources:
-                        logger.info(
+                        logger.debug(
                             "[Pipeline] Restored %d inline source candidates after cleaning",
                             len(inline_sources),
                         )
@@ -444,22 +790,22 @@ class ValidationPipeline:
                             src["is_primary_candidate"] = True
 
         elif needs_cleaning and not self._is_url(fact):
-            logger.info("[Pipeline] Extension page mode: cleaning %d chars", len(fact))
+            logger.debug("[Pipeline] Extension page mode: cleaning %d chars", len(fact))
 
             url_anchors = self._extract_url_anchors(fact, exclude_url=exclude_url)
             if url_anchors:
-                logger.info("[Pipeline] Found %d URL-anchor pairs in extension text", len(url_anchors))
+                logger.debug("[Pipeline] Found %d URL-anchor pairs in extension text", len(url_anchors))
 
             if len(fact) > 10000 and progress_callback:
                 await progress_callback("processing_large_text")
-                logger.info("[Pipeline] Large text detected: %d chars, extended timeout", len(fact))
+                logger.debug("[Pipeline] Large text detected: %d chars, extended timeout", len(fact))
 
             cleaned_article = await self.agent.clean_article(fact)
             if cleaned_article:
                 if url_anchors:
                     inline_sources = self._restore_urls_from_anchors(cleaned_article, url_anchors)
                     if inline_sources:
-                        logger.info(
+                        logger.debug(
                             "[Pipeline] Restored %d inline source candidates after cleaning",
                             len(inline_sources),
                         )
@@ -479,7 +825,7 @@ class ValidationPipeline:
         elif not self._is_url(fact) and not needs_cleaning:
             url_anchors = self._extract_url_anchors(fact, exclude_url=exclude_url)
             if url_anchors:
-                logger.info("[Pipeline] Found %d URL-anchor pairs in plain text", len(url_anchors))
+                logger.debug("[Pipeline] Found %d URL-anchor pairs in plain text", len(url_anchors))
                 for item in url_anchors:
                     inline_sources.append(
                         {
@@ -593,7 +939,7 @@ class ValidationPipeline:
                 if is_primary:
                     src["is_trusted"] = True
                 verified_inline_sources.append(src)
-                logger.info(
+                logger.debug(
                     "[Pipeline] Inline source %s: relevant=%s, primary=%s",
                     src.get("domain"),
                     is_relevant,
@@ -601,6 +947,10 @@ class ValidationPipeline:
                 )
 
             if verified_inline_sources:
+                if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
+                    verified_inline_sources = await self.search_mgr.apply_evidence_acquisition_ladder(
+                        verified_inline_sources
+                    )
                 Trace.event(
                     "pipeline.inline_sources_verified",
                     {
@@ -609,11 +959,30 @@ class ValidationPipeline:
                         "primary": len([s for s in verified_inline_sources if s.get("is_primary")]),
                     },
                 )
+                
+                # M109: Fetch content for primary inline sources
+                primary_sources = [s for s in verified_inline_sources if s.get("is_primary")]
+                if primary_sources and self.search_mgr:
+                    for src in primary_sources[:2]:  # Limit to 2 primary sources
+                        url = src.get("url", "")
+                        if url and not src.get("content"):
+                            try:
+                                fetched = await self.search_mgr.web_tool.fetch_page_content(url)
+                                if fetched and len(fetched) > 100:
+                                    src["content"] = fetched[:8000]
+                                    src["snippet"] = fetched[:300]
+                                    Trace.event("inline_source.content_fetched", {
+                                        "url": url[:80],
+                                        "chars": len(fetched),
+                                    })
+                            except Exception as e:
+                                logger.debug("[Pipeline] Failed to fetch inline source: %s", e)
+                
                 final_sources.extend(verified_inline_sources)
             return final_sources
 
         if inline_sources:
-            logger.info(
+            logger.debug(
                 "[Pipeline] No claims extracted, adding %d inline sources as secondary",
                 len(inline_sources),
             )
@@ -669,6 +1038,9 @@ class ValidationPipeline:
         max_queries: int = 3,
         fact_fallback: str = ""
     ) -> list[str]:
+        max_queries = resolve_budgeted_max_queries(claims, default_max=max_queries)
+        if max_queries <= 0:
+            return []
         return select_diverse_queries(
             claims,
             max_queries=max_queries,

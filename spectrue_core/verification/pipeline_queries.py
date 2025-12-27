@@ -121,11 +121,11 @@ def select_diverse_queries(
         )[:1]
         if not eligible:
             eligible = claims[:1]
-        log.info("[M64] All claims below threshold or sidefacts, using highest importance")
+        log.debug("[M64] All claims below threshold or sidefacts, using highest importance")
 
     groups: dict[str, list] = defaultdict(list)
     for c in eligible:
-        key = c.get("topic_key") or c.get("topic_group", "Other")
+        key = c.get("cluster_id") or c.get("topic_key") or c.get("topic_group", "Other")
         groups[key].append(c)
 
     sorted_keys = sorted(
@@ -202,7 +202,7 @@ def select_diverse_queries(
     if not selected and fact_fallback:
         selected = [normalize_search_query(fact_fallback[:200])]
 
-    log.info(
+    log.debug(
         "[M64] Query selection: %d eligible claims, %d topic_keys -> %d queries. Topics covered: %s",
         len(eligible),
         len(groups),
@@ -211,6 +211,33 @@ def select_diverse_queries(
     )
 
     return selected[:max_queries]
+
+
+def resolve_budgeted_max_queries(claims: list, *, default_max: int = 3) -> int:
+    """
+    Apply per-claim policy caps to the run-level query budget.
+    """
+    if not claims:
+        return default_max
+
+    modes = {c.get("policy_mode") for c in claims if isinstance(c, dict)}
+    if modes and modes.issubset({"SKIP"}):
+        return 0
+    if modes and modes.issubset({"SKIP", "CHEAP"}):
+        return 1
+
+    budget_caps: list[int] = []
+    for claim in claims:
+        budget = claim.get("budget_allocation") if isinstance(claim, dict) else None
+        if isinstance(budget, dict):
+            cap = budget.get("max_queries")
+            if isinstance(cap, int) and cap > 0:
+                budget_caps.append(cap)
+
+    if budget_caps:
+        return max(1, min(default_max, min(budget_caps)))
+
+    return default_max
 
 
 def build_assertion_query(unit: Any, assertion: Any) -> str | None:
@@ -296,7 +323,7 @@ def select_queries_from_claim_units(
         if fact_fallback:
             return [normalize_search_query(fact_fallback[:200])]
 
-    log.info("[M70] Query selection: %d claims, %d FACT queries generated", len(claim_units), len(queries))
+    log.debug("[M70] Query selection: %d claims, %d FACT queries generated", len(claim_units), len(queries))
     return queries[:max_queries]
 
 
@@ -319,4 +346,3 @@ def get_claim_units_for_evidence_mapping(claim_units: list, sources: list[dict])
             mapping[unit.id] = fact_keys
 
     return mapping
-

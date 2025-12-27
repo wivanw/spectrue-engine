@@ -31,6 +31,7 @@ from spectrue_core.verification.execution_plan import (
 from spectrue_core.verification.sufficiency import (
     check_sufficiency_for_claim,
     judge_sufficiency_for_claim,
+    verdict_ready_for_claim,
     SufficiencyDecision,
     SufficiencyStatus,
     get_domain_tier,
@@ -40,6 +41,7 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.schema.claim_metadata import EvidenceChannel
 from spectrue_core.verification.source_utils import canonicalize_sources, extract_domain
+from spectrue_core.verification.retrieval_eval import evaluate_retrieval_confidence
 
 if TYPE_CHECKING:
     from spectrue_core.verification.search_mgr import SearchManager
@@ -71,6 +73,19 @@ class RetrievalHop:
     phase_id: str | None = None
     query_type: str | None = None
     results: list[dict] | None = None
+    retrieval_eval: dict | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "hop_index": int(self.hop_index),
+            "query": self.query,
+            "decision": self.decision.value,
+            "reason": self.reason,
+            "phase_id": self.phase_id,
+            "query_type": self.query_type,
+            "results_count": len(self.results or []),
+            "retrieval_eval": self.retrieval_eval or {},
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -98,6 +113,7 @@ class PhaseRunner:
         gpt_model: str | None = None,
         search_type: str | None = None,
         max_cost: int | None = None,
+        inline_sources: list[dict] | None = None,
     ) -> None:
         """
         Initialize PhaseRunner.
@@ -106,6 +122,7 @@ class PhaseRunner:
             search_mgr: SearchManager for executing searches
             max_concurrent: Maximum concurrent searches per phase
             progress_callback: Optional async callback for progress updates
+            inline_sources: Pre-verified inline sources to include in evidence
         """
         self.search_mgr = search_mgr
         self.semaphore = asyncio.Semaphore(max_concurrent)
@@ -117,6 +134,12 @@ class PhaseRunner:
         self.gpt_model = gpt_model
         self.search_type = search_type
         self.max_cost = max_cost
+        self.inline_sources = inline_sources or []
+        if self.inline_sources:
+            import logging
+            logging.getLogger(__name__).debug(
+                "[M109] PhaseRunner received %d inline sources", len(self.inline_sources)
+            )
     
     async def run_all_claims(
         self,
@@ -166,7 +189,7 @@ class PhaseRunner:
                 if not claims_for_phase:
                     continue
                 
-                logger.info(
+                logger.debug(
                     "[M80] Running Phase %s for %d claim(s)",
                     phase_id, len(claims_for_phase)
                 )
@@ -243,7 +266,7 @@ class PhaseRunner:
                                 "skipped_phases": remaining,
                             })
                             
-                            logger.info(
+                            logger.debug(
                                 "[M80] Claim %s sufficient after Phase %s (rule=%s), skipping %s",
                                 claim_id, result.phase_id, sufficiency.rule_matched, remaining
                             )
@@ -265,7 +288,7 @@ class PhaseRunner:
                                 "rule": sufficiency.rule_matched,
                                 "skipped_phases": remaining,
                             })
-                            logger.info(
+                            logger.debug(
                                 "[M80] Claim %s skipped after Phase %s (reason=%s), skipping %s",
                                 claim_id, result.phase_id, sufficiency.reason, remaining
                             )
@@ -309,6 +332,7 @@ class PhaseRunner:
 
                 sources, hops, decision, reason = result
                 evidence[claim_id] = sources
+                state.hops = list(hops)
 
                 for hop in hops:
                     if hop.phase_id:
@@ -427,6 +451,46 @@ class PhaseRunner:
         all_sources: list[dict] = []
         hops: list[RetrievalHop] = []
 
+
+        # CRITICAL SHORTCUT: Check inline sources first (M109)
+        if self.inline_sources:
+            logger.debug("[M109] Checking inline sources shortcut for claim %s", claim_id)
+            sufficient, stats = verdict_ready_for_claim(
+                self.inline_sources, 
+                claim_id=claim_id,
+                claim_text=claim_text
+            )
+            
+            # Fallback: If not sufficient by embeddings (e.g. content fetch failed),
+            # BUT we have a verified PRIMARY source, trust the LLM's verification from Pipeline.
+            if not sufficient:
+                 primary_sources = [s for s in self.inline_sources if s.get("is_primary")]
+                 if primary_sources:
+                     sufficient = True
+                     logger.info("[M109] Inline primary source found (fallback) for %s. Trusting agent verification.", claim_id)
+                     stats = {"semantic_matches": len(primary_sources), "primary_fallback": True}
+
+            if sufficient:
+                logger.info("[M109] Inline sources sufficient (shortcut) for %s. Stats: %s", claim_id, stats)
+                
+                # M109 FIX: Ensure stance is set to SUPPORT for high-similarity inline sources
+                # Because verdict_ready_for_claim uses semantic matching (sim > 0.35), 
+                # we must propagate this as explicit STANCE so Scoring doesn't ignore it.
+                combined = []
+                for s in self.inline_sources:
+                    # If snippet matches high relevance, force SUPPORT
+                    # We re-use logic similar to verdict_ready_for_claim to identify WHICH source matched
+                    # But for simplicity, we just add them all, and let Scoring filter?
+                    # Better: Set SUPPORT for sources that are relevant.
+                    s_copy = s.copy()
+                    if s_copy.get("is_relevant") or s_copy.get("relevance_score", 0) > 0.35:
+                         s_copy["stance"] = "SUPPORT"
+                         # boost relevance to ensure it survives
+                         s_copy["relevance_score"] = max(s_copy.get("relevance_score", 0), 0.85)
+                    combined.append(s_copy)
+                
+                return combined, hops, SufficiencyDecision.ENOUGH, "inline_sufficient"
+
         if not phases:
             return all_sources, hops, SufficiencyDecision.STOP, "no_phases"
 
@@ -466,10 +530,55 @@ class PhaseRunner:
             async with self.semaphore:
                 sources = await self._search_by_phase(claim, phase, query_override=query)
 
+            for src in sources:
+                if isinstance(src, dict):
+                    if not src.get("claim_id"):
+                        src["claim_id"] = claim_id
+                    if claim_text and not src.get("claim_text"):
+                        src["claim_text"] = claim_text
+
             if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
                 sources = await self.search_mgr.apply_evidence_acquisition_ladder(sources)
 
             all_sources.extend(sources)
+
+            evaluation = evaluate_retrieval_confidence(sources)
+            action_result = None
+            decide_fn = getattr(self.search_mgr, "decide_retrieval_action", None)
+            if callable(decide_fn):
+                try:
+                    action_result = decide_fn(
+                        retrieval_confidence=evaluation["retrieval_confidence"],
+                        claim=claim,
+                    )
+                except Exception:
+                    action_result = None
+
+            if isinstance(action_result, tuple) and len(action_result) == 2:
+                action, action_reason = action_result
+            else:
+                action, action_reason = "continue", "decision_default"
+            allowed_actions = {
+                "stop_early",
+                "continue",
+                "refine_query",
+                "change_language",
+                "restrict_domains",
+                "change_channel",
+            }
+            if action not in allowed_actions:
+                action = "continue"
+                action_reason = "decision_default"
+            Trace.event(
+                "retrieval.evaluation",
+                {
+                    "claim_id": claim_id,
+                    "hop": hop_index,
+                    "scores": evaluation,
+                    "action": action,
+                    "action_reason": action_reason,
+                },
+            )
 
             judge = judge_sufficiency_for_claim(
                 claim=claim,
@@ -481,6 +590,121 @@ class PhaseRunner:
             decision = judge.decision
             reason = judge.reason
 
+            claim_sources = [s for s in all_sources if isinstance(s, dict) and s.get("claim_id") == claim_id]
+            
+            # M109: Include inline sources in potential evidence
+            # They may not have claim_id set yet, but embeddings/relevance will catch them
+            potential_evidence = claim_sources + self.inline_sources
+            quote_keys = ("quote", "quote_value", "quote_span", "contradiction_span", "key_snippet")
+            Trace.event(
+                "verdict.ready.input_summary",
+                {
+                    "claim_id": claim_id,
+                    "sources_total": len(potential_evidence),
+                    "sources_with_claim_id": sum(
+                        1 for s in potential_evidence if isinstance(s, dict) and s.get("claim_id")
+                    ),
+                    "sources_with_quote": sum(
+                        1
+                        for s in potential_evidence
+                        if isinstance(s, dict) and any(s.get(k) for k in quote_keys)
+                    ),
+                    "sources_with_relevance": sum(
+                        1
+                        for s in potential_evidence
+                        if isinstance(s, dict) and float(s.get("relevance_score") or 0) >= 0.7
+                    ),
+                    "sample_keys": [
+                        sorted(k for k in s.keys() if isinstance(k, str))[:12]
+                        for s in potential_evidence[:2]
+                        if isinstance(s, dict)
+                    ],
+                },
+            )
+            
+            logger.debug(
+                "[M109] verdict_ready call: claim_id=%s sources=%d (claim=%d + inline=%d)",
+                claim_id, len(potential_evidence), len(claim_sources), len(self.inline_sources)
+            )
+            ready, ready_stats = verdict_ready_for_claim(
+                potential_evidence,
+                claim_id=str(claim_id),
+                claim_text=claim_text,  # M109: For embedding similarity
+            )
+            Trace.event(
+                "verdict.ready",
+                {
+                    "claim_id": claim_id,
+                    "hop": hop_index,
+                    "ready": ready,
+                    "stats": ready_stats,
+                },
+            )
+            
+            if ready:
+                logger.info(
+                    "[M109] Initial sufficiency check passed for claim %s (stats=%s)",
+                    claim_id, ready_stats
+                )
+
+                for src in self.inline_sources:
+                    if isinstance(src, dict):
+                        if not src.get("claim_id"):
+                            src["claim_id"] = claim_id
+                        if claim_text and not src.get("claim_text"):
+                            src["claim_text"] = claim_text
+
+                if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
+                    self.inline_sources = await self.search_mgr.apply_evidence_acquisition_ladder(
+                        self.inline_sources
+                    )
+
+                # M109: Enhance inline sources with stance="SUPPORT" if they led to the match
+                # This ensures Scoring sees them as valid evidence.
+                from spectrue_core.embeddings import EmbedService
+                if EmbedService.is_available():
+                    for src in self.inline_sources:
+                        content = src.get("snippet") or src.get("content") or src.get("quote") or ""
+                        if content and len(content) > 30:
+                            try:
+                                sim = EmbedService.similarity(claim_text, content[:2000])
+                                if sim >= 0.35:
+                                    src["stance"] = "SUPPORT"
+                                    # Also ensure relevance is high enough to be kept
+                                    if float(src.get("relevance_score", 0)) < 0.7:
+                                        src["relevance_score"] = 0.85
+                                    logger.debug("[M109] Auto-set stance=SUPPORT for inline src (sim=%.3f)", sim)
+                            except Exception:
+                                pass
+
+                # IMPORTANT: We must return the inline sources too!
+                # Filter to only unique sources to avoid dupes if they were already in claim_sources
+                seen_urls = {s.get("url") for s in claim_sources if s.get("url")}
+                combined = list(claim_sources)
+                for src in self.inline_sources:
+                    if src.get("url") not in seen_urls:
+                        combined.append(src)
+                
+                return combined, hops, SufficiencyDecision.ENOUGH, "inline_sufficient"
+
+            # ─────────────────────────────────────────────────────────────────────────────
+            # Retrieval Loop
+            # ─────────────────────────────────────────────────────────────────────────────
+            if decision == SufficiencyDecision.ENOUGH and not ready:
+                decision = SufficiencyDecision.NEED_FOLLOWUP
+                reason = "verdict_not_ready"
+
+            # M108: Respect retrieval action from confidence evaluation
+            # Only sync action with decision - don't blindly override stop_early
+            if decision == SufficiencyDecision.ENOUGH:
+                action = "stop_early"
+                action_reason = "evidence_sufficient"
+            elif decision == SufficiencyDecision.NEED_FOLLOWUP:
+                # Sufficiency explicitly needs more evidence - continue even if confidence was high
+                if action == "stop_early":
+                    action = "continue"
+                    action_reason = "sufficiency_requires_more"
+
             hop_state = RetrievalHop(
                 hop_index=hop_index,
                 query=query,
@@ -489,6 +713,11 @@ class PhaseRunner:
                 phase_id=phase_id,
                 query_type=next_query_type,
                 results=sources,
+                retrieval_eval={
+                    **evaluation,
+                    "action": action,
+                    "action_reason": action_reason,
+                },
             )
             hops.append(hop_state)
 
@@ -505,6 +734,20 @@ class PhaseRunner:
             if decision == SufficiencyDecision.STOP:
                 break
 
+            if hop_index >= max_hops - 1:
+                decision = SufficiencyDecision.STOP
+                reason = "max_hops_reached"
+                Trace.event("retrieval.max_hops_reached", {
+                    "claim_id": claim_id,
+                    "max_hops": max_hops,
+                    "hops_completed": len(hops),
+                })
+                break
+
+            if action in ("refine_query", "change_language", "restrict_domains", "change_channel"):
+                next_query_type = action
+                reason = action_reason
+
             followup = generate_followup_query_from_evidence(claim_text, sources)
             if not followup:
                 decision = SufficiencyDecision.STOP
@@ -513,18 +756,6 @@ class PhaseRunner:
 
             next_query = followup["query"]
             next_query_type = followup["query_type"]
-
-        # T010: Enforce max_hops contract. If loop finished naturally (all hops exhausted)
-        # and decision is still NEED_FOLLOWUP, convert to STOP with explicit reason.
-        # This ensures the caller knows WHY we stopped (limit reached, not sufficiency).
-        if decision == SufficiencyDecision.NEED_FOLLOWUP:
-            decision = SufficiencyDecision.STOP
-            reason = "max_hops_reached"
-            Trace.event("retrieval.max_hops_reached", {
-                "claim_id": claim_id,
-                "max_hops": max_hops,
-                "hops_completed": len(hops),
-            })
 
         return all_sources, hops, decision, reason
 
@@ -771,6 +1002,18 @@ class PhaseRunner:
         # Limit results to phase.max_results
         if phase and len(normalized) > phase.max_results:
             normalized = normalized[:phase.max_results]
+
+        Trace.event(
+            "search.filtered",
+            {
+                "claim_id": claim.get("id", "unknown"),
+                "phase_id": phase.phase_id if phase else None,
+                "query": query,
+                "raw_count": len(sources),
+                "normalized_count": len(normalized),
+                "max_results": phase.max_results if phase else None,
+            },
+        )
         
         return normalized
     

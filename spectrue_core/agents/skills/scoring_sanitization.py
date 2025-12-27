@@ -15,7 +15,7 @@ def sanitize_quote(text: str, *, limit: int = MAX_QUOTE_LEN) -> str:
 
 
 def format_highlighted_excerpt(*, safe_snippet: str, key_snippet: str | None, stance: str) -> str:
-    if key_snippet and stance in ["SUPPORT", "REFUTE", "MIXED"]:
+    if key_snippet:
         safe_key = sanitize_quote(key_snippet)
         return f'📌 QUOTE: "{safe_key}"\nℹ️ CONTEXT: {safe_snippet}'
     return safe_snippet
@@ -67,4 +67,3 @@ def maybe_drop_style_section(rationale: str, *, honesty_score: float | None, lan
         s = re.sub(rf"(?:^|\n)\s*{re.escape(label)}.*(?:\n|$)", "\n", s, flags=re.IGNORECASE)
     s = re.sub(r"\n{3,}", "\n\n", s).strip()
     return s
-

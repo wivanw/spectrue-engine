@@ -13,6 +13,8 @@ Philosophy:
 
 from typing import Literal, TypedDict, Any
 
+from spectrue_core.verification.source_utils import has_evidence_chunk
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Claim Types
@@ -198,6 +200,34 @@ class LocalePlan(TypedDict, total=False):
     context_lang: str | None
     primary: str
     fallbacks: list[str]
+
+
+def score_evidence_likeness(sources: list[dict]) -> float:
+    """
+    Lightweight evidence-likeness scoring for retrieval evaluation.
+
+    Scores are based on presence of quotes/snippets and numeric cues.
+    """
+    if not sources:
+        return 0.0
+
+    scores: list[float] = []
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        score = 0.0
+        if src.get("quote"):
+            score += 0.6
+        if has_evidence_chunk(src):
+            score += 0.3
+        text = (src.get("quote") or src.get("snippet") or src.get("content") or "")
+        if isinstance(text, str) and any(ch.isdigit() for ch in text):
+            score += 0.1
+        scores.append(min(score, 1.0))
+
+    if not scores:
+        return 0.0
+    return sum(scores) / len(scores)
     justification: str
 
 

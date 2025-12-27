@@ -381,6 +381,21 @@ class WebSearchTool:
             ranked = self._rank_and_filter(q, cleaned)
             logger.debug("[Tavily] After cleaning: %d results", len(cleaned))
             logger.debug("[Tavily] After ranking/filter: %d results", len(ranked))
+            Trace.event(
+                "search.results.sample",
+                {
+                    "query": q,
+                    "count": len(ranked),
+                    "items": [
+                        {
+                            "title": r.get("title"),
+                            "url": r.get("url"),
+                            "relevance_score": r.get("relevance_score"),
+                        }
+                        for r in (ranked or [])[:5]
+                    ],
+                },
+            )
 
             def _domain(u: str) -> str:
                 try:

@@ -129,7 +129,7 @@ Output JSON: {{ "is_relevant": true/false, "reason": "..." }}
                 "is_relevant": is_relevant
             })
             if not is_relevant:
-                 logger.info("[Agent] Oracle hit rejected by LLM: %s", result.get("reason"))
+                 logger.debug("[Agent] Oracle hit rejected by LLM: %s", result.get("reason"))
             return is_relevant
             
         except Exception as e:
@@ -222,7 +222,7 @@ Output JSON: {{ "is_relevant": true/false, "is_primary": true/false, "reason": "
             })
             
             if is_primary:
-                logger.info("[Agent] Inline source PRIMARY: %s", domain)
+                logger.debug("[Agent] Inline source PRIMARY: %s", domain)
             elif not is_relevant:
                 # Full reason available in trace, keep console clean
                 logger.debug("[Agent] Inline source rejected: %s - %s", domain, reason[:60])

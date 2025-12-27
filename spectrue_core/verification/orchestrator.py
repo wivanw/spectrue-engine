@@ -145,7 +145,7 @@ class ClaimOrchestrator:
             "plan_summary": plan.summary(),
         })
         
-        logger.info(
+        logger.debug(
             "[M80] Orchestrator: %d claims, budget=%s | reality=%d, attribution=%d, existence=%d, none=%d, fail_open=%d",
             len(claims), budget_class.value, stats["reality"], stats["attribution"], 
             stats["existence"], stats["none"], stats["fail_open"]

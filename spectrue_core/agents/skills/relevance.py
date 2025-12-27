@@ -77,7 +77,7 @@ Return JSON:
             is_relevant = match_type in ("EXACT", "TOPIC")
             status = "RELEVANT" if is_relevant else "OFF_TOPIC"
             
-            logger.info("[M74] Semantic Router: match_type=%s → Status=%s. Reason: %s", match_type, status, reason)
+            logger.debug("[M74] Semantic Router: match_type=%s → Status=%s. Reason: %s", match_type, status, reason)
                 
             return {
                 "status": status,

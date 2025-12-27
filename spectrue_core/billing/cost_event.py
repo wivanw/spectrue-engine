@@ -54,6 +54,8 @@ class RunCostSummary:
     by_provider_usd: dict[str, float] = field(default_factory=dict)
     by_provider_credits: dict[str, Decimal] = field(default_factory=dict)
     events: list[CostEvent] = field(default_factory=list)
+    phase_usage: list[dict[str, Any]] = field(default_factory=list)
+    reason_summaries: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -65,4 +67,6 @@ class RunCostSummary:
             "by_provider_usd": dict(self.by_provider_usd),
             "by_provider_credits": {k: float(v) for k, v in self.by_provider_credits.items()},
             "events": [event.to_dict() for event in self.events],
+            "phase_usage": list(self.phase_usage),
+            "reason_summaries": list(self.reason_summaries),
         }

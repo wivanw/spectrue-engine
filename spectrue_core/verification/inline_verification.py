@@ -44,7 +44,7 @@ class InlineVerificationSkill(BaseSkill):
         if identity_score > 0.8 and support_score > 0.8:
             tier = "A'"
             
-        logger.info(
+        logger.debug(
             "[M67] Social Verification: Identity=%.2f, Support=%.2f -> Tier %s",
             identity_score, support_score, tier
         )

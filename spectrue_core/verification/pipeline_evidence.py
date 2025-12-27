@@ -10,7 +10,7 @@ import logging
 from spectrue_core.schema.signals import TimeWindow
 from spectrue_core.schema.scoring import BeliefState
 from spectrue_core.graph.context import ClaimContextGraph
-from spectrue_core.graph.propagation import propagate_belief
+from spectrue_core.graph.propagation import propagate_belief, propagation_routing_signals
 from spectrue_core.scoring.belief import (
     calculate_evidence_impact, 
     update_belief, 
@@ -24,7 +24,13 @@ from spectrue_core.verification.temporal import (
 )
 from spectrue_core.verification.source_utils import canonicalize_sources
 from spectrue_core.verification.trusted_sources import is_social_platform
-from spectrue_core.verification.scoring_aggregation import aggregate_claim_verdict
+
+# M108: Suppress deprecation warning - full migration to Bayesian scoring is future work
+import warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    from spectrue_core.verification.scoring_aggregation import aggregate_claim_verdict
+
 from spectrue_core.verification.rgba_aggregation import (
     apply_dependency_penalties,
     apply_conflict_explainability_penalty,
@@ -34,6 +40,7 @@ from spectrue_core.verification.search_policy import (
     resolve_profile_name,
     resolve_stance_pass_mode,
 )
+from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +180,7 @@ async def run_evidence_flow(
                 if isinstance(res, dict) and res.get("tier") == "A'":
                     sources[idx]["evidence_tier"] = "A'"
                     sources[idx]["source_type"] = "official"
-                    logger.info(
+                    logger.debug(
                         "[M67] Promoted Social Source %s to Tier A'",
                         sources[idx].get("domain"),
                     )
@@ -195,6 +202,7 @@ async def run_evidence_flow(
     if inp.progress_callback:
         await inp.progress_callback("score_evidence")
 
+    # M108: Single batch LLM call for all claims (not per-claim to avoid 6x cost)
     result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
 
     # M93: Apply dependency penalties after scoring
@@ -208,6 +216,17 @@ async def run_evidence_flow(
 
     conflict_detected = False
     verdict_state_by_claim: dict[str, str] = {}
+    importance_by_claim: dict[str, float] = {}
+    for claim in claims or []:
+        if not isinstance(claim, dict):
+            continue
+        cid = str(claim.get("id") or "").strip()
+        if not cid:
+            continue
+        try:
+            importance_by_claim[cid] = float(claim.get("importance", 1.0) or 1.0)
+        except Exception:
+            importance_by_claim[cid] = 1.0
     if isinstance(claim_verdicts, list):
         for cv in claim_verdicts:
             if not isinstance(cv, dict):
@@ -220,18 +239,49 @@ async def run_evidence_flow(
             claim_obj = next((c for c in (claims or []) if c.get("id") == claim_id), None)
             temporality = claim_obj.get("temporality") if isinstance(claim_obj, dict) else None
 
-            agg = aggregate_claim_verdict(
-                pack,
-                policy={},
-                claim_id=claim_id,
-                temporality=temporality if isinstance(temporality, dict) else None,
-            )
+            items = pack.get("items", []) if isinstance(pack, dict) else []
+            has_direct_evidence = False
+            if isinstance(items, list):
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    if claim_id and item.get("claim_id") not in (None, claim_id):
+                        continue
+                    stance = str(item.get("stance") or "").upper()
+                    if stance in ("SUPPORT", "REFUTE") and item.get("quote"):
+                        has_direct_evidence = True
+                        break
 
-            cv["verdict_score"] = agg.get("verdict_score", 0.5)
-            cv["verdict"] = agg.get("verdict", "ambiguous")
-            cv["status"] = agg.get("verdict", "ambiguous")
-            cv["reasons_expert"] = agg.get("reasons_expert", {})
-            cv["reasons_short"] = cv.get("reasons_short", []) or []
+            if has_direct_evidence:
+                Trace.event(
+                    "verdict.override",
+                    {
+                        "claim_id": claim_id,
+                        "mode": "deterministic",
+                        "reason": "direct_quote_evidence",
+                    },
+                )
+                agg = aggregate_claim_verdict(
+                    pack,
+                    policy={},
+                    claim_id=claim_id,
+                    temporality=temporality if isinstance(temporality, dict) else None,
+                )
+                cv["verdict_score"] = agg.get("verdict_score", 0.5)
+                cv["verdict"] = agg.get("verdict", "ambiguous")
+                cv["status"] = agg.get("verdict", "ambiguous")
+                cv["reasons_expert"] = agg.get("reasons_expert", {})
+                cv["reasons_short"] = cv.get("reasons_short", []) or []
+            else:
+                Trace.event(
+                    "verdict.override",
+                    {
+                        "claim_id": claim_id,
+                        "mode": "llm_only",
+                        "reason": "no_direct_quote_evidence",
+                    },
+                )
+                cv["reasons_short"] = cv.get("reasons_short", []) or []
 
             verdict_state = "insufficient_evidence"
             if cv["verdict"] == "verified":
@@ -291,6 +341,7 @@ async def run_evidence_flow(
                     node.local_belief = BeliefState(log_odds=impact)
             
             propagate_belief(inp.context_graph)
+            result["graph_propagation"] = propagation_routing_signals(inp.context_graph)
             
             # Update from Anchor
             if anchor_claim_id:
@@ -299,17 +350,29 @@ async def run_evidence_flow(
                     current_belief = update_belief(current_belief, anchor_node.propagated_belief.log_odds)
         
         elif isinstance(claim_verdicts, list):
-             # Fallback: Sum updates
-             for cv in claim_verdicts:
-                 v = cv.get("verdict", "ambiguous")
-                 impact = calculate_evidence_impact(v)
-                 current_belief = update_belief(current_belief, impact)
+            # Fallback: Sum updates (weighted by verdict strength + claim importance)
+            for cv in claim_verdicts:
+                if not isinstance(cv, dict):
+                    continue
+                v = cv.get("verdict", "ambiguous")
+                cid = str(cv.get("claim_id") or "").strip()
+                try:
+                    strength = float(cv.get("verdict_score", 0.5) or 0.5)
+                except Exception:
+                    strength = 0.5
+                strength = max(0.0, min(1.0, strength))
+                relevance = max(0.0, min(1.0, importance_by_claim.get(cid, 1.0)))
+                impact = calculate_evidence_impact(v, confidence=strength, relevance=relevance)
+                current_belief = update_belief(current_belief, impact)
                  
         # Apply Consensus
         current_belief = apply_consensus_bound(current_belief, consensus)
         
         # Set Result
         result["verified_score"] = log_odds_to_prob(current_belief.log_odds)
+        verified_cap = recompute_verified_score(claim_verdicts) if isinstance(claim_verdicts, list) else None
+        if verified_cap is not None and result["verified_score"] > verified_cap:
+            result["verified_score"] = verified_cap
         
         # Trace
         result["bayesian_trace"] = {
@@ -332,7 +395,12 @@ async def run_evidence_flow(
     result["cost"] = current_cost
     result["text"] = inp.fact
     result["search_meta"] = search_mgr.get_search_meta()
-    result["sources"] = enrich_sources_with_trust(sources)
+    display_sources = pack.get("scored_sources")
+    if not isinstance(display_sources, list) or not display_sources:
+        display_sources = pack.get("context_sources")
+    if not isinstance(display_sources, list):
+        display_sources = []
+    result["sources"] = enrich_sources_with_trust(display_sources)
 
     if anchor_claim:
         result["anchor_claim"] = {

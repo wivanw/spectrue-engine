@@ -70,7 +70,7 @@ class LLMClient:
         self,
         *,
         openai_api_key: str | None = None,
-        default_timeout: float = 30.0,
+        default_timeout: float = 60.0,  # Increased from 30.0 for complex tasks
         max_retries: int = 3,
         cache_retention: CacheRetention = "in_memory", # M56: Fix default
         meter: LLMMeter | None = None,
@@ -84,7 +84,8 @@ class LLMClient:
             max_retries: Maximum retry attempts on failure
             cache_retention: Prompt cache retention ("in_memory" or "24h")
         """
-        self.client = AsyncOpenAI(api_key=openai_api_key)
+        # Disable internal retries so we control them explicitly
+        self.client = AsyncOpenAI(api_key=openai_api_key, max_retries=0)
         self.default_timeout = default_timeout
         self.max_retries = max_retries
         self.cache_retention = cache_retention

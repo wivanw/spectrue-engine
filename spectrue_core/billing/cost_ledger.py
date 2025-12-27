@@ -20,9 +20,17 @@ class CostLedger:
     
     run_id: str | None = None
     events: list[CostEvent] = field(default_factory=list)
+    phase_usage: list[dict] = field(default_factory=list)
+    reason_summaries: list[dict] = field(default_factory=list)
 
     def record_event(self, event: CostEvent) -> None:
         self.events.append(event)
+
+    def set_phase_usage(self, usage: list[dict]) -> None:
+        self.phase_usage = list(usage)
+
+    def set_reason_summaries(self, summaries: list[dict]) -> None:
+        self.reason_summaries = list(summaries)
 
     def get_summary(self) -> RunCostSummary:
         by_stage_usd: dict[str, float] = {}
@@ -57,4 +65,6 @@ class CostLedger:
             by_provider_usd=by_provider_usd,
             by_provider_credits=by_provider_credits,
             events=list(self.events),
+            phase_usage=list(self.phase_usage),
+            reason_summaries=list(self.reason_summaries),
         )

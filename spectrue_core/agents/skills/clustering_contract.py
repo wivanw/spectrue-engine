@@ -1,7 +1,7 @@
 import json
 
 
-VALID_STANCES = {"SUPPORT", "REFUTE", "MIXED", "CONTEXT"}
+VALID_STANCES = {"SUPPORT", "REFUTE", "MIXED", "CONTEXT", "NEUTRAL"}
 
 
 def build_evidence_matrix_instructions(*, num_sources: int) -> str:
@@ -60,4 +60,3 @@ SOURCES:
 
 Return the result in JSON format with key "matrix".
 """
-

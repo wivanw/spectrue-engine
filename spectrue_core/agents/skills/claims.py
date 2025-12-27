@@ -191,7 +191,7 @@ class ClaimExtractionSkill(BaseSkill):
                     search_queries = []  # Skip search
                     query_candidates = []
                     reason = "satire" if satire_likelihood >= 0.8 else f"target={metadata.verification_target.value}"
-                    logger.info("[M80] Skip search (%s): %s", reason, normalized[:50])
+                    logger.debug("[M80] Skip search (%s): %s", reason, normalized[:50])
                 
                 c = Claim(
                     id=f"c{idx+1}",
@@ -273,17 +273,17 @@ class ClaimExtractionSkill(BaseSkill):
             # M78: Count satire claims for telemetry
             satire_count = sum(1 for c in claims if c.get("satire_likelihood", 0) >= 0.8 or c.get("claim_category") == "SATIRE")
             if satire_count > 0:
-                logger.info("[M78] Detected %d satire/hyperbolic claims", satire_count)
+                logger.debug("[M78] Detected %d satire/hyperbolic claims", satire_count)
             
             # Log topic and strategy distribution
             topics_found = [c.get("topic_key", "?") for c in claims]
-            logger.info("[Claims] Extracted %d claims (after dedup/sort). Topics keys: %s", len(claims), topics_found)
+            logger.debug("[Claims] Extracted %d claims (after dedup/sort). Topics keys: %s", len(claims), topics_found)
                 
             # M60 Oracle Optimization: Check if ANY claim needs oracle
             check_oracle = any(c.get("check_oracle", False) for c in claims)
             
             # M63: Log intent for debugging
-            logger.info("[Claims] Article intent: %s (check_oracle=%s)", article_intent, check_oracle)
+            logger.debug("[Claims] Article intent: %s (check_oracle=%s)", article_intent, check_oracle)
             
             # M81/T4: Trace extracted claims for debugging
             self._trace_extracted_claims(claims)
@@ -515,7 +515,7 @@ class ClaimExtractionSkill(BaseSkill):
             # Log summary
             total_facts = sum(len(c.get_fact_assertions()) for c in claim_units)
             total_context = sum(len(c.get_context_assertions()) for c in claim_units)
-            logger.info(
+            logger.debug(
                 "[M70] Extracted %d claims: %d FACT assertions, %d CONTEXT assertions",
                 len(claim_units), total_facts, total_context
             )
@@ -685,7 +685,7 @@ class ClaimExtractionSkill(BaseSkill):
         
         # Log dedup stats
         if len(claims) != len(deduped):
-            logger.info("[Dedup] Merged %d → %d claims", len(claims), len(deduped))
+            logger.debug("[Dedup] Merged %d → %d claims", len(claims), len(deduped))
         
         return deduped
 
@@ -841,7 +841,7 @@ class ClaimExtractionSkill(BaseSkill):
         })
         
         # Also log summary
-        logger.info(
+        logger.debug(
             "[M80] Metadata: targets=%s, roles=%s, confidence=%s, skip_search=%d",
             target_dist, role_dist, confidence_dist, skip_search_count
         )

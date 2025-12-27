@@ -82,7 +82,11 @@ class ClusteringSkill(BaseSkill):
             
             # Process in batches
             for i in range(0, num_sources, STANCE_BATCH_SIZE):
-                batch_sources = sources_lite[i : i + STANCE_BATCH_SIZE]
+                raw_batch = sources_lite[i : i + STANCE_BATCH_SIZE]
+                batch_sources = [
+                    {**src, "index": local_idx}
+                    for local_idx, src in enumerate(raw_batch)
+                ]
                 batch_suffix = f"{trace_suffix}_b{i // STANCE_BATCH_SIZE}"
                 
                 prompt = build_stance_matrix_prompt(claims_lite=claims_lite, sources_lite=batch_sources)
@@ -106,6 +110,9 @@ class ClusteringSkill(BaseSkill):
                     batch_matrix = result.get("matrix", [])
                     # Add to total matrix
                     if batch_matrix:
+                        for row in batch_matrix:
+                            if isinstance(row, dict) and isinstance(row.get("source_index"), int):
+                                row["source_index"] = row["source_index"] + i
                         all_matrix_rows.extend(batch_matrix)
                 except Exception as e:
                     logger.warning("[Clustering] Batch %d failed: %s", i, e)
@@ -138,6 +145,41 @@ class ClusteringSkill(BaseSkill):
                 )
 
             single_results = await run_pass(STANCE_PASS_SINGLE, "single")
+            
+            # M109 FIX: Restore pre-verified stances (e.g. from PhaseRunner shortcuts)
+            # If Clustering LLM degraded them to CONTEXT, force restore them.
+            if single_results and len(single_results) == len(search_results):
+                count_restored = 0
+                # Assuming index alignment is preserved
+                for i, res in enumerate(single_results):
+                     original = search_results[i]
+                     pre_stance = (original.get("stance") or "").upper()
+                     curr_stance = (res.get("stance") or "").upper()
+                     
+                     # Only restore if it was explicit SUPPORT/REFUTE and Clustering dropped it
+                     if pre_stance in ("SUPPORT", "REFUTE") and curr_stance not in ("SUPPORT", "REFUTE"):
+                         final_stance = pre_stance.lower()
+                         res["stance"] = final_stance
+                         # Boost relevance if needed
+                         res["relevance_score"] = max(res.get("relevance_score", 0), 0.85)
+                         # If no quote found by LLM, use snippet as backup quote
+                         if not res.get("quote") and not res.get("quote_span"):
+                              res["quote"] = (original.get("snippet") or "")[:500]
+                              if final_stance == "support":
+                                  res["quote_span"] = res["quote"]
+                              elif final_stance == "refute":
+                                  res["contradiction_span"] = res["quote"]
+                         count_restored += 1
+                    
+                     # M109 FIX: Always propagate is_primary flag if present (even if stance wasn't restored)
+                     # The Scoring layer needs this to trigger the "[PRIMARY SOURCE]" prompt injection.
+                     if original.get("is_primary"):
+                         res["is_primary"] = True
+                         res["source_type"] = "primary"
+                
+                if count_restored > 0:
+                     logger.info("[Clustering] M109: Restored %d pre-verified stances (overwrote LLM context)", count_restored)
+
             return single_results
         except Exception as e:
             return exception_fallback_all_context(search_results=search_results, error=e)

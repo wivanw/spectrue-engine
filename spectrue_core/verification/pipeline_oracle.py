@@ -75,7 +75,7 @@ async def run_oracle_flow(
         if reality_count == 0 and attribution_count > 0:
             oracle_skip_reason = "all_attribution_claims"
             run_oracle = False
-            logger.info("[M81] Skipping Oracle: all claims are attribution/existence (quota save)")
+            logger.debug("[M81] Skipping Oracle: all claims are attribution/existence (quota save)")
             Trace.event(
                 "oracle.skipped",
                 {
@@ -92,7 +92,7 @@ async def run_oracle_flow(
             if inp.article_intent in inp.oracle_skip_intents
             else "no markers"
         )
-        logger.info(
+        logger.debug(
             "[Pipeline] Skipping Oracle (%s, intent=%s)", skip_reason, inp.article_intent
         )
         return OracleFlowResult(ran_oracle=False, skip_reason=skip_reason)
@@ -127,14 +127,14 @@ async def run_oracle_flow(
 
         if en_query:
             query_text = en_query.strip(" ,.-:;")
-            logger.info("[Pipeline] Oracle: Using English query candidate")
+            logger.debug("[Pipeline] Oracle: Using English query candidate")
         else:
             query_text = (cand.get("normalized_text") or cand.get("text", "")).strip(
                 " ,.-:;"
             )
 
         q = normalize_search_query(query_text)
-        logger.info(
+        logger.debug(
             "[Pipeline] Oracle Hybrid Check: intent=%s, query=%s",
             inp.article_intent,
             q[:300],
@@ -194,12 +194,12 @@ async def run_oracle_flow(
         Trace.event("pipeline.oracle_hybrid", trace_payload)
 
         if status == "EMPTY":
-            logger.info("[Pipeline] Oracle: No results found. Continuing to search.")
+            logger.debug("[Pipeline] Oracle: No results found. Continuing to search.")
             continue
 
         # SCENARIO A: JACKPOT (relevance > 0.9)
         if is_jackpot:
-            logger.info(
+            logger.debug(
                 "[Pipeline] 🎰 JACKPOT! Oracle hit (score=%.2f). Stopping pipeline.",
                 relevance,
             )
@@ -217,7 +217,7 @@ async def run_oracle_flow(
 
         # SCENARIO B: EVIDENCE (0.5 < relevance <= 0.9)
         if relevance > EVIDENCE_THRESHOLD:
-            logger.info(
+            logger.debug(
                 "[Pipeline] 📚 EVIDENCE: Oracle related (score=%.2f). Adding to pack.",
                 relevance,
             )
@@ -226,10 +226,10 @@ async def run_oracle_flow(
             continue
 
         # SCENARIO C: MISS (relevance <= 0.5)
-        logger.info("[Pipeline] Oracle MISS (score=%.2f). Proceeding to search.", relevance)
+        logger.debug("[Pipeline] Oracle MISS (score=%.2f). Proceeding to search.", relevance)
 
     if not oracle_evidence_source:
-        logger.info("[Pipeline] Oracle checks finished. No relevant hits.")
+        logger.debug("[Pipeline] Oracle checks finished. No relevant hits.")
 
     return OracleFlowResult(
         evidence_source=oracle_evidence_source,

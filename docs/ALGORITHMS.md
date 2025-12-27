@@ -141,6 +141,15 @@ sign = -1 if CONTRADICTS else +1
 
 > **Reference:** Pearl, J. (1988). *Probabilistic Reasoning in Intelligent Systems*.
 
+**Doc-to-Code Matrix (Propagation):**
+
+| Doc Step | Runtime Behavior | Code Location |
+|----------|------------------|---------------|
+| Topological sort for DAG processing | `ClaimContextGraph.topological_sort()` | `spectrue_core/graph/context.py` |
+| Message passing with edge sign/weight | `message = source_log_odds * edge.weight * sign` | `spectrue_core/graph/propagation.py` |
+| Update propagated belief | `node.propagated_belief = local + Σ messages` | `spectrue_core/graph/propagation.py` |
+| Use in scoring flow | Context graph passed into evidence pipeline | `spectrue_core/verification/pipeline_evidence.py` |
+
 ---
 
 ### RGBA Belief Dimensions [B]
