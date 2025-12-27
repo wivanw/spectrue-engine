@@ -228,7 +228,6 @@ def score_evidence_likeness(sources: list[dict]) -> float:
     if not scores:
         return 0.0
     return sum(scores) / len(scores)
-    justification: str
 
 
 class EvidenceNeed(TypedDict, total=False):

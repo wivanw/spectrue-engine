@@ -12,11 +12,10 @@ Steps:
 4. Evidence Aggregation & Stance Logic
 """
 import pytest
-import asyncio
 from unittest.mock import MagicMock, AsyncMock
 
 from spectrue_core.verification.pipeline import ValidationPipeline
-from spectrue_core.verification.pipeline_search import SearchFlowInput, SearchFlowState, run_search_flow
+from spectrue_core.verification.pipeline_search import SearchFlowInput
 from spectrue_core.verification.phase_runner import PhaseRunner
 from spectrue_core.verification.search_mgr import SearchManager
 
@@ -140,12 +139,7 @@ async def test_pipeline_algorithmic_chain():
         inline_sources=state.inline_sources  # CRITICAL: This must be passed
     )
     
-    stage_state = SearchFlowState(
-        final_context="",
-        final_sources=[],
-        preloaded_context=None,
-        used_orchestration=False
-    )
+    # SearchFlowState is used internally by run_search_flow when called
     
     # ALGORITHMIC CHECK 2:
     assert inp.inline_sources is not None
@@ -178,10 +172,7 @@ async def test_pipeline_algorithmic_chain():
     
     # Verdict readiness is deterministic and based on contract fields only.
     
-    # ExecutionPlan needs to be mocked or built
-    from spectrue_core.verification.orchestrator import ExecutionPlan, BudgetClass
-    plan = ExecutionPlan(budget_class=BudgetClass.MINIMAL)
-    # We don't even need phases if shortcut works!
+    # We don't need a full ExecutionPlan if shortcut works!
     
     # Run ONLY the logic for c1
     # accessing private method for granular testing involves risk but gives certainty

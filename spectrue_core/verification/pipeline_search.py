@@ -20,7 +20,6 @@ from spectrue_core.verification.search_policy_adapter import (
     evaluate_locale_decision,
 )
 from spectrue_core.verification.source_utils import canonicalize_sources
-from spectrue_core.verification.retrieval_eval import evaluate_retrieval_confidence
 
 logger = logging.getLogger(__name__)
 

@@ -1,10 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 
-import pytest
 from spectrue_core.verification.target_selection import (
     select_verification_targets,
-    TargetSelectionResult,
 )
 
 

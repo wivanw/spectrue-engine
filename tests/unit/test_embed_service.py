@@ -2,7 +2,6 @@
 # Copyright (c) 2024-2025 Spectrue Contributors
 """Unit tests for M109 EmbedService."""
 
-import pytest
 from unittest.mock import patch, MagicMock
 import numpy as np
 
