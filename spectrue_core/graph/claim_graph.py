@@ -49,7 +49,7 @@ class ClaimGraphBuilder:
     def __init__(
         self,
         config: "ClaimGraphConfig",
-        openai_client: "AsyncOpenAI | None",
+        openai_client: "AsyncOpenAI | None" = None,
         edge_typing_skill: object | None = None,  # kept for interface compatibility
         embedding_client: EmbeddingClient | None = None,
     ):

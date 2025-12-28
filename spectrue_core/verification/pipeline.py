@@ -24,6 +24,7 @@ from spectrue_core.verification.pipeline_search import (
     SearchFlowState,
     run_search_flow,
 )
+from spectrue_core.verification.claim_dedup import dedup_claims_post_extraction
 from spectrue_core.verification.claim_selection import (
     pick_ui_main_claim,
     top_ui_candidates,
@@ -114,7 +115,6 @@ class ValidationPipeline:
             openai_client = AsyncOpenAI(api_key=config.openai_api_key)
             self._claim_graph = ClaimGraphBuilder(
                 config=config.runtime.claim_graph,
-                openai_client=openai_client,
                 edge_typing_skill=agent.edge_typing_skill,
             )
 
@@ -465,6 +465,39 @@ class ValidationPipeline:
             self._claim_extraction_text = stitched_claim_text
             anchor_claim = None
             anchor_claim_id = None
+
+            # M111: Semantic claim dedup right after extraction (pre-oracle/graph/search).
+            # This reduces cost + prevents anchor/secondary duplicates.
+            try:
+                before_n = len(claims or [])
+                claims, dedup_pairs = dedup_claims_post_extraction(claims or [], tau=0.90)
+                after_n = len(claims or [])
+                if dedup_pairs:
+                    Trace.event(
+                        "claims.dedup_post_extraction",
+                        {
+                            "before": before_n,
+                            "after": after_n,
+                            "removed": max(before_n - after_n, 0),
+                            "tau": 0.90,
+                            "pairs": [
+                                {
+                                    "canonical_id": p.canonical_id,
+                                    "duplicate_id": p.duplicate_id,
+                                    "sim": p.similarity,
+                                }
+                                for p in dedup_pairs[:50]  # trace safety cap
+                            ],
+                        },
+                    )
+                else:
+                    Trace.event(
+                        "claims.dedup_post_extraction",
+                        {"before": before_n, "after": after_n, "removed": 0, "tau": 0.90, "pairs": []},
+                    )
+            except Exception as e:
+                # Non-fatal: if embeddings unavailable or error occurs, proceed with raw claims.
+                Trace.event("claims.dedup_post_extraction.failed", {"error": str(e)})
 
             final_sources = await self._verify_inline_sources(
                 inline_sources=inline_sources,
