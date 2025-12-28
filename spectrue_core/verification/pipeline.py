@@ -24,6 +24,16 @@ from spectrue_core.verification.pipeline_search import (
     SearchFlowState,
     run_search_flow,
 )
+from spectrue_core.verification.claim_selection import (
+    pick_ui_main_claim,
+    top_ui_candidates,
+    ui_bucket,
+    ui_position,
+    ui_score,
+    is_admissible_as_main,
+)
+from spectrue_core.analysis.content_budgeter import ContentBudgeter, TrimResult
+from spectrue_core.runtime_config import ContentBudgetConfig
 from spectrue_core.verification.pipeline_input import (
     extract_url_anchors,
     is_url_input,
@@ -62,6 +72,7 @@ from spectrue_core.verification.costs import summarize_reason_codes, map_stage_c
 import logging
 import asyncio
 from dataclasses import dataclass
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +117,114 @@ class ValidationPipeline:
                 openai_client=openai_client,
                 edge_typing_skill=agent.edge_typing_skill,
             )
+
+        self._content_budget_config = (
+            getattr(getattr(config, "runtime", None), "content_budget", None)
+        )
+        if not isinstance(self._content_budget_config, ContentBudgetConfig):
+            self._content_budget_config = ContentBudgetConfig()
+        self._claim_extraction_text: str = ""
+
+    def _conf_score(self, val: str | None) -> float:
+        if not val:
+            return 0.6
+        v = str(val).lower()
+        if v == "high":
+            return 1.0
+        if v == "medium":
+            return 0.8
+        if v == "low":
+            return 0.6
+        return 0.6
+
+    def _safe_float01(self, value: object, *, default: float = 0.0) -> float:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return default
+        return max(0.0, min(1.0, v))
+
+    def _lede_bonus(self, claim: dict) -> float:
+        """
+        Mild preference for early claims (lede bias), capped to [0..1].
+        """
+        if not isinstance(claim, dict):
+            return 0.0
+        anchor = claim.get("anchor") or {}
+        if not isinstance(anchor, dict):
+            return 0.0
+        try:
+            pos = int(anchor.get("char_start"))
+        except (TypeError, ValueError):
+            return 0.0
+        if pos is None or pos < 0:
+            return 0.0
+        window = 8000  # character span that still gets a small bonus
+        if pos >= window:
+            return 0.0
+        return max(0.0, min(1.0, 1 - (pos / window)))
+
+    def _claim_ev(self, claim: dict, *, centrality_map: dict[str, float] | None = None) -> float:
+        """Deterministic EV for main-claim / retrieval ordering."""
+        centrality_map = centrality_map or {}
+        cid = str(claim.get("id") or claim.get("claim_id") or "")
+        role = str(claim.get("claim_role") or claim.get("role") or "background").lower()
+        role_w = {"core": 1.0, "thesis": 1.0, "support": 0.7, "counter": 0.6, "background": 0.2}.get(role, 0.2)
+        worthiness = self._safe_float01(claim.get("check_worthiness", claim.get("importance", 0.0)), default=0.0)
+        harm_raw = claim.get("harm_potential", 0.0)
+        harm = self._safe_float01(harm_raw, default=0.0)
+        if isinstance(harm_raw, (int, float)) and harm_raw > 1.0:
+            harm = self._safe_float01(float(harm_raw) / 5.0, default=harm)
+        centrality = self._safe_float01(centrality_map.get(cid, claim.get("centrality", 0.0)), default=0.0)
+        ev = (0.40 * role_w) + (0.25 * worthiness) + (0.25 * harm) + (0.10 * centrality)
+        ev += 0.05 * self._lede_bonus(claim)
+        return ev
+
+    def _apply_content_budget(self, text: str, *, source: str) -> tuple[str, TrimResult | None]:
+        """
+        Apply deterministic content budgeting to plain text before LLM steps.
+        """
+        if not text:
+            return text, None
+        cfg = self._content_budget_config
+        raw_len = len(text)
+        if raw_len > int(cfg.absolute_guardrail_chars):
+            Trace.event(
+                "content_budgeter.guardrail",
+                {"raw_len": raw_len, "absolute_guardrail_chars": int(cfg.absolute_guardrail_chars), "source": source},
+            )
+            raise ValueError("Input too large to process safely")
+
+        if raw_len <= int(cfg.max_clean_text_chars_default):
+            return text, None
+
+        budgeter = ContentBudgeter(cfg)
+        result = budgeter.trim(text)
+        Trace.event("content_budgeter.blocks", result.trace_blocks_payload())
+        Trace.event(
+            "content_budgeter.selection",
+            result.trace_selection_payload(getattr(cfg, "trace_top_blocks", 8)),
+        )
+        return result.trimmed_text, result
+
+    def _trace_input_summary(
+        self, *, source: str, raw_text: str, cleaned_text: str, budget_result: TrimResult | None
+    ) -> None:
+        raw_sha = budget_result.raw_sha256 if budget_result else hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+        cleaned_sha = (
+            budget_result.trimmed_sha256 if budget_result else hashlib.sha256(cleaned_text.encode("utf-8")).hexdigest()
+        )
+        Trace.event(
+            "analysis.input_summary",
+            {
+                "source": source,
+                "raw_len": len(raw_text),
+                "cleaned_len": len(cleaned_text),
+                "raw_sha256": raw_sha,
+                "cleaned_sha256": cleaned_sha,
+                "budget_applied": bool(budget_result),
+            },
+        )
 
     async def execute(
         self,
@@ -230,9 +349,9 @@ class ValidationPipeline:
         self.agent.llm_client._meter = llm_meter
         self.search_mgr.web_tool._tavily._meter = tavily_meter
 
-        async def _progress(stage: str) -> None:
+        async def _progress(stage: str, processed: int | None = None, total: int | None = None) -> None:
             if progress_callback:
-                await progress_callback(stage)
+                await progress_callback(stage, processed, total)
             payload = progress_emitter.maybe_emit(stage=stage)
             if payload:
                 Trace.progress_cost_delta(
@@ -317,27 +436,35 @@ class ValidationPipeline:
                 source_url=source_url,
                 progress_callback=_progress,
             )
-            fact = prepared.fact
+            fact_before_budget = prepared.fact
             original_fact = prepared.original_fact
             final_context = prepared.final_context
             final_sources = prepared.final_sources
             inline_sources = prepared.inline_sources
 
-            claims, should_check_oracle, article_intent, fast_query = await self._extract_claims(
+            budget_result: TrimResult | None = None
+            if not self._is_url(fact_before_budget):
+                fact, budget_result = self._apply_content_budget(fact_before_budget, source="plain")
+            else:
+                fact = fact_before_budget
+
+            source_label = "url" if self._is_url(original_fact) else ("clean_plain" if needs_cleaning else "plain")
+            self._trace_input_summary(
+                source=source_label,
+                raw_text=fact_before_budget,
+                cleaned_text=fact,
+                budget_result=budget_result,
+            )
+
+            claims, should_check_oracle, article_intent, fast_query, stitched_claim_text = await self._extract_claims(
                 fact=fact,
                 lang=lang,
                 progress_callback=_progress,
             )
             _end_phase("extraction")
+            self._claim_extraction_text = stitched_claim_text
+            anchor_claim = None
             anchor_claim_id = None
-            if claims:
-                core_claims = [c for c in claims if c.get("type") == "core"]
-                anchor_claim = (
-                    max(core_claims, key=lambda c: c.get("importance", 0))
-                    if core_claims
-                    else claims[0]
-                )
-                anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
             final_sources = await self._verify_inline_sources(
                 inline_sources=inline_sources,
@@ -384,6 +511,54 @@ class ValidationPipeline:
                 runtime_config=self.config.runtime,
                 progress_callback=_progress,
             )
+
+            if claims:
+                centrality_map: dict[str, float] = {}
+                gr_obj = getattr(graph_flow_result, "graph_result", None) if graph_flow_result else None
+                ranked_all = getattr(gr_obj, "all_ranked", None) or []
+                max_c = max((float(getattr(r, "centrality_score", 0.0) or 0.0) for r in ranked_all), default=1.0)
+                for r in ranked_all:
+                    try:
+                        centrality_map[r.claim_id] = float(getattr(r, "centrality_score", 0.0) or 0.0) / max_c
+                    except Exception:
+                        continue
+                ev_anchor_claim = max(claims, key=lambda c: self._claim_ev(c, centrality_map=centrality_map))
+                ui_anchor_claim = pick_ui_main_claim(claims)
+                anchor_claim = ui_anchor_claim or ev_anchor_claim
+                anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
+                ui_candidates = top_ui_candidates(claims, limit=3)
+                def _role_val(c: dict) -> str | None:
+                    val = c.get("claim_role") if isinstance(c, dict) else None
+                    return str(val) if val is not None else None
+                Trace.event(
+                    "anchor_selection.ui_main",
+                    {
+                        "ui_anchor_id": anchor_claim_id,
+                        "ui_anchor_role": _role_val(anchor_claim),
+                        "ui_anchor_kind": anchor_claim.get("type"),
+                        "ui_anchor_pos": ui_position(anchor_claim),
+                        "ui_anchor_worthiness": anchor_claim.get("check_worthiness"),
+                        "ui_anchor_harm": anchor_claim.get("harm_potential"),
+                        "ev_anchor_id": ev_anchor_claim.get("id") or ev_anchor_claim.get("claim_id"),
+                        "ev_anchor_role": _role_val(ev_anchor_claim),
+                        "ev_anchor_kind": ev_anchor_claim.get("type"),
+                        "ev_anchor_score": self._claim_ev(ev_anchor_claim, centrality_map=centrality_map),
+                        "candidates": [
+                            {
+                                "id": c.get("id") or c.get("claim_id"),
+                                "role": _role_val(c),
+                                "kind": c.get("type"),
+                                "bucket": ui_bucket(_role_val(c)),
+                                "ui_score": ui_score(c),
+                                "ev_score": self._claim_ev(c, centrality_map=centrality_map),
+                                "pos": ui_position(c),
+                            }
+                            for c in ui_candidates
+                        ],
+                        "admissible_count": len([c for c in claims if is_admissible_as_main(c)]),
+                        "fallback_used": ui_anchor_claim is None,
+                    },
+                )
 
             # M104: Build Context Graph for Belief Propagation
             context_graph = None
@@ -665,6 +840,7 @@ class ValidationPipeline:
                     progress_callback=_progress,
                     prior_belief=prior_belief,
                     context_graph=context_graph,
+                    claim_extraction_text=self._claim_extraction_text,
                 ),
                 claims=claims_for_scoring,
                 sources=final_sources,
@@ -756,8 +932,9 @@ class ValidationPipeline:
                         len(fetched_text),
                     )
 
-                cleaned_article = await self.agent.clean_article(fetched_text)
-                fact = cleaned_article or fetched_text
+                budgeted_fetched, _ = self._apply_content_budget(fetched_text, source="url_fetched")
+                cleaned_article = await self.agent.clean_article(budgeted_fetched)
+                fact = cleaned_article or budgeted_fetched
                 final_context = fact
 
                 if url_anchors and cleaned_article:
@@ -788,7 +965,8 @@ class ValidationPipeline:
                 await progress_callback("processing_large_text")
                 logger.debug("[Pipeline] Large text detected: %d chars, extended timeout", len(fact))
 
-            cleaned_article = await self.agent.clean_article(fact)
+            budgeted_fact, _ = self._apply_content_budget(fact, source="extension")
+            cleaned_article = await self.agent.clean_article(budgeted_fact)
             if cleaned_article:
                 if url_anchors:
                     inline_sources = self._restore_urls_from_anchors(cleaned_article, url_anchors)
@@ -809,6 +987,9 @@ class ValidationPipeline:
 
                 fact = cleaned_article
                 final_context = fact
+            else:
+                fact = budgeted_fact
+                final_context = final_context or fact
 
         elif not self._is_url(fact) and not needs_cleaning:
             url_anchors = self._extract_url_anchors(fact, exclude_url=exclude_url)
@@ -848,7 +1029,7 @@ class ValidationPipeline:
         fact: str,
         lang: str,
         progress_callback,
-    ) -> tuple[list, bool, str, str]:
+    ) -> tuple[list, bool, str, str, str]:
         if progress_callback:
             await progress_callback("extracting_claims")
 
@@ -856,7 +1037,7 @@ class ValidationPipeline:
         blob = fact_first_line if len(fact_first_line) > 20 else fact[:200]
 
         cleaned_fact = clean_article_text(fact)
-        task_claims = asyncio.create_task(self.agent.extract_claims(cleaned_fact[:4000], lang=lang))
+        task_claims = asyncio.create_task(self.agent.extract_claims(cleaned_fact, lang=lang))
 
         if len(blob) > 150:
             blob = blob[:150].rsplit(" ", 1)[0]
@@ -867,23 +1048,31 @@ class ValidationPipeline:
 
         try:
             claims_result = await task_claims
-            if isinstance(claims_result, tuple) and len(claims_result) >= 3:
-                claims, should_check_oracle, article_intent = claims_result
-            elif isinstance(claims_result, tuple) and len(claims_result) == 2:
-                claims, should_check_oracle = claims_result
-                article_intent = "news"
+            if isinstance(claims_result, tuple):
+                if len(claims_result) >= 4:
+                    claims, should_check_oracle, article_intent, stitched_text = claims_result[:4]
+                elif len(claims_result) == 3:
+                    claims, should_check_oracle, article_intent = claims_result
+                    stitched_text = ""
+                elif len(claims_result) == 2:
+                    claims, should_check_oracle = claims_result
+                    article_intent = "news"
+                    stitched_text = ""
+                else:
+                    claims, should_check_oracle, article_intent, stitched_text = claims_result, False, "news", ""
             else:
-                claims, should_check_oracle, article_intent = claims_result, False, "news"
+                claims, should_check_oracle, article_intent, stitched_text = [], False, "news", ""
         except asyncio.CancelledError:
             claims = []
             should_check_oracle = False
             article_intent = "news"
+            stitched_text = ""
 
         if claims:
             for i, c in enumerate(claims):
                 c["id"] = f"c{i+1}"
 
-        return claims, should_check_oracle, article_intent, fast_query
+        return claims, should_check_oracle, article_intent, fast_query, stitched_text
 
     async def _verify_inline_sources(
         self,
@@ -957,8 +1146,11 @@ class ValidationPipeline:
                             try:
                                 fetched = await self.search_mgr.web_tool.fetch_page_content(url)
                                 if fetched and len(fetched) > 100:
-                                    src["content"] = fetched[:8000]
-                                    src["snippet"] = fetched[:300]
+                                    budgeted_content, _ = self._apply_content_budget(
+                                        fetched, source="inline_source"
+                                    )
+                                    src["content"] = budgeted_content
+                                    src["snippet"] = budgeted_content[:300]
                                     Trace.event("inline_source.content_fetched", {
                                         "url": url[:80],
                                         "chars": len(fetched),

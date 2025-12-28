@@ -213,7 +213,7 @@ class ArticleCleanerSkill:
             
             if response and len(response.strip()) > 100:
                 logger.debug("[ArticleCleaner] Cleaned: %d -> %d chars", len(raw_text), len(response))
-                Trace.event(
+                Trace.event_full(
                     "article_clean.cleaned",
                     {
                         "orig_len": len(raw_text),
@@ -285,7 +285,7 @@ class ArticleCleanerSkill:
         merged = sampler.merge(list(cleaned_results))
         
         logger.debug("[M74] Merged length: %d chars", len(merged))
-        Trace.event(
+        Trace.event_full(
             "article_clean.cleaned_chunked",
             {
                 "orig_len": len(raw_text),

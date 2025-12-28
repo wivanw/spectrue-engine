@@ -10,7 +10,7 @@ optimized greedily under a budget.
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set
 
 
 def greedy_budgeted_submodular(

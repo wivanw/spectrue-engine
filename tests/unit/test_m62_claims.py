@@ -36,7 +36,7 @@ class TestM62ClaimExtraction:
         }
         
         # M63: extract_claims returns 3-tuple now
-        claims, should_check_oracle, article_intent = await skill.extract_claims("Some article text", lang="en")
+        claims, should_check_oracle, article_intent, _ = await skill.extract_claims("Some article text", lang="en")
         
         assert len(claims) == 1
         claim = claims[0]
@@ -59,7 +59,7 @@ class TestM62ClaimExtraction:
         }
         
         # M63: extract_claims returns 3-tuple now
-        claims, _, _ = await skill.extract_claims("Text", lang="en")
+        claims, _, _, _ = await skill.extract_claims("Text", lang="en")
         
         assert claims[0]["topic_group"] == "Other"
     
@@ -76,7 +76,7 @@ class TestM62ClaimExtraction:
         }
         
         # M63: extract_claims returns 3-tuple now
-        claims, _, _ = await skill.extract_claims("Text", lang="en")
+        claims, _, _, _ = await skill.extract_claims("Text", lang="en")
         
         # Should fallback to importance
         assert claims[0]["check_worthiness"] == 0.7

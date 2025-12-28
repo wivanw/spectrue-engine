@@ -687,15 +687,27 @@ def judge_sufficiency_for_claim(
 
         coverage = 0.0
         diversity = 0.0
+        aligned_hits = 0
         if policy_profile is not None and decision != SufficiencyDecision.STOP:
             thresholds = policy_profile.quality_thresholds
             coverage = _estimate_coverage(sources, thresholds.min_relevance_score)
             diversity = _estimate_diversity(sources)
-            if coverage < thresholds.min_coverage or diversity < thresholds.min_diversity:
+            aligned_hits = sum(
+                1
+                for src in sources
+                if isinstance(src, dict)
+                and float(src.get("relevance_score") or 0.0) >= float(thresholds.min_relevance_score)
+                and str(src.get("claim_id") or claim_id) == str(claim_id)
+            )
+            if (
+                coverage < thresholds.min_coverage
+                or diversity < thresholds.min_diversity
+                or aligned_hits == 0
+            ):
                 decision = SufficiencyDecision.NEED_FOLLOWUP
                 sufficiency.reason = (
                     f"{sufficiency.reason}; below quality thresholds "
-                    f"(coverage={coverage:.2f}, diversity={diversity:.2f})"
+                    f"(coverage={coverage:.2f}, diversity={diversity:.2f}, aligned_hits={aligned_hits})"
                 )
 
             if not policy_profile.stop_conditions.stop_on_sufficiency and decision == SufficiencyDecision.ENOUGH:

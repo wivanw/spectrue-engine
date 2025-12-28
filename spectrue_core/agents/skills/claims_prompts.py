@@ -289,8 +289,6 @@ You MUST respond in valid JSON.
 
 def build_claim_strategist_prompt(*, text_excerpt: str, max_claims: int) -> str:
     return f"""Extract 3-{max_claims} atomic verifiable claims.
-PRIORITIZE HARM: Find claims with harm_potential 4-5 (Health/Safety) first.
-Ignore separate definitions (harm_potential 1) unless false/dangerous.
 
 ARTICLE:
 {text_excerpt}

@@ -170,6 +170,15 @@ class EngineTunableConfig:
 
 
 @dataclass(frozen=True)
+class ContentBudgetConfig:
+    max_clean_text_chars_default: int = 120_000
+    max_clean_text_chars_huge_input: int = 200_000
+    block_min_chars: int = 80
+    trace_top_blocks: int = 8
+    absolute_guardrail_chars: int = 2_000_000
+
+
+@dataclass(frozen=True)
 class ClaimGraphConfig:
     """
     M72: Hybrid ClaimGraph (B + C) configuration.
@@ -239,6 +248,7 @@ class EngineRuntimeConfig:
     temporal: TemporalPolicyConfig
     locale: LocalePolicyConfig
     tunables: EngineTunableConfig
+    content_budget: ContentBudgetConfig
     claim_graph: ClaimGraphConfig
 
     @staticmethod
@@ -338,6 +348,33 @@ class EngineRuntimeConfig:
             max_claims_deep=_parse_int(os.getenv("SPECTRUE_MAX_CLAIMS"), default=2, min_v=1, max_v=1000),
         )
 
+        content_budget = ContentBudgetConfig(
+            max_clean_text_chars_default=_parse_int(
+                os.getenv("CONTENT_BUDGET_MAX_DEFAULT_CHARS"),
+                default=120_000,
+                min_v=10_000,
+                max_v=2_000_000,
+            ),
+            max_clean_text_chars_huge_input=_parse_int(
+                os.getenv("CONTENT_BUDGET_MAX_HUGE_CHARS"),
+                default=200_000,
+                min_v=50_000,
+                max_v=2_000_000,
+            ),
+            block_min_chars=_parse_int(
+                os.getenv("CONTENT_BUDGET_BLOCK_MIN_CHARS"), default=80, min_v=1, max_v=2_000
+            ),
+            trace_top_blocks=_parse_int(
+                os.getenv("CONTENT_BUDGET_TRACE_TOP_BLOCKS"), default=8, min_v=1, max_v=50
+            ),
+            absolute_guardrail_chars=_parse_int(
+                os.getenv("CONTENT_BUDGET_ABSOLUTE_GUARDRAIL"),
+                default=2_000_000,
+                min_v=100_000,
+                max_v=10_000_000,
+            ),
+        )
+
         llm = EngineLLMConfig(
             timeout_sec=float(llm_timeout),
             concurrency=int(llm_conc),
@@ -393,6 +430,7 @@ class EngineRuntimeConfig:
             temporal=temporal,
             locale=locale,
             tunables=tunables,
+            content_budget=content_budget,
             claim_graph=claim_graph,
         )
 
@@ -452,6 +490,13 @@ class EngineRuntimeConfig:
             "tunables": {
                 "langdetect_min_prob": float(self.tunables.langdetect_min_prob),
                 "max_claims_deep": int(self.tunables.max_claims_deep),
+            },
+            "content_budget": {
+                "max_clean_text_chars_default": int(self.content_budget.max_clean_text_chars_default),
+                "max_clean_text_chars_huge_input": int(self.content_budget.max_clean_text_chars_huge_input),
+                "block_min_chars": int(self.content_budget.block_min_chars),
+                "trace_top_blocks": int(self.content_budget.trace_top_blocks),
+                "absolute_guardrail_chars": int(self.content_budget.absolute_guardrail_chars),
             },
             "claim_graph": {
                 "enabled": bool(self.claim_graph.enabled),

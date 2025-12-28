@@ -52,7 +52,7 @@ class TestOracleOptimization:
             {"id": "c3", "text": "Claim Three", "check_oracle": True},
         ]
         # should_check_oracle = True
-        mock_agent.extract_claims.return_value = (claims, True, "news")
+        mock_agent.extract_claims.return_value = (claims, True, "news", "")
         
         # Oracle returns None (miss)
         mock_search_mgr.check_oracle_hybrid.return_value = None
@@ -84,7 +84,7 @@ class TestOracleOptimization:
             {"id": "c2", "text": "Claim 2", "check_oracle": True},
         ]
         # All true
-        mock_agent.extract_claims.return_value = (claims, True, "news")
+        mock_agent.extract_claims.return_value = (claims, True, "news", "")
         mock_search_mgr.check_oracle_hybrid.return_value = None
         mock_agent.generate_search_queries = AsyncMock(return_value=["q1", "q2"])
         mock_agent.score_evidence = AsyncMock(return_value={"verified_score": 0.5, "rationale": "test"})
@@ -103,7 +103,7 @@ class TestOracleOptimization:
             {"id": "c1", "text": "Claim 1", "check_oracle": False, "type": "core"},
         ]
         # Flag True (heuristic override)
-        mock_agent.extract_claims.return_value = (claims, True, "news")
+        mock_agent.extract_claims.return_value = (claims, True, "news", "")
         mock_search_mgr.check_oracle_hybrid.return_value = None
         mock_agent.generate_search_queries = AsyncMock(return_value=["q1", "q2"])
         mock_agent.score_evidence = AsyncMock(return_value={"verified_score": 0.5, "rationale": "test"})
