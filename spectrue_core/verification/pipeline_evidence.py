@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Any
 
 import asyncio
 import logging
@@ -35,7 +35,6 @@ with warnings.catch_warnings():
 from spectrue_core.verification.rgba_aggregation import (
     apply_dependency_penalties,
     apply_conflict_explainability_penalty,
-    recompute_verified_score,
 )
 from spectrue_core.verification.claim_selection import pick_ui_main_claim
 from spectrue_core.verification.search_policy import (
@@ -46,25 +45,92 @@ from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
 
+def _norm_id(x: Any) -> str:
+    return str(x or "").strip().lower()
+
+def _is_prob(x: Any) -> bool:
+    return isinstance(x, (int, float)) and math.isfinite(float(x)) and 0.0 <= float(x) <= 1.0
+
+def _logit(p: float) -> float:
+    # Contract: p must be in (0,1). No clamping here.
+    return math.log(p / (1.0 - p))
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+def _compute_article_g_from_anchor(
+    *,
+    anchor_claim_id: str | None,
+    claim_verdicts: list[dict] | None,
+    prior_p: float = 0.5,
+) -> tuple[float, dict]:
+    """
+    Pure formula (no orchestration heuristics):
+      G = sigmoid( logit(prior_p) + k * logit(p_anchor) )
+    where:
+      p_anchor = verdict_score for anchor claim
+      k = 0 if verdict_state is insufficient_evidence, else 1
+
+    If anchor is missing or invalid, return prior_p (neutral).
+    """
+    debug = {
+        "anchor_claim_id": anchor_claim_id,
+        "used_anchor": False,
+        "k": 0.0,
+        "p_anchor": None,
+        "prior_p": prior_p,
+    }
+    if not anchor_claim_id or not isinstance(claim_verdicts, list):
+        return float(prior_p), debug
+
+    anc_norm = _norm_id(anchor_claim_id)
+    cv = next(
+        (
+            x
+            for x in claim_verdicts
+            if isinstance(x, dict) and _norm_id(x.get("claim_id")) == anc_norm
+        ),
+        None,
+    )
+    if not cv:
+        return float(prior_p), debug
+
+    p = cv.get("verdict_score")
+    if not isinstance(p, (int, float)) or not math.isfinite(float(p)):
+        return float(prior_p), debug
+    p = float(p)
+    if not (0.0 < p < 1.0):
+        return float(prior_p), debug
+
+    vs = str(cv.get("verdict_state") or "").strip().lower()
+    k = 0.0 if vs == "insufficient_evidence" else 1.0
+    debug.update({"used_anchor": True, "k": k, "p_anchor": p})
+
+    L = _logit(float(prior_p)) + (k * _logit(p))
+    return float(_sigmoid(L)), debug
+
 ProgressCallback = Callable[[str], Awaitable[None]]
 
 
-_TIER_PRIOR = {
-    "D": 0.80,
-    "C": 0.85,
-    "B": 0.90,
-    "A'": 0.93,
+# Tier is a first-class prior on A (Explainability) ONLY.
+# It must not bias veracity (G) or verdicts.
+_TIER_A_PRIOR_MEAN = {
     "A": 0.96,
-    "UNKNOWN": 0.90,
+    "A'": 0.93,
+    "B": 0.90,
+    "C": 0.85,
+    "D": 0.80,
+    "UNKNOWN": 0.38,
 }
-_TIER_PRIOR_BASELINE = _TIER_PRIOR["B"]
+_TIER_A_BASELINE = _TIER_A_PRIOR_MEAN["B"]
 
 
 def _explainability_factor_for_tier(tier: str | None) -> tuple[float, str, float]:
     if not tier:
-        return _TIER_PRIOR["UNKNOWN"] / _TIER_PRIOR_BASELINE, "unknown_default", _TIER_PRIOR["UNKNOWN"]
-    prior = _TIER_PRIOR.get(str(tier).strip().upper(), _TIER_PRIOR["UNKNOWN"])
-    return prior / _TIER_PRIOR_BASELINE, "best_tier", prior
+        prior = _TIER_A_PRIOR_MEAN["UNKNOWN"]
+        return prior / _TIER_A_BASELINE, "unknown_default", prior
+    prior = _TIER_A_PRIOR_MEAN.get(str(tier).strip().upper(), _TIER_A_PRIOR_MEAN["UNKNOWN"])
+    return prior / _TIER_A_BASELINE, "best_tier", prior
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +294,12 @@ async def run_evidence_flow(
 
     # M108: Single batch LLM call for all claims (not per-claim to avoid 6x cost)
     result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
+    if str(result.get("status", "")).lower() == "error":
+        result["status"] = "error"
+        Trace.event(
+            "verdict.status",
+            {"status": "error", "reason": "llm_error", "kind": "score_evidence"},
+        )
     raw_verified_score = result.get("verified_score")
     raw_confidence_score = result.get("confidence_score")
     raw_rationale = result.get("rationale")
@@ -245,10 +317,9 @@ async def run_evidence_flow(
     claim_verdicts = result.get("claim_verdicts")
     if isinstance(claim_verdicts, list):
         changed = apply_dependency_penalties(claim_verdicts, claims)
-        if changed:
-            recalculated = recompute_verified_score(claim_verdicts)
-            if recalculated is not None:
-                result["verified_score"] = recalculated
+        # NOTE: dependency penalties mutate per-claim verdicts only.
+        # Article-level G is selected later from the anchor claim,
+        # and must NOT be recomputed as an average across claims.
         for cv in claim_verdicts:
             if not isinstance(cv, dict):
                 continue
@@ -262,26 +333,33 @@ async def run_evidence_flow(
     verdict_state_by_claim: dict[str, str] = {}
     importance_by_claim: dict[str, float] = {}
     veracity_debug: list[dict] = []
+    # NOTE: article-level G is computed from anchor formula (no worthiness/thesis fallback),
+    # so we do not need claim_meta_by_id for G.
     for claim in claims or []:
         if not isinstance(claim, dict):
             continue
-        cid = str(claim.get("id") or "").strip()
-        if not cid:
+        raw_id = claim.get("id") or claim.get("claim_id") or ""
+        cid_norm = _norm_id(raw_id)
+        if not cid_norm:
             continue
         try:
-            importance_by_claim[cid] = float(claim.get("importance", 1.0) or 1.0)
+            importance_by_claim[cid_norm] = float(claim.get("importance", 1.0) or 1.0)
         except Exception:
-            importance_by_claim[cid] = 1.0
+            importance_by_claim[cid_norm] = 1.0
     if isinstance(claim_verdicts, list):
         for cv in claim_verdicts:
             if not isinstance(cv, dict):
                 continue
-            claim_id = str(cv.get("claim_id") or "").strip()
+            claim_id = _norm_id(cv.get("claim_id"))
             if not claim_id and claims:
-                claim_id = str(claims[0].get("id") or "c1")
+                claim_id = _norm_id(claims[0].get("id") or "c1")
                 cv["claim_id"] = claim_id
 
-            claim_obj = next((c for c in (claims or []) if c.get("id") == claim_id), None)
+            claim_obj = None
+            for c in claims or []:
+                if _norm_id(c.get("id") or c.get("claim_id")) == claim_id:
+                    claim_obj = c
+                    break
             temporality = claim_obj.get("temporality") if isinstance(claim_obj, dict) else None
 
             items = pack.get("items", []) if isinstance(pack, dict) else []
@@ -340,8 +418,23 @@ async def run_evidence_flow(
                 best_tier = agg.get("best_tier") if isinstance(agg, dict) else None
                 pre_a = float(explainability)
                 factor, source, prior = _explainability_factor_for_tier(best_tier)
-                if math.isfinite(pre_a):
-                    post_a = max(0.0, min(1.0, pre_a * factor))
+                if math.isfinite(pre_a) and 0.0 < pre_a < 1.0:
+                    if factor <= 0 or not math.isfinite(factor):
+                        Trace.event(
+                            "verdict.explainability_bad_factor",
+                            {
+                                "claim_id": claim_id,
+                                "best_tier": best_tier,
+                                "pre_A": pre_a,
+                                "prior": prior,
+                                "baseline": _TIER_A_BASELINE,
+                                "factor": factor,
+                                "source": source,
+                            },
+                        )
+                        post_a = pre_a
+                    else:
+                        post_a = _sigmoid(_logit(pre_a) + math.log(factor))
                     if abs(post_a - pre_a) > 1e-9:
                         result["explainability_score"] = post_a
                     Trace.event(
@@ -351,7 +444,7 @@ async def run_evidence_flow(
                             "best_tier": best_tier,
                             "pre_A": pre_a,
                             "prior": prior,
-                            "baseline": _TIER_PRIOR_BASELINE,
+                            "baseline": _TIER_A_BASELINE,
                             "factor": factor,
                             "post_A": post_a,
                             "source": source,
@@ -360,7 +453,7 @@ async def run_evidence_flow(
                 else:
                     Trace.event(
                         "verdict.explainability_missing",
-                        {"claim_id": claim_id, "best_tier": best_tier},
+                        {"claim_id": claim_id, "best_tier": best_tier, "pre_A": pre_a},
                     )
 
             veracity_debug.append(
@@ -394,9 +487,9 @@ async def run_evidence_flow(
             )
 
         changed = apply_dependency_penalties(claim_verdicts, claims)
-        recalculated = recompute_verified_score(claim_verdicts)
-        if recalculated is not None:
-            result["verified_score"] = recalculated
+        # Do NOT recompute article-level G as an average across claims.
+        # Article-level G is selected later from a single claim (anchor/thesis)
+        # and stored in result["verified_score"].
         if changed:
             result["dependency_penalty_applied"] = True
 
@@ -429,9 +522,11 @@ async def run_evidence_flow(
                 node = inp.context_graph.get_node(cid)
                 if node:
                     v = cv.get("verdict", "ambiguous")
-                    conf = cv.get("confidence", 1.0)
-                    if not isinstance(conf, (int, float)):
-                        conf = 1.0
+                    conf = cv.get("confidence")
+                    if not _is_prob(conf):
+                        conf = cv.get("verdict_score")
+                    if not _is_prob(conf):
+                        conf = 0.5
                     impact = calculate_evidence_impact(v, confidence=conf)
                     node.local_belief = BeliefState(log_odds=impact)
             
@@ -450,7 +545,7 @@ async def run_evidence_flow(
                 if not isinstance(cv, dict):
                     continue
                 v = cv.get("verdict", "ambiguous")
-                cid = str(cv.get("claim_id") or "").strip()
+                cid = _norm_id(cv.get("claim_id"))
                 try:
                     strength = float(cv.get("verdict_score", 0.5) or 0.5)
                 except Exception:
@@ -462,12 +557,24 @@ async def run_evidence_flow(
                  
         # Apply Consensus
         current_belief = apply_consensus_bound(current_belief, consensus)
-        
-        # Set Result
-        result["verified_score"] = log_odds_to_prob(current_belief.log_odds)
-        verified_cap = recompute_verified_score(claim_verdicts) if isinstance(claim_verdicts, list) else None
-        if verified_cap is not None and result["verified_score"] > verified_cap:
-            result["verified_score"] = verified_cap
+        belief_g = log_odds_to_prob(current_belief.log_odds)
+
+        # Article-level G: pure anchor formula (no thesis/worthiness heuristics, no dedup).
+        g_article, g_dbg = _compute_article_g_from_anchor(
+            anchor_claim_id=anchor_claim_id,
+            claim_verdicts=claim_verdicts if isinstance(claim_verdicts, list) else None,
+            prior_p=0.5,
+        )
+        prev = result.get("verified_score")
+        result["verified_score"] = g_article
+        Trace.event(
+            "verdict.article_g_formula",
+            {
+                **g_dbg,
+                "prev_verified_score": prev,
+                "belief_score": belief_g,
+            },
+        )
 
         Trace.event_full(
             "verdict.veracity_debug",
@@ -486,7 +593,8 @@ async def run_evidence_flow(
             "prior_log_odds": inp.prior_belief.log_odds,
             "consensus_score": consensus.score,
             "posterior_log_odds": current_belief.log_odds,
-            "final_probability": result["verified_score"]
+            "final_probability": result["verified_score"],
+            "belief_probability": belief_g,
         }
 
     if conflict_detected:

@@ -7,6 +7,7 @@ from spectrue_core.schema import (
     VerdictState,
 )
 from spectrue_core.agents.skills.scoring_sanitization import maybe_drop_style_section, strip_internal_source_markers
+from spectrue_core.utils.trace import Trace
 
 
 def safe_score(val, default: float = -1.0) -> float:
@@ -24,15 +25,9 @@ def clamp_score_evidence_result(result: dict) -> dict:
     if "verified_score" in result:
         result["verified_score"] = safe_score(result["verified_score"], default=-1.0)
     else:
-        verdicts = result.get("claim_verdicts")
-        if isinstance(verdicts, list) and verdicts:
-            vals: list[float] = []
-            for v in verdicts:
-                if isinstance(v, dict):
-                    vals.append(safe_score(v.get("verdict_score", 0.5)))
-            result["verified_score"] = (sum(vals) / len(vals)) if vals else -1.0
-        else:
-            result["verified_score"] = -1.0
+        # Do NOT synthesize article-level G here (e.g., averaging claims).
+        # Pipeline selects article-level G from a single claim (anchor/thesis).
+        result["verified_score"] = -1.0
 
     result["explainability_score"] = safe_score(result.get("explainability_score"), default=-1.0)
     result["danger_score"] = safe_score(result.get("danger_score"), default=-1.0)
@@ -43,6 +38,11 @@ def clamp_score_evidence_result(result: dict) -> dict:
         for cv in claim_verdicts:
             if isinstance(cv, dict):
                 cv["verdict_score"] = safe_score(cv.get("verdict_score", 0.5))
+                # Semantic contract: insufficient evidence is neutral (not false).
+                vs = str(cv.get("verdict_state") or "").lower().strip()
+                if vs in {"insufficient_evidence", "insufficient evidence", "insufficient"}:
+                    if cv["verdict_score"] != 0.5:
+                        cv["verdict_score"] = 0.5
     else:
         result["claim_verdicts"] = []
 
@@ -136,7 +136,7 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
                     status=parse_status(rc.get("status", "")),
                     verdict=parse_status(rc.get("verdict", rc.get("status", ""))),
                     verdict_state=parse_state(rc.get("verdict_state")),
-                    verdict_score=safe_score(rc.get("verdict_score"), default=-1.0),
+                    verdict_score=0.0,  # temp, set below
                     assertion_verdicts=assertion_verdicts,
                     evidence_count=int(rc.get("evidence_count", 0)),
                     fact_assertions_verified=fact_verified,
@@ -148,18 +148,31 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
                     reasons_expert=reasons_expert,
                 )
             )
+            # Enforce semantic neutral score for insufficient evidence
+            if claim_verdicts[-1].verdict_state == VerdictState.INSUFFICIENT_EVIDENCE:
+                original_score = safe_score(rc.get("verdict_score"), default=-1.0)
+                if original_score != 0.5:
+                    Trace.event(
+                        "verdict.score_corrected",
+                        {
+                            "claim_id": claim_verdicts[-1].claim_id,
+                            "from": original_score,
+                            "to": 0.5,
+                            "reason": "insufficient_evidence",
+                        },
+                    )
+                claim_verdicts[-1].verdict_score = 0.5
+            else:
+                claim_verdicts[-1].verdict_score = safe_score(rc.get("verdict_score"), default=-1.0)
 
     verified = safe_score(raw.get("verified_score"), default=-1.0)
     explainability = safe_score(raw.get("explainability_score"), default=-1.0)
     danger = safe_score(raw.get("danger_score"), default=-1.0)
     style = safe_score(raw.get("style_score"), default=-1.0)
 
-    if verified < 0 and claim_verdicts:
-        scores = [(cv.verdict_score, 1.0) for cv in claim_verdicts if cv.verdict_score >= 0]
-        if scores:
-            total_weight = sum(w for _, w in scores)
-            if total_weight > 0:
-                verified = sum(s * w for s, w in scores) / total_weight
+    # Do not average claim scores here; article-level G is selected in pipeline.
+    if verified < 0:
+        verified = -1.0
 
     rationale = strip_internal_source_markers(str(raw.get("rationale", "")))
     rationale = maybe_drop_style_section(rationale, honesty_score=style, lang=lang)

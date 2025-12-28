@@ -21,9 +21,6 @@ from spectrue_core.scoring.rgba_belief import (
     create_rgba_belief_from_tier,
 )
 
-# Prior calculation
-from spectrue_core.scoring.priors import calculate_prior
-
 # Consensus
 from spectrue_core.scoring.consensus import calculate_consensus
 
@@ -36,7 +33,6 @@ __all__ = [
     "calculate_evidence_impact",
     "process_updates",
     "sigmoid_impact",
-    "calculate_prior",
     "calculate_consensus",
     # Classes
     "RGBABeliefState",

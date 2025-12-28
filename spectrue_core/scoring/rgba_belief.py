@@ -21,7 +21,7 @@ class RGBABeliefState:
     Independent Bayesian belief dimensions for RGBA.
     
     Each dimension (R, G, B, A) has its own:
-    - Prior belief (set from source tier, context)
+    - Prior belief (set from context/initialization)
     - Evidence updates
     - Posterior belief
     
@@ -50,8 +50,8 @@ class RGBABeliefState:
         Initialize RGBA beliefs from probability priors.
         
         Args:
-            danger_prior: P(harmful | source tier), default 0.5 (neutral)
-            veracity_prior: P(true | source tier), e.g., 0.8 for Tier A
+            danger_prior: P(harmful), default 0.5 (neutral)
+            veracity_prior: P(true), default 0.5 (neutral)
             honesty_prior: P(good faith), default 0.5
             explainability_prior: P(explainable), default 0.5
         """
@@ -112,21 +112,16 @@ class RGBABeliefState:
         }
 
 
-# Tier-based prior mappings
-_TIER_VERACITY_PRIORS = {
-    "A": 0.85,
-    "A'": 0.75,
-    "B": 0.70,
-    "C": 0.55,
-    "D": 0.35,
-}
-
-_TIER_DANGER_PRIORS = {
-    "A": 0.1,
-    "A'": 0.15,
-    "B": 0.2,
-    "C": 0.35,
-    "D": 0.5,
+_TIER_EXPLAINABILITY_PRIORS = {
+    # IMPORTANT: Tier is a prior factor for A (Explainability) ONLY.
+    # It must not bias veracity (G) or verdicts.
+    # Values here represent expected explainability (how likely we can trace/quote).
+    "A": 0.96,
+    "A'": 0.93,
+    "B": 0.90,
+    "C": 0.85,
+    "D": 0.80,
+    "UNKNOWN": 0.38,
 }
 
 
@@ -134,19 +129,16 @@ def create_rgba_belief_from_tier(tier: str) -> RGBABeliefState:
     """
     Factory function to create RGBABeliefState with tier-based priors.
     
-    Maps evidence tiers to veracity priors:
-    - Tier A (Official): 0.85 prior
-    - Tier A' (Official Social): 0.75 prior
-    - Tier B (Trusted Media): 0.70 prior
-    - Tier C (Local Media): 0.55 prior
-    - Tier D (Social): 0.35 prior
+    Tier affects Alpha (Explainability) only.
+    Veracity (G), Danger (R) and Honesty (B) start neutral (0.5) and are driven by evidence.
     """
-    veracity_prior = _TIER_VERACITY_PRIORS.get(tier.upper(), 0.5)
-    danger_prior = _TIER_DANGER_PRIORS.get(tier.upper(), 0.5)
+    explainability_prior = _TIER_EXPLAINABILITY_PRIORS.get(
+        str(tier).strip().upper(), _TIER_EXPLAINABILITY_PRIORS["UNKNOWN"]
+    )
     
     return RGBABeliefState.from_priors(
-        danger_prior=danger_prior,
-        veracity_prior=veracity_prior,
+        danger_prior=0.5,
+        veracity_prior=0.5,
         honesty_prior=0.5,
-        explainability_prior=0.5,
+        explainability_prior=explainability_prior,
     )

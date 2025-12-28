@@ -193,10 +193,13 @@ class ScoringSkill(BaseSkill):
             logger.exception("[Scoring] Failed: %s", e)
             Trace.event("llm.error", {"kind": "score_evidence", "error": str(e)})
             return {
+                "status": "error",
+                "error": "llm_failed",
                 "verified_score": -1.0,
                 "explainability_score": -1.0,
                 "danger_score": -1.0,
                 "style_score": -1.0,
+                "claim_verdicts": [],
                 "rationale": "Error during analysis."
             }
 
