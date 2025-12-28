@@ -8,7 +8,7 @@ import asyncio
 import logging
 import math
 
-from spectrue_core.embeddings.embed_service import EmbedService
+from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.schema.signals import TimeWindow
 from spectrue_core.schema.scoring import BeliefState
 from spectrue_core.graph.context import ClaimContextGraph

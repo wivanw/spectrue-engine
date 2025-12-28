@@ -24,6 +24,7 @@ from spectrue_core.verification.pipeline_search import (
     SearchFlowState,
     run_search_flow,
 )
+from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.verification.claim_dedup import dedup_claims_post_extraction
 from spectrue_core.verification.claim_selection import (
     pick_ui_main_claim,
@@ -99,6 +100,7 @@ class ValidationPipeline:
     def __init__(self, config: SpectrueConfig, agent: FactCheckerAgent, translation_service=None):
         self.config = config
         self.agent = agent
+        EmbedService.configure(openai_api_key=getattr(config, "openai_api_key", None))
         # M63: Pass oracle_skill to SearchManager for hybrid mode
         self.search_mgr = SearchManager(config, oracle_validator=agent.oracle_skill)
         # M67: Optional translation service for Oracle result localization

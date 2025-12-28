@@ -31,7 +31,7 @@ def _assign_semantic_clusters(claims: list[dict], threshold: float = 0.75) -> No
         return
     
     try:
-        from spectrue_core.embeddings import EmbedService
+        from spectrue_core.utils.embedding_service import EmbedService
         if not EmbedService.is_available():
             return
     except ImportError:
@@ -43,7 +43,6 @@ def _assign_semantic_clusters(claims: list[dict], threshold: float = 0.75) -> No
         return
     
     try:
-        import numpy as np
         embeddings = EmbedService.embed(texts)
         if len(embeddings) == 0:
             return
@@ -55,7 +54,7 @@ def _assign_semantic_clusters(claims: list[dict], threshold: float = 0.75) -> No
         for i, vec in enumerate(embeddings):
             assigned = False
             for rep_idx in cluster_reps:
-                sim = float(np.dot(vec, embeddings[rep_idx]))
+                sim = float(sum(x * y for x, y in zip(vec, embeddings[rep_idx])))
                 if sim >= threshold:
                     cluster_ids.append(cluster_ids[rep_idx])
                     assigned = True

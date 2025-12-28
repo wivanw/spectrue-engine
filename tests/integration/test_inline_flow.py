@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, AsyncMock
 
 from spectrue_core.verification.pipeline_search import run_search_flow, SearchFlowInput, SearchFlowState
 from spectrue_core.verification.search_mgr import SearchManager
-from spectrue_core.embeddings import EmbedService
+from spectrue_core.utils.embedding_service import EmbedService
 
 @pytest.mark.asyncio
 async def test_inline_sources_shortcut_flow():

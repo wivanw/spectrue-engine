@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from spectrue_core.embeddings.embed_service import EmbedService
+from spectrue_core.utils.embedding_service import EmbedService
 
 
 def _claim_id(c: dict) -> str:

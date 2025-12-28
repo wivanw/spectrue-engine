@@ -56,9 +56,10 @@ class EmbeddingClient:
     
     Uses OpenAI text-embedding-3-small model.
     Caches embeddings by (text_hash, model) to avoid redundant calls.
+    Falls back to EmbedService when no client is provided.
     """
     
-    def __init__(self, openai_client: "AsyncOpenAI"):
+    def __init__(self, openai_client: "AsyncOpenAI | None" = None):
         self.client = openai_client
         self._cache: dict[str, list[float]] = {}
     
@@ -72,6 +73,7 @@ class EmbeddingClient:
         
         Uses caching to avoid redundant API calls.
         Batches requests for efficiency.
+        Falls back to EmbedService when no async client is available.
         
         Args:
             texts: List of texts to embed
@@ -81,6 +83,18 @@ class EmbeddingClient:
         """
         if not texts:
             return []
+        
+        # Fallback to EmbedService if no async client
+        if self.client is None:
+            try:
+                from spectrue_core.utils.embedding_service import EmbedService
+                if EmbedService.is_available():
+                    return EmbedService.embed(texts)
+            except ImportError:
+                pass
+            # Return zero vectors if no service available
+            logger.debug("[M72] No embedding client available, returning zero vectors")
+            return [[0.0] * EMBEDDING_DIMENSIONS for _ in texts]
         
         # Check cache and identify texts that need embedding
         results: list[list[float] | None] = [None] * len(texts)

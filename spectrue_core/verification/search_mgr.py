@@ -209,7 +209,10 @@ class SearchManager:
                 
                 if claim_text:
                     try:
-                        from spectrue_core.embeddings import extract_best_quote, EmbedService
+                        from spectrue_core.utils.embedding_service import (
+                            extract_best_quote,
+                            EmbedService,
+                        )
                         if EmbedService.is_available():
                             best_quote = extract_best_quote(claim_text, current_content)
                     except ImportError:
