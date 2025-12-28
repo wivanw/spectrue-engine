@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 """Deterministic helpers for selecting the UI-facing main claim."""
+from __future__ import annotations
 
 from typing import Iterable
 

@@ -4,14 +4,10 @@ from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from .claims_prompts import (
-    build_claim_schema_instructions,
-    build_claim_schema_prompt,
     build_claim_strategist_instructions,
     build_claim_strategist_prompt,
 )
 from .claims_parsing import (
-    CLAIM_TYPE_MAPPING,
-    DOMAIN_MAPPING,
     SEARCH_INTENTS,
     TOPIC_GROUPS,
     clamp_float,
@@ -23,17 +19,7 @@ from .claims_parsing import (
 
 # M70: Import schema module for structured claims
 from spectrue_core.schema import (
-    ClaimUnit,
-    Assertion,
-    Dimension,
-    ClaimType,
-    ClaimDomain,
-    EvidenceRequirementSpec,
-    EventQualifiers,
-    LocationQualifier,
-    ClaimStructure,
     ClaimStructureType,
-    ClaimRole,
 )
 
 # M80: Import claim metadata types
@@ -163,7 +149,7 @@ class ClaimExtractionSkill(BaseSkill):
             chunk_claims: list[Claim] = []
 
             raw_intent = normalize_article_intent(result.get("article_intent", "news"))
-            article_intent: ArticleIntent = raw_intent  # type: ignore
+            _article_intent: ArticleIntent = raw_intent  # type: ignore  # noqa: F841
 
             for idx, rc in enumerate(raw_claims):
                 if not isinstance(rc, dict) or not rc.get("text"):
