@@ -113,8 +113,6 @@ class ValidationPipeline:
             is True
         )
         if config and claim_graph_enabled:
-            from openai import AsyncOpenAI
-            openai_client = AsyncOpenAI(api_key=config.openai_api_key)
             self._claim_graph = ClaimGraphBuilder(
                 config=config.runtime.claim_graph,
                 edge_typing_skill=agent.edge_typing_skill,
