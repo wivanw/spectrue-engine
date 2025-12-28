@@ -24,6 +24,14 @@ from spectrue_core.verification.pipeline_search import (
     SearchFlowState,
     run_search_flow,
 )
+from spectrue_core.verification.claim_selection import (
+    pick_ui_main_claim,
+    top_ui_candidates,
+    ui_bucket,
+    ui_position,
+    ui_score,
+    is_admissible_as_main,
+)
 from spectrue_core.analysis.content_budgeter import ContentBudgeter, TrimResult
 from spectrue_core.runtime_config import ContentBudgetConfig
 from spectrue_core.verification.pipeline_input import (
@@ -129,32 +137,48 @@ class ValidationPipeline:
             return 0.6
         return 0.6
 
+    def _safe_float01(self, value: object, *, default: float = 0.0) -> float:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return default
+        return max(0.0, min(1.0, v))
+
+    def _lede_bonus(self, claim: dict) -> float:
+        """
+        Mild preference for early claims (lede bias), capped to [0..1].
+        """
+        if not isinstance(claim, dict):
+            return 0.0
+        anchor = claim.get("anchor") or {}
+        if not isinstance(anchor, dict):
+            return 0.0
+        try:
+            pos = int(anchor.get("char_start"))
+        except (TypeError, ValueError):
+            return 0.0
+        if pos is None or pos < 0:
+            return 0.0
+        window = 8000  # character span that still gets a small bonus
+        if pos >= window:
+            return 0.0
+        return max(0.0, min(1.0, 1 - (pos / window)))
+
     def _claim_ev(self, claim: dict, *, centrality_map: dict[str, float] | None = None) -> float:
         """Deterministic EV for main-claim / retrieval ordering."""
         centrality_map = centrality_map or {}
         cid = str(claim.get("id") or claim.get("claim_id") or "")
-        worthiness = float(claim.get("check_worthiness", claim.get("importance", 0.5)) or 0.5)
-        harm = float(claim.get("harm_potential", 1) or 1) / 5.0
-        confidence = self._conf_score(claim.get("metadata_confidence"))
-        uncertainty = 1.0 - confidence
-        centrality = centrality_map.get(cid, float(claim.get("centrality") or 0.0))
-        thesis = 1.0 if str(claim.get("claim_role", "core")).lower() in {"core", "thesis"} else 0.0
-        default_cost = getattr(getattr(self.config, "runtime", None), "claim_graph", None)
-        if default_cost:
-            try:
-                default_cost = float(getattr(default_cost, "default_claim_cost", 1.0) or 1.0)
-            except Exception:
-                default_cost = 1.0
-        else:
-            default_cost = 1.0
-        cost = float(claim.get("cost_estimate", default_cost) or default_cost)
-        w_h = 0.55
-        w_u = 0.20
-        w_c = 0.15
-        w_t = 0.10
-        signal = (w_h * harm + w_u * uncertainty + w_c * centrality + w_t * thesis)
-        return (signal * worthiness * confidence) / max(cost, 1e-3)
-        self._claim_extraction_text: str = ""
+        role = str(claim.get("claim_role") or claim.get("role") or "background").lower()
+        role_w = {"core": 1.0, "thesis": 1.0, "support": 0.7, "counter": 0.6, "background": 0.2}.get(role, 0.2)
+        worthiness = self._safe_float01(claim.get("check_worthiness", claim.get("importance", 0.0)), default=0.0)
+        harm_raw = claim.get("harm_potential", 0.0)
+        harm = self._safe_float01(harm_raw, default=0.0)
+        if isinstance(harm_raw, (int, float)) and harm_raw > 1.0:
+            harm = self._safe_float01(float(harm_raw) / 5.0, default=harm)
+        centrality = self._safe_float01(centrality_map.get(cid, claim.get("centrality", 0.0)), default=0.0)
+        ev = (0.40 * role_w) + (0.25 * worthiness) + (0.25 * harm) + (0.10 * centrality)
+        ev += 0.05 * self._lede_bonus(claim)
+        return ev
 
     def _apply_content_budget(self, text: str, *, source: str) -> tuple[str, TrimResult | None]:
         """
@@ -325,9 +349,9 @@ class ValidationPipeline:
         self.agent.llm_client._meter = llm_meter
         self.search_mgr.web_tool._tavily._meter = tavily_meter
 
-        async def _progress(stage: str) -> None:
+        async def _progress(stage: str, processed: int | None = None, total: int | None = None) -> None:
             if progress_callback:
-                await progress_callback(stage)
+                await progress_callback(stage, processed, total)
             payload = progress_emitter.maybe_emit(stage=stage)
             if payload:
                 Trace.progress_cost_delta(
@@ -498,9 +522,43 @@ class ValidationPipeline:
                         centrality_map[r.claim_id] = float(getattr(r, "centrality_score", 0.0) or 0.0) / max_c
                     except Exception:
                         continue
-
-                anchor_claim = max(claims, key=lambda c: self._claim_ev(c, centrality_map=centrality_map))
+                ev_anchor_claim = max(claims, key=lambda c: self._claim_ev(c, centrality_map=centrality_map))
+                ui_anchor_claim = pick_ui_main_claim(claims)
+                anchor_claim = ui_anchor_claim or ev_anchor_claim
                 anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
+                ui_candidates = top_ui_candidates(claims, limit=3)
+                def _role_val(c: dict) -> str | None:
+                    val = c.get("claim_role") if isinstance(c, dict) else None
+                    return str(val) if val is not None else None
+                Trace.event(
+                    "anchor_selection.ui_main",
+                    {
+                        "ui_anchor_id": anchor_claim_id,
+                        "ui_anchor_role": _role_val(anchor_claim),
+                        "ui_anchor_kind": anchor_claim.get("type"),
+                        "ui_anchor_pos": ui_position(anchor_claim),
+                        "ui_anchor_worthiness": anchor_claim.get("check_worthiness"),
+                        "ui_anchor_harm": anchor_claim.get("harm_potential"),
+                        "ev_anchor_id": ev_anchor_claim.get("id") or ev_anchor_claim.get("claim_id"),
+                        "ev_anchor_role": _role_val(ev_anchor_claim),
+                        "ev_anchor_kind": ev_anchor_claim.get("type"),
+                        "ev_anchor_score": self._claim_ev(ev_anchor_claim, centrality_map=centrality_map),
+                        "candidates": [
+                            {
+                                "id": c.get("id") or c.get("claim_id"),
+                                "role": _role_val(c),
+                                "kind": c.get("type"),
+                                "bucket": ui_bucket(_role_val(c)),
+                                "ui_score": ui_score(c),
+                                "ev_score": self._claim_ev(c, centrality_map=centrality_map),
+                                "pos": ui_position(c),
+                            }
+                            for c in ui_candidates
+                        ],
+                        "admissible_count": len([c for c in claims if is_admissible_as_main(c)]),
+                        "fallback_used": ui_anchor_claim is None,
+                    },
+                )
 
             # M104: Build Context Graph for Belief Propagation
             context_graph = None

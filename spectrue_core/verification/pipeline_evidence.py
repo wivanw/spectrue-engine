@@ -37,6 +37,7 @@ from spectrue_core.verification.rgba_aggregation import (
     apply_conflict_explainability_penalty,
     recompute_verified_score,
 )
+from spectrue_core.verification.claim_selection import pick_ui_main_claim
 from spectrue_core.verification.search_policy import (
     resolve_profile_name,
     resolve_stance_pass_mode,
@@ -171,12 +172,7 @@ async def run_evidence_flow(
     anchor_claim = None
     anchor_claim_id = None
     if claims:
-        core_claims = [c for c in claims if c.get("type") == "core"]
-        anchor_claim = (
-            max(core_claims, key=lambda c: c.get("importance", 0))
-            if core_claims
-            else claims[0]
-        )
+        anchor_claim = pick_ui_main_claim(claims) or claims[0]
         anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
     # M67: Inline Social Verification (Tier A')
@@ -232,6 +228,18 @@ async def run_evidence_flow(
 
     # M108: Single batch LLM call for all claims (not per-claim to avoid 6x cost)
     result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
+    raw_verified_score = result.get("verified_score")
+    raw_confidence_score = result.get("confidence_score")
+    raw_rationale = result.get("rationale")
+    Trace.event_full(
+        "evidence.llm_output",
+        {
+            "verified_score_raw": raw_verified_score,
+            "confidence_score_raw": raw_confidence_score,
+            "rationale": raw_rationale,
+            "claim_verdicts_raw": result.get("claim_verdicts"),
+        },
+    )
 
     # M93: Apply dependency penalties after scoring
     claim_verdicts = result.get("claim_verdicts")
@@ -253,6 +261,7 @@ async def run_evidence_flow(
     conflict_detected = False
     verdict_state_by_claim: dict[str, str] = {}
     importance_by_claim: dict[str, float] = {}
+    veracity_debug: list[dict] = []
     for claim in claims or []:
         if not isinstance(claim, dict):
             continue
@@ -354,6 +363,21 @@ async def run_evidence_flow(
                         {"claim_id": claim_id, "best_tier": best_tier},
                     )
 
+            veracity_debug.append(
+                {
+                    "claim_id": claim_id,
+                    "role": claim_obj.get("claim_role") if claim_obj else None,
+                    "target": claim_obj.get("verification_target") if claim_obj else None,
+                    "harm": claim_obj.get("harm_potential") if claim_obj else None,
+                    "llm_verdict": cv.get("verdict"),
+                    "llm_score": cv.get("verdict_score"),
+                    "agg_verdict": agg.get("verdict") if isinstance(agg, dict) else cv.get("verdict"),
+                    "agg_score": agg.get("verdict_score") if isinstance(agg, dict) else cv.get("verdict_score"),
+                    "has_direct_evidence": has_direct_evidence,
+                    "best_tier": agg.get("best_tier") if isinstance(agg, dict) else None,
+                }
+            )
+
             verdict_state = "insufficient_evidence"
             if cv["verdict"] == "verified":
                 verdict_state = "supported"
@@ -444,6 +468,18 @@ async def run_evidence_flow(
         verified_cap = recompute_verified_score(claim_verdicts) if isinstance(claim_verdicts, list) else None
         if verified_cap is not None and result["verified_score"] > verified_cap:
             result["verified_score"] = verified_cap
+
+        Trace.event_full(
+            "verdict.veracity_debug",
+            {
+                "raw_verified_score": raw_verified_score,
+                "raw_confidence_score": raw_confidence_score,
+                "final_verified_score": result.get("verified_score"),
+                "final_confidence_score": result.get("confidence_score"),
+                "veracity_by_claim": veracity_debug,
+                "rationale": raw_rationale,
+            },
+        )
         
         # Trace
         result["bayesian_trace"] = {

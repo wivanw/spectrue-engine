@@ -36,6 +36,7 @@ _redact_pii_enabled_var: contextvars.ContextVar[bool] = contextvars.ContextVar("
 _trace_safe_payloads_var: contextvars.ContextVar[bool] = contextvars.ContextVar("spectrue_trace_safe_payloads", default=True)
 _trace_max_head_var: contextvars.ContextVar[int] = contextvars.ContextVar("spectrue_trace_max_head", default=120)
 _trace_max_inline_var: contextvars.ContextVar[int] = contextvars.ContextVar("spectrue_trace_max_inline", default=600)
+_trace_max_override_var: contextvars.ContextVar[int | None] = contextvars.ContextVar("spectrue_trace_max_override", default=None)
 _trace_phase_starts: contextvars.ContextVar[dict[str, int]] = contextvars.ContextVar(
     "spectrue_trace_phase_starts", default={}
 )
@@ -125,11 +126,16 @@ def _redact_medical(s: str) -> str:
 def _sanitize(
     obj: Any,
     *,
-    max_str: int = 4000,
+    max_str: int | None = None,
     max_list: int = 100,
     max_dict: int = 200,
     key_hint: str | None = None,
 ) -> Any:
+    max_override = _trace_max_override_var.get()
+    if max_override is not None:
+        max_str = max_override
+    if max_str is None:
+        max_str = 4000
     if obj is None:
         return None
     if isinstance(obj, (int, float, bool)):
@@ -287,6 +293,22 @@ class Trace:
         except Exception:
             # Tracing must never break the main flow.
             return
+
+    @staticmethod
+    def event_full(name: str, data: Any | None = None) -> None:
+        """
+        Emit event without safe-payload truncation (still redacts secrets/PII).
+        Intended for debugging prompts/contracts; use sparingly.
+        """
+        prev = _trace_safe_payloads_var.get()
+        prev_override = _trace_max_override_var.get()
+        try:
+            _trace_safe_payloads_var.set(False)
+            _trace_max_override_var.set(250000)  # allow large payloads for debugging
+            Trace.event(name, data)
+        finally:
+            _trace_max_override_var.set(prev_override)
+            _trace_safe_payloads_var.set(prev)
 
     @staticmethod
     def progress_cost_delta(*, stage: str, delta: int, total: int) -> None:

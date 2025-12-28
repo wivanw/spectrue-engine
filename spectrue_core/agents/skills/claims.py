@@ -138,6 +138,17 @@ class ClaimExtractionSkill(BaseSkill):
                 chunk.char_end,
             )
 
+            Trace.event_full(
+                "claim_extraction.prompt_full",
+                {
+                    "chunk_start": chunk.char_start,
+                    "chunk_end": chunk.char_end,
+                    "chunk_len": len(chunk.text),
+                    "prompt": prompt,
+                    "instructions": instructions,
+                },
+            )
+
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
                 input=prompt,
@@ -419,3 +430,192 @@ class ClaimExtractionSkill(BaseSkill):
             harm_potential=harm_potential,
             verification_target=verification_target,
         )
+
+    def _parse_claim_metadata(
+        self,
+        rc: dict,
+        lang: str,
+        harm_potential: int,
+        claim_category: str,
+        satire_likelihood: float,
+    ) -> ClaimMetadata:
+        """
+        Parse claim metadata from LLM response with safe fallback defaults.
+        """
+        return parse_claim_metadata_v1(
+            rc,
+            lang=lang,
+            harm_potential=harm_potential,
+            claim_category=claim_category,
+            satire_likelihood=satire_likelihood,
+        )
+
+    def _parse_claim_structure(
+        self,
+        rc: dict,
+        *,
+        fallback_conclusion: str,
+    ) -> dict | None:
+        """
+        Parse claim structure fields with safe fallback (atomic if missing).
+        """
+        raw = rc.get("structure")
+        if not isinstance(raw, dict):
+            return None
+
+        allowed_types = {
+            t.value for t in ClaimStructureType if t != ClaimStructureType.OTHER
+        }
+
+        try:
+            raw_type = str(raw.get("type", "")).lower().strip()
+            if raw_type not in allowed_types:
+                return None
+
+            premises_raw = raw.get("premises", [])
+            premises = [
+                p.strip()
+                for p in premises_raw
+                if isinstance(p, str) and p.strip()
+            ]
+
+            conclusion = raw.get("conclusion")
+            if not isinstance(conclusion, str) or not conclusion.strip():
+                conclusion = fallback_conclusion
+
+            deps_raw = raw.get("dependencies", [])
+            dependencies = [
+                d.strip()
+                for d in deps_raw
+                if isinstance(d, str) and d.strip()
+            ]
+
+            return {
+                "type": raw_type,
+                "premises": premises,
+                "conclusion": conclusion,
+                "dependencies": dependencies,
+            }
+        except Exception:
+            return None
+
+    def _locate_anchor(self, text: str, chunks: list[TextChunk] | None) -> ClaimAnchor | None:
+        """
+        Locate claim anchor within original chunks (deterministic substring match).
+        """
+        if not text or not chunks:
+            return None
+
+        target = " ".join(text.lower().split())[:100]
+        if not target:
+            return None
+
+        for ch in chunks:
+            hay = " ".join(ch.text.lower().split())
+            if target in hay:
+                start = hay.find(target)
+                return {
+                    "chunk_id": ch.chunk_id,
+                    "char_start": ch.char_start + start,
+                    "char_end": ch.char_start + start + len(text),
+                    "section_path": ch.section_path,
+                }
+        return None
+
+    def _should_check_oracle(
+        self,
+        claims: list[Claim],
+        article_intent: ArticleIntent,
+    ) -> tuple[bool, ArticleIntent]:
+        """
+        Determine whether Oracle check is needed.
+        """
+        intent = normalize_article_intent(article_intent or "news")
+        has_flag = any(c.get("check_oracle") for c in claims)
+        if has_flag:
+            return True, intent
+        if intent in ("opinion", "prediction"):
+            return False, intent
+        return True, intent
+
+    def _dedupe_claims(self, claims: list[Claim]) -> list[Claim]:
+        """
+        Deduplicate claims by normalized_text + location bucket.
+
+        Keeps max importance/worthiness, merges query candidates, and remaps IDs.
+        """
+        if not claims:
+            return []
+
+        seen: dict[str, Claim] = {}
+        key_to_ids: dict[str, list[str]] = {}
+
+        for c in claims:
+            base_key = " ".join((c.get("normalized_text") or c.get("text") or "").lower().split())
+            if not base_key:
+                continue
+
+            key = base_key
+            anchor = c.get("anchor") or {}
+            if isinstance(anchor, dict) and "char_start" in anchor:
+                try:
+                    bucket = int(anchor.get("char_start", 0)) // 200
+                    key = f"{base_key}|loc:{bucket}"
+                except Exception:
+                    key = base_key
+
+            if c.get("id"):
+                key_to_ids.setdefault(key, []).append(c["id"])
+
+            if key in seen:
+                existing = seen[key]
+                existing["importance"] = max(
+                    float(existing.get("importance", 0.5)),
+                    float(c.get("importance", 0.5)),
+                )
+                existing["check_worthiness"] = max(
+                    float(existing.get("check_worthiness", 0.5)),
+                    float(c.get("check_worthiness", 0.5)),
+                )
+                existing_queries = existing.get("query_candidates", []) or []
+                new_queries = c.get("query_candidates", []) or []
+                seen_texts = {q.get("text") for q in existing_queries if q}
+                for q in new_queries:
+                    if q and q.get("text") not in seen_texts:
+                        existing_queries.append(q)
+                        seen_texts.add(q.get("text"))
+                existing["query_candidates"] = existing_queries
+                if c.get("check_oracle"):
+                    existing["check_oracle"] = True
+            else:
+                seen[key] = c
+
+        deduped_items = list(seen.items())
+        deduped: list[Claim] = []
+        id_map: dict[str, str] = {}
+        for idx, (key, c) in enumerate(deduped_items):
+            new_id = f"c{idx + 1}"
+            for old_id in key_to_ids.get(key, []):
+                id_map[old_id] = new_id
+            c["id"] = new_id
+            deduped.append(c)
+
+        known_ids = {c.get("id") for c in deduped if c.get("id")}
+        for c in deduped:
+            structure = c.get("structure")
+            if not isinstance(structure, dict):
+                continue
+            deps = structure.get("dependencies", [])
+            if not isinstance(deps, list):
+                structure["dependencies"] = []
+                continue
+            remapped: list[str] = []
+            for dep in deps:
+                if not isinstance(dep, str):
+                    continue
+                new_dep = id_map.get(dep, dep)
+                if new_dep in known_ids and new_dep != c.get("id"):
+                    remapped.append(new_dep)
+            structure["dependencies"] = remapped
+
+        return deduped
