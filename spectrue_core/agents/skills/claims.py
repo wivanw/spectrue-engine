@@ -47,6 +47,8 @@ from spectrue_core.agents.skills.claim_metadata_parser import (
     parse_claim_metadata as parse_claim_metadata_v1,
     default_channels as default_channels_v1,
 )
+from spectrue_core.analysis.content_budgeter import ContentBudgeter, TrimResult
+from spectrue_core.runtime_config import ContentBudgetConfig
 
 class ClaimExtractionSkill(BaseSkill):
     
@@ -54,7 +56,14 @@ class ClaimExtractionSkill(BaseSkill):
     BASE_TIMEOUT_SEC = 35.0     # Minimum timeout
     TIMEOUT_PER_1K_CHARS = 2.0  # Additional seconds per 1000 chars
     MAX_TIMEOUT_SEC = 75.0      # Maximum timeout cap
-    
+
+    def __init__(self, config, llm_client):
+        super().__init__(config, llm_client)
+        cfg = getattr(self.runtime, "content_budget", None)
+        self._budget_config = cfg if isinstance(cfg, ContentBudgetConfig) else ContentBudgetConfig()
+        self._budgeter = ContentBudgeter(self._budget_config)
+        self._claim_excerpt_budget = min(int(self._budget_config.max_clean_text_chars_default), 12_000)
+
     def _calculate_timeout(self, text_len: int, *, base_offset: float = 0.0) -> float:
         """
         Calculate dynamic timeout based on text length.
@@ -66,6 +75,17 @@ class ClaimExtractionSkill(BaseSkill):
         extra = (text_len / 1000) * self.TIMEOUT_PER_1K_CHARS
         timeout = self.BASE_TIMEOUT_SEC + base_offset + extra
         return min(timeout, self.MAX_TIMEOUT_SEC + base_offset)
+
+    def _budget_text_excerpt(self, text: str) -> TrimResult | None:
+        """
+        Deterministically reduce the text fed to claim extraction prompts.
+        """
+        stripped = (text or "").strip()
+        if not stripped:
+            return None
+        if len(stripped) <= self._claim_excerpt_budget:
+            return None
+        return self._budgeter.trim(stripped, budget_limit=self._claim_excerpt_budget)
     
     async def extract_claims(
         self,
@@ -90,8 +110,8 @@ class ClaimExtractionSkill(BaseSkill):
         if not text:
             return [], False, "news"  # Default intent
 
-        # Limit input to prevent token overflow
-        text_excerpt = text[:8000] if len(text) > 8000 else text
+        excerpt_result = self._budget_text_excerpt(text)
+        text_excerpt = excerpt_result.trimmed_text if excerpt_result else text
         
         # M57: Resolve language name for bilingual query generation
         lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
@@ -348,7 +368,8 @@ class ClaimExtractionSkill(BaseSkill):
         if not text:
             return [], False, "news"
 
-        text_excerpt = text[:8000] if len(text) > 8000 else text
+        excerpt_result = self._budget_text_excerpt(text)
+        text_excerpt = excerpt_result.trimmed_text if excerpt_result else text
         lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
         topics_str = ", ".join(TOPIC_GROUPS)
 

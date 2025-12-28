@@ -26,12 +26,16 @@ This module provides the TextAnalyzer class for:
 
 import logging
 import asyncio
+import hashlib
 from typing import List, Optional, Callable
 from datetime import datetime
 from dataclasses import dataclass
-import spacy
 # newspaper3k replaced with trafilatura
 import trafilatura
+
+from spectrue_core.analysis.content_budgeter import ContentBudgeter, TrimResult
+from spectrue_core.runtime_config import ContentBudgetConfig
+from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,13 @@ class ParsedText:
     title: Optional[str] = None
     authors: Optional[List[str]] = None
     publish_date: Optional[datetime] = None
+    raw_text: Optional[str] = None
+    raw_len: Optional[int] = None
+    cleaned_len: Optional[int] = None
+    raw_sha256: Optional[str] = None
+    cleaned_sha256: Optional[str] = None
+    selection_meta: Optional[List[dict]] = None
+    blocks_stats: Optional[dict] = None
 
 
 @dataclass
@@ -80,6 +91,13 @@ class TextAnalyzer:
         self._nlp_cache = {}  # Cache loaded models by language
         self.verifier = verifier
         self.config = config or {}
+
+    def _get_budget_config(self) -> ContentBudgetConfig:
+        runtime_cfg = getattr(self.config, "runtime", None)
+        cfg = getattr(runtime_cfg, "content_budget", None)
+        if isinstance(cfg, ContentBudgetConfig):
+            return cfg
+        return ContentBudgetConfig()
         
     def _get_nlp(self, language: str):
         """
@@ -94,6 +112,8 @@ class TextAnalyzer:
         Raises:
             ValueError: If language is not supported
         """
+        import spacy
+
         if language not in self.SPACY_MODELS:
             raise ValueError(f"Unsupported language: {language}. Supported: {list(self.SPACY_MODELS.keys())}")
         
@@ -160,7 +180,7 @@ class TextAnalyzer:
         pattern = r'<a\s+[^>]*href=[^>]+>[^<]*</a>'
         return re.sub(pattern, replace_link, html_content, flags=re.IGNORECASE)
     
-    def parse_html(self, html_content: str) -> ParsedText:
+    def parse_html(self, html_content: str, language: Optional[str] = None) -> ParsedText:
         """
         Parse HTML content into clean text using trafilatura.
         
@@ -179,6 +199,9 @@ class TextAnalyzer:
         # M29: Preserve links before parsing
         html_with_links = self._preserve_links_in_html(html_content)
         
+        budget_cfg = self._get_budget_config()
+        budget_result: Optional[TrimResult] = None
+
         try:
             # Use trafilatura for extraction
             text = trafilatura.extract(
@@ -195,6 +218,51 @@ class TextAnalyzer:
             
             if not text or not text.strip():
                 raise ValueError("Parsed text is empty")
+
+            extracted_text = text.strip()
+            raw_len = len(extracted_text)
+
+            if raw_len > int(budget_cfg.absolute_guardrail_chars):
+                Trace.event(
+                    "content_budgeter.guardrail",
+                    {"raw_len": raw_len, "absolute_guardrail_chars": int(budget_cfg.absolute_guardrail_chars)},
+                )
+                raise ValueError("HTML content too large to process safely")
+
+            if raw_len > int(budget_cfg.max_clean_text_chars_default):
+                try:
+                    budget_result = ContentBudgeter(budget_cfg).trim(extracted_text)
+                except ValueError:
+                    # Guardrail already traced above; re-raise
+                    raise
+
+            cleaned_text = budget_result.trimmed_text if budget_result else extracted_text
+            cleaned_len = len(cleaned_text)
+            raw_sha = budget_result.raw_sha256 if budget_result else hashlib.sha256(
+                extracted_text.encode("utf-8")
+            ).hexdigest()
+            cleaned_sha = budget_result.trimmed_sha256 if budget_result else hashlib.sha256(
+                cleaned_text.encode("utf-8")
+            ).hexdigest()
+
+            if budget_result:
+                Trace.event("content_budgeter.blocks", budget_result.trace_blocks_payload())
+                Trace.event(
+                    "content_budgeter.selection",
+                    budget_result.trace_selection_payload(getattr(budget_cfg, "trace_top_blocks", 8)),
+                )
+
+            Trace.event(
+                "analysis.input_summary",
+                {
+                    "source": "html",
+                    "raw_len": raw_len,
+                    "cleaned_len": cleaned_len,
+                    "raw_sha256": raw_sha,
+                    "cleaned_sha256": cleaned_sha,
+                    "budget_applied": bool(budget_result),
+                },
+            )
             
             title = None
             authors = None
@@ -213,10 +281,17 @@ class TextAnalyzer:
                         pass
             
             return ParsedText(
-                text=text.strip(),
+                text=cleaned_text,
                 title=title,
                 authors=authors,
-                publish_date=publish_date
+                publish_date=publish_date,
+                raw_text=extracted_text,
+                raw_len=raw_len,
+                cleaned_len=cleaned_len,
+                raw_sha256=raw_sha,
+                cleaned_sha256=cleaned_sha,
+                selection_meta=budget_result.selection_meta if budget_result else None,
+                blocks_stats=budget_result.blocks_stats if budget_result else None,
             )
         except ValueError:
             raise

@@ -24,6 +24,8 @@ from spectrue_core.verification.pipeline_search import (
     SearchFlowState,
     run_search_flow,
 )
+from spectrue_core.analysis.content_budgeter import ContentBudgeter, TrimResult
+from spectrue_core.runtime_config import ContentBudgetConfig
 from spectrue_core.verification.pipeline_input import (
     extract_url_anchors,
     is_url_input,
@@ -62,6 +64,7 @@ from spectrue_core.verification.costs import summarize_reason_codes, map_stage_c
 import logging
 import asyncio
 from dataclasses import dataclass
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +109,58 @@ class ValidationPipeline:
                 openai_client=openai_client,
                 edge_typing_skill=agent.edge_typing_skill,
             )
+
+        self._content_budget_config = (
+            getattr(getattr(config, "runtime", None), "content_budget", None)
+        )
+        if not isinstance(self._content_budget_config, ContentBudgetConfig):
+            self._content_budget_config = ContentBudgetConfig()
+
+    def _apply_content_budget(self, text: str, *, source: str) -> tuple[str, TrimResult | None]:
+        """
+        Apply deterministic content budgeting to plain text before LLM steps.
+        """
+        if not text:
+            return text, None
+        cfg = self._content_budget_config
+        raw_len = len(text)
+        if raw_len > int(cfg.absolute_guardrail_chars):
+            Trace.event(
+                "content_budgeter.guardrail",
+                {"raw_len": raw_len, "absolute_guardrail_chars": int(cfg.absolute_guardrail_chars), "source": source},
+            )
+            raise ValueError("Input too large to process safely")
+
+        if raw_len <= int(cfg.max_clean_text_chars_default):
+            return text, None
+
+        budgeter = ContentBudgeter(cfg)
+        result = budgeter.trim(text)
+        Trace.event("content_budgeter.blocks", result.trace_blocks_payload())
+        Trace.event(
+            "content_budgeter.selection",
+            result.trace_selection_payload(getattr(cfg, "trace_top_blocks", 8)),
+        )
+        return result.trimmed_text, result
+
+    def _trace_input_summary(
+        self, *, source: str, raw_text: str, cleaned_text: str, budget_result: TrimResult | None
+    ) -> None:
+        raw_sha = budget_result.raw_sha256 if budget_result else hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+        cleaned_sha = (
+            budget_result.trimmed_sha256 if budget_result else hashlib.sha256(cleaned_text.encode("utf-8")).hexdigest()
+        )
+        Trace.event(
+            "analysis.input_summary",
+            {
+                "source": source,
+                "raw_len": len(raw_text),
+                "cleaned_len": len(cleaned_text),
+                "raw_sha256": raw_sha,
+                "cleaned_sha256": cleaned_sha,
+                "budget_applied": bool(budget_result),
+            },
+        )
 
     async def execute(
         self,
@@ -317,11 +372,25 @@ class ValidationPipeline:
                 source_url=source_url,
                 progress_callback=_progress,
             )
-            fact = prepared.fact
+            fact_before_budget = prepared.fact
             original_fact = prepared.original_fact
             final_context = prepared.final_context
             final_sources = prepared.final_sources
             inline_sources = prepared.inline_sources
+
+            budget_result: TrimResult | None = None
+            if not self._is_url(fact_before_budget):
+                fact, budget_result = self._apply_content_budget(fact_before_budget, source="plain")
+            else:
+                fact = fact_before_budget
+
+            source_label = "url" if self._is_url(original_fact) else ("clean_plain" if needs_cleaning else "plain")
+            self._trace_input_summary(
+                source=source_label,
+                raw_text=fact_before_budget,
+                cleaned_text=fact,
+                budget_result=budget_result,
+            )
 
             claims, should_check_oracle, article_intent, fast_query = await self._extract_claims(
                 fact=fact,
@@ -756,8 +825,9 @@ class ValidationPipeline:
                         len(fetched_text),
                     )
 
-                cleaned_article = await self.agent.clean_article(fetched_text)
-                fact = cleaned_article or fetched_text
+                budgeted_fetched, _ = self._apply_content_budget(fetched_text, source="url_fetched")
+                cleaned_article = await self.agent.clean_article(budgeted_fetched)
+                fact = cleaned_article or budgeted_fetched
                 final_context = fact
 
                 if url_anchors and cleaned_article:
@@ -788,7 +858,8 @@ class ValidationPipeline:
                 await progress_callback("processing_large_text")
                 logger.debug("[Pipeline] Large text detected: %d chars, extended timeout", len(fact))
 
-            cleaned_article = await self.agent.clean_article(fact)
+            budgeted_fact, _ = self._apply_content_budget(fact, source="extension")
+            cleaned_article = await self.agent.clean_article(budgeted_fact)
             if cleaned_article:
                 if url_anchors:
                     inline_sources = self._restore_urls_from_anchors(cleaned_article, url_anchors)
@@ -809,6 +880,9 @@ class ValidationPipeline:
 
                 fact = cleaned_article
                 final_context = fact
+            else:
+                fact = budgeted_fact
+                final_context = final_context or fact
 
         elif not self._is_url(fact) and not needs_cleaning:
             url_anchors = self._extract_url_anchors(fact, exclude_url=exclude_url)
@@ -856,7 +930,7 @@ class ValidationPipeline:
         blob = fact_first_line if len(fact_first_line) > 20 else fact[:200]
 
         cleaned_fact = clean_article_text(fact)
-        task_claims = asyncio.create_task(self.agent.extract_claims(cleaned_fact[:4000], lang=lang))
+        task_claims = asyncio.create_task(self.agent.extract_claims(cleaned_fact, lang=lang))
 
         if len(blob) > 150:
             blob = blob[:150].rsplit(" ", 1)[0]
@@ -957,8 +1031,11 @@ class ValidationPipeline:
                             try:
                                 fetched = await self.search_mgr.web_tool.fetch_page_content(url)
                                 if fetched and len(fetched) > 100:
-                                    src["content"] = fetched[:8000]
-                                    src["snippet"] = fetched[:300]
+                                    budgeted_content, _ = self._apply_content_budget(
+                                        fetched, source="inline_source"
+                                    )
+                                    src["content"] = budgeted_content
+                                    src["snippet"] = budgeted_content[:300]
                                     Trace.event("inline_source.content_fetched", {
                                         "url": url[:80],
                                         "chars": len(fetched),

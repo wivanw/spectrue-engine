@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from spectrue_core.verification.pipeline import ValidationPipeline
 from spectrue_core.verification.pipeline_evidence import (
     _explainability_factor_for_tier,
-    _TIER_PRIOR,
     _TIER_PRIOR_BASELINE,
 )
 
@@ -209,7 +208,7 @@ class TestValidationPipeline:
         
         mock_agent.score_evidence.return_value = {"verified_score": 0.9}
         
-        result = await pipeline.execute(
+        await pipeline.execute(
             fact=text_with_url,
             search_type="standard",
             gpt_model="gpt-4",
