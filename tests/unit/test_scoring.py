@@ -62,8 +62,10 @@ class TestScoringSkill:
         
         result = await skill.score_evidence(pack)
         
-        # Fallback: simple mean of verdict_scores
-        assert result["verified_score"] == 0.7  # (0.8 + 0.6) / 2
+        # M111+: verified_score is now anchor-based, not averaged.
+        # Parsing returns -1.0 sentinel when LLM doesn't provide a score.
+        # Actual G is computed later from anchor claim.
+        assert result["verified_score"] == -1.0
 
     def test_strip_internal_source_markers(self, skill):
         # Test cleaning of [TRUSTED], [REL=0.9], [RAW]

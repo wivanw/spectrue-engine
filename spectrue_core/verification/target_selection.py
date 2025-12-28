@@ -120,6 +120,8 @@ def select_verification_targets(
         return TargetSelectionResult()
     
     # Adjust max_targets based on budget_class
+    if max_targets is None:
+        max_targets = 10  # Default if not specified
     if budget_class == "minimal":
         max_targets = min(max_targets, 2)
     elif budget_class == "standard":
