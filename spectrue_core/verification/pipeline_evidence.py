@@ -8,6 +8,7 @@ import asyncio
 import logging
 import math
 
+from spectrue_core.embeddings.embed_service import EmbedService
 from spectrue_core.schema.signals import TimeWindow
 from spectrue_core.schema.scoring import BeliefState
 from spectrue_core.graph.context import ClaimContextGraph
@@ -57,6 +58,71 @@ def _logit(p: float) -> float:
 
 def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
+
+def _claim_text(cv: dict) -> str:
+    text = cv.get("claim_text") or cv.get("claim") or cv.get("text") or ""
+    return str(text).strip()
+
+def _mark_anchor_duplicates(
+    *,
+    anchor_claim_id: str | None,
+    claim_verdicts: list[dict],
+    embed_service: type[EmbedService] = EmbedService,
+    tau: float = 0.90,
+) -> None:
+    """
+    Mark secondary claims that are semantic duplicates of the anchor claim.
+    Contract:
+      - anchor vs secondary only
+      - embedding-based cosine similarity
+      - no filtering, only marking
+    """
+    if not anchor_claim_id or not claim_verdicts:
+        return
+    if not embed_service.is_available():
+        return
+
+    anchor_norm = _norm_id(anchor_claim_id)
+    anc = next(
+        (
+            cv
+            for cv in claim_verdicts
+            if isinstance(cv, dict) and _norm_id(cv.get("claim_id")) == anchor_norm
+        ),
+        None,
+    )
+    if not anc:
+        return
+
+    anchor_text = _claim_text(anc)
+    if not anchor_text:
+        return
+
+    candidates: list[str] = []
+    candidate_refs: list[dict] = []
+    for cv in claim_verdicts:
+        if not isinstance(cv, dict):
+            continue
+        if _norm_id(cv.get("claim_id")) == anchor_norm:
+            continue
+        txt = _claim_text(cv)
+        if not txt:
+            continue
+        candidates.append(txt)
+        candidate_refs.append(cv)
+
+    if not candidates:
+        return
+
+    scores = embed_service.batch_similarity(anchor_text, candidates)
+    for cv, sim in zip(candidate_refs, scores):
+        if not isinstance(sim, (int, float)) or not math.isfinite(float(sim)):
+            continue
+        if sim >= tau:
+            cv["duplicate_of_anchor"] = True
+            cv["dup_sim"] = float(sim)
+        else:
+            cv["duplicate_of_anchor"] = False
 
 def _compute_article_g_from_anchor(
     *,
@@ -488,10 +554,21 @@ async def run_evidence_flow(
 
         changed = apply_dependency_penalties(claim_verdicts, claims)
         # Do NOT recompute article-level G as an average across claims.
-        # Article-level G is selected later from a single claim (anchor/thesis)
+        # Article-level G is selected later from the anchor claim
         # and stored in result["verified_score"].
         if changed:
             result["dependency_penalty_applied"] = True
+
+    # Anchor ↔ secondary semantic dedup (marking only)
+    try:
+        _mark_anchor_duplicates(
+            anchor_claim_id=anchor_claim_id,
+            claim_verdicts=claim_verdicts if isinstance(claim_verdicts, list) else [],
+            embed_service=EmbedService,
+            tau=0.90,
+        )
+    except Exception as e:
+        logger.warning("Anchor dedup failed (non-fatal): %s", e)
 
     # M104: Bayesian Scoring
     if inp.prior_belief:

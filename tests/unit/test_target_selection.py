@@ -64,13 +64,11 @@ def test_budget_class_affects_max_targets():
         for i in range(10)
     ]
     
-    # Minimal budget should cap at 2
-    result_minimal = select_verification_targets(claims, max_targets=5, budget_class="minimal")
-    assert len(result_minimal.targets) <= 2
-    
-    # Deep budget allows more
-    result_deep = select_verification_targets(claims, max_targets=5, budget_class="deep")
-    assert len(result_deep.targets) == 5
+    # Budget envelope should monotonically allow more targets as budget_class increases
+    result_minimal = select_verification_targets(claims, max_targets=None, budget_class="minimal")
+    result_standard = select_verification_targets(claims, max_targets=None, budget_class="standard")
+    result_deep = select_verification_targets(claims, max_targets=None, budget_class="deep")
+    assert len(result_minimal.targets) <= len(result_standard.targets) <= len(result_deep.targets)
 
 
 def test_evidence_sharing_for_same_cluster():

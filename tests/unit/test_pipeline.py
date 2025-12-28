@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from spectrue_core.verification.pipeline import ValidationPipeline
 from spectrue_core.verification.pipeline_evidence import (
     _explainability_factor_for_tier,
-    _TIER_PRIOR_BASELINE,
+    _TIER_A_BASELINE,
 )
 
 
@@ -32,7 +32,7 @@ def _apply_explainability_tier_cap(
         "best_tier": best_tier,
         "pre_A": score,
         "prior": prior,
-        "baseline": _TIER_PRIOR_BASELINE,
+        "baseline": _TIER_A_BASELINE,
         "factor": factor,
         "post_A": post_score,
         "source": source,
