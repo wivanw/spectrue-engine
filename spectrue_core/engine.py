@@ -70,7 +70,7 @@ class SpectrueEngine:
         search_type: str = "advanced",
         progress_callback = None,
         max_credits: Optional[int] = None,
-        sentences: Optional[List[str]] = None,  # M67: Pre-segmented sentences (skip spaCy)
+        sentences: Optional[List[str]] = None,  # M67: Pre-segmented sentences (skip segmentation)
     ) -> Dict[str, Any]:
         """
         Analyze text with content detection and waterfall verification.
@@ -107,11 +107,11 @@ class SpectrueEngine:
                     1, int(getattr(self.config.runtime.tunables, "max_claims_deep", 2) or 2)
                 )
 
-                # M67: Use pre-segmented sentences if provided, otherwise use spaCy
+                # M67: Use pre-segmented sentences if provided, otherwise use regex segmentation
                 if sentences:
                     claims = sentences[:max_claims]
                 else:
-                    # Use spaCy for proper sentence segmentation
+                    # Use regex for proper sentence segmentation
                     analyzer = TextAnalyzer()
                     claims = analyzer.get_sentences(text, content_lang)[:max_claims]
                 

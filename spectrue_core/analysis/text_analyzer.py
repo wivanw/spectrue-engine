@@ -20,7 +20,7 @@ Text analysis utilities for HTML parsing and sentence segmentation.
 
 This module provides the TextAnalyzer class for:
 - Parsing HTML content into clean text using trafilatura
-- Segmenting text into sentences using spaCy
+- Segmenting text into sentences using regex
 - Extracting metadata (title, authors, publish date)
 """
 
@@ -58,7 +58,7 @@ class ParsedText:
 
 @dataclass
 class SentenceSegment:
-    """Individual sentence extracted by spaCy."""
+    """Individual sentence extracted from text."""
     text: str
     start_char: int
     end_char: int
@@ -69,26 +69,12 @@ class TextAnalyzer:
     """
     Analyzes text by parsing HTML and segmenting sentences.
     
-    Uses trafilatura for HTML parsing and spaCy for sentence segmentation.
-    Lazy-loads spaCy model to avoid startup delays.
-    Supports 8 languages with lightweight models.
+    Uses trafilatura for HTML parsing and regex for sentence segmentation.
+    No external NLP dependencies (spacy removed).
     """
     
-    # Mapping of language codes to lightweight spaCy models
-    SPACY_MODELS = {
-        "en": "en_core_web_sm",      # English
-        "uk": "uk_core_news_sm",     # Ukrainian
-        "ru": "ru_core_news_sm",     # Russian
-        "de": "de_core_news_sm",     # German
-        "es": "es_core_news_sm",     # Spanish
-        "fr": "fr_core_news_sm",     # French
-        "ja": "ja_core_news_sm",     # Japanese
-        "zh": "zh_core_web_sm",      # Chinese
-    }
-    
     def __init__(self, verifier=None, config=None):
-        """Initialize TextAnalyzer with lazy-loaded models."""
-        self._nlp_cache = {}  # Cache loaded models by language
+        """Initialize TextAnalyzer."""
         self.verifier = verifier
         self.config = config or {}
 
@@ -98,47 +84,51 @@ class TextAnalyzer:
         if isinstance(cfg, ContentBudgetConfig):
             return cfg
         return ContentBudgetConfig()
-        
-    def _get_nlp(self, language: str):
+    
+    def _segment_sentences_regex(self, text: str) -> List[SentenceSegment]:
         """
-        Lazy-load spaCy model for the specified language.
+        Regex-based sentence segmentation (no spacy dependency).
         
-        Args:
-            language: Language code (en, uk, ru, de, es, fr, ja, zh)
-            
-        Returns:
-            Loaded spaCy model
-            
-        Raises:
-            ValueError: If language is not supported
+        Uses simple punctuation rules. Not perfect but lightweight and fast.
         """
-        import spacy
-
-        if language not in self.SPACY_MODELS:
-            raise ValueError(f"Unsupported language: {language}. Supported: {list(self.SPACY_MODELS.keys())}")
+        import re
         
-        # Return cached model if available
-        if language in self._nlp_cache:
-            return self._nlp_cache[language]
+        if not text or not text.strip():
+            return []
         
-        model_name = self.SPACY_MODELS[language]
+        # Split on sentence-ending punctuation followed by whitespace
+        # Handles abbreviations like "Dr.", "Mr.", "e.g." reasonably well
+        sentence_pattern = re.compile(
+            r'(?<=[.!?。！？])\s+(?=[A-ZА-ЯЇЄІҐ\u4e00-\u9fff])',
+            re.UNICODE
+        )
         
-        try:
-            nlp = spacy.load(model_name)
-            self._nlp_cache[language] = nlp
-            return nlp
-        except OSError:
-            # Model not found, try to download
-            logger.warning("spaCy model '%s' not found. Attempting download...", model_name)
-            import subprocess
-            import sys
-            try:
-                subprocess.run([sys.executable, "-m", "spacy", "download", model_name], check=True)
-                nlp = spacy.load(model_name)
-                self._nlp_cache[language] = nlp
-                return nlp
-            except Exception as e:
-                raise ValueError(f"Failed to load spaCy model for {language}: {e}")
+        parts = sentence_pattern.split(text.strip())
+        
+        segments = []
+        current_pos = 0
+        
+        for idx, part in enumerate(parts):
+            part_stripped = part.strip()
+            if not part_stripped or len(part_stripped) < 10:
+                # Skip very short fragments
+                current_pos += len(part)
+                continue
+            
+            start = text.find(part_stripped, current_pos)
+            if start == -1:
+                start = current_pos
+            end = start + len(part_stripped)
+            
+            segments.append(SentenceSegment(
+                text=part_stripped,
+                start_char=start,
+                end_char=end,
+                index=len(segments)
+            ))
+            current_pos = end
+        
+        return segments
     
     def _preserve_links_in_html(self, html_content: str) -> str:
         """
@@ -330,7 +320,7 @@ class TextAnalyzer:
 
     def segment_sentences(self, text: str, language: str = "en") -> List[SentenceSegment]:
         """
-        Segment text into sentences using spaCy.
+        Segment text into sentences using regex.
         
         Args:
             text: Input text to segment
@@ -345,23 +335,8 @@ class TextAnalyzer:
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
         
-        # Get language-specific spaCy model
-        nlp = self._get_nlp(language)
-        
-        # Process text with spaCy
-        doc = nlp(text)
-        
-        # Extract sentences
-        segments = []
-        for idx, sent in enumerate(doc.sents):
-            segments.append(SentenceSegment(
-                text=sent.text.strip(),
-                start_char=sent.start_char,
-                end_char=sent.end_char,
-                index=idx
-            ))
-        
-        return segments
+        # Use regex-based segmentation (no spacy dependency)
+        return self._segment_sentences_regex(text)
     
     def parse_and_segment(self, html_content: str, language: str = "en") -> tuple[ParsedText, List[SentenceSegment]]:
         """
