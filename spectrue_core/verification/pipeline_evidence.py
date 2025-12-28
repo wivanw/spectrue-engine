@@ -77,6 +77,7 @@ class EvidenceFlowInput:
     progress_callback: ProgressCallback | None
     prior_belief: BeliefState | None = None
     context_graph: ClaimContextGraph | None = None
+    claim_extraction_text: str = ""
 
 
 async def run_evidence_flow(
@@ -147,6 +148,15 @@ async def run_evidence_flow(
                 label_evidence_timeliness(claim_sources, time_window=window)
 
     clustered_results = None
+    claim_text_map: dict[str, str] = {}
+    if claims:
+        for c in claims:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("id") or c.get("claim_id")
+            if not cid:
+                continue
+            claim_text_map[str(cid)] = c.get("normalized_text") or c.get("text") or ""
     if claims and sources:
         if inp.progress_callback:
             await inp.progress_callback("clustering_evidence")
@@ -231,6 +241,14 @@ async def run_evidence_flow(
             recalculated = recompute_verified_score(claim_verdicts)
             if recalculated is not None:
                 result["verified_score"] = recalculated
+        for cv in claim_verdicts:
+            if not isinstance(cv, dict):
+                continue
+            cid = cv.get("claim_id")
+            if cid and "claim_text" not in cv:
+                text_val = claim_text_map.get(str(cid))
+                if text_val:
+                    cv["claim_text"] = text_val
 
     conflict_detected = False
     verdict_state_by_claim: dict[str, str] = {}
@@ -498,5 +516,9 @@ async def run_evidence_flow(
         logger.warning("[Pipeline] ⚠️ Missing verified_score in result - using 0.5")
         verified = 0.5
         result["verified_score"] = verified
+
+    # Preserve stitched claim-extraction text for audit/history.
+    if inp.claim_extraction_text:
+        result["claim_extraction_text"] = inp.claim_extraction_text
 
     return result

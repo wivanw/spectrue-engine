@@ -85,7 +85,12 @@ class TestValidationPipeline:
     @pytest.mark.asyncio
     async def test_execute_basic_flow(self, pipeline, mock_agent, mock_search_mgr):
         # Setup Agent mocks
-        mock_agent.extract_claims.return_value = ([{"id": "c1", "text": "Claim", "search_queries": ["q1"]}], False, "news")
+        mock_agent.extract_claims.return_value = (
+            [{"id": "c1", "text": "Claim", "search_queries": ["q1"]}],
+            False,
+            "news",
+            "",
+        )
         mock_agent.score_evidence.return_value = {"verified_score": 0.8, "rationale": "ok"}
         
         # Run
@@ -118,7 +123,7 @@ class TestValidationPipeline:
     @pytest.mark.asyncio
     async def test_execute_with_oracle_hit(self, pipeline, mock_agent, mock_search_mgr):
         # Setup Agent mocks: claims detection triggers oracle check
-        mock_agent.extract_claims.return_value = ([{"id": "c1", "text": "Fake news"}], True, "news") 
+        mock_agent.extract_claims.return_value = ([{"id": "c1", "text": "Fake news"}], True, "news", "") 
         
         # Setup Oracle hit (Jackpot)
         mock_search_mgr.check_oracle_hybrid.return_value = {
@@ -146,7 +151,7 @@ class TestValidationPipeline:
     async def test_waterfall_fallback(self, pipeline, mock_agent, mock_search_mgr):
         # Unified returns nothing
         mock_search_mgr.search_unified.return_value = ("", [])
-        mock_agent.extract_claims.return_value = ([{"search_queries": ["q1"]}], False, "news")
+        mock_agent.extract_claims.return_value = ([{"search_queries": ["q1"]}], False, "news", "")
         mock_agent.score_evidence.return_value = {}
         # Enable usage of CSE by ensuring tavily calls > 0 (as logic checks usage before fallback)
         mock_search_mgr.tavily_calls = 1 
@@ -161,7 +166,7 @@ class TestValidationPipeline:
     @pytest.mark.asyncio
     async def test_smart_mode_waterfall(self, pipeline, mock_agent, mock_search_mgr):
         """T9/M65: Verify Smart Mode uses Unified Search."""
-        mock_agent.extract_claims.return_value = ([{"search_queries": ["q1"]}], False, "news")
+        mock_agent.extract_claims.return_value = ([{"search_queries": ["q1"]}], False, "news", "")
         mock_agent.score_evidence.return_value = {}
         
         # Setup Unified to return GOOD results
@@ -186,7 +191,9 @@ class TestValidationPipeline:
         # Mock claims extraction with a relevant claim
         mock_agent.extract_claims.return_value = (
             [{"id": "c1", "text": "Trump announced blockade of Venezuela", "type": "core", "search_queries": ["trump venezuela blockade"]}],
-            False
+            False,
+            "news",
+            "",
         )
         
         # Mock inline source verification - return is_primary=True
@@ -228,7 +235,9 @@ class TestValidationPipeline:
         
         mock_agent.extract_claims.return_value = (
             [{"id": "c1", "text": "Climate change accelerates", "type": "core"}],
-            False
+            False,
+            "news",
+            "",
         )
         
         # Mock inline source verification - author's Twitter is NOT relevant to climate claim
@@ -254,7 +263,7 @@ class TestValidationPipeline:
     @pytest.mark.asyncio
     async def test_semantic_gating_rejection(self, pipeline, mock_agent, mock_search_mgr):
         """M66: Verify pipeline stops if search results are semantically irrelevant."""
-        mock_agent.extract_claims.return_value = ([{"id": "c1", "search_queries": ["q1"], "search_method": "news"}], False, "news")
+        mock_agent.extract_claims.return_value = ([{"id": "c1", "search_queries": ["q1"], "search_method": "news"}], False, "news", "")
         
         # Search returns results
         mock_search_mgr.search_unified.return_value = ("Context", [{"title": "Irrelevant", "snippet": "Foo"}])

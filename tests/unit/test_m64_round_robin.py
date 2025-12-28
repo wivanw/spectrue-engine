@@ -126,7 +126,8 @@ class TestM64RoundRobin:
         pipeline.agent.extract_claims = AsyncMock(return_value=(
             [], # claims
             False, # check_oracle
-            "news" # article_intent -> triggers topic="news"
+            "news", # article_intent -> triggers topic="news"
+            "",
         ))
         pipeline._select_diverse_queries = MagicMock(return_value=["Query 1"])
         pipeline._can_add_search = MagicMock(return_value=True) # Allow search
@@ -154,7 +155,7 @@ class TestM64RoundRobin:
         """M64/M65: Verify 'general' topic is passed for 'evergreen' intent."""
         # Setup
         pipeline.agent.extract_claims = AsyncMock(return_value=(
-            [], False, "evergreen" # intent -> topic="general"
+            [], False, "evergreen", "" # intent -> topic="general"
         ))
         pipeline._select_diverse_queries = MagicMock(return_value=["Query 1"])
         

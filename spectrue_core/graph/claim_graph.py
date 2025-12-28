@@ -153,10 +153,15 @@ class ClaimGraphBuilder:
             cost_map, cost_info = self._build_costs(
                 claims, default=self.config.default_claim_cost
             )
-            budget = float(self.config.selection_budget)
+            fallback_cost = max(float(self.config.default_claim_cost or 0.0), 1.0)
+            budget = float(self.config.selection_budget or 0.0)
+            if budget <= 0:
+                # Deterministic finite budget to avoid rank-only/unlimited mode.
+                target_count = self.config.top_k or len(node_ids) or 1
+                budget = fallback_cost * float(target_count)
             selection_mode = "budgeted"
-            selected: list[str]
-            selection_trace: list[dict]
+            selected: list[str] = []
+            selection_trace: list[dict] = []
 
             if budget > 0 and cost_map:
                 selected, selection_trace = greedy_budgeted_submodular(
@@ -169,19 +174,23 @@ class ClaimGraphBuilder:
                     mu_redundancy=self.config.mu_redundancy,
                 )
                 selection_mode = "budgeted"
-            else:
-                ranked_ids = sorted(node_ids, key=lambda cid: pr_scores.get(cid, 0.0), reverse=True)
-                selected = ranked_ids[: self.config.top_k] if self.config.top_k else ranked_ids
+
+            if not selected:
+                # Fail-open: fallback to top-K by PageRank when costs missing/invalid.
+                fallback_k = self.config.top_k or len(node_ids) or 0
+                selected = sorted(node_ids, key=lambda x: pr_scores.get(x, 0.0), reverse=True)[
+                    :fallback_k
+                ]
+                selection_mode = "fallback_rank"
                 selection_trace = [
                     {
                         "id": cid,
                         "gain": pr_scores.get(cid, 0.0),
                         "cost": 0.0,
-                        "remaining_budget": float("inf"),
+                        "remaining_budget": budget,
                     }
                     for cid in selected
                 ]
-                selection_mode = "rank_only"
 
             result.selection_trace = selection_trace
             for step in selection_trace:
@@ -301,36 +310,31 @@ class ClaimGraphBuilder:
 
     def _build_costs(self, claims: list[dict], default: float) -> tuple[dict[str, float], dict]:
         """
-        Build deterministic cost map.
-
-        If default <= 0, missing costs are not injected and the selector runs
-        with unlimited budget (all costs set to 1 for scoring only).
+        Build deterministic cost map with guaranteed coverage.
+        Missing/invalid costs fall back to default (>=1).
         """
         cost_map: dict[str, float] = {}
         source = "provided"
         missing_costs = 0
         invalid_costs = 0
+        fallback = max(float(default or 0.0), 1.0)
         for c in claims:
             cid = str(c.get("id") or "")
             if not cid:
                 continue
             if "cost_estimate" in c:
                 try:
-                    cost_map[cid] = float(c.get("cost_estimate") or 0.0)
-                    if cost_map[cid] <= 0:
-                        invalid_costs += 1
-                        cost_map.pop(cid, None)
+                    val = float(c.get("cost_estimate") or 0.0)
+                    if val > 0:
+                        cost_map[cid] = val
+                        continue
+                    invalid_costs += 1
                 except Exception:
                     invalid_costs += 1
-                    cost_map.pop(cid, None)
-            elif default > 0:
-                cost_map[cid] = float(default)
-                source = "default_claim_cost"
             else:
                 missing_costs += 1
-
-        if not cost_map and default <= 0:
-            source = "rank_only_unlimited_budget"
+            cost_map[cid] = fallback
+            source = "default_claim_cost"
 
         return cost_map, {
             "source": source,

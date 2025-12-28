@@ -46,7 +46,7 @@ class FactCheckerAgent:
 
     async def extract_claims(
         self, text: str, *, lang: str = "en", max_claims: int = 7
-    ) -> tuple[list[Claim], bool, ArticleIntent]:
+    ) -> tuple[list[Claim], bool, ArticleIntent, str]:
         """Extract claims with article intent for M63 Oracle triggering."""
         return await self.claims_skill.extract_claims(text, lang=lang, max_claims=max_claims)
 

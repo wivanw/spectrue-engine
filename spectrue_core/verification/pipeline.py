@@ -115,6 +115,46 @@ class ValidationPipeline:
         )
         if not isinstance(self._content_budget_config, ContentBudgetConfig):
             self._content_budget_config = ContentBudgetConfig()
+        self._claim_extraction_text: str = ""
+
+    def _conf_score(self, val: str | None) -> float:
+        if not val:
+            return 0.6
+        v = str(val).lower()
+        if v == "high":
+            return 1.0
+        if v == "medium":
+            return 0.8
+        if v == "low":
+            return 0.6
+        return 0.6
+
+    def _claim_ev(self, claim: dict, *, centrality_map: dict[str, float] | None = None) -> float:
+        """Deterministic EV for main-claim / retrieval ordering."""
+        centrality_map = centrality_map or {}
+        cid = str(claim.get("id") or claim.get("claim_id") or "")
+        worthiness = float(claim.get("check_worthiness", claim.get("importance", 0.5)) or 0.5)
+        harm = float(claim.get("harm_potential", 1) or 1) / 5.0
+        confidence = self._conf_score(claim.get("metadata_confidence"))
+        uncertainty = 1.0 - confidence
+        centrality = centrality_map.get(cid, float(claim.get("centrality") or 0.0))
+        thesis = 1.0 if str(claim.get("claim_role", "core")).lower() in {"core", "thesis"} else 0.0
+        default_cost = getattr(getattr(self.config, "runtime", None), "claim_graph", None)
+        if default_cost:
+            try:
+                default_cost = float(getattr(default_cost, "default_claim_cost", 1.0) or 1.0)
+            except Exception:
+                default_cost = 1.0
+        else:
+            default_cost = 1.0
+        cost = float(claim.get("cost_estimate", default_cost) or default_cost)
+        w_h = 0.55
+        w_u = 0.20
+        w_c = 0.15
+        w_t = 0.10
+        signal = (w_h * harm + w_u * uncertainty + w_c * centrality + w_t * thesis)
+        return (signal * worthiness * confidence) / max(cost, 1e-3)
+        self._claim_extraction_text: str = ""
 
     def _apply_content_budget(self, text: str, *, source: str) -> tuple[str, TrimResult | None]:
         """
@@ -392,21 +432,15 @@ class ValidationPipeline:
                 budget_result=budget_result,
             )
 
-            claims, should_check_oracle, article_intent, fast_query = await self._extract_claims(
+            claims, should_check_oracle, article_intent, fast_query, stitched_claim_text = await self._extract_claims(
                 fact=fact,
                 lang=lang,
                 progress_callback=_progress,
             )
             _end_phase("extraction")
+            self._claim_extraction_text = stitched_claim_text
+            anchor_claim = None
             anchor_claim_id = None
-            if claims:
-                core_claims = [c for c in claims if c.get("type") == "core"]
-                anchor_claim = (
-                    max(core_claims, key=lambda c: c.get("importance", 0))
-                    if core_claims
-                    else claims[0]
-                )
-                anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
             final_sources = await self._verify_inline_sources(
                 inline_sources=inline_sources,
@@ -453,6 +487,20 @@ class ValidationPipeline:
                 runtime_config=self.config.runtime,
                 progress_callback=_progress,
             )
+
+            if claims:
+                centrality_map: dict[str, float] = {}
+                gr_obj = getattr(graph_flow_result, "graph_result", None) if graph_flow_result else None
+                ranked_all = getattr(gr_obj, "all_ranked", None) or []
+                max_c = max((float(getattr(r, "centrality_score", 0.0) or 0.0) for r in ranked_all), default=1.0)
+                for r in ranked_all:
+                    try:
+                        centrality_map[r.claim_id] = float(getattr(r, "centrality_score", 0.0) or 0.0) / max_c
+                    except Exception:
+                        continue
+
+                anchor_claim = max(claims, key=lambda c: self._claim_ev(c, centrality_map=centrality_map))
+                anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
             # M104: Build Context Graph for Belief Propagation
             context_graph = None
@@ -734,6 +782,7 @@ class ValidationPipeline:
                     progress_callback=_progress,
                     prior_belief=prior_belief,
                     context_graph=context_graph,
+                    claim_extraction_text=self._claim_extraction_text,
                 ),
                 claims=claims_for_scoring,
                 sources=final_sources,
@@ -922,7 +971,7 @@ class ValidationPipeline:
         fact: str,
         lang: str,
         progress_callback,
-    ) -> tuple[list, bool, str, str]:
+    ) -> tuple[list, bool, str, str, str]:
         if progress_callback:
             await progress_callback("extracting_claims")
 
@@ -941,23 +990,31 @@ class ValidationPipeline:
 
         try:
             claims_result = await task_claims
-            if isinstance(claims_result, tuple) and len(claims_result) >= 3:
-                claims, should_check_oracle, article_intent = claims_result
-            elif isinstance(claims_result, tuple) and len(claims_result) == 2:
-                claims, should_check_oracle = claims_result
-                article_intent = "news"
+            if isinstance(claims_result, tuple):
+                if len(claims_result) >= 4:
+                    claims, should_check_oracle, article_intent, stitched_text = claims_result[:4]
+                elif len(claims_result) == 3:
+                    claims, should_check_oracle, article_intent = claims_result
+                    stitched_text = ""
+                elif len(claims_result) == 2:
+                    claims, should_check_oracle = claims_result
+                    article_intent = "news"
+                    stitched_text = ""
+                else:
+                    claims, should_check_oracle, article_intent, stitched_text = claims_result, False, "news", ""
             else:
-                claims, should_check_oracle, article_intent = claims_result, False, "news"
+                claims, should_check_oracle, article_intent, stitched_text = [], False, "news", ""
         except asyncio.CancelledError:
             claims = []
             should_check_oracle = False
             article_intent = "news"
+            stitched_text = ""
 
         if claims:
             for i, c in enumerate(claims):
                 c["id"] = f"c{i+1}"
 
-        return claims, should_check_oracle, article_intent, fast_query
+        return claims, should_check_oracle, article_intent, fast_query, stitched_text
 
     async def _verify_inline_sources(
         self,

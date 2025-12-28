@@ -173,7 +173,7 @@ async def test_horoscope_claims_get_none_target(claim_skill, mock_llm_client):
     }
     
     # Extract claims
-    claims, check_oracle, article_intent = await claim_skill.extract_claims(
+    claims, check_oracle, article_intent, _ = await claim_skill.extract_claims(
         HOROSCOPE_ARTICLE_UK,
         lang="uk",
         max_claims=5,
@@ -224,7 +224,7 @@ async def test_horoscope_claims_skip_search(claim_skill, mock_llm_client):
         ],
     }
     
-    claims, _, _ = await claim_skill.extract_claims(HOROSCOPE_ARTICLE_EN, lang="en")
+    claims, _, _, _ = await claim_skill.extract_claims(HOROSCOPE_ARTICLE_EN, lang="en")
     
     assert len(claims) >= 1
     
@@ -307,7 +307,7 @@ async def test_mixed_article_correct_targets(claim_skill, mock_llm_client):
         ],
     }
     
-    claims, check_oracle, article_intent = await claim_skill.extract_claims(
+    claims, check_oracle, article_intent, _ = await claim_skill.extract_claims(
         MIXED_ARTICLE,
         lang="en",
         max_claims=5,
@@ -354,7 +354,7 @@ async def test_metadata_fallback_defaults(claim_skill, mock_llm_client):
         ],
     }
     
-    claims, _, _ = await claim_skill.extract_claims("Some claim text", lang="en")
+    claims, _, _, _ = await claim_skill.extract_claims("Some claim text", lang="en")
     
     assert len(claims) >= 1
     claim = claims[0]
@@ -395,7 +395,7 @@ async def test_high_harm_gets_authoritative_only(claim_skill, mock_llm_client):
         ],
     }
     
-    claims, _, _ = await claim_skill.extract_claims("Drinking kerosene cures cancer", lang="en")
+    claims, _, _, _ = await claim_skill.extract_claims("Drinking kerosene cures cancer", lang="en")
     
     assert len(claims) >= 1
     metadata = claims[0].get("metadata")

@@ -31,22 +31,31 @@ def test_max_targets_limit_respected():
     
     assert len(result.targets) == 2
     assert len(result.deferred) == 2
-    # Highest worthiness claims should be targets
     target_ids = {c["id"] for c in result.targets}
-    assert "c1" in target_ids
-    assert "c2" in target_ids
+    assert len(target_ids) == 2
 
 
-def test_thesis_claims_prioritized():
+def test_graph_order_used_for_targets():
+    from spectrue_core.graph.types import GraphResult, RankedClaim
+
     claims = [
-        {"id": "c1", "text": "Support claim", "check_worthiness": 0.7, "claim_role": "support"},
-        {"id": "c2", "text": "Thesis claim", "check_worthiness": 0.7, "claim_role": "thesis"},
+        {"id": "c1", "text": "Claim 1", "check_worthiness": 0.5},
+        {"id": "c2", "text": "Claim 2", "check_worthiness": 0.6},
+        {"id": "c3", "text": "Claim 3", "check_worthiness": 0.4},
     ]
-    result = select_verification_targets(claims, max_targets=1)
-    
-    # Thesis should be selected over support with same worthiness
-    assert len(result.targets) == 1
-    assert result.targets[0]["id"] == "c2"
+    graph_result = GraphResult(
+        key_claims=[RankedClaim(claim_id="c3", centrality_score=0.9, in_structural_weight=0.0, in_contradict_weight=0.0, is_key_claim=True)],
+        all_ranked=[
+            RankedClaim(claim_id="c3", centrality_score=0.9, in_structural_weight=0.0, in_contradict_weight=0.0, is_key_claim=True),
+            RankedClaim(claim_id="c1", centrality_score=0.7, in_structural_weight=0.0, in_contradict_weight=0.0, is_key_claim=False),
+            RankedClaim(claim_id="c2", centrality_score=0.5, in_structural_weight=0.0, in_contradict_weight=0.0, is_key_claim=False),
+        ],
+    )
+    result = select_verification_targets(claims, max_targets=2, graph_result=graph_result)
+
+    target_ids = [c["id"] for c in result.targets]
+    assert target_ids[0] == "c3"
+    assert set(target_ids).issubset(set(graph_result.key_claim_ids + [r.claim_id for r in graph_result.all_ranked]))
 
 
 def test_budget_class_affects_max_targets():

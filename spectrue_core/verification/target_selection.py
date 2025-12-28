@@ -130,62 +130,68 @@ def select_verification_targets(
     # M109: Assign semantic clusters using embeddings (if available)
     _assign_semantic_clusters(claims)
     
-    # Score each claim for target selection priority
-    scored_claims: list[tuple[float, dict]] = []
-    
-    for claim in claims:
-        claim_id = str(claim.get("id") or claim.get("claim_id") or "c1")
-        
-        # Base score from check_worthiness (0-1)
-        worthiness = float(claim.get("check_worthiness", 0.5) or 0.5)
-        
-        # Importance boost
-        importance = float(claim.get("importance", 0.5) or 0.5)
-        
-        # Graph-based boosts
-        graph_score = 0.0
-        is_key = False
-        if graph_result:
-            # Check if this is a key claim from graph analysis
-            key_ids = getattr(graph_result, "key_claim_ids", None) or []
-            is_key = claim_id in key_ids
-            if is_key:
-                graph_score += 0.3
-            
-            # Centrality boost
-            ranked = getattr(graph_result, "ranked", None) or []
-            for r in ranked:
-                if r.claim_id == claim_id:
-                    graph_score += float(r.structural_importance or 0) * 0.2
-                    break
-            
-            # Tension boost (controversial claims need more scrutiny)
-            tension = float(claim.get("graph_tension_score", 0) or 0)
-            graph_score += tension * 0.1
-        
-        # Claim type boost (thesis > support > background)
-        # M108: Thesis claims get massive boost to ALWAYS be in targets
-        type_boost = 0.0
-        claim_type = str(claim.get("type", "support")).lower()
-        claim_role = str(claim.get("claim_role", "support")).lower()
-        is_thesis = claim_type == "core" or claim_role == "thesis"
-        if is_thesis:
-            type_boost = 10.0  # M108: Guarantee thesis is first
-        elif claim_type == "support":
-            type_boost = 0.1
-        
-        # Final score
-        score = worthiness * 0.4 + importance * 0.3 + graph_score + type_boost
-        scored_claims.append((score, claim))
-    
-    # Sort by score descending
-    scored_claims.sort(key=lambda x: x[0], reverse=True)
-    
-    # Split into targets and deferred
+    # Primary ordering comes from EV (harm/uncertainty/centrality/thesis) when graph available
+    claim_by_id = {str(c.get("id") or c.get("claim_id") or "c1"): c for c in claims}
+    centrality_map: dict[str, float] = {}
+    if graph_result and getattr(graph_result, "all_ranked", None):
+        ranked_all = list(graph_result.all_ranked)
+        max_c = max((float(getattr(r, "centrality_score", 0.0) or 0.0) for r in ranked_all), default=1.0)
+        for r in ranked_all:
+            try:
+                centrality_map[r.claim_id] = float(getattr(r, "centrality_score", 0.0) or 0.0) / max_c
+            except Exception:
+                continue
+
+    def _conf_score(val):
+        if not val:
+            return 0.6
+        v = str(val).lower()
+        if v == "high":
+            return 1.0
+        if v == "medium":
+            return 0.8
+        if v == "low":
+            return 0.6
+        return 0.6
+
+    def _ev(claim_id: str) -> float:
+        c = claim_by_id.get(claim_id, {})
+        worthiness = float(c.get("check_worthiness", c.get("importance", 0.5)) or 0.5)
+        harm = float(c.get("harm_potential", 1) or 1) / 5.0
+        uncertainty = 1.0 - _conf_score(c.get("metadata_confidence"))
+        centrality = centrality_map.get(claim_id, float(c.get("centrality") or 0.0))
+        thesis = 1.0 if str(c.get("claim_role", "core")).lower() in {"core", "thesis"} else 0.0
+        cost = float(c.get("cost_estimate", 1.0) or 1.0)
+        w_h = 0.55
+        w_u = 0.20
+        w_c = 0.15
+        w_t = 0.10
+        confidence = _conf_score(c.get("metadata_confidence"))
+        signal = (w_h * harm + w_u * uncertainty + w_c * centrality + w_t * thesis)
+        return (signal * worthiness * confidence) / max(cost, 1e-3)
+
+    ordered_ids: list[str] = []
+    if graph_result and not getattr(graph_result, "disabled", False):
+        ranked = getattr(graph_result, "key_claims", None) or getattr(graph_result, "all_ranked", None) or []
+        ordered_ids = [r.claim_id for r in ranked if getattr(r, "claim_id", None)]
+        ordered_ids = sorted(ordered_ids, key=lambda cid: _ev(cid), reverse=True)
+
+    seen: set[str] = set()
+    ordered_claims: list[dict] = []
+    for cid in ordered_ids:
+        if cid in claim_by_id and cid not in seen:
+            ordered_claims.append(claim_by_id[cid])
+            seen.add(cid)
+    for cid, c in claim_by_id.items():
+        if cid not in seen:
+            ordered_claims.append(c)
+            seen.add(cid)
+
+    # Split into targets and deferred using deterministic ordered_claims
     result = TargetSelectionResult()
     cluster_map: dict[str, str] = {}  # cluster_id -> target_claim_id
     
-    for i, (score, claim) in enumerate(scored_claims):
+    for i, claim in enumerate(ordered_claims):
         claim_id = str(claim.get("id") or claim.get("claim_id") or "c1")
         cluster_id = str(claim.get("cluster_id") or claim.get("topic_key") or "default")
         
@@ -223,8 +229,20 @@ def select_verification_targets(
             "evidence_sharing_count": len(result.evidence_sharing),
             "max_targets": max_targets,
             "budget_class": budget_class,
-            "target_ids": [c.get("id") for c in result.targets],
-            "deferred_ids": [c.get("id") for c in result.deferred],
+            "target_ids": [
+                str(cid)
+                for cid in (
+                    c.get("id") or c.get("claim_id") for c in result.targets
+                )
+                if cid is not None
+            ],
+            "deferred_ids": [
+                str(cid)
+                for cid in (
+                    c.get("id") or c.get("claim_id") for c in result.deferred
+                )
+                if cid is not None
+            ],
         },
     )
     
