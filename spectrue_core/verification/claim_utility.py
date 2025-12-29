@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from spectrue_core.runtime_config import CalibrationPolicyConfig
 from spectrue_core.verification.calibration_registry import CalibrationRegistry
 
 
@@ -20,17 +21,12 @@ def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-def _role_weight(role: str | None) -> float:
-    mapping = {
-        "core": 1.0,
-        "thesis": 1.0,
-        "support": 0.7,
-        "counter": 0.6,
-        "background": 0.2,
-    }
+def _role_weight(role: str | None, *, policy: CalibrationPolicyConfig) -> float:
+    mapping = policy.claim_utility_role_weights or {}
+    bg = float(mapping.get("background", 0.2))
     if not role:
-        return 0.2
-    return mapping.get(str(role).strip().lower(), 0.2)
+        return bg
+    return float(mapping.get(str(role).strip().lower(), bg))
 
 
 def _claim_position(claim: dict) -> int:
@@ -52,7 +48,7 @@ def _position_norm(claim: dict, *, max_pos: int | None) -> float:
     return _clamp01(pos / max_pos)
 
 
-def _lede_bonus(claim: dict, *, window: int = 8000) -> float:
+def _lede_bonus(claim: dict, *, window: int) -> float:
     if not isinstance(claim, dict):
         return 0.0
     anchor = claim.get("anchor") or {}
@@ -74,25 +70,31 @@ def build_claim_utility_features(
     *,
     centrality_map: dict[str, float] | None = None,
     max_pos: int | None = None,
+    calibration_registry: CalibrationRegistry | None = None,
 ) -> dict[str, float]:
     centrality_map = centrality_map or {}
+    registry = calibration_registry or CalibrationRegistry.from_runtime(None)
+    policy = registry.policy
     claim_id = str(claim.get("id") or claim.get("claim_id") or "")
     role = claim.get("claim_role") or claim.get("role")
     worthiness = _safe_float(claim.get("check_worthiness", claim.get("importance", 0.0)))
     harm_raw = claim.get("harm_potential", 0.0)
     harm = _safe_float(harm_raw, default=0.0)
-    if harm > 1.0:
-        harm = harm / 5.0
+    harm_scale = float(policy.claim_utility_harm_scale or 1.0)
+    if harm > 1.0 and harm_scale > 0:
+        harm = harm / harm_scale
     importance = _safe_float(claim.get("importance", 0.0))
     centrality = _safe_float(centrality_map.get(claim_id, claim.get("centrality", 0.0)))
 
     return {
-        "role_weight": _clamp01(_role_weight(str(role) if role is not None else None)),
+        "role_weight": _clamp01(_role_weight(str(role) if role is not None else None, policy=policy)),
         "worthiness": _clamp01(worthiness),
         "harm": _clamp01(harm),
         "importance": _clamp01(importance),
         "centrality": _clamp01(centrality),
-        "lede_bonus": _clamp01(_lede_bonus(claim)),
+        "lede_bonus": _clamp01(
+            _lede_bonus(claim, window=int(policy.claim_utility_lede_window))
+        ),
         "position_norm": _position_norm(claim, max_pos=max_pos),
     }
 
@@ -109,10 +111,20 @@ def score_claim_utility(
         claim,
         centrality_map=centrality_map,
         max_pos=max_pos,
+        calibration_registry=registry,
     )
     model = registry.get_model("claim_utility")
     if not model:
         raw_score = sum(features.values())
         return _clamp01(raw_score), {"model": "claim_utility", "fallback_used": True, "features": features}
     score, trace = model.score(features)
+    if isinstance(trace, dict):
+        trace.setdefault("extra", {})
+        trace["extra"].update(
+            {
+                "claim_utility_lede_window": int(registry.policy.claim_utility_lede_window),
+                "claim_utility_harm_scale": float(registry.policy.claim_utility_harm_scale),
+                "claim_utility_role_weights": dict(registry.policy.claim_utility_role_weights or {}),
+            }
+        )
     return score, trace

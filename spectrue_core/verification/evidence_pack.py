@@ -14,6 +14,7 @@ Philosophy:
 from typing import Literal, TypedDict, Any
 
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.calibration_models import logistic_score
 from spectrue_core.verification.calibration_registry import CalibrationRegistry
 from spectrue_core.verification.source_utils import has_evidence_chunk
 
@@ -242,13 +243,22 @@ def score_evidence_likeness(
         if model:
             score, trace = model.score(features)
         else:
-            score = min(
-                1.0,
-                (0.6 * features["has_quote"])
-                + (0.3 * features["has_chunk"])
-                + (0.1 * features["has_digits"]),
+            policy = registry.policy.evidence_likeness
+            raw, score = logistic_score(
+                features,
+                policy.fallback_weights or policy.weights,
+                bias=policy.fallback_bias or policy.bias,
             )
-            trace = {"model": "evidence_likeness", "fallback_used": True, "features": features}
+            trace = {
+                "model": "evidence_likeness",
+                "version": policy.version,
+                "features": features,
+                "weights": policy.fallback_weights or policy.weights,
+                "bias": policy.fallback_bias or policy.bias,
+                "raw_score": raw,
+                "score": score,
+                "fallback_used": True,
+            }
         scores.append(float(score))
         if len(samples) < 5:
             samples.append(

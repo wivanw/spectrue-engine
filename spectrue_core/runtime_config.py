@@ -184,6 +184,17 @@ class CalibrationPolicyConfig:
             score_mode="sigmoid",
         )
     )
+    claim_utility_role_weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "core": 1.0,
+            "thesis": 1.0,
+            "support": 0.7,
+            "counter": 0.6,
+            "background": 0.2,
+        }
+    )
+    claim_utility_lede_window: int = 8000
+    claim_utility_harm_scale: float = 5.0
     retrieval_confidence: CalibrationModelPolicy = field(
         default_factory=lambda: CalibrationModelPolicy(
             version="retrieval-confidence-v1",
@@ -273,6 +284,8 @@ class CalibrationPolicyConfig:
     retrieval_cost_weight: float = 1.0
     retrieval_min_value_per_cost: float = 0.25
     retrieval_gain_floor: float = 0.15
+    retrieval_confidence_low: float = 0.35
+    retrieval_confidence_high: float = 0.70
 
     propagation_min_shrink: float = 0.05
     propagation_max_shrink: float = 0.35
@@ -612,10 +625,15 @@ class EngineRuntimeConfig:
                 "retrieval_gain_version": self.calibration.retrieval_gain.version,
                 "evidence_likeness_version": self.calibration.evidence_likeness.version,
                 "search_relevance_version": self.calibration.search_relevance.version,
+                "claim_utility_role_weights": dict(self.calibration.claim_utility_role_weights or {}),
+                "claim_utility_lede_window": int(self.calibration.claim_utility_lede_window),
+                "claim_utility_harm_scale": float(self.calibration.claim_utility_harm_scale),
                 "retrieval_cost_norm": float(self.calibration.retrieval_cost_norm),
                 "retrieval_cost_weight": float(self.calibration.retrieval_cost_weight),
                 "retrieval_min_value_per_cost": float(self.calibration.retrieval_min_value_per_cost),
                 "retrieval_gain_floor": float(self.calibration.retrieval_gain_floor),
+                "retrieval_confidence_low": float(self.calibration.retrieval_confidence_low),
+                "retrieval_confidence_high": float(self.calibration.retrieval_confidence_high),
             },
             "debug": {
                 "engine_debug": bool(self.debug.engine_debug),

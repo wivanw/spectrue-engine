@@ -765,6 +765,15 @@ class ValidationPipeline:
                                     ReasonCodes.RETRIEVAL_STOP_FOLLOWUP_FAILED,
                                     claim_id=str(claim_id),
                                 )
+                        registry = getattr(self, "_calibration_registry", None)
+                        if registry is not None:
+                            low_threshold = float(getattr(registry.policy, "retrieval_confidence_low", 0.35) or 0.35)
+                            high_threshold = float(getattr(registry.policy, "retrieval_confidence_high", 0.70) or 0.70)
+                        else:
+                            low_threshold = 0.35
+                            high_threshold = 0.70
+                        if high_threshold <= low_threshold:
+                            high_threshold = min(1.0, low_threshold + 0.05)
                         for hop in hops:
                             eval_data = hop.get("retrieval_eval", {}) if isinstance(hop, dict) else {}
                             action = eval_data.get("action", "continue")
@@ -773,9 +782,9 @@ class ValidationPipeline:
                                 reason_spec = ReasonCodes.RETRIEVAL_STOP_EARLY
                             elif action in ("refine_query", "change_language", "restrict_domains", "change_channel"):
                                 reason_spec = ReasonCodes.RETRIEVAL_CORRECTION
-                            elif eval_data.get("retrieval_confidence", 0.0) <= 0.35:
+                            elif eval_data.get("retrieval_confidence", 0.0) <= low_threshold:
                                 reason_spec = ReasonCodes.RETRIEVAL_CONF_LOW
-                            elif eval_data.get("retrieval_confidence", 0.0) >= 0.7:
+                            elif eval_data.get("retrieval_confidence", 0.0) >= high_threshold:
                                 reason_spec = ReasonCodes.RETRIEVAL_CONF_HIGH
 
                             reason_code = _record_reason(reason_spec, claim_id=str(claim_id))

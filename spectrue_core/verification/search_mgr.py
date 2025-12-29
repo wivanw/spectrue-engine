@@ -110,12 +110,33 @@ class SearchManager:
             if expected_gain <= gain_floor or value_per_cost < min_value_per_cost:
                 return "stop_early", "marginal_gain_below_cost"
 
-        high_threshold = 0.7
-        low_threshold = 0.35
+        calibration = getattr(getattr(self.config, "runtime", None), "calibration", None)
+        low_threshold = float(getattr(calibration, "retrieval_confidence_low", 0.35) or 0.35)
+        high_threshold = float(getattr(calibration, "retrieval_confidence_high", 0.70) or 0.70)
+        guard_applied = False
         if self.policy_profile is not None:
-            base = float(self.policy_profile.quality_thresholds.min_relevance_score or 0.15)
-            low_threshold = max(0.25, min(0.45, base * 2.0))
-            high_threshold = max(0.6, min(0.85, base * 4.0))
+            base = float(self.policy_profile.quality_thresholds.min_relevance_score or 0.0)
+            if base > 0:
+                low_threshold = max(low_threshold, base)
+                high_threshold = max(high_threshold, base)
+        if high_threshold <= low_threshold:
+            high_threshold = min(1.0, low_threshold + 0.05)
+            guard_applied = True
+        if guard_applied:
+            Trace.event(
+                "retrieval.threshold_guard_applied",
+                {
+                    "low_threshold": float(low_threshold),
+                    "high_threshold": float(high_threshold),
+                    "policy_profile_enabled": self.policy_profile is not None,
+                    "base_min_relevance": float(
+                        getattr(getattr(self.policy_profile, "quality_thresholds", None), "min_relevance_score", 0.0)
+                        or 0.0
+                    )
+                    if self.policy_profile is not None
+                    else 0.0,
+                },
+            )
 
         if retrieval_confidence >= high_threshold:
             return "stop_early", "confidence_high"

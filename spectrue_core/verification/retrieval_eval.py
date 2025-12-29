@@ -8,6 +8,7 @@ from typing import Any
 
 from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.calibration_models import linear_score, logistic_score
 from spectrue_core.verification.calibration_registry import CalibrationRegistry
 from spectrue_core.verification.evidence_pack import score_evidence_likeness
 from spectrue_core.verification.source_utils import extract_domain, score_source_quality
@@ -97,11 +98,26 @@ def predict_marginal_gain(
         "temporal_risk": _clamp01(state.get("temporal_risk", 0.0)),
     }
     if not model:
-        expected_gain = _clamp01(sum(features.values()) / max(1.0, len(features)))
-        return {
-            "expected_gain": expected_gain,
+        policy = registry.policy.retrieval_gain
+        raw, expected_gain = logistic_score(
+            features,
+            policy.fallback_weights or policy.weights,
+            bias=policy.fallback_bias or policy.bias,
+        )
+        trace = {
+            "model": "retrieval_gain",
+            "version": policy.version,
             "features": features,
-            "trace": {"model": "retrieval_gain", "fallback_used": True, "features": features},
+            "weights": policy.fallback_weights or policy.weights,
+            "bias": policy.fallback_bias or policy.bias,
+            "raw_score": raw,
+            "score": expected_gain,
+            "fallback_used": True,
+        }
+        return {
+            "expected_gain": _clamp01(expected_gain),
+            "features": features,
+            "trace": trace,
         }
     expected_gain, trace = model.score(features)
     return {
@@ -124,21 +140,31 @@ def evaluate_retrieval_confidence(
     state = build_retrieval_state(sources, calibration_registry=registry)
 
     model = registry.get_model("retrieval_confidence")
-    if not model:
-        retrieval_confidence = _clamp01(
-            (0.5 * state["mean_relevance"])
-            + (0.3 * state["evidence_likeness"])
-            + (0.2 * state["source_quality"])
-        )
-        confidence_trace = {"model": "retrieval_confidence", "fallback_used": True, "features": state}
+    confidence_features = {
+        "mean_relevance": state["mean_relevance"],
+        "evidence_likeness": state["evidence_likeness"],
+        "source_quality": state["source_quality"],
+    }
+    if model:
+        retrieval_confidence, confidence_trace = model.score(confidence_features)
     else:
-        retrieval_confidence, confidence_trace = model.score(
-            {
-                "mean_relevance": state["mean_relevance"],
-                "evidence_likeness": state["evidence_likeness"],
-                "source_quality": state["source_quality"],
-            }
+        policy = registry.policy.retrieval_confidence
+        raw, retrieval_confidence = linear_score(
+            confidence_features,
+            policy.fallback_weights or policy.weights,
+            bias=policy.fallback_bias or policy.bias,
+            clamp=True,
         )
+        confidence_trace = {
+            "model": "retrieval_confidence",
+            "version": policy.version,
+            "features": confidence_features,
+            "weights": policy.fallback_weights or policy.weights,
+            "bias": policy.fallback_bias or policy.bias,
+            "raw_score": raw,
+            "score": retrieval_confidence,
+            "fallback_used": True,
+        }
 
     gain_payload = predict_marginal_gain(state, calibration_registry=registry)
     expected_gain = gain_payload["expected_gain"]

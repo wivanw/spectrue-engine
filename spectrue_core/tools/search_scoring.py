@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 
 from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.calibration_models import logistic_score
 from spectrue_core.verification.calibration_registry import CalibrationRegistry
 from spectrue_core.verification.trusted_sources import ALL_TRUSTED_DOMAINS as TRUSTED_DOMAINS
 
@@ -207,11 +208,11 @@ def relevance_score(
     hit_ratio = (hits_title * 2 + hits_content) / max(1, len(tokens))
 
     # Small bonus for trusted domains (stability)
-    trusted_bonus = 0.0
+    trusted_domain = 0.0
     try:
         host = urlparse(url).netloc
         if is_trusted_host(host):
-            trusted_bonus = 0.10
+            trusted_domain = 1.0
     except Exception:
         pass
 
@@ -223,7 +224,6 @@ def relevance_score(
             provider_score = max(0.0, min(1.0, float(tavily_score)))
         except (TypeError, ValueError):
             provider_score = 0.0
-    trusted_domain = 1.0 if trusted_bonus > 0.0 else 0.0
     url_year_freshness = _year_freshness(url, title)
 
     features = {
@@ -236,13 +236,25 @@ def relevance_score(
 
     registry = CalibrationRegistry.from_runtime(runtime_config)
     model = registry.get_model("search_relevance")
-    if not model:
-        final_score = max(0.0, min(1.0, lexical_score + trusted_bonus))
-        trace_payload = {"model": "search_relevance", "fallback_used": True, "features": features}
-    else:
+    if model:
         final_score, trace_payload = model.score(features)
-        if trusted_bonus:
-            final_score = max(0.0, min(1.0, float(final_score) + trusted_bonus))
+    else:
+        policy = registry.policy.search_relevance
+        raw, final_score = logistic_score(
+            features,
+            policy.fallback_weights or policy.weights,
+            bias=policy.fallback_bias or policy.bias,
+        )
+        trace_payload = {
+            "model": "search_relevance",
+            "version": policy.version,
+            "features": features,
+            "weights": policy.fallback_weights or policy.weights,
+            "bias": policy.fallback_bias or policy.bias,
+            "raw_score": raw,
+            "score": final_score,
+            "fallback_used": True,
+        }
 
     if trace:
         trace_payload["score"] = float(final_score)
