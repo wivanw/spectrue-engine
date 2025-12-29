@@ -458,40 +458,6 @@ async def run_evidence_flow(
         ) or claims[0]
         anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
-    # M67: Inline Social Verification (Tier A')
-    if claims and sources:
-        verify_tasks = []
-        social_indices = []
-
-        for i, src in enumerate(sources):
-            stype = src.get("source_type", "general")
-            domain = src.get("domain", "")
-            if stype == "social" or is_social_platform(domain):
-                anchor = anchor_claim if anchor_claim else claims[0]
-                verify_tasks.append(
-                    agent.verify_social_statement(
-                        anchor,
-                        src.get("content", "") or src.get("snippet", ""),
-                        src.get("url", "") or src.get("link", ""),
-                    )
-                )
-                social_indices.append(i)
-
-        if verify_tasks:
-            if inp.progress_callback:
-                await inp.progress_callback("verifying_social")
-
-            social_results = await asyncio.gather(*verify_tasks, return_exceptions=True)
-
-            for idx, res in zip(social_indices, social_results):
-                if isinstance(res, dict) and res.get("tier") == "A'":
-                    sources[idx]["evidence_tier"] = "A'"
-                    sources[idx]["source_type"] = "official"
-                    logger.debug(
-                        "[M67] Promoted Social Source %s to Tier A'",
-                        sources[idx].get("domain"),
-                    )
-
     # T7: Deterministic Ranking
     claims.sort(key=lambda c: (-c.get("importance", 0.0), c.get("text", "")))
 
