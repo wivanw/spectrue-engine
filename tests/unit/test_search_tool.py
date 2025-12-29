@@ -116,6 +116,12 @@ class TestWebSearchTool:
         assert ranked[0]["title"] == "Exact Match"
 
     def test_tavily_score_blending(self, tool):
+        """M112: Calibrated logistic scoring replaces heuristic blending.
+        
+        With calibrated models, scores pass through sigmoid, so:
+        - High lexical match + low provider score → moderate output (sigmoid saturation)
+        - Low lexical match + high provider score → still moderate (provider weighted lower)
+        """
         long_content = "Some Content " * 10 
         res = tool._relevance_score(
             query="irrelevant query terms",
@@ -124,7 +130,8 @@ class TestWebSearchTool:
             url="http://x.com",
             tavily_score=0.95
         )
-        assert 0.6 < res < 0.8
+        # Low lexical overlap but high tavily → moderate score after sigmoid
+        assert 0.5 < res < 0.85
 
         res2 = tool._relevance_score(
             query="test",
@@ -133,7 +140,8 @@ class TestWebSearchTool:
             url="http://x.com",
             tavily_score=0.5
         )
-        assert res2 > 0.9
+        # Perfect lexical match → high raw, but sigmoid compresses to ~0.73
+        assert res2 > 0.7
 
     # M108: Removed heuristic-based tests (test_archive_domain_filtered, etc.)
     # per design decision: no URL-based heuristic filtering
