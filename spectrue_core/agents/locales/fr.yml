@@ -63,3 +63,6 @@ fr:
       ### DONNÉES D'ENTRÉE
       AFFIRMATION : {fact}
       CONTEXTE : {context}
+  ui:
+    popup:
+      not_available: "Non disponible"

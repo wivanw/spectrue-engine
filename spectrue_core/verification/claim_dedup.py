@@ -17,7 +17,10 @@ Contract:
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 from dataclasses import dataclass
+from functools import partial
 
 from spectrue_core.utils.embedding_service import EmbedService
 
@@ -47,34 +50,18 @@ class DedupInfo:
     similarity: float
 
 
-def dedup_claims_post_extraction(
+def _dedup_sync(
     claims: list[dict],
-    *,
-    tau: float = 0.90,
+    tau: float,
 ) -> tuple[list[dict], list[DedupInfo]]:
     """
-    Greedy semantic dedup:
-      iterate in input order, assign each claim to the most similar canonical;
-      if similarity >= tau => mark duplicate; else becomes new canonical.
-
-    Returns:
-      (canonical_claims, dedup_pairs)
+    Synchronous implementation of dedup logic.
+    Called from thread pool to avoid blocking event loop.
     """
-    if not claims:
-        return [], []
-
-    # If embeddings aren't available, don't guess with heuristics.
-    if not EmbedService.is_available():
-        return claims, []
-
     canonical_claims: list[dict] = []
     canonical_texts: list[str] = []
     dedup_pairs: list[DedupInfo] = []
 
-    # We keep aliases on the canonical claim for UI/trace (non-breaking extra fields).
-    # Structure:
-    #   canonical["aliases"] = [{"id": "...", "text": "...", "sim": 0.93}, ...]
-    #   canonical["dedup_group_size"] = 1 + len(aliases)
     for c in claims:
         if not isinstance(c, dict):
             continue
@@ -135,3 +122,79 @@ def dedup_claims_post_extraction(
         canonical_texts.append(txt)
 
     return canonical_claims, dedup_pairs
+
+
+# Thread pool for embedding operations (shared across calls)
+_executor: concurrent.futures.ThreadPoolExecutor | None = None
+
+
+def _get_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """Get or create thread pool executor."""
+    global _executor
+    if _executor is None:
+        _executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="embed_dedup",
+        )
+    return _executor
+
+
+async def dedup_claims_post_extraction_async(
+    claims: list[dict],
+    *,
+    tau: float = 0.90,
+) -> tuple[list[dict], list[DedupInfo]]:
+    """
+    Async version of claim deduplication.
+    
+    Runs embedding operations in thread pool to avoid blocking event loop.
+    
+    Greedy semantic dedup:
+      iterate in input order, assign each claim to the most similar canonical;
+      if similarity >= tau => mark duplicate; else becomes new canonical.
+
+    Returns:
+      (canonical_claims, dedup_pairs)
+    """
+    if not claims:
+        return [], []
+
+    # If embeddings aren't available, don't guess with heuristics.
+    if not EmbedService.is_available():
+        return claims, []
+
+    loop = asyncio.get_running_loop()
+    executor = _get_executor()
+    
+    # Run sync dedup in thread pool
+    result = await loop.run_in_executor(
+        executor,
+        partial(_dedup_sync, claims, tau),
+    )
+    
+    return result
+
+
+def dedup_claims_post_extraction(
+    claims: list[dict],
+    *,
+    tau: float = 0.90,
+) -> tuple[list[dict], list[DedupInfo]]:
+    """
+    Synchronous wrapper for backward compatibility.
+    
+    Greedy semantic dedup:
+      iterate in input order, assign each claim to the most similar canonical;
+      if similarity >= tau => mark duplicate; else becomes new canonical.
+
+    Returns:
+      (canonical_claims, dedup_pairs)
+    """
+    if not claims:
+        return [], []
+
+    # If embeddings aren't available, don't guess with heuristics.
+    if not EmbedService.is_available():
+        return claims, []
+
+    return _dedup_sync(claims, tau)

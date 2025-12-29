@@ -63,3 +63,6 @@ zh:
       ### 输入数据
       声明：{fact}
       上下文：{context}
+  ui:
+    popup:
+      not_available: "不可用"

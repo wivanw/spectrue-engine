@@ -63,3 +63,6 @@ ja:
       ### 入力データ
       主張: {fact}
       コンテキスト: {context}
+  ui:
+    popup:
+      not_available: "利用不可"

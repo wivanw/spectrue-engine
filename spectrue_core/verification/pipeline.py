@@ -25,7 +25,7 @@ from spectrue_core.verification.pipeline_search import (
     run_search_flow,
 )
 from spectrue_core.utils.embedding_service import EmbedService
-from spectrue_core.verification.claim_dedup import dedup_claims_post_extraction
+from spectrue_core.verification.claim_dedup import dedup_claims_post_extraction_async
 from spectrue_core.verification.claim_selection import (
     pick_ui_main_claim,
     top_ui_candidates,
@@ -470,7 +470,7 @@ class ValidationPipeline:
             # This reduces cost + prevents anchor/secondary duplicates.
             try:
                 before_n = len(claims or [])
-                claims, dedup_pairs = dedup_claims_post_extraction(claims or [], tau=0.90)
+                claims, dedup_pairs = await dedup_claims_post_extraction_async(claims or [], tau=0.90)
                 after_n = len(claims or [])
                 if dedup_pairs:
                     Trace.event(

@@ -403,8 +403,7 @@ config = SpectrueConfig(
 ## 🧪 Testing
 
 ```bash
-# Run offline core suite (no network, no secrets)
-export SPECTRUE_TEST_OFFLINE=1
+# Run core suite
 pytest tests/unit tests/test_*.py \
   tests/integration/test_m80_orchestration.py \
   tests/integration/test_m81_calibration.py \

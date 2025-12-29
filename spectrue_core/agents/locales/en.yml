@@ -50,3 +50,6 @@ en:
       ### INPUT DATA
       CLAIM: {fact}
       CONTEXT: {context}
+  ui:
+    popup:
+      not_available: "Not available"

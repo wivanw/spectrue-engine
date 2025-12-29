@@ -141,13 +141,13 @@ class SearchManager:
         M104: Two-phase approach:
         1. If source has content but no quote, extract quote from existing content
         2. If source has no content, fetch URL and extract quote
+        
+        M111: Uses batch quote extraction for efficiency (single embedding call).
         """
         if not needs_evidence_acquisition_ladder(sources):
             return sources
 
         fetch_count = 0
-        quoted_count = 0
-        enriched_count = 0
         # Prefer higher relevance scores.
         candidates = sorted(
             [s for s in sources if isinstance(s, dict)],
@@ -156,18 +156,16 @@ class SearchManager:
         )
 
         processed_urls = set()
-        for src in candidates:
-            # M104: If already has quote, we still might want to fetch fulltext if we have budget?
-            # User requirement: "Search -> Deterministic Extract" for top-K.
-            # But if we have a quote, we are technically "sufficient".
-            # For efficiency/safety, let's assume if we have a quote, we are good.
+        
+        # Phase 1: Fetch content for sources that need it
+        sources_for_quote_extraction: list[tuple[int, dict]] = []  # (index, source)
+        
+        for idx, src in enumerate(candidates):
             if src.get("quote"):
                 continue
 
-            # Check if we should fetch content (Fix C)
-            # Fetch if we have budget AND (no content OR content is just a snippet/short)
-            should_fetch = False
             current_content = src.get("content") or src.get("snippet") or ""
+            should_fetch = False
             
             if fetch_count < max_fetches:
                 # M108: Check global limit (across all claims)
@@ -201,37 +199,74 @@ class SearchManager:
                         fetch_count += 1
                         self.global_extracts_used += 1  # M108: Track globally
             
-            # Now extract quote from whatever content we have (newly fetched or existing)
+            # Collect sources that need quote extraction
             if current_content and len(current_content) >= 50:
-                # M109: Try semantic quote extraction first
                 claim_text = src.get("claim_text") or ""
-                best_quote = None
-                
                 if claim_text:
-                    try:
-                        from spectrue_core.utils.embedding_service import (
-                            extract_best_quote,
-                            EmbedService,
-                        )
-                        if EmbedService.is_available():
-                            best_quote = extract_best_quote(claim_text, current_content)
-                    except ImportError:
-                        pass
-                
-                if best_quote:
-                    src["quote"] = best_quote
-                    src["quote_method"] = "semantic"
+                    sources_for_quote_extraction.append((idx, src))
+        
+        # Phase 2: Batch quote extraction (single embedding call for all sources)
+        quoted_count = 0
+        enriched_count = 0
+        
+        if sources_for_quote_extraction:
+            try:
+                from spectrue_core.utils.embedding_service import (
+                    extract_best_quotes_batch_async,
+                    EmbedService,
+                )
+                if EmbedService.is_available():
+                    # Prepare batch items
+                    batch_items = [
+                        (src.get("claim_text", ""), src.get("content") or src.get("snippet") or "")
+                        for _, src in sources_for_quote_extraction
+                    ]
+                    
+                    # Single async batch call
+                    quotes = await extract_best_quotes_batch_async(batch_items)
+                    
+                    # Assign quotes to sources
+                    for i, (_, src) in enumerate(sources_for_quote_extraction):
+                        best_quote = quotes[i] if i < len(quotes) else None
+                        
+                        if best_quote:
+                            src["quote"] = best_quote
+                            src["quote_method"] = "semantic_batch"
+                            src["eal_enriched"] = True
+                            enriched_count += 1
+                            quoted_count += 1
+                        else:
+                            # Fallback to heuristic extraction
+                            content = src.get("content") or src.get("snippet") or ""
+                            heuristic_quotes = extract_quote_candidates(content)
+                            if heuristic_quotes:
+                                src["quote"] = heuristic_quotes[0]
+                                src["quote_method"] = "heuristic"
+                                src["eal_enriched"] = True
+                                enriched_count += 1
+                                quoted_count += 1
                 else:
-                    # Fallback to heuristic extraction
-                    quotes = extract_quote_candidates(current_content)
-                    if quotes:
-                        src["quote"] = quotes[0]
+                    # Embeddings unavailable - use heuristic for all
+                    for _, src in sources_for_quote_extraction:
+                        content = src.get("content") or src.get("snippet") or ""
+                        heuristic_quotes = extract_quote_candidates(content)
+                        if heuristic_quotes:
+                            src["quote"] = heuristic_quotes[0]
+                            src["quote_method"] = "heuristic"
+                            src["eal_enriched"] = True
+                            enriched_count += 1
+                            quoted_count += 1
+            except ImportError:
+                # Fallback to heuristic extraction
+                for _, src in sources_for_quote_extraction:
+                    content = src.get("content") or src.get("snippet") or ""
+                    heuristic_quotes = extract_quote_candidates(content)
+                    if heuristic_quotes:
+                        src["quote"] = heuristic_quotes[0]
                         src["quote_method"] = "heuristic"
-                
-                if src.get("quote"):
-                    src["eal_enriched"] = True
-                    enriched_count += 1
-                    quoted_count += 1
+                        src["eal_enriched"] = True
+                        enriched_count += 1
+                        quoted_count += 1
 
         Trace.event(
             "evidence.ladder.summary",
@@ -241,6 +276,7 @@ class SearchManager:
                 "fetches": fetch_count,
                 "quotes_added": quoted_count,
                 "enriched": enriched_count,
+                "batch_size": len(sources_for_quote_extraction),
             },
         )
 

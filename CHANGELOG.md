@@ -17,8 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fixed ClaimGraph role mapping (thesis->core, background->support)
 
 - M89: Open Source Readiness
-  - Offline core test suite guard (`SPECTRUE_TEST_OFFLINE=1`) that blocks sockets during tests
-  - CI workflow runs an explicit allowlist of offline tests (unit + key integrations)
+  - CI workflow runs an explicit allowlist of core tests (unit + key integrations)
 - M80: Claim-Centric Orchestration
   - `ClaimMetadata` schema with verification_target, claim_role, retrieval_policy
   - `ClaimOrchestrator` for building ExecutionPlans

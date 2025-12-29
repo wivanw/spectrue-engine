@@ -63,3 +63,6 @@ es:
       ### DATOS DE ENTRADA
       AFIRMACIÓN: {fact}
       CONTEXTO: {context}
+  ui:
+    popup:
+      not_available: "No disponible"

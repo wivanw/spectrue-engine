@@ -34,7 +34,7 @@ from spectrue_core.verification.sufficiency import (
     verdict_ready_for_claim,
     SufficiencyDecision,
     SufficiencyStatus,
-    get_domain_tier,
+    get_domain_tier,  # returns EvidenceChannel (enum)
 )
 from spectrue_core.agents.skills.query import generate_followup_query_from_evidence
 from spectrue_core.utils.trace import Trace
@@ -897,15 +897,33 @@ class PhaseRunner:
 
         # Apply channel filtering (best-effort).
         if phase and phase.channels:
-            allowed = set(phase.channels)
+            # Normalize phase.channels to string values (they may be EvidenceChannel enums or strings)
+            allowed: set[str] = set()
+            for x in (phase.channels or []):
+                if hasattr(x, "value"):
+                    allowed.add(str(x.value))
+                else:
+                    allowed.add(str(x))
+            
             filtered: list[dict] = []
             for src in normalized:
                 url = src.get("url", "")
                 if not url:
                     continue
                 domain = extract_domain(url)
-                tier = get_domain_tier(domain)
-                if tier in allowed:
+                chan = get_domain_tier(domain)  # EvidenceChannel enum
+                # Normalize to string key for comparison
+                chan_key = chan.value if hasattr(chan, "value") else str(chan)
+                
+                passed = chan_key in allowed
+                Trace.event("search.channel_filter.item", {
+                    "domain": domain,
+                    "chan_key": chan_key,
+                    "allowed": list(allowed),
+                    "passed": passed,
+                })
+                
+                if passed:
                     filtered.append(src)
             normalized = filtered
         

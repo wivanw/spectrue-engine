@@ -33,12 +33,60 @@ def clamp_score_evidence_result(result: dict) -> dict:
     result["danger_score"] = safe_score(result.get("danger_score"), default=-1.0)
     result["style_score"] = safe_score(result.get("style_score"), default=-1.0)
 
+    # Canonical verdict sets
+    CANONICAL_VERDICTS = {"verified", "refuted", "ambiguous"}
+    CANONICAL_STATES = {"supported", "refuted", "conflicted", "insufficient_evidence"}
+
     claim_verdicts = result.get("claim_verdicts")
     if isinstance(claim_verdicts, list):
         for cv in claim_verdicts:
             if isinstance(cv, dict):
-                cv["verdict_score"] = safe_score(cv.get("verdict_score", 0.5))
-                # Semantic contract: insufficient evidence is neutral (not false).
+                p = safe_score(cv.get("verdict_score", 0.5))
+                cv["verdict_score"] = p
+
+                # --- (1) Normalize verdict_state from p ---
+                # Contract: p >= 0.6 → supported, p <= 0.4 → refuted, else conflicted
+                raw_state = str(cv.get("verdict_state") or "").lower().strip()
+                if raw_state not in CANONICAL_STATES:
+                    # Derive verdict_state from p
+                    if p >= 0.6:
+                        cv["verdict_state"] = "supported"
+                    elif p <= 0.4:
+                        cv["verdict_state"] = "refuted"
+                    else:
+                        # 0.4 < p < 0.6 → conflicted (evidence exists but ambiguous)
+                        cv["verdict_state"] = "conflicted"
+                    Trace.event(
+                        "verdict.state_normalized",
+                        {
+                            "claim_id": cv.get("claim_id"),
+                            "p": p,
+                            "raw_state": raw_state or None,
+                            "normalized_state": cv["verdict_state"],
+                        },
+                    )
+
+                # --- (2) Normalize verdict (UI label) from p ---
+                raw_verdict = str(cv.get("verdict") or "").lower().strip()
+                if raw_verdict not in CANONICAL_VERDICTS:
+                    # Log non-canonical LLM verdict
+                    Trace.event(
+                        "verdict.label_noncanonical",
+                        {
+                            "claim_id": cv.get("claim_id"),
+                            "raw_verdict": raw_verdict or None,
+                            "p": p,
+                        },
+                    )
+                    # Normalize to canonical UI label
+                    if p >= 0.8:
+                        cv["verdict"] = "verified"
+                    elif p <= 0.2:
+                        cv["verdict"] = "refuted"
+                    else:
+                        cv["verdict"] = "ambiguous"
+
+                # --- (3) Semantic contract: insufficient evidence = 0.5 ---
                 vs = str(cv.get("verdict_state") or "").lower().strip()
                 if vs in {"insufficient_evidence", "insufficient evidence", "insufficient"}:
                     if cv["verdict_score"] != 0.5:

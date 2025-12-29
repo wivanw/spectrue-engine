@@ -14,6 +14,8 @@ import logging
 import math
 from typing import TYPE_CHECKING
 
+from spectrue_core.utils.trace import Trace
+
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
@@ -83,7 +85,10 @@ class EmbeddingClient:
         """
         if not texts:
             return []
-        
+        empty_texts = 0
+        api_error_texts = 0
+        fill_none_texts = 0
+
         # Fallback to EmbedService if no async client
         if self.client is None:
             try:
@@ -94,6 +99,15 @@ class EmbeddingClient:
                 pass
             # Return zero vectors if no service available
             logger.debug("[M72] No embedding client available, returning zero vectors")
+            Trace.event(
+                "embeddings.zero_vectors",
+                {
+                    "component": "embedding_client",
+                    "model": EMBEDDING_MODEL,
+                    "reason": "service_unavailable",
+                    "total_texts": len(texts),
+                },
+            )
             return [[0.0] * EMBEDDING_DIMENSIONS for _ in texts]
         
         # Check cache and identify texts that need embedding
@@ -104,6 +118,7 @@ class EmbeddingClient:
             if not text or not text.strip():
                 # Empty text gets zero vector
                 results[i] = [0.0] * EMBEDDING_DIMENSIONS
+                empty_texts += 1
                 continue
             
             cache_key = self._cache_key(text)
@@ -144,12 +159,42 @@ class EmbeddingClient:
             except Exception as e:
                 logger.warning("[M72] Embedding API error: %s", e)
                 # Fill with zero vectors on error
+                batch_missing = sum(1 for idx in batch_indices if results[idx] is None)
+                api_error_texts += batch_missing
                 for idx in batch_indices:
                     if results[idx] is None:
                         results[idx] = [0.0] * EMBEDDING_DIMENSIONS
         
         # Fill any remaining None with zero vectors
-        return [r if r is not None else [0.0] * EMBEDDING_DIMENSIONS for r in results]
+        final_results: list[list[float]] = []
+        for r in results:
+            if r is None:
+                fill_none_texts += 1
+                final_results.append([0.0] * EMBEDDING_DIMENSIONS)
+            else:
+                final_results.append(r)
+
+        if empty_texts or api_error_texts or fill_none_texts:
+            logger.debug(
+                "[M72] Zero vectors summary: total=%d empty=%d api_error=%d fill_none=%d",
+                len(texts),
+                empty_texts,
+                api_error_texts,
+                fill_none_texts,
+            )
+            Trace.event(
+                "embeddings.zero_vectors",
+                {
+                    "component": "embedding_client",
+                    "model": EMBEDDING_MODEL,
+                    "total_texts": len(texts),
+                    "empty_texts": empty_texts,
+                    "api_error_texts": api_error_texts,
+                    "fill_none_texts": fill_none_texts,
+                },
+            )
+
+        return final_results
     
     def _create_batches(
         self, 

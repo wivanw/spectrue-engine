@@ -50,3 +50,6 @@ uk:
       ### ВХІДНІ ДАНІ
       ТВЕРДЖЕННЯ: {fact}
       КОНТЕКСТ: {context}
+  ui:
+    popup:
+      not_available: "Недоступно"

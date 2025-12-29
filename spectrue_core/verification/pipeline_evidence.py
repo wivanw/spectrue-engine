@@ -63,7 +63,7 @@ def _claim_text(cv: dict) -> str:
     text = cv.get("claim_text") or cv.get("claim") or cv.get("text") or ""
     return str(text).strip()
 
-def _mark_anchor_duplicates(
+def _mark_anchor_duplicates_sync(
     *,
     anchor_claim_id: str | None,
     claim_verdicts: list[dict],
@@ -71,11 +71,7 @@ def _mark_anchor_duplicates(
     tau: float = 0.90,
 ) -> None:
     """
-    Mark secondary claims that are semantic duplicates of the anchor claim.
-    Contract:
-      - anchor vs secondary only
-      - embedding-based cosine similarity
-      - no filtering, only marking
+    Sync implementation of anchor duplicate marking.
     """
     if not anchor_claim_id or not claim_verdicts:
         return
@@ -123,6 +119,62 @@ def _mark_anchor_duplicates(
             cv["dup_sim"] = float(sim)
         else:
             cv["duplicate_of_anchor"] = False
+
+
+async def _mark_anchor_duplicates_async(
+    *,
+    anchor_claim_id: str | None,
+    claim_verdicts: list[dict],
+    embed_service: type[EmbedService] = EmbedService,
+    tau: float = 0.90,
+) -> None:
+    """
+    Async version: runs embedding in thread pool to avoid blocking.
+    """
+    if not anchor_claim_id or not claim_verdicts:
+        return
+    if not embed_service.is_available():
+        return
+    
+    import concurrent.futures
+    from functools import partial
+    
+    loop = asyncio.get_running_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        await loop.run_in_executor(
+            executor,
+            partial(
+                _mark_anchor_duplicates_sync,
+                anchor_claim_id=anchor_claim_id,
+                claim_verdicts=claim_verdicts,
+                embed_service=embed_service,
+                tau=tau,
+            ),
+        )
+
+
+def _mark_anchor_duplicates(
+    *,
+    anchor_claim_id: str | None,
+    claim_verdicts: list[dict],
+    embed_service: type[EmbedService] = EmbedService,
+    tau: float = 0.90,
+) -> None:
+    """
+    Mark secondary claims that are semantic duplicates of the anchor claim.
+    Contract:
+      - anchor vs secondary only
+      - embedding-based cosine similarity
+      - no filtering, only marking
+    
+    Note: This is a sync wrapper. Use _mark_anchor_duplicates_async in async context.
+    """
+    _mark_anchor_duplicates_sync(
+        anchor_claim_id=anchor_claim_id,
+        claim_verdicts=claim_verdicts,
+        embed_service=embed_service,
+        tau=tau,
+    )
 
 def _compute_article_g_from_anchor(
     *,
@@ -412,35 +464,19 @@ async def run_evidence_flow(
             importance_by_claim[cid_norm] = float(claim.get("importance", 1.0) or 1.0)
         except Exception:
             importance_by_claim[cid_norm] = 1.0
+    
     if isinstance(claim_verdicts, list):
-        for cv in claim_verdicts:
-            if not isinstance(cv, dict):
-                continue
-            claim_id = _norm_id(cv.get("claim_id"))
-            if not claim_id and claims:
-                claim_id = _norm_id(claims[0].get("id") or "c1")
-                cv["claim_id"] = claim_id
-
-            claim_obj = None
-            for c in claims or []:
-                if _norm_id(c.get("id") or c.get("claim_id")) == claim_id:
-                    claim_obj = c
-                    break
-            temporality = claim_obj.get("temporality") if isinstance(claim_obj, dict) else None
-
-            items = pack.get("items", []) if isinstance(pack, dict) else []
-            has_direct_evidence = False
-            if isinstance(items, list):
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    if claim_id and item.get("claim_id") not in (None, claim_id):
-                        continue
-                    stance = str(item.get("stance") or "").upper()
-                    if stance in ("SUPPORT", "REFUTE") and item.get("quote"):
-                        has_direct_evidence = True
-                        break
-
+        # Prepare data for parallel processing
+        def _process_single_cv(cv_data: dict) -> dict:
+            """Process a single claim verdict - runs in thread pool."""
+            cv = cv_data["cv"]
+            claim_id = cv_data["claim_id"]
+            claim_obj = cv_data["claim_obj"]
+            temporality = cv_data["temporality"]
+            has_direct_evidence = cv_data["has_direct_evidence"]
+            pack_ref = cv_data["pack"]
+            explainability = cv_data["explainability"]
+            
             agg = None
             if has_direct_evidence:
                 Trace.event(
@@ -452,7 +488,7 @@ async def run_evidence_flow(
                     },
                 )
                 agg = aggregate_claim_verdict(
-                    pack,
+                    pack_ref,
                     policy={},
                     claim_id=claim_id,
                     temporality=temporality if isinstance(temporality, dict) else None,
@@ -472,14 +508,15 @@ async def run_evidence_flow(
                     },
                 )
                 agg = aggregate_claim_verdict(
-                    pack,
+                    pack_ref,
                     policy={},
                     claim_id=claim_id,
                     temporality=temporality if isinstance(temporality, dict) else None,
                 )
                 cv["reasons_short"] = cv.get("reasons_short", []) or []
 
-            explainability = result.get("explainability_score", -1.0)
+            # Explainability tier factor
+            explainability_update = None
             if isinstance(explainability, (int, float)) and explainability >= 0:
                 best_tier = agg.get("best_tier") if isinstance(agg, dict) else None
                 pre_a = float(explainability)
@@ -502,7 +539,7 @@ async def run_evidence_flow(
                     else:
                         post_a = _sigmoid(_logit(pre_a) + math.log(factor))
                     if abs(post_a - pre_a) > 1e-9:
-                        result["explainability_score"] = post_a
+                        explainability_update = post_a
                     Trace.event(
                         "verdict.explainability_tier_factor",
                         {
@@ -512,7 +549,7 @@ async def run_evidence_flow(
                             "prior": prior,
                             "baseline": _TIER_A_BASELINE,
                             "factor": factor,
-                            "post_A": post_a,
+                            "post_A": post_a if explainability_update else pre_a,
                             "source": source,
                         },
                     )
@@ -522,35 +559,109 @@ async def run_evidence_flow(
                         {"claim_id": claim_id, "best_tier": best_tier, "pre_A": pre_a},
                     )
 
-            veracity_debug.append(
-                {
-                    "claim_id": claim_id,
-                    "role": claim_obj.get("claim_role") if claim_obj else None,
-                    "target": claim_obj.get("verification_target") if claim_obj else None,
-                    "harm": claim_obj.get("harm_potential") if claim_obj else None,
-                    "llm_verdict": cv.get("verdict"),
-                    "llm_score": cv.get("verdict_score"),
-                    "agg_verdict": agg.get("verdict") if isinstance(agg, dict) else cv.get("verdict"),
-                    "agg_score": agg.get("verdict_score") if isinstance(agg, dict) else cv.get("verdict_score"),
-                    "has_direct_evidence": has_direct_evidence,
-                    "best_tier": agg.get("best_tier") if isinstance(agg, dict) else None,
-                }
-            )
+            veracity_entry = {
+                "claim_id": claim_id,
+                "role": claim_obj.get("claim_role") if claim_obj else None,
+                "target": claim_obj.get("verification_target") if claim_obj else None,
+                "harm": claim_obj.get("harm_potential") if claim_obj else None,
+                "llm_verdict": cv.get("verdict"),
+                "llm_score": cv.get("verdict_score"),
+                "agg_verdict": agg.get("verdict") if isinstance(agg, dict) else cv.get("verdict"),
+                "agg_score": agg.get("verdict_score") if isinstance(agg, dict) else cv.get("verdict_score"),
+                "has_direct_evidence": has_direct_evidence,
+                "best_tier": agg.get("best_tier") if isinstance(agg, dict) else None,
+            }
 
-            verdict_state = "insufficient_evidence"
-            if cv["verdict"] == "verified":
-                verdict_state = "supported"
-            elif cv["verdict"] == "refuted":
-                verdict_state = "refuted"
-            elif cv["verdict"] == "ambiguous":
-                verdict_state = "conflicted"
+            # Respect verdict_state if already normalized by parser
+            existing_state = str(cv.get("verdict_state") or "").lower().strip()
+            CANONICAL_STATES = {"supported", "refuted", "conflicted", "insufficient_evidence"}
+            
+            if existing_state in CANONICAL_STATES:
+                # Already normalized by clamp_score_evidence_result()
+                verdict_state = existing_state
+            else:
+                # Fallback mapping (should rarely happen after parser normalization)
+                verdict_state = "insufficient_evidence"
+                if cv["verdict"] == "verified":
+                    verdict_state = "supported"
+                elif cv["verdict"] == "refuted":
+                    verdict_state = "refuted"
+                elif cv["verdict"] == "ambiguous":
+                    verdict_state = "conflicted"
 
             cv["verdict_state"] = verdict_state
-            verdict_state_by_claim[claim_id] = verdict_state
+            
+            has_conflict = bool((cv.get("reasons_expert") or {}).get("conflict"))
 
-            conflict_detected = conflict_detected or bool(
-                (cv.get("reasons_expert") or {}).get("conflict")
-            )
+            return {
+                "claim_id": claim_id,
+                "verdict_state": verdict_state,
+                "veracity_entry": veracity_entry,
+                "explainability_update": explainability_update,
+                "has_conflict": has_conflict,
+            }
+        
+        # Prepare all CV data
+        cv_data_list = []
+        items = pack.get("items", []) if isinstance(pack, dict) else []
+        explainability = result.get("explainability_score", -1.0)
+        
+        for cv in claim_verdicts:
+            if not isinstance(cv, dict):
+                continue
+            claim_id = _norm_id(cv.get("claim_id"))
+            if not claim_id and claims:
+                claim_id = _norm_id(claims[0].get("id") or "c1")
+                cv["claim_id"] = claim_id
+
+            claim_obj = None
+            for c in claims or []:
+                if _norm_id(c.get("id") or c.get("claim_id")) == claim_id:
+                    claim_obj = c
+                    break
+            temporality = claim_obj.get("temporality") if isinstance(claim_obj, dict) else None
+
+            has_direct_evidence = False
+            if isinstance(items, list):
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    if claim_id and item.get("claim_id") not in (None, claim_id):
+                        continue
+                    stance = str(item.get("stance") or "").upper()
+                    if stance in ("SUPPORT", "REFUTE") and item.get("quote"):
+                        has_direct_evidence = True
+                        break
+            
+            cv_data_list.append({
+                "cv": cv,
+                "claim_id": claim_id,
+                "claim_obj": claim_obj,
+                "temporality": temporality,
+                "has_direct_evidence": has_direct_evidence,
+                "pack": pack,
+                "explainability": explainability,
+            })
+        
+        # Process in parallel using thread pool
+        import concurrent.futures
+        
+        if len(cv_data_list) > 1:
+            # Parallel execution for multiple claims
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(cv_data_list))) as executor:
+                results_list = list(executor.map(_process_single_cv, cv_data_list))
+        else:
+            # Sequential for single claim (avoid thread overhead)
+            results_list = [_process_single_cv(d) for d in cv_data_list]
+        
+        # Merge results
+        for res in results_list:
+            verdict_state_by_claim[res["claim_id"]] = res["verdict_state"]
+            veracity_debug.append(res["veracity_entry"])
+            if res["explainability_update"] is not None:
+                result["explainability_score"] = res["explainability_update"]
+            if res["has_conflict"]:
+                conflict_detected = True
 
         changed = apply_dependency_penalties(claim_verdicts, claims)
         # Do NOT recompute article-level G as an average across claims.
@@ -561,7 +672,7 @@ async def run_evidence_flow(
 
     # Anchor ↔ secondary semantic dedup (marking only)
     try:
-        _mark_anchor_duplicates(
+        await _mark_anchor_duplicates_async(
             anchor_claim_id=anchor_claim_id,
             claim_verdicts=claim_verdicts if isinstance(claim_verdicts, list) else [],
             embed_service=EmbedService,

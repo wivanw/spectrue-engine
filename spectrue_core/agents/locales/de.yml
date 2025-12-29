@@ -50,3 +50,6 @@ de:
       ### EINGABEDATEN
       BEHAUPTUNG: {fact}
       KONTEXT: {context}
+  ui:
+    popup:
+      not_available: "Nicht verfügbar"

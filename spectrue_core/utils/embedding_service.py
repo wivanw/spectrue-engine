@@ -15,6 +15,8 @@ import math
 import os
 from typing import TYPE_CHECKING
 
+from spectrue_core.utils.trace import Trace
+
 if TYPE_CHECKING:
     from openai import OpenAI
 
@@ -92,12 +94,6 @@ class EmbedService:
         if cls._client is not None:
             return True
         if cls._available is None:
-            if (os.getenv("SPECTRUE_TEST_OFFLINE") or "").strip().lower() in {
-                "1", "true", "yes", "y", "on"
-            }:
-                cls._available = False
-                logger.debug("[Embeddings] Offline test mode enabled")
-                return cls._available
             try:
                 import openai  # noqa: F401
             except ImportError:
@@ -165,10 +161,15 @@ class EmbedService:
 
         results: list[list[float] | None] = [None] * len(texts)
         texts_to_embed: list[tuple[int, str]] = []
+        empty_texts = 0
+        api_error_texts = 0
+        zero_norm_texts = 0
+        fill_none_texts = 0
 
         for i, text in enumerate(texts):
             if not text or not str(text).strip():
                 results[i] = [0.0] * EMBEDDING_DIMENSIONS
+                empty_texts += 1
                 continue
 
             cleaned = str(text).strip()
@@ -194,19 +195,50 @@ class EmbedService:
                     for i, embedding_data in enumerate(response.data):
                         idx = batch_indices[i]
                         embedding = _normalize(list(embedding_data.embedding))
+                        if not embedding or not any(embedding):
+                            zero_norm_texts += 1
                         cache_key = cls._cache_key(batch_texts[i])
                         cls._cache[cache_key] = embedding
                         results[idx] = embedding
                 except Exception as e:
                     logger.warning("[Embeddings] Embedding API error: %s", e)
+                    batch_missing = sum(1 for idx in batch_indices if results[idx] is None)
+                    api_error_texts += batch_missing
                     for idx in batch_indices:
                         if results[idx] is None:
                             results[idx] = [0.0] * EMBEDDING_DIMENSIONS
 
-        return [
-            r if r is not None else [0.0] * EMBEDDING_DIMENSIONS
-            for r in results
-        ]
+        final_results: list[list[float]] = []
+        for r in results:
+            if r is None:
+                fill_none_texts += 1
+                final_results.append([0.0] * EMBEDDING_DIMENSIONS)
+            else:
+                final_results.append(r)
+
+        if empty_texts or api_error_texts or zero_norm_texts or fill_none_texts:
+            logger.debug(
+                "[Embeddings] Zero vectors summary: total=%d empty=%d api_error=%d zero_norm=%d fill_none=%d",
+                len(texts),
+                empty_texts,
+                api_error_texts,
+                zero_norm_texts,
+                fill_none_texts,
+            )
+            Trace.event(
+                "embeddings.zero_vectors",
+                {
+                    "component": "embed_service",
+                    "model": EMBEDDING_MODEL,
+                    "total_texts": len(texts),
+                    "empty_texts": empty_texts,
+                    "api_error_texts": api_error_texts,
+                    "zero_norm_texts": zero_norm_texts,
+                    "fill_none_texts": fill_none_texts,
+                },
+            )
+
+        return final_results
 
     @classmethod
     def embed_single(cls, text: str) -> list[float]:
@@ -325,3 +357,171 @@ def extract_best_quote(
 
     quote = sentences[best_idx]
     return quote[:max_len] if len(quote) > max_len else quote
+
+
+async def extract_best_quote_async(
+    claim_text: str,
+    content: str,
+    *,
+    max_len: int = 300,
+    min_similarity: float = 0.3,
+) -> str | None:
+    """
+    Async version of extract_best_quote.
+    
+    Runs embedding operations in thread pool to avoid blocking event loop.
+    """
+    import asyncio
+    import concurrent.futures
+    from functools import partial
+    
+    if not EmbedService.is_available():
+        return None
+    
+    loop = asyncio.get_running_loop()
+    
+    # Use shared thread pool
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        result = await loop.run_in_executor(
+            executor,
+            partial(extract_best_quote, claim_text, content, max_len=max_len, min_similarity=min_similarity),
+        )
+    
+    return result
+
+
+def extract_best_quotes_batch(
+    items: list[tuple[str, str]],
+    *,
+    max_len: int = 300,
+    min_similarity: float = 0.3,
+) -> list[str | None]:
+    """
+    Batch extract quotes for multiple (claim_text, content) pairs.
+    
+    More efficient than calling extract_best_quote() N times because
+    it batches all embeddings into a single API call.
+    
+    Args:
+        items: List of (claim_text, content) tuples
+        max_len: Maximum quote length
+        min_similarity: Minimum similarity threshold
+    
+    Returns:
+        List of best quotes (or None) for each item
+    """
+    if not items:
+        return []
+    
+    if not EmbedService.is_available():
+        Trace.event("embeddings.caller", {
+            "caller": "extract_best_quotes_batch",
+            "action": "skip",
+            "reason": "embed_service_unavailable",
+        })
+        return [None] * len(items)
+    
+    Trace.event("embeddings.caller", {
+        "caller": "extract_best_quotes_batch",
+        "action": "start",
+        "items_count": len(items),
+    })
+    
+    # Pre-process: split sentences for each content
+    all_sentences: list[list[str]] = []
+    claim_texts: list[str] = []
+    
+    for claim_text, content in items:
+        sentences = split_sentences(content) if content else []
+        all_sentences.append(sentences)
+        claim_texts.append(claim_text)
+    
+    # Flatten all texts for single batch embedding
+    # Structure: [claim1, sent1_1, sent1_2, ..., claim2, sent2_1, ...]
+    flat_texts: list[str] = []
+    offsets: list[tuple[int, int, int]] = []  # (claim_idx, sentence_start, sentence_count)
+    
+    for i, (claim_text, sentences) in enumerate(zip(claim_texts, all_sentences)):
+        claim_idx = len(flat_texts)
+        flat_texts.append(claim_text)
+        sent_start = len(flat_texts)
+        flat_texts.extend(sentences)
+        offsets.append((claim_idx, sent_start, len(sentences)))
+    
+    if not flat_texts:
+        return [None] * len(items)
+    
+    # Single batch embedding call
+    embeddings = EmbedService.embed(flat_texts)
+    
+    if not embeddings:
+        return [None] * len(items)
+    
+    # Compute similarities and find best quotes
+    results: list[str | None] = []
+    
+    for i, (claim_idx, sent_start, sent_count) in enumerate(offsets):
+        if sent_count == 0:
+            # No sentences - return truncated content or None
+            content = items[i][1]
+            results.append(content[:max_len] if content else None)
+            continue
+        
+        claim_vec = embeddings[claim_idx]
+        best_score = -1.0
+        best_sent_idx = -1
+        
+        for j in range(sent_count):
+            sent_vec = embeddings[sent_start + j]
+            score = float(_dot(claim_vec, sent_vec))
+            if score > best_score:
+                best_score = score
+                best_sent_idx = j
+        
+        if best_sent_idx < 0 or best_score < min_similarity:
+            results.append(None)
+        else:
+            quote = all_sentences[i][best_sent_idx]
+            results.append(quote[:max_len] if len(quote) > max_len else quote)
+    
+    non_null = sum(1 for r in results if r is not None)
+    Trace.event("embeddings.caller.result", {
+        "caller": "extract_best_quotes_batch",
+        "total": len(results),
+        "non_null": non_null,
+    })
+    
+    return results
+
+
+async def extract_best_quotes_batch_async(
+    items: list[tuple[str, str]],
+    *,
+    max_len: int = 300,
+    min_similarity: float = 0.3,
+) -> list[str | None]:
+    """
+    Async batch quote extraction.
+    
+    Runs in thread pool to avoid blocking event loop.
+    """
+    import asyncio
+    import concurrent.futures
+    from functools import partial
+    
+    if not items:
+        return []
+    
+    if not EmbedService.is_available():
+        return [None] * len(items)
+    
+    loop = asyncio.get_running_loop()
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        result = await loop.run_in_executor(
+            executor,
+            partial(extract_best_quotes_batch, items, max_len=max_len, min_similarity=min_similarity),
+        )
+    
+    return result
+
