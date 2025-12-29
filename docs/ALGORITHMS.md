@@ -77,28 +77,6 @@ L_max = 2.0   # Maximum log-odds impact
 
 ---
 
-### Tier-Based Credibility Priors [B]
-
-**Status:** Engineering Heuristic (Empirically Tuned)
-
-Source tier determines the starting belief:
-
-| Tier | Description | Veracity Prior |
-|------|-------------|----------------|
-| A | Official/Institutional | 0.85 |
-| A' | Official Social | 0.75 |
-| B | Trusted Media | 0.70 |
-| C | Local Media | 0.55 |
-| D | Social | 0.35 |
-
-**Code location:** `spectrue_core/scoring/priors.py` → `calculate_prior()`
-
-> ⚠️ **Epistemological Note:** These values are **NOT derived from academic literature**.
-> They were empirically tuned based on internal observations of source accuracy.
-> Different use cases may require different priors.
-
----
-
 ### Consensus Cap [C]
 
 **Status:** Constraint-Based Safeguard (Non-Bayesian)

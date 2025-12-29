@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- M112: Learned Scoring Calibration
+  - `CalibrationRegistry` and `CalibrationModel` for calibrated scoring models
+  - Logistic scoring for search relevance and evidence likeness
+  - Aggregation policy weights (conflict, temporal, diversity penalties)
+  - Feature flags: `SPECTRUE_CALIBRATION_ENABLED` and per-model toggles
 - M105: Pipeline Evidence & Billing Fixes
   - Fixed "100% CONTEXT" degradation in Evidence Matrix (added `search_query` to LLM context)
   - Fixed Frontend Cost Display showing "0 credits" (now reads `total_credits` from engine cost summary)
@@ -28,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 59 new tests (orchestrator, sufficiency, integration)
 
 ### Changed
+- **Removed Tier A' (Social Inline Verification)**: LLM cannot reliably verify social account identity without API access
 - Docs: Updated module trees (ClaimGraph split + schema serialization helper)
 - Horoscopes and predictions now get `verification_target=none` and skip search
 - RGBA aggregation uses weighted average (context claims weight=0)
