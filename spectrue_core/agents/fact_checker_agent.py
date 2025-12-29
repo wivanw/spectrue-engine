@@ -10,7 +10,6 @@ from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
 from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
 from spectrue_core.agents.skills.relevance import RelevanceSkill
 from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
-from spectrue_core.verification.inline_verification import InlineVerificationSkill
 import logging
 
 logger = logging.getLogger(__name__)
@@ -39,8 +38,6 @@ class FactCheckerAgent:
         self.oracle_skill = OracleValidationSkill(self.config, self.llm_client)
         # M66: Relevance skill for semantic gating
         self.relevance_skill = RelevanceSkill(self.config, self.llm_client)
-        # M67: Inline Verification (Social Identity check)
-        self.inline_verification_skill = InlineVerificationSkill(self.config, self.llm_client)
         # M72: Edge Typing for ClaimGraph C-stage
         self.edge_typing_skill = EdgeTypingSkill(self.config, self.llm_client)
 
@@ -86,9 +83,6 @@ class FactCheckerAgent:
         """M66: Verify if search results are semantically relevant to claims."""
         return await self.relevance_skill.verify_search_relevance(claims, search_results)
         
-    async def verify_social_statement(self, claim: Claim, snippet: str, url: str) -> dict:
-        """M67: Verify Key Official Statement from Social Media (Tier A')."""
-        return await self.inline_verification_skill.verify_social_statement(claim, snippet, url)
 
     async def verify_oracle_relevance(self, user_fact: str, oracle_claim: str, oracle_rating: str) -> bool:
         """
