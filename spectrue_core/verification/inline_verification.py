@@ -27,15 +27,8 @@ class _SocialDecisionParams:
     @staticmethod
     def from_env() -> "_SocialDecisionParams":
         # Conservative defaults: false promotion is costlier than missing a true one.
-        # Support both old (M67) and new (SOCIAL) env var names for backwards compatibility.
-        benefit_true = float(
-            os.getenv("SPECTRUE_SOCIAL_BENEFIT_TRUE") 
-            or os.getenv("SPECTRUE_M67_BENEFIT_TRUE", "1.0")
-        )
-        cost_false = float(
-            os.getenv("SPECTRUE_SOCIAL_COST_FALSE")
-            or os.getenv("SPECTRUE_M67_COST_FALSE", "2.0")
-        )
+        benefit_true = float(os.getenv("SPECTRUE_SOCIAL_BENEFIT_TRUE", "1.0"))
+        cost_false = float(os.getenv("SPECTRUE_SOCIAL_COST_FALSE", "2.0"))
         # Avoid zero/negative which would break EV semantics.
         benefit_true = benefit_true if benefit_true > 0 else 1.0
         cost_false = cost_false if cost_false > 0 else 2.0
