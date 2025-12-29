@@ -18,8 +18,8 @@ class _DummyLLM:
 @pytest.mark.asyncio
 async def test_m67_promotes_by_expected_value_no_hard_threshold(monkeypatch):
     # Make false promotions costly but still allow promotion if probability is strong.
-    monkeypatch.setenv("SPECTRUE_M67_BENEFIT_TRUE", "1.0")
-    monkeypatch.setenv("SPECTRUE_M67_COST_FALSE", "2.0")
+    monkeypatch.setenv("SPECTRUE_SOCIAL_BENEFIT_TRUE", "1.0")
+    monkeypatch.setenv("SPECTRUE_SOCIAL_COST_FALSE", "2.0")
 
     llm = _DummyLLM(
         responses=[
@@ -37,8 +37,8 @@ async def test_m67_promotes_by_expected_value_no_hard_threshold(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_m67_does_not_promote_when_uncertain(monkeypatch):
-    monkeypatch.setenv("SPECTRUE_M67_BENEFIT_TRUE", "1.0")
-    monkeypatch.setenv("SPECTRUE_M67_COST_FALSE", "2.0")
+    monkeypatch.setenv("SPECTRUE_SOCIAL_BENEFIT_TRUE", "1.0")
+    monkeypatch.setenv("SPECTRUE_SOCIAL_COST_FALSE", "2.0")
 
     llm = _DummyLLM(
         responses=[

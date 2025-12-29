@@ -13,7 +13,7 @@ def _clamp01(x: float) -> float:
 
 
 @dataclass(frozen=True)
-class _M67DecisionParams:
+class _SocialDecisionParams:
     """Decision economics for A' promotion.
 
     We intentionally avoid hard caps like p>0.8.
@@ -25,19 +25,26 @@ class _M67DecisionParams:
     cost_false: float
 
     @staticmethod
-    def from_env() -> "_M67DecisionParams":
+    def from_env() -> "_SocialDecisionParams":
         # Conservative defaults: false promotion is costlier than missing a true one.
-        benefit_true = float(os.getenv("SPECTRUE_M67_BENEFIT_TRUE", "1.0"))
-        cost_false = float(os.getenv("SPECTRUE_M67_COST_FALSE", "2.0"))
+        # Support both old (M67) and new (SOCIAL) env var names for backwards compatibility.
+        benefit_true = float(
+            os.getenv("SPECTRUE_SOCIAL_BENEFIT_TRUE") 
+            or os.getenv("SPECTRUE_M67_BENEFIT_TRUE", "1.0")
+        )
+        cost_false = float(
+            os.getenv("SPECTRUE_SOCIAL_COST_FALSE")
+            or os.getenv("SPECTRUE_M67_COST_FALSE", "2.0")
+        )
         # Avoid zero/negative which would break EV semantics.
         benefit_true = benefit_true if benefit_true > 0 else 1.0
         cost_false = cost_false if cost_false > 0 else 2.0
-        return _M67DecisionParams(benefit_true=benefit_true, cost_false=cost_false)
+        return _SocialDecisionParams(benefit_true=benefit_true, cost_false=cost_false)
 
 class InlineVerificationSkill(BaseSkill):
     """
     Skill for verifying specific types of evidence inline (e.g., Social Media Identity).
-    Part of Tier A' Verification (M67).
+    Part of Tier A' Verification (Social Inline Verification).
     """
 
     async def verify_social_statement(
@@ -82,7 +89,7 @@ class InlineVerificationSkill(BaseSkill):
         if not social_snippet or not claim_text:
             return {"is_identity_verified": 0.0, "is_statement_supported": 0.0, "tier": "D"}
 
-        params = _M67DecisionParams.from_env()
+        params = _SocialDecisionParams.from_env()
 
         # 1) LLM returns probabilistic *features* (soft evidence), not a verdict.
         identity = await self._check_identity(str(claim_text), profile_url, social_snippet)
