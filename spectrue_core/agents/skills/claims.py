@@ -3,6 +3,8 @@ from .base_skill import BaseSkill, logger
 from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
+import re
+from spectrue_core.agents.llm_client import is_schema_failure
 from .claims_prompts import (
     build_claim_strategist_instructions,
     build_claim_strategist_prompt,
@@ -34,6 +36,7 @@ from spectrue_core.agents.skills.claim_metadata_parser import (
     default_channels as default_channels_v1,
 )
 from spectrue_core.runtime_config import ContentBudgetConfig
+from spectrue_core.agents.llm_schemas import CLAIM_EXTRACTION_SCHEMA
 
 class ClaimExtractionSkill(BaseSkill):
     
@@ -139,6 +142,7 @@ class ClaimExtractionSkill(BaseSkill):
                 model="gpt-5-nano",
                 input=prompt,
                 instructions=instructions,
+                response_schema=CLAIM_EXTRACTION_SCHEMA,
                 reasoning_effort="low",
                 cache_key=cache_key,
                 timeout=dynamic_timeout,
@@ -217,7 +221,12 @@ class ClaimExtractionSkill(BaseSkill):
                     query_candidates=query_candidates,
                     search_method=rc.get("search_method", "general_search"),
                     evidence_need=rc.get("evidence_need", "unknown"),
-                    anchor=self._locate_anchor(rc.get("text", ""), chunks),
+                    anchor=self._locate_anchor(
+                        rc.get("text", ""),
+                        normalized_text=normalized,
+                        chunks=chunks,
+                        full_text=text,
+                    ),
                     harm_potential=harm_potential,
                     claim_category=claim_category,
                     satire_likelihood=satire_likelihood,
@@ -307,6 +316,9 @@ class ClaimExtractionSkill(BaseSkill):
             return all_claims, should_check_oracle_agg, article_intent_agg, stitched_text
 
         except Exception as e:
+            if is_schema_failure(e):
+                logger.exception("[M48] Claim extraction schema failure: %s", e)
+                raise
             logger.warning("[M48] Claim extraction failed: %s. Using fallback.", e)
             fallback_text = text[:300] + "..." if len(text) > 300 else text
             return [
@@ -485,27 +497,132 @@ class ClaimExtractionSkill(BaseSkill):
         except Exception:
             return None
 
-    def _locate_anchor(self, text: str, chunks: list[TextChunk] | None) -> ClaimAnchor | None:
+    def _locate_anchor(
+        self,
+        text: str,
+        *,
+        normalized_text: str | None,
+        chunks: list[TextChunk] | None,
+        full_text: str | None = None,
+    ) -> ClaimAnchor | None:
         """
         Locate claim anchor within original chunks (deterministic substring match).
         """
         if not text or not chunks:
-            return None
+            chunks = []
 
-        target = " ".join(text.lower().split())[:100]
-        if not target:
-            return None
+        candidates = []
+        for candidate in (text, normalized_text):
+            if not isinstance(candidate, str):
+                continue
+            cleaned = candidate.strip()
+            if cleaned and cleaned not in candidates:
+                candidates.append(cleaned)
 
-        for ch in chunks:
-            hay = " ".join(ch.text.lower().split())
-            if target in hay:
-                start = hay.find(target)
+        def _normalize(val: str, *, strip_punct: bool = False) -> str:
+            out = val.lower()
+            if strip_punct:
+                out = re.sub(r"[^a-z0-9]+", " ", out)
+            return " ".join(out.split())
+
+        for candidate in candidates:
+            target = candidate.lower()
+            if target:
+                for ch in chunks:
+                    hay_raw = ch.text.lower()
+                    if target in hay_raw:
+                        start = hay_raw.find(target)
+                        return {
+                            "chunk_id": ch.chunk_id,
+                            "char_start": ch.char_start + start,
+                            "char_end": ch.char_start + start + len(candidate),
+                            "section_path": ch.section_path,
+                        }
+
+            target = _normalize(candidate)[:160]
+            if target:
+                for ch in chunks:
+                    hay = _normalize(ch.text)
+                    if target in hay:
+                        start = hay.find(target)
+                        return {
+                            "chunk_id": ch.chunk_id,
+                            "char_start": ch.char_start + start,
+                            "char_end": ch.char_start + start + len(candidate),
+                            "section_path": ch.section_path,
+                        }
+
+            target = _normalize(candidate, strip_punct=True)[:160]
+            if target:
+                for ch in chunks:
+                    hay = _normalize(ch.text, strip_punct=True)
+                    if target in hay:
+                        start = hay.find(target)
+                        return {
+                            "chunk_id": ch.chunk_id,
+                            "char_start": ch.char_start + start,
+                            "char_end": ch.char_start + start + len(candidate),
+                            "section_path": ch.section_path,
+                        }
+
+        if full_text:
+            anchor = self._locate_anchor_in_text(full_text, candidates)
+            if anchor:
+                Trace.event(
+                    "anchor_position.fallback",
+                    {
+                        "method": anchor["method"],
+                        "match_quality": anchor["match_quality"],
+                        "candidate_len": anchor["candidate_len"],
+                        "candidate_sample": (candidates[0][:80] if candidates else ""),
+                    },
+                )
                 return {
-                    "chunk_id": ch.chunk_id,
-                    "char_start": ch.char_start + start,
-                    "char_end": ch.char_start + start + len(text),
-                    "section_path": ch.section_path,
+                    "chunk_id": "full_text",
+                    "char_start": anchor["char_start"],
+                    "char_end": anchor["char_end"],
+                    "section_path": [],
                 }
+
+        return None
+
+    def _locate_anchor_in_text(
+        self,
+        full_text: str,
+        candidates: list[str],
+    ) -> dict[str, object] | None:
+        if not full_text or not candidates:
+            return None
+
+        hay = full_text.lower()
+        for candidate in candidates:
+            cand = candidate.strip().lower()
+            if not cand:
+                continue
+            idx = hay.find(cand)
+            if idx >= 0:
+                return {
+                    "char_start": idx,
+                    "char_end": idx + len(cand),
+                    "method": "exact",
+                    "match_quality": 1.0,
+                    "candidate_len": len(cand),
+                }
+
+            tokens = re.findall(r"[\w]+", cand, flags=re.UNICODE)
+            if len(tokens) < 2:
+                continue
+            pattern = r"\b" + r"\W+".join(re.escape(t) for t in tokens) + r"\b"
+            match = re.search(pattern, hay, flags=re.UNICODE)
+            if match:
+                return {
+                    "char_start": match.start(),
+                    "char_end": match.end(),
+                    "method": "token_span",
+                    "match_quality": 0.6,
+                    "candidate_len": len(cand),
+                }
+
         return None
 
     def _should_check_oracle(

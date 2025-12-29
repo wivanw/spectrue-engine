@@ -4,6 +4,8 @@ from .base_skill import BaseSkill, logger
 from spectrue_core.verification.trusted_sources import AVAILABLE_TOPICS
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
+from spectrue_core.agents.llm_schemas import QUERY_GENERATION_SCHEMA
+from spectrue_core.agents.llm_client import is_schema_failure
 
 FOLLOWUP_QUERY_TYPES = {
     "clarify_entity",
@@ -145,6 +147,7 @@ class QuerySkill(BaseSkill):
         instructions = f"""You are a fact-checking search query generator.
 Requirements:
 - Output valid JSON (no markdown) with keys: "claim" (object), "queries" (list), and "topics" (list).
+- "claim": object with key "text" containing the TARGET_CLAIM.
 - "topics": select ALL matching topics from this list: [{topics_list_str}].
 - Produce 2 queries:
   1) English: Pure factual query.
@@ -176,6 +179,7 @@ CONTEXT:
                 model="gpt-5-nano",
                 input=prompt,
                 instructions=instructions,
+                response_schema=QUERY_GENERATION_SCHEMA,
                 reasoning_effort="low",
                 cache_key=f"query_gen_v3_{target_lang_code}", # Stable prefix per language
                 timeout=float(self.runtime.llm.nano_timeout_sec),
@@ -192,5 +196,7 @@ CONTEXT:
 
         except Exception as e:
             logger.warning("[M48] Query generation failed: %s", e)
+            if is_schema_failure(e):
+                raise
             # Fallback
             return [full_statement[:150], full_statement[:150]]

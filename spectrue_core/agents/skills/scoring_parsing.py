@@ -22,6 +22,8 @@ def safe_score(val, default: float = -1.0) -> float:
 
 
 def clamp_score_evidence_result(result: dict) -> dict:
+    Trace.event("score_evidence.parsed_keys", {"keys": sorted(result.keys())})
+
     if "verified_score" in result:
         result["verified_score"] = safe_score(result["verified_score"], default=-1.0)
     else:
@@ -29,7 +31,31 @@ def clamp_score_evidence_result(result: dict) -> dict:
         # Pipeline selects article-level G from a single claim (anchor/thesis).
         result["verified_score"] = -1.0
 
-    result["explainability_score"] = safe_score(result.get("explainability_score"), default=-1.0)
+    explainability_raw = result.get("explainability_score")
+    confidence_raw = result.get("confidence_score")
+    if explainability_raw is None and confidence_raw is None:
+        raise ValueError("missing_explainability_score")
+    if explainability_raw is None:
+        explainability_raw = confidence_raw
+    if confidence_raw is None:
+        confidence_raw = explainability_raw
+
+    result["explainability_score"] = safe_score(explainability_raw, default=-1.0)
+    result["confidence_score"] = safe_score(confidence_raw, default=-1.0)
+    if result["explainability_score"] < 0 or result["confidence_score"] < 0:
+        raise ValueError("invalid_explainability_score")
+
+    Trace.event(
+        "score_evidence.parsed_scores",
+        {
+            "verified": result.get("verified_score"),
+            "explainability": result.get("explainability_score"),
+            "confidence": result.get("confidence_score"),
+            "danger": result.get("danger_score"),
+            "style": result.get("style_score"),
+        },
+    )
+
     result["danger_score"] = safe_score(result.get("danger_score"), default=-1.0)
     result["style_score"] = safe_score(result.get("style_score"), default=-1.0)
 

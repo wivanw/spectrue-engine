@@ -29,8 +29,11 @@ from spectrue_core.graph.types import (
     ClaimPostGraphMeta,
     ClaimPreGraphMeta,
     DedupeResult,
+    EdgeRelation,
     GraphResult,
     RankedClaim,
+    STRUCTURAL_RELATIONS,
+    CandidateEdge,
 )
 from spectrue_core.utils.trace import Trace
 
@@ -120,6 +123,60 @@ class ClaimGraphBuilder:
             self._trace_edges(sim_edges)
             self._trace_mst(mst_edges, len(nodes))
 
+            typed_edges: list[object] = []
+            typed_edges_by_relation: dict[str, int] = {}
+            structural_in: dict[str, float] = {}
+            contradict_in: dict[str, float] = {}
+
+            if self.edge_typing_skill and sim_edges:
+                node_map = {n.claim_id: n for n in nodes}
+                candidates: list[CandidateEdge] = []
+                for src, dst, sim_score in sim_edges:
+                    src_node = node_map.get(src)
+                    dst_node = node_map.get(dst)
+                    same_section = (
+                        src_node.section_id == dst_node.section_id if src_node and dst_node else False
+                    )
+                    candidates.append(
+                        CandidateEdge(
+                            src_id=src,
+                            dst_id=dst,
+                            reason="sim",
+                            sim_score=float(sim_score),
+                            same_section=same_section,
+                            cross_topic=False,
+                        )
+                    )
+
+                try:
+                    typed_edges = await self.edge_typing_skill.type_edges_batch(
+                        candidates, node_map
+                    )
+                except Exception as exc:
+                    logger.warning("[M72] Edge typing failed: %s", exc)
+                    Trace.event("edge_typing.error", {"error": str(exc)[:200]})
+                    typed_edges = []
+
+            kept_edges = []
+            min_edge_score = 0.6
+            for te in typed_edges or []:
+                if not te or te.relation == EdgeRelation.UNRELATED:
+                    continue
+                if float(te.score) < min_edge_score:
+                    continue
+                kept_edges.append(te)
+                typed_edges_by_relation[te.relation.value] = (
+                    typed_edges_by_relation.get(te.relation.value, 0) + 1
+                )
+                if te.relation in STRUCTURAL_RELATIONS:
+                    structural_in[te.dst_id] = structural_in.get(te.dst_id, 0.0) + float(te.score)
+                if te.relation == EdgeRelation.CONTRADICTS:
+                    contradict_in[te.dst_id] = contradict_in.get(te.dst_id, 0.0) + float(te.score)
+
+            result.typed_edges = kept_edges
+            result.typed_edges_kept_count = len(kept_edges)
+            result.typed_edges_by_relation = typed_edges_by_relation
+
             # Personalized PageRank
             teleport = {cid: meta.node_prior for cid, meta in pre_meta.items()}
             node_ids = [n.claim_id for n in nodes]
@@ -163,7 +220,23 @@ class ClaimGraphBuilder:
             selected: list[str] = []
             selection_trace: list[dict] = []
 
-            if budget > 0 and cost_map:
+            missing_all_costs = cost_info.get("missing_costs", 0) >= len(node_ids)
+            if missing_all_costs:
+                fallback_k = self.config.top_k or len(node_ids) or 0
+                selected = sorted(node_ids, key=lambda x: pr_scores.get(x, 0.0), reverse=True)[
+                    :fallback_k
+                ]
+                selection_mode = "rank_only_missing_costs"
+                selection_trace = [
+                    {
+                        "id": cid,
+                        "gain": pr_scores.get(cid, 0.0),
+                        "cost": 0.0,
+                        "remaining_budget": budget,
+                    }
+                    for cid in selected
+                ]
+            elif budget > 0 and cost_map:
                 selected, selection_trace = greedy_budgeted_submodular(
                     nodes=node_ids,
                     sim=sim,
@@ -209,7 +282,13 @@ class ClaimGraphBuilder:
                     }
             self._trace_selection(selected, selection_trace, budget, cost_info, selection_mode)
 
-            ranked = self._build_ranked(node_ids, pr_scores, selected)
+            ranked = self._build_ranked(
+                node_ids,
+                pr_scores,
+                selected,
+                structural_in=structural_in,
+                contradict_in=contradict_in,
+            )
             result.all_ranked = ranked
             result.key_claims = [r for r in ranked if r.is_key_claim]
 
@@ -343,16 +422,24 @@ class ClaimGraphBuilder:
         }
 
     def _build_ranked(
-        self, node_ids: list[str], pr_scores: dict[str, float], selected: list[str]
+        self,
+        node_ids: list[str],
+        pr_scores: dict[str, float],
+        selected: list[str],
+        *,
+        structural_in: dict[str, float] | None = None,
+        contradict_in: dict[str, float] | None = None,
     ) -> list[RankedClaim]:
         ranked: list[RankedClaim] = []
+        structural_in = structural_in or {}
+        contradict_in = contradict_in or {}
         for cid in sorted(node_ids, key=lambda x: pr_scores.get(x, 0.0), reverse=True):
             ranked.append(
                 RankedClaim(
                     claim_id=cid,
                     centrality_score=pr_scores.get(cid, 0.0),
-                    in_structural_weight=0.0,
-                    in_contradict_weight=0.0,
+                    in_structural_weight=structural_in.get(cid, 0.0),
+                    in_contradict_weight=contradict_in.get(cid, 0.0),
                     is_key_claim=cid in selected,
                 )
             )

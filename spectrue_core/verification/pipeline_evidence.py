@@ -251,6 +251,88 @@ def _explainability_factor_for_tier(tier: str | None) -> tuple[float, str, float
     return prior / _TIER_A_BASELINE, "best_tier", prior
 
 
+def _select_anchor_for_article_g(
+    *,
+    anchor_claim_id: str | None,
+    claim_verdicts: list[dict] | None,
+    veracity_debug: list[dict],
+) -> tuple[str | None, dict]:
+    debug: dict = {
+        "pre_anchor_id": anchor_claim_id,
+        "selected_anchor_id": anchor_claim_id,
+        "override_used": False,
+        "reason": "no_candidates",
+    }
+    if not claim_verdicts or not veracity_debug:
+        return anchor_claim_id, debug
+
+    verdict_score_by_claim: dict[str, float] = {}
+    for cv in claim_verdicts:
+        if not isinstance(cv, dict):
+            continue
+        cid = _norm_id(cv.get("claim_id"))
+        if not cid:
+            continue
+        score = cv.get("verdict_score")
+        if isinstance(score, (int, float)) and math.isfinite(float(score)):
+            verdict_score_by_claim[cid] = float(score)
+
+    candidates: list[dict] = []
+    for entry in veracity_debug:
+        if not isinstance(entry, dict):
+            continue
+        cid = _norm_id(entry.get("claim_id"))
+        if not cid:
+            continue
+        if not entry.get("has_direct_evidence"):
+            continue
+        p = verdict_score_by_claim.get(cid)
+        if p is None or not (0.0 < p < 1.0):
+            continue
+        best_tier = entry.get("best_tier")
+        factor, source, _prior = _explainability_factor_for_tier(best_tier)
+        if not isinstance(factor, (int, float)) or not math.isfinite(float(factor)):
+            continue
+        factor = max(0.0, float(factor))
+        score = abs(p - 0.5) * factor
+        candidates.append(
+            {
+                "id": cid,
+                "score": score,
+                "p": p,
+                "best_tier": best_tier,
+                "factor": factor,
+                "factor_source": source,
+            }
+        )
+
+    if not candidates:
+        return anchor_claim_id, debug
+
+    candidates.sort(key=lambda c: c["score"], reverse=True)
+    best = candidates[0]
+    if best["score"] <= 0:
+        debug["reason"] = "non_informative"
+        return anchor_claim_id, debug
+
+    selected_id = best["id"]
+    debug.update(
+        {
+            "selected_anchor_id": selected_id,
+            "override_used": _norm_id(selected_id) != _norm_id(anchor_claim_id),
+            "reason": "evidence_weighted_distance",
+            "selected_score": best["score"],
+            "selected_p": best["p"],
+            "selected_best_tier": best["best_tier"],
+            "selected_factor": best["factor"],
+            "selected_factor_source": best["factor_source"],
+            "candidate_count": len(candidates),
+            "top_candidates": candidates[:3],
+        }
+    )
+    return selected_id, debug
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceFlowInput:
     fact: str
@@ -747,9 +829,19 @@ async def run_evidence_flow(
         current_belief = apply_consensus_bound(current_belief, consensus)
         belief_g = log_odds_to_prob(current_belief.log_odds)
 
+        anchor_for_g = anchor_claim_id
+        anchor_dbg = {}
+        if isinstance(claim_verdicts, list) and veracity_debug:
+            anchor_for_g, anchor_dbg = _select_anchor_for_article_g(
+                anchor_claim_id=anchor_claim_id,
+                claim_verdicts=claim_verdicts,
+                veracity_debug=veracity_debug,
+            )
+            Trace.event("anchor_selection.post_evidence", anchor_dbg)
+
         # Article-level G: pure anchor formula (no thesis/worthiness heuristics, no dedup).
         g_article, g_dbg = _compute_article_g_from_anchor(
-            anchor_claim_id=anchor_claim_id,
+            anchor_claim_id=anchor_for_g,
             claim_verdicts=claim_verdicts if isinstance(claim_verdicts, list) else None,
             prior_p=0.5,
         )

@@ -162,6 +162,10 @@ Also assign:
 
 ## OUTPUT FORMAT
 
+IMPORTANT: Every claim MUST include all keys shown below. Use empty arrays/objects
+or neutral defaults when a field does not apply.
+- "text" MUST be an exact substring from the article (no paraphrase).
+
 ```json
 {{
   "article_intent": "news",
@@ -190,8 +194,7 @@ Also assign:
         "fallback": ["en"]
       }},
       "retrieval_policy": {{
-        "channels_allowed": ["authoritative", "reputable_news"],
-        "use_policy_by_channel": {{"social": "lead_only", "low_reliability_web": "lead_only"}}
+        "channels_allowed": ["authoritative", "reputable_news"]
       }},
       "metadata_confidence": "high",
       "search_strategy": {{
@@ -220,23 +223,43 @@ Also assign:
 **EXAMPLE: HOROSCOPE (verification_target=none)**
 ```json
 {{
-  "text": "Водоліям сьогодні пощастить у фінансах",
-  "verification_target": "none",
-  "claim_role": "background",
-  "claim_category": "OPINION",
-  "satire_likelihood": 0.0,
-  "check_worthiness": 0.1,
-  "structure": {{
-    "type": "forecast",
-    "premises": [],
-    "conclusion": "Водоліям сьогодні пощастить у фінансах",
-    "dependencies": []
-  }},
-  "search_locale_plan": {{"primary": "en", "fallback": []}},
-  "retrieval_policy": {{"channels_allowed": []}},
-  "metadata_confidence": "high",
-  "query_candidates": [],
-  "search_queries": []
+  "article_intent": "opinion",
+  "claims": [
+    {{
+      "text": "Водоліям сьогодні пощастить у фінансах",
+      "normalized_text": "Aquarius will have financial luck today",
+      "type": "opinion",
+      "claim_category": "OPINION",
+      "satire_likelihood": 0.0,
+      "topic_group": "Other",
+      "topic_key": "Horoscope",
+      "importance": 0.2,
+      "check_worthiness": 0.1,
+      "harm_potential": 1,
+      "verification_target": "none",
+      "claim_role": "background",
+      "structure": {{
+        "type": "forecast",
+        "premises": [],
+        "conclusion": "Водоліям сьогодні пощастить у фінансах",
+        "dependencies": []
+      }},
+      "search_locale_plan": {{"primary": "uk", "fallback": ["en"]}},
+      "retrieval_policy": {{"channels_allowed": []}},
+      "metadata_confidence": "high",
+      "search_strategy": {{
+        "intent": "prediction_opinion",
+        "reasoning": "Horoscope-style statement without verifiable source",
+        "best_language": "uk"
+      }},
+      "query_candidates": [],
+      "search_method": "general_search",
+      "search_queries": [],
+      "evidence_req": {{"needs_primary": false, "needs_2_independent": false}},
+      "evidence_need": "unknown",
+      "check_oracle": false
+    }}
+  ]
 }}
 ```
 
@@ -250,31 +273,109 @@ For an article about Kate Winslet interview:
       "text": "Вінслет розповіла, що папараці стежили за нею після Титаніка",
       "normalized_text": "Kate Winslet said paparazzi followed her after Titanic",
       "type": "attribution",
+      "claim_category": "FACTUAL",
+      "satire_likelihood": 0.0,
+      "topic_group": "Culture",
+      "topic_key": "Kate Winslet Interview",
+      "importance": 0.7,
+      "check_worthiness": 0.7,
+      "harm_potential": 2,
       "verification_target": "attribution",
       "claim_role": "thesis",
+      "structure": {{
+        "type": "attribution",
+        "premises": [],
+        "conclusion": "Kate Winslet said paparazzi followed her after Titanic",
+        "dependencies": []
+      }},
+      "search_locale_plan": {{"primary": "en", "fallback": ["uk"]}},
+      "retrieval_policy": {{"channels_allowed": ["reputable_news", "authoritative"]}},
       "metadata_confidence": "medium",
-      "check_worthiness": 0.7,
-      "search_queries": ["Kate Winslet interview paparazzi Titanic"]
+      "search_strategy": {{
+        "intent": "quote_attribution",
+        "reasoning": "Interview statement requires primary source",
+        "best_language": "en"
+      }},
+      "query_candidates": [
+        {{"text": "Kate Winslet interview paparazzi after Titanic", "role": "CORE", "score": 1.0}}
+      ],
+      "search_method": "news",
+      "search_queries": ["Kate Winslet interview paparazzi Titanic"],
+      "evidence_req": {{"needs_primary": true, "needs_2_independent": false}},
+      "evidence_need": "news_report",
+      "check_oracle": false
     }},
     {{
       "text": "Акторка згадала, що їй радили схуднути",
       "normalized_text": "The actress mentioned being told to lose weight",
       "type": "attribution",
+      "claim_category": "FACTUAL",
+      "satire_likelihood": 0.0,
+      "topic_group": "Culture",
+      "topic_key": "Kate Winslet Interview",
+      "importance": 0.5,
+      "check_worthiness": 0.5,
+      "harm_potential": 2,
       "verification_target": "attribution",
       "claim_role": "support",
+      "structure": {{
+        "type": "attribution",
+        "premises": [],
+        "conclusion": "The actress mentioned being told to lose weight",
+        "dependencies": []
+      }},
+      "search_locale_plan": {{"primary": "en", "fallback": ["uk"]}},
+      "retrieval_policy": {{"channels_allowed": ["reputable_news", "authoritative"]}},
       "metadata_confidence": "medium",
-      "check_worthiness": 0.5,
-      "search_queries": ["Kate Winslet weight pressure interview"]
+      "search_strategy": {{
+        "intent": "quote_attribution",
+        "reasoning": "Interview statement requires primary source",
+        "best_language": "en"
+      }},
+      "query_candidates": [
+        {{"text": "Kate Winslet told to lose weight interview", "role": "SUPPORT", "score": 0.8}}
+      ],
+      "search_method": "news",
+      "search_queries": ["Kate Winslet weight pressure interview"],
+      "evidence_req": {{"needs_primary": true, "needs_2_independent": false}},
+      "evidence_need": "news_report",
+      "check_oracle": false
     }},
     {{
       "text": "Титанік заробив понад 2 мільярди доларів",
       "normalized_text": "Titanic earned over 2 billion dollars",
       "type": "numeric",
+      "claim_category": "FACTUAL",
+      "satire_likelihood": 0.0,
+      "topic_group": "Culture",
+      "topic_key": "Titanic Box Office",
+      "importance": 0.8,
+      "check_worthiness": 0.8,
+      "harm_potential": 2,
       "verification_target": "reality",
       "claim_role": "support",
+      "structure": {{
+        "type": "empirical_numeric",
+        "premises": [],
+        "conclusion": "Titanic earned over 2 billion dollars",
+        "dependencies": []
+      }},
+      "search_locale_plan": {{"primary": "en", "fallback": ["uk"]}},
+      "retrieval_policy": {{"channels_allowed": ["authoritative", "reputable_news"]}},
       "metadata_confidence": "high",
-      "check_worthiness": 0.8,
-      "search_queries": ["Titanic box office revenue"]
+      "search_strategy": {{
+        "intent": "historical_event",
+        "reasoning": "Box office totals require reputable sources",
+        "best_language": "en"
+      }},
+      "query_candidates": [
+        {{"text": "Titanic box office revenue total", "role": "NUMERIC", "score": 0.9}}
+      ],
+      "search_method": "news",
+      "search_queries": ["Titanic box office revenue"],
+      "evidence_req": {{"needs_primary": false, "needs_2_independent": true}},
+      "evidence_need": "official_stats",
+      "check_oracle": false
     }}
   ]
 }}

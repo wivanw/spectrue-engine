@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 from openai import AsyncOpenAI
 
@@ -43,6 +43,152 @@ logger = logging.getLogger(__name__)
 
 ReasoningEffort = Literal["low", "medium", "high"]
 CacheRetention = Literal["in_memory", "24h"]
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+# NOTE: Minimal sanity-checker for structured outputs (not full JSON Schema).
+def _validate_schema(
+    value: Any,
+    schema: dict[str, Any],
+    path: str = "$",
+    errors: list[str] | None = None,
+    max_errors: int = 5,
+) -> list[str]:
+    if errors is None:
+        errors = []
+
+    if len(errors) >= max_errors:
+        return errors
+
+    any_of = schema.get("anyOf")
+    if isinstance(any_of, list) and any_of:
+        for option in any_of:
+            option_errors: list[str] = []
+            _validate_schema(value, option, path=path, errors=option_errors, max_errors=max_errors)
+            if not option_errors:
+                return errors
+        errors.append(f"{path}: does not match anyOf schemas")
+        return errors
+
+    if "enum" in schema:
+        allowed = schema.get("enum", [])
+        if value not in allowed:
+            errors.append(f"{path}: value {value!r} not in enum")
+            return errors
+
+    schema_type = schema.get("type")
+    if schema_type == "object":
+        if not isinstance(value, dict):
+            errors.append(f"{path}: expected object")
+            return errors
+        required = schema.get("required", [])
+        if isinstance(required, list):
+            for key in required:
+                if key not in value:
+                    errors.append(f"{path}.{key}: missing required field")
+                    if len(errors) >= max_errors:
+                        return errors
+        properties = schema.get("properties", {})
+        additional = schema.get("additionalProperties", True)
+        for key, item in value.items():
+            if key in properties:
+                _validate_schema(item, properties[key], path=f"{path}.{key}", errors=errors, max_errors=max_errors)
+            else:
+                if isinstance(additional, dict):
+                    _validate_schema(item, additional, path=f"{path}.{key}", errors=errors, max_errors=max_errors)
+                elif additional is False:
+                    value_repr = repr(item)
+                    if len(value_repr) > 160:
+                        value_repr = value_repr[:157] + "..."
+                    errors.append(f"{path}.{key}: unexpected field {key!r}={value_repr}")
+            if len(errors) >= max_errors:
+                return errors
+        return errors
+
+    if schema_type == "array":
+        if not isinstance(value, list):
+            errors.append(f"{path}: expected array")
+            return errors
+        min_items = schema.get("minItems")
+        max_items = schema.get("maxItems")
+        if isinstance(min_items, int) and len(value) < min_items:
+            errors.append(f"{path}: expected at least {min_items} items")
+        if isinstance(max_items, int) and len(value) > max_items:
+            errors.append(f"{path}: expected at most {max_items} items")
+        items_schema = schema.get("items")
+        if isinstance(items_schema, dict):
+            for idx, item in enumerate(value):
+                _validate_schema(
+                    item,
+                    items_schema,
+                    path=f"{path}[{idx}]",
+                    errors=errors,
+                    max_errors=max_errors,
+                )
+                if len(errors) >= max_errors:
+                    return errors
+        return errors
+
+    if schema_type == "string":
+        if not isinstance(value, str):
+            errors.append(f"{path}: expected string")
+            return errors
+        min_len = schema.get("minLength")
+        max_len = schema.get("maxLength")
+        if isinstance(min_len, int) and len(value) < min_len:
+            errors.append(f"{path}: expected minLength {min_len}")
+        if isinstance(max_len, int) and len(value) > max_len:
+            errors.append(f"{path}: expected maxLength {max_len}")
+        return errors
+
+    if schema_type == "integer":
+        if not isinstance(value, int) or isinstance(value, bool):
+            errors.append(f"{path}: expected integer")
+            return errors
+        minimum = schema.get("minimum")
+        maximum = schema.get("maximum")
+        if isinstance(minimum, (int, float)) and value < minimum:
+            errors.append(f"{path}: expected >= {minimum}")
+        if isinstance(maximum, (int, float)) and value > maximum:
+            errors.append(f"{path}: expected <= {maximum}")
+        return errors
+
+    if schema_type == "number":
+        if not _is_number(value):
+            errors.append(f"{path}: expected number")
+            return errors
+        minimum = schema.get("minimum")
+        maximum = schema.get("maximum")
+        if isinstance(minimum, (int, float)) and value < minimum:
+            errors.append(f"{path}: expected >= {minimum}")
+        if isinstance(maximum, (int, float)) and value > maximum:
+            errors.append(f"{path}: expected <= {maximum}")
+        return errors
+
+    if schema_type == "boolean":
+        if not isinstance(value, bool):
+            errors.append(f"{path}: expected boolean")
+        return errors
+
+    return errors
+
+
+_SCHEMA_ERROR_MARKERS = (
+    "llm schema validation failed",
+    "invalid_json_schema",
+    "text.format.schema",
+    "text.format.name",
+    "missing_explainability_score",
+    "invalid_explainability_score",
+)
+
+
+def is_schema_failure(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _SCHEMA_ERROR_MARKERS)
 
 
 class LLMClient:
@@ -99,6 +245,7 @@ class LLMClient:
         input: str,  # noqa: A002 - 'input' is the official API param name
         instructions: str | None = None,
         json_output: bool = False,
+        response_schema: dict[str, Any] | None = None,
         reasoning_effort: ReasoningEffort = "low",
         cache_key: str | None = None,
         timeout: float | None = None,
@@ -114,6 +261,7 @@ class LLMClient:
             input: The main input/prompt content
             instructions: System instructions (cached if cache_key provided)
             json_output: If True, request JSON output and parse response
+            response_schema: Optional JSON schema for strict structured output
             reasoning_effort: Reasoning effort level (low/medium/high)
             cache_key: Optional key for prompt caching (reduces tokens)
             timeout: Request timeout in seconds (uses default if not specified)
@@ -133,6 +281,8 @@ class LLMClient:
         """
         effective_timeout = timeout or self.default_timeout
         
+        json_output_requested = json_output or response_schema is not None
+
         # Build API params
         params: dict = {
             "model": model,
@@ -147,8 +297,21 @@ class LLMClient:
             params["max_output_tokens"] = max_output_tokens
         
         # JSON output configuration
-        if json_output:
-            params["text"] = {"format": {"type": "json_object"}}
+        if json_output_requested:
+            if response_schema:
+                schema_name = response_schema.get("title") if isinstance(response_schema, dict) else None
+                if not schema_name:
+                    schema_name = "structured_output"
+                params["text"] = {
+                    "format": {
+                        "type": "json_schema",
+                        "name": schema_name,
+                        "strict": True,
+                        "schema": response_schema,
+                    }
+                }
+            else:
+                params["text"] = {"format": {"type": "json_object"}}
         
         # Reasoning control for GPT-5 and O-series models
         if "gpt-5" in model or model.startswith("o"):
@@ -179,7 +342,8 @@ class LLMClient:
             "est_input_tokens": est_input_tokens,
             "est_instr_tokens": est_instr_tokens,
             "payload_hash": payload_hash,
-            "json_output": json_output,
+            "json_output": json_output_requested,
+            "response_schema": bool(response_schema),
             "cache_key": cache_key,
             # M67: Log full prompts for debugging
             "input_text": input[:10000], # Truncate to 10k chars
@@ -214,7 +378,7 @@ class LLMClient:
                 
                 # Parse JSON if requested
                 parsed = None
-                if json_output:
+                if json_output_requested:
                     try:
                         parsed = json.loads(content)
                     except json.JSONDecodeError as e:
@@ -227,7 +391,12 @@ class LLMClient:
                             except (IndexError, json.JSONDecodeError):
                                 pass
                         if parsed is None:
-                            raise ValueError(f"Failed to parse JSON response: {e}") from e
+                            raise ValueError(f"LLM JSON parse failed: {e}") from e
+
+                    if response_schema:
+                        schema_errors = _validate_schema(parsed, response_schema)
+                        if schema_errors:
+                            raise ValueError(f"LLM schema validation failed: {schema_errors[0]}")
                 
                 # Extract usage info
                 usage = None
@@ -330,6 +499,7 @@ class LLMClient:
         model: str,
         input: str,  # noqa: A002
         instructions: str | None = None,
+        response_schema: dict[str, Any] | None = None,
         reasoning_effort: ReasoningEffort = "low",
         cache_key: str | None = None,
         timeout: float | None = None,
@@ -346,6 +516,7 @@ class LLMClient:
             input=input,
             instructions=instructions,
             json_output=True,
+            response_schema=response_schema,
             reasoning_effort=reasoning_effort,
             cache_key=cache_key,
             timeout=timeout,
