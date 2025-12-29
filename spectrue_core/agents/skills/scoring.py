@@ -4,8 +4,16 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.utils.security import sanitize_input
 from spectrue_core.agents.prompts import get_prompt
+from spectrue_core.agents.llm_client import is_schema_failure
 from datetime import datetime
 import hashlib
+
+# M111: Structured output schemas
+from spectrue_core.agents.llm_schemas import (
+    ANALYSIS_RESPONSE_SCHEMA,
+    SCORE_EVIDENCE_STRUCTURED_SCHEMA,
+    SCORING_RESPONSE_SCHEMA,
+)
 
 # M87: Decomposition helpers
 from .scoring_contract import (
@@ -175,6 +183,7 @@ class ScoringSkill(BaseSkill):
                 model=m,
                 input=prompt,
                 instructions=instructions,
+                response_schema=SCORING_RESPONSE_SCHEMA,
                 reasoning_effort="medium",
                 cache_key=cache_key,
                 timeout=float(self.runtime.llm.timeout_sec),
@@ -192,6 +201,8 @@ class ScoringSkill(BaseSkill):
         except Exception as e:
             logger.exception("[Scoring] Failed: %s", e)
             Trace.event("llm.error", {"kind": "score_evidence", "error": str(e)})
+            if is_schema_failure(e):
+                raise
             return {
                 "status": "error",
                 "error": "llm_failed",
@@ -284,6 +295,7 @@ class ScoringSkill(BaseSkill):
                 model=gpt_model,
                 input=prompt,
                 instructions="You are Aletheia, an advanced fact-checking AI.",
+                response_schema=ANALYSIS_RESPONSE_SCHEMA,
                 reasoning_effort="low",
                 cache_key=f"final_analysis_{lang}_v1",
                 timeout=float(self.runtime.llm.timeout_sec),
@@ -294,6 +306,8 @@ class ScoringSkill(BaseSkill):
         except Exception as e:
             logger.exception("[GPT] ✗ Error calling %s: %s", gpt_model, e)
             Trace.event("llm.error", {"kind": "analysis", "error": str(e)})
+            if is_schema_failure(e):
+                raise
             return {
                 "verified_score": -1.0, "context_score": -1.0, "danger_score": -1.0,
                 "style_score": -1.0, "confidence_score": -1.0, "rationale_key": "errors.agent_call_failed"
@@ -440,6 +454,7 @@ class ScoringSkill(BaseSkill):
                 model=m,
                 input=prompt,
                 instructions=instructions,
+                response_schema=SCORE_EVIDENCE_STRUCTURED_SCHEMA,
                 reasoning_effort="medium",
                 cache_key=cache_key,
                 timeout=float(self.runtime.llm.timeout_sec),
@@ -452,6 +467,8 @@ class ScoringSkill(BaseSkill):
         except Exception as e:
             logger.exception("[M70 Scoring] Failed: %s", e)
             Trace.event("llm.error", {"kind": "score_evidence_structured", "error": str(e)})
+            if is_schema_failure(e):
+                raise
             return StructuredVerdict(
                 verified_score=-1.0,
                 explainability_score=-1.0,

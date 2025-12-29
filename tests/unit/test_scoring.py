@@ -19,6 +19,7 @@ class TestScoringSkill:
                 {"claim_id": "c1", "verdict_score": 0.8}
             ],
             "verified_score": 0.85,  # LLM provides this now!
+            "explainability_score": 0.7,
             "danger_score": 0.1,
             "style_score": 0.9,
             "rationale": "Solid evidence."
@@ -46,6 +47,7 @@ class TestScoringSkill:
                 {"claim_id": "c2", "verdict_score": 0.6}
             ],
             # verified_score missing!
+            "explainability_score": 0.6,
             "danger_score": 0.1,
             "style_score": 0.9,
             "rationale": "Analysis."
@@ -97,6 +99,7 @@ class TestScoringSkill:
         # Test analyze() post-processing
         mock_llm_client.call_json.return_value = {
             "verified_score": 0.5,
+            "explainability_score": 0.8,
             "rationale": "Some [TRUSTED] rationale.",
             "style_score": 0.9,
             "context_score": 0.9

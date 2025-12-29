@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from spectrue_core.utils.trace import Trace
 from spectrue_core.graph.types import (
     CandidateEdge,
     ClaimNode,
@@ -19,6 +20,7 @@ from spectrue_core.graph.types import (
     TypedEdge,
 )
 from .base_skill import BaseSkill
+from spectrue_core.agents.llm_schemas import EDGE_TYPING_SCHEMA
 
 if TYPE_CHECKING:
     pass
@@ -70,43 +72,53 @@ class EdgeTypingSkill(BaseSkill):
         
         for attempt in range(max_retries + 1):
             try:
-                # Use slightly higher temp on retry to break loops
-                temp = 0.0 if attempt == 0 else 0.3
-                
                 result = await self.llm_client.call_json(
                     model="gpt-5-nano",
                     input=prompt,
                     instructions=instructions,
+                    response_schema=EDGE_TYPING_SCHEMA,
                     reasoning_effort="low",
                     cache_key=f"edge_typing_{PROMPT_VERSION}_{attempt}" if attempt > 0 else f"edge_typing_{PROMPT_VERSION}",
                     timeout=30.0,
                     trace_kind="edge_typing",
-                    temperature=temp,
                 )
                 
                 parsed = self._parse_response(result, edges)
                 
-                # T8: Validation
-                is_valid, reason = self._validate_batch(parsed, edges)
-                if is_valid:
-                    return parsed
-                
-                logger.warning("[M72] Edge typing validation failed (attempt %d): %s", attempt + 1, reason)
-                if attempt == max_retries:
-                    # Return best effort on final failure
-                    return parsed
+                # T8: Validation (localized failures; do not drop entire batch)
+                is_valid, reason, failures = self._validate_batch(parsed, edges)
+                Trace.event(
+                    "edge_typing.batch_summary",
+                    {
+                        "edge_count": len(edges),
+                        "missing": failures,
+                        "attempt": attempt + 1,
+                        "valid": is_valid,
+                        "reason": reason,
+                    },
+                )
+
+                # If we missed any pair indices, retry once; otherwise accept.
+                if failures and attempt < max_retries:
+                    logger.warning(
+                        "[M72] Edge typing incomplete (attempt %d): %s",
+                        attempt + 1,
+                        reason,
+                    )
+                    continue
+
+                # Even with missing classifications, return partial results (caller filters None).
+                if failures:
+                    logger.warning(
+                        "[M72] Edge typing returning partial batch: %s",
+                        reason,
+                    )
+                return parsed
                 
             except Exception as e:
                 logger.warning("[M72] Edge typing batch failed (attempt %d): %s", attempt + 1, e)
                 if attempt == max_retries:
-                    # Return safe defaults (Unrelated)
-                    return [
-                        TypedEdge(
-                            e.src_id, e.dst_id, EdgeRelation.UNRELATED, 0.0, 
-                            "Error / Failed", ""
-                        ) 
-                        for e in edges
-                    ]
+                    raise
     
     def _build_instructions(self) -> str:
         """Build injection-hardened instructions."""
@@ -133,17 +145,19 @@ class EdgeTypingSkill(BaseSkill):
   - Below 0.5: Low confidence, consider "unrelated" instead
 
 ## OUTPUT FORMAT
-Return a JSON array with one object per pair:
+Return a JSON object with "classifications" array:
 ```json
-[
-  {
-    "pair_index": 0,
-    "relation": "supports",
-    "score": 0.85,
-    "rationale_short": "Claim B provides timing evidence for Claim A's event",
-    "evidence_spans": "A: 'Dec 2024', B: 'announced December'"
-  }
-]
+{
+  "classifications": [
+    {
+      "pair_index": 0,
+      "relation": "supports",
+      "score": 0.85,
+      "rationale_short": "Claim B provides timing evidence for Claim A's event",
+      "evidence_spans": "A: 'Dec 2024', B: 'announced December'"
+    }
+  ]
+}
 ```
 
 IMPORTANT: "unrelated" should be used for 40-60% of pairs in typical articles.
@@ -180,19 +194,23 @@ IMPORTANT: "unrelated" should be used for 40-60% of pairs in typical articles.
 CLAIM PAIRS:
 {chr(10).join(pairs_text)}
 
-Return JSON array with classifications for each pair.
+Return JSON object with "classifications" array for each pair.
 Remember: "unrelated" is the correct answer for many pairs.
 """
 
-    def _validate_batch(self, typed: list[TypedEdge | None], input_edges: list[CandidateEdge]) -> tuple[bool, str]:
+    def _validate_batch(
+        self,
+        typed: list[TypedEdge | None],
+        input_edges: list[CandidateEdge],
+    ) -> tuple[bool, str, int]:
         """T8: Validate edge typing batch for consistency and quality."""
         if not typed or len(typed) != len(input_edges):
-            return False, "Length mismatch"
+            return False, "Length mismatch", len(input_edges)
             
         # 1. Check for failure rate (None or "Failed to classify")
         failures = sum(1 for e in typed if e is None or e.rationale_short == "Failed to classify")
-        if failures > len(typed) * 0.5 and len(typed) > 2:
-            return False, f"High failure rate ({failures}/{len(typed)})"
+        if failures:
+            return False, f"Missing classifications ({failures}/{len(typed)})", failures
             
         # 2. Check for Hallucinated Strong Relations (Low Score)
         # If relation is SUPPORTS/CONTRADICTS, score should typically be > 0.6
@@ -205,9 +223,9 @@ Remember: "unrelated" is the correct answer for many pairs.
         
         # If >30% of edges are weak strong signals, LLM might be confused
         if valid_edges and weak_strong > len(valid_edges) * 0.3:
-             return False, f"Too many weak strong relations ({weak_strong})"
+             return False, f"Too many weak strong relations ({weak_strong})", failures
              
-        return True, "OK"
+        return True, "OK", failures
     
     def _truncate_claim(self, text: str, max_chars: int) -> str:
         """Truncate claim text, preserving anchor context."""
@@ -226,12 +244,9 @@ Remember: "unrelated" is the correct answer for many pairs.
         typed_edges: list[TypedEdge | None] = [None] * len(edges)
         
         # Handle both dict with "classifications" key and direct list
-        classifications = result
+        classifications = []
         if isinstance(result, dict):
-            classifications = result.get("classifications") or result.get("edges") or []
-            if not classifications and isinstance(result, dict):
-                # Try to use the result directly if it's a list-like structure
-                classifications = [result] if "relation" in result else []
+            classifications = result.get("classifications") or []
         
         if not isinstance(classifications, list):
             logger.warning("[M72] Edge typing: unexpected response format")
@@ -271,18 +286,5 @@ Remember: "unrelated" is the correct answer for many pairs.
             except Exception as e:
                 logger.debug("[M72] Edge parsing error: %s", e)
                 continue
-        
-        # Fill remaining with unrelated (fail closed)
-        for i, typed in enumerate(typed_edges):
-            if typed is None:
-                edge = edges[i]
-                typed_edges[i] = TypedEdge(
-                    src_id=edge.src_id,
-                    dst_id=edge.dst_id,
-                    relation=EdgeRelation.UNRELATED,
-                    score=0.0,
-                    rationale_short="Failed to classify",
-                    evidence_spans="",
-                )
         
         return typed_edges
