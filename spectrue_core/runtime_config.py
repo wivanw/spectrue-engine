@@ -150,6 +150,141 @@ class EngineSearchConfig:
 
 
 @dataclass(frozen=True)
+class CalibrationModelPolicy:
+    version: str
+    weights: dict[str, float] = field(default_factory=dict)
+    bias: float = 0.0
+    fallback_weights: dict[str, float] = field(default_factory=dict)
+    fallback_bias: float = 0.0
+    score_mode: str = "sigmoid"
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class CalibrationPolicyConfig:
+    claim_utility: CalibrationModelPolicy = field(
+        default_factory=lambda: CalibrationModelPolicy(
+            version="claim-utility-v1",
+            weights={
+                "role_weight": 0.35,
+                "worthiness": 0.22,
+                "harm": 0.22,
+                "importance": 0.12,
+                "centrality": 0.08,
+                "lede_bonus": 0.05,
+            },
+            fallback_weights={
+                "role_weight": 0.35,
+                "worthiness": 0.22,
+                "harm": 0.22,
+                "importance": 0.12,
+                "centrality": 0.08,
+                "lede_bonus": 0.05,
+            },
+            score_mode="sigmoid",
+        )
+    )
+    retrieval_confidence: CalibrationModelPolicy = field(
+        default_factory=lambda: CalibrationModelPolicy(
+            version="retrieval-confidence-v1",
+            weights={
+                "mean_relevance": 0.50,
+                "evidence_likeness": 0.30,
+                "source_quality": 0.20,
+            },
+            fallback_weights={
+                "mean_relevance": 0.50,
+                "evidence_likeness": 0.30,
+                "source_quality": 0.20,
+            },
+            score_mode="linear",
+        )
+    )
+    retrieval_gain: CalibrationModelPolicy = field(
+        default_factory=lambda: CalibrationModelPolicy(
+            version="retrieval-gain-v1",
+            weights={
+                "relevance_gap": 0.30,
+                "evidence_gap": 0.25,
+                "quality_gap": 0.15,
+                "diversity_gap": 0.10,
+                "quote_gap": 0.10,
+                "conflict_presence": 0.05,
+                "temporal_risk": 0.05,
+            },
+            fallback_weights={
+                "relevance_gap": 0.30,
+                "evidence_gap": 0.25,
+                "quality_gap": 0.15,
+                "diversity_gap": 0.10,
+                "quote_gap": 0.10,
+                "conflict_presence": 0.05,
+                "temporal_risk": 0.05,
+            },
+            score_mode="sigmoid",
+        )
+    )
+    evidence_likeness: CalibrationModelPolicy = field(
+        default_factory=lambda: CalibrationModelPolicy(
+            version="evidence-likeness-v1",
+            weights={
+                "has_quote": 1.2,
+                "has_chunk": 0.8,
+                "has_digits": 0.4,
+                "quote_len_norm": 0.6,
+                "snippet_len_norm": 0.3,
+                "extraction_success": 0.5,
+            },
+            fallback_weights={
+                "has_quote": 1.2,
+                "has_chunk": 0.8,
+                "has_digits": 0.4,
+                "quote_len_norm": 0.6,
+                "snippet_len_norm": 0.3,
+                "extraction_success": 0.5,
+            },
+            bias=-1.0,
+            fallback_bias=-1.0,
+        )
+    )
+    search_relevance: CalibrationModelPolicy = field(
+        default_factory=lambda: CalibrationModelPolicy(
+            version="search-relevance-v1",
+            weights={
+                "lexical_score": 1.4,
+                "provider_score": 0.6,
+                "snippet_len_norm": 0.4,
+                "trusted_domain": 0.5,
+                "url_year_freshness": 0.3,
+            },
+            fallback_weights={
+                "lexical_score": 1.4,
+                "provider_score": 0.6,
+                "snippet_len_norm": 0.4,
+                "trusted_domain": 0.5,
+                "url_year_freshness": 0.3,
+            },
+            bias=-0.8,
+            fallback_bias=-0.8,
+        )
+    )
+
+    retrieval_cost_norm: float = 100.0
+    retrieval_cost_weight: float = 1.0
+    retrieval_min_value_per_cost: float = 0.25
+    retrieval_gain_floor: float = 0.15
+
+    propagation_min_shrink: float = 0.05
+    propagation_max_shrink: float = 0.35
+    propagation_similarity_weight: float = 0.7
+    propagation_cohesion_weight: float = 0.3
+
+    penalty_conflict_weight: float = 0.10
+    penalty_temporal_weight: float = 0.15
+    penalty_diversity_weight: float = 0.05
+
+
+@dataclass(frozen=True)
 class TemporalPolicyConfig:
     relative_window_days: int = DEFAULT_RELATIVE_WINDOW_DAYS
 
@@ -245,6 +380,7 @@ class EngineRuntimeConfig:
     features: EngineFeatureFlags
     debug: EngineDebugFlags
     search: EngineSearchConfig
+    calibration: CalibrationPolicyConfig
     temporal: TemporalPolicyConfig
     locale: LocalePolicyConfig
     tunables: EngineTunableConfig
@@ -317,6 +453,21 @@ class EngineRuntimeConfig:
             tavily_raw_max_results=_parse_int(os.getenv("SPECTRUE_TAVILY_RAW_MAX_RESULTS"), default=4, min_v=1, max_v=10),
             # M80: Phase runner concurrency limit
             max_concurrent_searches=_parse_int(os.getenv("M80_MAX_CONCURRENT_SEARCHES"), default=3, min_v=1, max_v=10),
+        )
+
+        calibration = CalibrationPolicyConfig(
+            retrieval_cost_norm=_parse_float(
+                os.getenv("CALIBRATION_RETRIEVAL_COST_NORM"), default=100.0, min_v=1.0, max_v=10_000.0
+            ),
+            retrieval_cost_weight=_parse_float(
+                os.getenv("CALIBRATION_RETRIEVAL_COST_WEIGHT"), default=1.0, min_v=0.1, max_v=10.0
+            ),
+            retrieval_min_value_per_cost=_parse_float(
+                os.getenv("CALIBRATION_RETRIEVAL_MIN_VALUE_PER_COST"), default=0.25, min_v=0.0, max_v=10.0
+            ),
+            retrieval_gain_floor=_parse_float(
+                os.getenv("CALIBRATION_RETRIEVAL_GAIN_FLOOR"), default=0.15, min_v=0.0, max_v=1.0
+            ),
         )
 
         temporal = TemporalPolicyConfig(
@@ -427,6 +578,7 @@ class EngineRuntimeConfig:
             features=features,
             debug=debug,
             search=search,
+            calibration=calibration,
             temporal=temporal,
             locale=locale,
             tunables=tunables,
@@ -453,6 +605,17 @@ class EngineRuntimeConfig:
                 "embeddings_verdict_ready": bool(self.features.embeddings_verdict_ready),
                 "embeddings_clustering": bool(self.features.embeddings_clustering),
                 "embeddings_quotes": bool(self.features.embeddings_quotes),
+            },
+            "calibration": {
+                "claim_utility_version": self.calibration.claim_utility.version,
+                "retrieval_confidence_version": self.calibration.retrieval_confidence.version,
+                "retrieval_gain_version": self.calibration.retrieval_gain.version,
+                "evidence_likeness_version": self.calibration.evidence_likeness.version,
+                "search_relevance_version": self.calibration.search_relevance.version,
+                "retrieval_cost_norm": float(self.calibration.retrieval_cost_norm),
+                "retrieval_cost_weight": float(self.calibration.retrieval_cost_weight),
+                "retrieval_min_value_per_cost": float(self.calibration.retrieval_min_value_per_cost),
+                "retrieval_gain_floor": float(self.calibration.retrieval_gain_floor),
             },
             "debug": {
                 "engine_debug": bool(self.debug.engine_debug),

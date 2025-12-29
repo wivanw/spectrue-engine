@@ -80,7 +80,11 @@ class WebSearchTool:
         return is_trusted_host(host)
 
     def _rank_and_filter(self, query: str, results: list[dict]) -> list[dict]:
-        return rank_and_filter(query, results)
+        return rank_and_filter(
+            query,
+            results,
+            runtime_config=(self.config.runtime if self.config else None),
+        )
 
     def _clean_results(self, results: list[dict]) -> list[dict]:
         return clean_tavily_results(results)
@@ -90,7 +94,14 @@ class WebSearchTool:
     ) -> float:
         from spectrue_core.tools.search_scoring import relevance_score
 
-        return relevance_score(query, title, content, url, tavily_score=tavily_score)
+        return relevance_score(
+            query,
+            title,
+            content,
+            url,
+            tavily_score=tavily_score,
+            runtime_config=(self.config.runtime if self.config else None),
+        )
 
     def _raw_content_mode(self, *, depth: str, domains: list[str] | None) -> bool:
         try:

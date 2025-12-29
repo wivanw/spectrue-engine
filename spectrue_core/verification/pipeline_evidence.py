@@ -37,6 +37,7 @@ from spectrue_core.verification.rgba_aggregation import (
     apply_dependency_penalties,
     apply_conflict_explainability_penalty,
 )
+from spectrue_core.verification.calibration_registry import CalibrationRegistry
 from spectrue_core.verification.claim_selection import pick_ui_main_claim
 from spectrue_core.verification.search_policy import (
     resolve_profile_name,
@@ -62,6 +63,17 @@ def _sigmoid(x: float) -> float:
 def _claim_text(cv: dict) -> str:
     text = cv.get("claim_text") or cv.get("claim") or cv.get("text") or ""
     return str(text).strip()
+
+
+def _aggregation_policy(search_mgr) -> dict:
+    calibration = getattr(getattr(getattr(search_mgr, "config", None), "runtime", None), "calibration", None)
+    if not calibration:
+        return {}
+    return {
+        "penalty_conflict_weight": float(calibration.penalty_conflict_weight),
+        "penalty_temporal_weight": float(calibration.penalty_temporal_weight),
+        "penalty_diversity_weight": float(calibration.penalty_diversity_weight),
+    }
 
 def _mark_anchor_duplicates_sync(
     *,
@@ -353,6 +365,7 @@ async def run_evidence_flow(
     search_mgr,
     build_evidence_pack,
     enrich_sources_with_trust,
+    calibration_registry: CalibrationRegistry | None = None,
     inp: EvidenceFlowInput,
     claims: list[dict],
     sources: list[dict],
@@ -368,6 +381,7 @@ async def run_evidence_flow(
     current_cost = search_mgr.calculate_cost(inp.gpt_model, inp.search_type)
 
     sources = canonicalize_sources(sources)
+    agg_policy = _aggregation_policy(search_mgr)
 
     time_windows: dict[str, TimeWindow] = {}
     if claims:
@@ -438,7 +452,10 @@ async def run_evidence_flow(
     anchor_claim = None
     anchor_claim_id = None
     if claims:
-        anchor_claim = pick_ui_main_claim(claims) or claims[0]
+        anchor_claim = pick_ui_main_claim(
+            claims,
+            calibration_registry=calibration_registry,
+        ) or claims[0]
         anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
     # M67: Inline Social Verification (Tier A')
@@ -571,7 +588,7 @@ async def run_evidence_flow(
                 )
                 agg = aggregate_claim_verdict(
                     pack_ref,
-                    policy={},
+                    policy=agg_policy,
                     claim_id=claim_id,
                     temporality=temporality if isinstance(temporality, dict) else None,
                 )
@@ -591,7 +608,7 @@ async def run_evidence_flow(
                 )
                 agg = aggregate_claim_verdict(
                     pack_ref,
-                    policy={},
+                    policy=agg_policy,
                     claim_id=claim_id,
                     temporality=temporality if isinstance(temporality, dict) else None,
                 )

@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from spectrue_core.verification.calibration_registry import CalibrationRegistry
+from spectrue_core.verification.claim_utility import score_claim_utility
+
 
 def _safe_float(value: object, default: float = 0.0) -> float:
     try:
@@ -36,13 +39,22 @@ def ui_position(claim: dict) -> int:
         return 10**9
 
 
-def ui_score(claim: dict) -> float:
+def ui_score(
+    claim: dict,
+    *,
+    calibration_registry: CalibrationRegistry | None = None,
+    centrality_map: dict[str, float] | None = None,
+    max_pos: int | None = None,
+) -> float:
     if not isinstance(claim, dict):
         return 0.0
-    worthiness = _safe_float(claim.get("check_worthiness", claim.get("importance", 0.0)))
-    harm = _safe_float(claim.get("harm_potential", 0.0))
-    importance = _safe_float(claim.get("importance", 0.0))
-    return (2.0 * worthiness) + (1.5 * harm) + (0.5 * importance)
+    score, _trace = score_claim_utility(
+        claim,
+        centrality_map=centrality_map,
+        max_pos=max_pos,
+        calibration_registry=calibration_registry,
+    )
+    return float(score)
 
 
 def is_admissible_as_main(claim: dict) -> bool:
@@ -68,17 +80,31 @@ def _position_norm(claim: dict, *, max_pos: int | None) -> float:
     return max(0.0, min(1.0, pos / max_pos))
 
 
-def ui_sort_key(claim: dict, *, max_pos: int | None = None) -> tuple[int, float, float, int]:
+def ui_sort_key(
+    claim: dict,
+    *,
+    calibration_registry: CalibrationRegistry | None = None,
+    centrality_map: dict[str, float] | None = None,
+    max_pos: int | None = None,
+) -> tuple[float, int, float, int]:
     bucket = ui_bucket(str(claim.get("claim_role") or claim.get("role") or ""))
-    score = ui_score(claim)
+    score = ui_score(
+        claim,
+        calibration_registry=calibration_registry,
+        centrality_map=centrality_map,
+        max_pos=max_pos,
+    )
     pos_norm = _position_norm(claim, max_pos=max_pos)
-    # Small positional penalty inside the same bucket/score band.
-    score_with_pos = score - 0.05 * pos_norm
     pos = ui_position(claim)
-    return (bucket, -score_with_pos, pos_norm, pos)
+    return (-score, bucket, pos_norm, pos)
 
 
-def pick_ui_main_claim(claims: list[dict]) -> dict | None:
+def pick_ui_main_claim(
+    claims: list[dict],
+    *,
+    calibration_registry: CalibrationRegistry | None = None,
+    centrality_map: dict[str, float] | None = None,
+) -> dict | None:
     if not claims:
         return None
     max_pos = max((ui_position(c) for c in claims if isinstance(c, dict)), default=0)
@@ -92,12 +118,34 @@ def pick_ui_main_claim(claims: list[dict]) -> dict | None:
     ]
     candidate_pool = harm_priority if harm_priority else admissible
     if candidate_pool:
-        return min(candidate_pool, key=lambda c: ui_sort_key(c, max_pos=max_pos))
+        return min(
+            candidate_pool,
+            key=lambda c: ui_sort_key(
+                c,
+                calibration_registry=calibration_registry,
+                centrality_map=centrality_map,
+                max_pos=max_pos,
+            ),
+        )
     # Fallback to any claim if none admissible; caller should log this.
-    return min(claims, key=lambda c: ui_sort_key(c, max_pos=max_pos))
+    return min(
+        claims,
+        key=lambda c: ui_sort_key(
+            c,
+            calibration_registry=calibration_registry,
+            centrality_map=centrality_map,
+            max_pos=max_pos,
+        ),
+    )
 
 
-def top_ui_candidates(claims: Iterable[dict], *, limit: int = 3) -> list[dict]:
+def top_ui_candidates(
+    claims: Iterable[dict],
+    *,
+    limit: int = 3,
+    calibration_registry: CalibrationRegistry | None = None,
+    centrality_map: dict[str, float] | None = None,
+) -> list[dict]:
     items = list(claims or [])
     if not items:
         return []
@@ -106,4 +154,12 @@ def top_ui_candidates(claims: Iterable[dict], *, limit: int = 3) -> list[dict]:
     except (TypeError, ValueError):
         limit = 3
     max_pos = max((ui_position(c) for c in items if isinstance(c, dict)), default=0)
-    return sorted(items, key=lambda c: ui_sort_key(c, max_pos=max_pos))[:limit]
+    return sorted(
+        items,
+        key=lambda c: ui_sort_key(
+            c,
+            calibration_registry=calibration_registry,
+            centrality_map=centrality_map,
+            max_pos=max_pos,
+        ),
+    )[:limit]

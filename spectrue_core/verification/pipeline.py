@@ -26,6 +26,8 @@ from spectrue_core.verification.pipeline_search import (
 )
 from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.verification.claim_dedup import dedup_claims_post_extraction_async
+from spectrue_core.verification.calibration_registry import CalibrationRegistry
+from spectrue_core.verification.claim_utility import score_claim_utility
 from spectrue_core.verification.claim_selection import (
     pick_ui_main_claim,
     top_ui_candidates,
@@ -100,6 +102,9 @@ class ValidationPipeline:
     def __init__(self, config: SpectrueConfig, agent: FactCheckerAgent, translation_service=None):
         self.config = config
         self.agent = agent
+        self._calibration_registry = CalibrationRegistry.from_runtime(
+            getattr(config, "runtime", None)
+        )
         EmbedService.configure(openai_api_key=getattr(config, "openai_api_key", None))
         # M63: Pass oracle_skill to SearchManager for hybrid mode
         self.search_mgr = SearchManager(config, oracle_validator=agent.oracle_skill)
@@ -124,61 +129,6 @@ class ValidationPipeline:
         if not isinstance(self._content_budget_config, ContentBudgetConfig):
             self._content_budget_config = ContentBudgetConfig()
         self._claim_extraction_text: str = ""
-
-    def _conf_score(self, val: str | None) -> float:
-        if not val:
-            return 0.6
-        v = str(val).lower()
-        if v == "high":
-            return 1.0
-        if v == "medium":
-            return 0.8
-        if v == "low":
-            return 0.6
-        return 0.6
-
-    def _safe_float01(self, value: object, *, default: float = 0.0) -> float:
-        try:
-            v = float(value)
-        except (TypeError, ValueError):
-            return default
-        return max(0.0, min(1.0, v))
-
-    def _lede_bonus(self, claim: dict) -> float:
-        """
-        Mild preference for early claims (lede bias), capped to [0..1].
-        """
-        if not isinstance(claim, dict):
-            return 0.0
-        anchor = claim.get("anchor") or {}
-        if not isinstance(anchor, dict):
-            return 0.0
-        try:
-            pos = int(anchor.get("char_start"))
-        except (TypeError, ValueError):
-            return 0.0
-        if pos is None or pos < 0:
-            return 0.0
-        window = 8000  # character span that still gets a small bonus
-        if pos >= window:
-            return 0.0
-        return max(0.0, min(1.0, 1 - (pos / window)))
-
-    def _claim_ev(self, claim: dict, *, centrality_map: dict[str, float] | None = None) -> float:
-        """Deterministic EV for main-claim / retrieval ordering."""
-        centrality_map = centrality_map or {}
-        cid = str(claim.get("id") or claim.get("claim_id") or "")
-        role = str(claim.get("claim_role") or claim.get("role") or "background").lower()
-        role_w = {"core": 1.0, "thesis": 1.0, "support": 0.7, "counter": 0.6, "background": 0.2}.get(role, 0.2)
-        worthiness = self._safe_float01(claim.get("check_worthiness", claim.get("importance", 0.0)), default=0.0)
-        harm_raw = claim.get("harm_potential", 0.0)
-        harm = self._safe_float01(harm_raw, default=0.0)
-        if isinstance(harm_raw, (int, float)) and harm_raw > 1.0:
-            harm = self._safe_float01(float(harm_raw) / 5.0, default=harm)
-        centrality = self._safe_float01(centrality_map.get(cid, claim.get("centrality", 0.0)), default=0.0)
-        ev = (0.40 * role_w) + (0.25 * worthiness) + (0.25 * harm) + (0.10 * centrality)
-        ev += 0.05 * self._lede_bonus(claim)
-        return ev
 
     def _apply_content_budget(self, text: str, *, source: str) -> tuple[str, TrimResult | None]:
         """
@@ -555,14 +505,29 @@ class ValidationPipeline:
                         centrality_map[r.claim_id] = float(getattr(r, "centrality_score", 0.0) or 0.0) / max_c
                     except Exception:
                         continue
-                ev_anchor_claim = max(claims, key=lambda c: self._claim_ev(c, centrality_map=centrality_map))
-                ui_anchor_claim = pick_ui_main_claim(claims)
-                anchor_claim = ui_anchor_claim or ev_anchor_claim
+                max_pos = max((ui_position(c) for c in claims if isinstance(c, dict)), default=0)
+                ui_anchor_claim = pick_ui_main_claim(
+                    claims,
+                    calibration_registry=self._calibration_registry,
+                    centrality_map=centrality_map,
+                )
+                anchor_claim = ui_anchor_claim or (claims[0] if claims else None)
                 anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
-                ui_candidates = top_ui_candidates(claims, limit=3)
+                ui_candidates = top_ui_candidates(
+                    claims,
+                    limit=3,
+                    calibration_registry=self._calibration_registry,
+                    centrality_map=centrality_map,
+                )
                 def _role_val(c: dict) -> str | None:
                     val = c.get("claim_role") if isinstance(c, dict) else None
                     return str(val) if val is not None else None
+                anchor_score, anchor_trace = score_claim_utility(
+                    anchor_claim,
+                    centrality_map=centrality_map,
+                    max_pos=max_pos,
+                    calibration_registry=self._calibration_registry,
+                )
                 Trace.event(
                     "anchor_selection.ui_main",
                     {
@@ -572,18 +537,20 @@ class ValidationPipeline:
                         "ui_anchor_pos": ui_position(anchor_claim),
                         "ui_anchor_worthiness": anchor_claim.get("check_worthiness"),
                         "ui_anchor_harm": anchor_claim.get("harm_potential"),
-                        "ev_anchor_id": ev_anchor_claim.get("id") or ev_anchor_claim.get("claim_id"),
-                        "ev_anchor_role": _role_val(ev_anchor_claim),
-                        "ev_anchor_kind": ev_anchor_claim.get("type"),
-                        "ev_anchor_score": self._claim_ev(ev_anchor_claim, centrality_map=centrality_map),
+                        "utility_anchor_score": anchor_score,
+                        "utility_anchor_trace": anchor_trace,
                         "candidates": [
                             {
                                 "id": c.get("id") or c.get("claim_id"),
                                 "role": _role_val(c),
                                 "kind": c.get("type"),
                                 "bucket": ui_bucket(_role_val(c)),
-                                "ui_score": ui_score(c),
-                                "ev_score": self._claim_ev(c, centrality_map=centrality_map),
+                                "utility_score": ui_score(
+                                    c,
+                                    calibration_registry=self._calibration_registry,
+                                    centrality_map=centrality_map,
+                                    max_pos=max_pos,
+                                ),
                                 "pos": ui_position(c),
                             }
                             for c in ui_candidates
@@ -821,6 +788,9 @@ class ValidationPipeline:
                                     retrieval_confidence=float(eval_data.get("retrieval_confidence", 0.0)),
                                     action=str(action),
                                     reason_code=reason_code,
+                                    expected_gain=float(eval_data.get("expected_gain", 0.0)),
+                                    expected_cost=float(eval_data.get("expected_cost", 0.0)),
+                                    value_per_cost=float(eval_data.get("value_per_cost", 0.0)),
                                 )
                             )
                 run_ledger.counts.queries_total = query_total
@@ -863,6 +833,7 @@ class ValidationPipeline:
                 search_mgr=self.search_mgr,
                 build_evidence_pack=build_evidence_pack,
                 enrich_sources_with_trust=enrich_sources_with_trust,
+                calibration_registry=self._calibration_registry,
                 inp=EvidenceFlowInput(
                     fact=fact,
                     original_fact=original_fact,
@@ -886,6 +857,7 @@ class ValidationPipeline:
                     result=result,
                     evidence_sharing=target_selection.evidence_sharing,
                     deferred_claims=deferred_claims,
+                    calibration_registry=self._calibration_registry,
                 )
             
             locale_decisions = getattr(search_state, "locale_decisions", {}) or {}
