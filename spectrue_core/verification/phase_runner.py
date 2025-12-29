@@ -518,15 +518,21 @@ class PhaseRunner:
 
             all_sources.extend(sources)
 
-            evaluation = evaluate_retrieval_confidence(sources)
+            expected_cost = None
+            try:
+                expected_cost = self.search_mgr.estimate_hop_cost(search_type=self.search_type)
+            except Exception:
+                expected_cost = None
+            evaluation = evaluate_retrieval_confidence(
+                sources,
+                runtime_config=getattr(getattr(self.search_mgr, "config", None), "runtime", None),
+                expected_cost=expected_cost,
+            )
             action_result = None
             decide_fn = getattr(self.search_mgr, "decide_retrieval_action", None)
             if callable(decide_fn):
                 try:
-                    action_result = decide_fn(
-                        retrieval_confidence=evaluation["retrieval_confidence"],
-                        claim=claim,
-                    )
+                    action_result = decide_fn(retrieval_eval=evaluation, claim=claim)
                 except Exception:
                     action_result = None
 

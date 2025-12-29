@@ -13,6 +13,9 @@ Philosophy:
 
 from typing import Literal, TypedDict, Any
 
+from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.calibration_models import logistic_score
+from spectrue_core.verification.calibration_registry import CalibrationRegistry
 from spectrue_core.verification.source_utils import has_evidence_chunk
 
 
@@ -202,32 +205,80 @@ class LocalePlan(TypedDict, total=False):
     fallbacks: list[str]
 
 
-def score_evidence_likeness(sources: list[dict]) -> float:
-    """
-    Lightweight evidence-likeness scoring for retrieval evaluation.
+def _evidence_feature_row(src: dict) -> dict[str, float]:
+    quote = src.get("quote") or ""
+    snippet = src.get("snippet") or src.get("content") or ""
+    text = quote or snippet or ""
+    has_digits = 1.0 if isinstance(text, str) and any(ch.isdigit() for ch in text) else 0.0
+    return {
+        "has_quote": 1.0 if quote else 0.0,
+        "has_chunk": 1.0 if has_evidence_chunk(src) else 0.0,
+        "has_digits": has_digits,
+        "quote_len_norm": min(1.0, len(str(quote)) / 200.0) if quote else 0.0,
+        "snippet_len_norm": min(1.0, len(str(snippet)) / 400.0) if snippet else 0.0,
+        "extraction_success": 1.0 if snippet or quote else 0.0,
+    }
 
-    Scores are based on presence of quotes/snippets and numeric cues.
+
+def score_evidence_likeness(
+    sources: list[dict],
+    *,
+    calibration_registry: CalibrationRegistry | None = None,
+) -> float:
+    """
+    Calibrated evidence-likeness scoring for retrieval evaluation.
     """
     if not sources:
         return 0.0
 
+    registry = calibration_registry or CalibrationRegistry.from_runtime(None)
+    model = registry.get_model("evidence_likeness")
     scores: list[float] = []
+    samples: list[dict] = []
+
     for src in sources:
         if not isinstance(src, dict):
             continue
-        score = 0.0
-        if src.get("quote"):
-            score += 0.6
-        if has_evidence_chunk(src):
-            score += 0.3
-        text = (src.get("quote") or src.get("snippet") or src.get("content") or "")
-        if isinstance(text, str) and any(ch.isdigit() for ch in text):
-            score += 0.1
-        scores.append(min(score, 1.0))
+        features = _evidence_feature_row(src)
+        if model:
+            score, trace = model.score(features)
+        else:
+            policy = registry.policy.evidence_likeness
+            raw, score = logistic_score(
+                features,
+                policy.fallback_weights or policy.weights,
+                bias=policy.fallback_bias or policy.bias,
+            )
+            trace = {
+                "model": "evidence_likeness",
+                "version": policy.version,
+                "features": features,
+                "weights": policy.fallback_weights or policy.weights,
+                "bias": policy.fallback_bias or policy.bias,
+                "raw_score": raw,
+                "score": score,
+                "fallback_used": True,
+            }
+        scores.append(float(score))
+        if len(samples) < 5:
+            samples.append(
+                {
+                    "domain": src.get("domain"),
+                    "score": float(score),
+                    "trace": trace,
+                }
+            )
 
-    if not scores:
-        return 0.0
-    return sum(scores) / len(scores)
+    avg = sum(scores) / len(scores) if scores else 0.0
+    Trace.event(
+        "evidence_likeness.scored",
+        {
+            "avg_score": float(avg),
+            "sample_count": len(samples),
+            "samples": samples,
+        },
+    )
+    return float(avg)
 
 
 class EvidenceNeed(TypedDict, total=False):

@@ -130,9 +130,30 @@ def aggregate_claim_verdict(
         refute_count=refute_count,
     )
 
+    core_count = support_count + refute_count
+    side_count = sum(
+        1
+        for i in items
+        if isinstance(i, dict)
+        and i.get("quote")
+        and str(i.get("stance") or "").upper() not in {"SUPPORT", "REFUTE"}
+    )
+    total_count = len([i for i in items if isinstance(i, dict)])
+
+    conflict_weight = float(policy.get("penalty_conflict_weight", 0.10))
+    temporal_weight = float(policy.get("penalty_temporal_weight", 0.15))
+    diversity_weight = float(policy.get("penalty_diversity_weight", 0.05))
+
+    conflict_mass = 0.0
+    if core_count > 0:
+        conflict_mass = min(support_count, refute_count) / max(1, core_count)
+    conflict_penalty = conflict_weight * conflict_mass if conflict else 0.0
+    temporal_mass = 0.0
+    diversity_shortfall = 0.0
+
     penalties: list[str] = []
     if conflict:
-        base -= 0.10
+        base -= conflict_penalty
         penalties.append("conflict_penalty")
 
     is_time_sensitive = bool((temporality or {}).get("is_time_sensitive"))
@@ -140,7 +161,13 @@ def aggregate_claim_verdict(
     if is_time_sensitive:
         outdated = any(str(i.get("temporal_flag") or "").lower() == "outdated" for i in items)
         if outdated:
-            base -= 0.15
+            temporal_mass = sum(
+                1
+                for i in items
+                if isinstance(i, dict)
+                and str(i.get("temporal_flag") or "").lower() in {"outdated", "future"}
+            ) / max(1, total_count)
+            base -= temporal_weight * temporal_mass
             penalties.append("temporal_penalty")
             if verdict == "verified":
                 verdict = "ambiguous"
@@ -149,8 +176,10 @@ def aggregate_claim_verdict(
     stats = evidence_pack.get("stats") or {}
     min_domain_div = int(policy.get("min_domain_diversity", 1))
     if isinstance(stats, dict) and stats.get("domain_diversity") is not None:
-        if int(stats.get("domain_diversity") or 0) < min_domain_div:
-            base -= 0.05
+        domain_diversity = int(stats.get("domain_diversity") or 0)
+        if domain_diversity < min_domain_div:
+            diversity_shortfall = (min_domain_div - domain_diversity) / max(1, min_domain_div)
+            base -= diversity_weight * diversity_shortfall
             penalties.append("consistency_penalty")
 
     best_tier = None
@@ -183,6 +212,18 @@ def aggregate_claim_verdict(
             "forced_ambiguous": forced_ambiguous,
             "support_quotes": support_count,
             "refute_quotes": refute_count,
+            "core_quotes": core_count,
+            "side_quotes": side_count,
+            "penalty_weights": {
+                "conflict": conflict_weight,
+                "temporal": temporal_weight,
+                "diversity": diversity_weight,
+            },
+            "penalty_masses": {
+                "conflict_mass": conflict_mass,
+                "temporal_mass": temporal_mass,
+                "diversity_shortfall": diversity_shortfall,
+            },
         },
     )
 
@@ -196,6 +237,11 @@ def aggregate_claim_verdict(
             "conflict": conflict,
             "penalties": penalties,
             "best_tier": best_tier,
+            "penalty_mass": {
+                "conflict_mass": conflict_mass,
+                "temporal_mass": temporal_mass,
+                "diversity_shortfall": diversity_shortfall,
+            },
         },
     }
 

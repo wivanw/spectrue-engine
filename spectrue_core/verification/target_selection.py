@@ -12,10 +12,12 @@ The gate ensures only top-K key claims trigger searches.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.calibration_registry import CalibrationRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +78,25 @@ def _assign_semantic_clusters(claims: list[dict], threshold: float = 0.75) -> No
         logger.debug("[TargetSelection] Semantic clustering failed: %s", e)
 
 
+def _tokenize_claim_text(text: str) -> set[str]:
+    tokens = re.findall(r"[\w']+", (text or "").lower())
+    return {t for t in tokens if t and len(t) > 2}
+
+
+def _claim_similarity(a: dict, b: dict) -> float:
+    text_a = str(a.get("normalized_text") or a.get("text") or "")
+    text_b = str(b.get("normalized_text") or b.get("text") or "")
+    if not text_a or not text_b:
+        return 0.0
+    tokens_a = _tokenize_claim_text(text_a)
+    tokens_b = _tokenize_claim_text(text_b)
+    if not tokens_a or not tokens_b:
+        return 0.0
+    inter = tokens_a.intersection(tokens_b)
+    union = tokens_a.union(tokens_b)
+    return float(len(inter)) / max(1.0, float(len(union)))
+
+
 @dataclass
 class TargetSelectionResult:
     """Result of target selection gate."""
@@ -87,7 +108,7 @@ class TargetSelectionResult:
     deferred: list[dict] = field(default_factory=list)
     
     # Mapping: deferred_claim_id -> target_claim_id (for evidence sharing)
-    evidence_sharing: dict[str, str] = field(default_factory=dict)
+    evidence_sharing: dict[str, dict[str, Any]] = field(default_factory=dict)
     
     # Reason codes for each claim
     reasons: dict[str, str] = field(default_factory=dict)
@@ -133,6 +154,12 @@ def select_verification_targets(
     
     # Primary ordering comes from EV (harm/uncertainty/centrality/thesis) when graph available
     claim_by_id = {str(c.get("id") or c.get("claim_id") or "c1"): c for c in claims}
+    cluster_sizes: dict[str, int] = {}
+    for c in claims:
+        if not isinstance(c, dict):
+            continue
+        cluster_id = str(c.get("cluster_id") or c.get("topic_key") or "default")
+        cluster_sizes[cluster_id] = cluster_sizes.get(cluster_id, 0) + 1
     centrality_map: dict[str, float] = {}
     if graph_result and getattr(graph_result, "all_ranked", None):
         ranked_all = list(graph_result.all_ranked)
@@ -210,13 +237,28 @@ def select_verification_targets(
             
             # Check if there's a target in same cluster for evidence sharing
             if cluster_id in cluster_map:
-                result.evidence_sharing[claim_id] = cluster_map[cluster_id]
-                result.reasons[claim_id] = f"deferred_shares_{cluster_map[cluster_id]}"
+                target_id = cluster_map[cluster_id]
+                target_claim = claim_by_id.get(target_id, {})
+                similarity = _claim_similarity(claim, target_claim) if target_claim else 0.0
+                cluster_size = max(1, cluster_sizes.get(cluster_id, 1))
+                cohesion = min(1.0, 1.0 / (cluster_size ** 0.5))
+                result.evidence_sharing[claim_id] = {
+                    "target_id": target_id,
+                    "similarity": similarity,
+                    "cohesion": cohesion,
+                }
+                result.reasons[claim_id] = f"deferred_shares_{target_id}"
             elif cluster_map:
                 # M108: Fallback - share with first target when no cluster match
                 # Better than leaving claim without any verdict
                 first_target = next(iter(cluster_map.values()))
-                result.evidence_sharing[claim_id] = first_target
+                target_claim = claim_by_id.get(first_target, {})
+                similarity = _claim_similarity(claim, target_claim) if target_claim else 0.0
+                result.evidence_sharing[claim_id] = {
+                    "target_id": first_target,
+                    "similarity": similarity,
+                    "cohesion": 0.0,
+                }
                 result.reasons[claim_id] = f"deferred_shares_{first_target}_fallback"
             else:
                 result.reasons[claim_id] = "deferred_no_search"
@@ -252,8 +294,10 @@ def select_verification_targets(
 
 def propagate_deferred_verdicts(
     result: dict,
-    evidence_sharing: dict[str, str],
+    evidence_sharing: dict[str, Any],
     deferred_claims: list[dict],
+    *,
+    calibration_registry: CalibrationRegistry | None = None,
 ) -> dict:
     """
     Propagate verdicts from target claims to deferred claims.
@@ -263,7 +307,7 @@ def propagate_deferred_verdicts(
     
     Args:
         result: Evidence flow result containing claim_verdicts
-        evidence_sharing: Map of deferred_claim_id -> target_claim_id
+        evidence_sharing: Map of deferred_claim_id -> share payload
         deferred_claims: List of deferred claim dicts
         
     Returns:
@@ -275,6 +319,13 @@ def propagate_deferred_verdicts(
     claim_verdicts = result.get("claim_verdicts")
     if not isinstance(claim_verdicts, list):
         return result
+
+    registry = calibration_registry or CalibrationRegistry.from_runtime(None)
+    policy = registry.policy
+    min_shrink = float(policy.propagation_min_shrink)
+    max_shrink = float(policy.propagation_max_shrink)
+    sim_weight = float(policy.propagation_similarity_weight)
+    cohesion_weight = float(policy.propagation_cohesion_weight)
     
     # Build lookup: target_claim_id -> verdict
     target_verdicts: dict[str, dict] = {}
@@ -293,8 +344,8 @@ def propagate_deferred_verdicts(
         if not claim_id:
             continue
         
-        target_id = evidence_sharing.get(claim_id)
-        if not target_id:
+        share = evidence_sharing.get(claim_id)
+        if not share:
             # No target to inherit from - mark as NEI
             payload = {
                 "claim_id": claim_id,
@@ -309,6 +360,18 @@ def propagate_deferred_verdicts(
             else:
                 claim_verdicts.append(payload)
             propagated_count += 1
+            continue
+
+        if isinstance(share, dict):
+            target_id = str(share.get("target_id") or "")
+            similarity = float(share.get("similarity") or 0.0)
+            cohesion = float(share.get("cohesion") or 0.0)
+        else:
+            target_id = str(share)
+            similarity = 0.0
+            cohesion = 0.0
+
+        if not target_id:
             continue
         
         target_cv = target_verdicts.get(target_id)
@@ -329,10 +392,11 @@ def propagate_deferred_verdicts(
             propagated_count += 1
             continue
         
-        # Inherit from target with penalty
+        # Inherit from target with similarity/cohesion shrinkage
         target_score = float(target_cv.get("verdict_score", 0.5) or 0.5)
-        # Apply 10% penalty toward 0.5 (uncertainty)
-        derived_score = target_score * 0.9 + 0.5 * 0.1
+        affinity = max(0.0, min(1.0, (sim_weight * similarity) + (cohesion_weight * cohesion)))
+        shrinkage = max(min_shrink, min(max_shrink, max_shrink - ((max_shrink - min_shrink) * affinity)))
+        derived_score = target_score * (1.0 - shrinkage) + 0.5 * shrinkage
         
         payload = {
             "claim_id": claim_id,
@@ -342,6 +406,12 @@ def propagate_deferred_verdicts(
             "derived_from": target_id,
             "derived_reason": "inherited_from_cluster_target",
             "reasons_short": ["Verdict derived from key claim in same cluster"],
+            "propagation": {
+                "similarity": similarity,
+                "cohesion": cohesion,
+                "affinity": affinity,
+                "shrinkage": shrinkage,
+            },
         }
         if claim_id in verdict_index:
             claim_verdicts[verdict_index[claim_id]] = payload
@@ -349,11 +419,12 @@ def propagate_deferred_verdicts(
             claim_verdicts.append(payload)
         propagated_count += 1
     
+    sharing_sample = list(evidence_sharing.items())[:5]
     Trace.event(
         "deferred_verdicts.propagated",
         {
             "propagated_count": propagated_count,
-            "evidence_sharing_map": evidence_sharing,
+            "evidence_sharing_sample": sharing_sample,
         },
     )
     

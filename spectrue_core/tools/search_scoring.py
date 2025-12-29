@@ -27,6 +27,10 @@ import logging
 import re
 from urllib.parse import urlparse
 
+from spectrue_core.runtime_config import EngineRuntimeConfig
+from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.calibration_models import logistic_score
+from spectrue_core.verification.calibration_registry import CalibrationRegistry
 from spectrue_core.verification.trusted_sources import ALL_TRUSTED_DOMAINS as TRUSTED_DOMAINS
 
 logger = logging.getLogger(__name__)
@@ -124,6 +128,34 @@ def is_trusted_host(host: str) -> bool:
 # Relevance Scoring
 # =============================================================================
 
+def _extract_recent_year(text: str) -> int | None:
+    if not text:
+        return None
+    years = []
+    for match in re.findall(r"\b(20\d{2})\b", text):
+        try:
+            year = int(match)
+        except ValueError:
+            continue
+        years.append(year)
+    if not years:
+        return None
+    now_year = datetime.datetime.now().year
+    candidates = [y for y in years if 1990 <= y <= now_year + 1]
+    if not candidates:
+        return None
+    return max(candidates)
+
+
+def _year_freshness(url: str, title: str) -> float:
+    year = _extract_recent_year(f"{url} {title}")
+    if not year:
+        return 0.0
+    now_year = datetime.datetime.now().year
+    delta = max(0, now_year - year)
+    return max(0.0, min(1.0, 1.0 - (delta / 10.0)))
+
+
 def relevance_score(
     query: str,
     title: str,
@@ -131,7 +163,9 @@ def relevance_score(
     url: str,
     *,
     tavily_score: float | None = None,
-) -> float:
+    runtime_config: EngineRuntimeConfig | None = None,
+    trace: bool = False,
+) -> float | tuple[float, dict]:
     """
     Lightweight lexical relevance scoring to drop obviously off-topic results.
     Keeps behavior deterministic and cheap (no LLM calls).
@@ -142,12 +176,24 @@ def relevance_score(
         content: Result content/snippet
         url: Result URL
         tavily_score: Optional Tavily-provided relevance score
+        runtime_config: Optional engine runtime config for calibration models
+        trace: Whether to emit trace payloads (returns score + trace)
     
     Returns:
-        Relevance score between 0.0 and 1.0
+        Relevance score between 0.0 and 1.0 (or score + trace)
     """
     query_tokens = tokenize(query)
     if not query_tokens:
+        if trace:
+            trace_payload = {
+                "model": "search_relevance",
+                "version": "empty_query",
+                "features": {},
+                "score": 0.0,
+                "fallback_used": True,
+            }
+            Trace.event("search.relevance.scored", trace_payload)
+            return 0.0, trace_payload
         return 0.0
 
     tokens = [t for t in query_tokens if (len(t) >= 3 or t.isdigit()) and t not in STOP_WORDS]
@@ -161,72 +207,72 @@ def relevance_score(
     hits_content = sum(1 for t in tokens if t in content_tokens)
     hit_ratio = (hits_title * 2 + hits_content) / max(1, len(tokens))
 
-    # Penalize extremely short snippets (often random/empty)
-    length_penalty = 0.0
-    if content and len(content) < 80:
-        length_penalty = 0.08
-
     # Small bonus for trusted domains (stability)
-    trusted_bonus = 0.0
+    trusted_domain = 0.0
     try:
         host = urlparse(url).netloc
         if is_trusted_host(host):
-            trusted_bonus = 0.10
+            trusted_domain = 1.0
     except Exception:
         pass
 
     lexical_score = max(0.0, min(1.0, hit_ratio))
-
-    # Start with lexical score
-    final_score = lexical_score
-
+    snippet_len_norm = max(0.0, min(1.0, len(content or "") / 200.0))
+    provider_score = 0.0
     if tavily_score is not None:
         try:
-            ts = float(tavily_score)
-            # M46/M47: Hardened gate.
-            # If keywords don't match (lexical < 0.15), we distrust Tavily
-            # UNLESS it's extremely confident (ts >= 0.90), which suggests strong semantic match.
-            if lexical_score < 0.15:
-                if ts >= 0.90:
-                    final_score = max(lexical_score, ts * 0.70)  # Reduced trust in pure semantic match
-                else:
-                    final_score = lexical_score * 0.5  # Heavy penalty
-            else:
-                # Blend: allow TS to boost, but cap the gain to avoid Tavily hallucination dominance.
-                blended = max(lexical_score, ts)
-                cap = lexical_score + 0.35
-                final_score = min(blended, cap)
-        except Exception:
-            pass
+            provider_score = max(0.0, min(1.0, float(tavily_score)))
+        except (TypeError, ValueError):
+            provider_score = 0.0
+    url_year_freshness = _year_freshness(url, title)
 
-    # T5: Date freshness heuristic from URL path (cheap, deterministic).
-    # - current year => +0.08
-    # - older than 2 years => -0.12
-    freshness_adjust = 0.0
-    try:
-        now_year = datetime.datetime.now().year
-        m = re.search(r"/(20\d{2})(?:/|\\b)", url or "")
-        if m:
-            year = int(m.group(1))
-            if year == now_year:
-                freshness_adjust = 0.08
-            elif year <= now_year - 3:
-                freshness_adjust = -0.12
-    except Exception:
-        pass
+    features = {
+        "lexical_score": lexical_score,
+        "provider_score": provider_score,
+        "snippet_len_norm": snippet_len_norm,
+        "trusted_domain": trusted_domain,
+        "url_year_freshness": url_year_freshness,
+    }
 
-    final_score += trusted_bonus
-    final_score -= length_penalty
-    final_score += freshness_adjust
+    registry = CalibrationRegistry.from_runtime(runtime_config)
+    model = registry.get_model("search_relevance")
+    if model:
+        final_score, trace_payload = model.score(features)
+    else:
+        policy = registry.policy.search_relevance
+        raw, final_score = logistic_score(
+            features,
+            policy.fallback_weights or policy.weights,
+            bias=policy.fallback_bias or policy.bias,
+        )
+        trace_payload = {
+            "model": "search_relevance",
+            "version": policy.version,
+            "features": features,
+            "weights": policy.fallback_weights or policy.weights,
+            "bias": policy.fallback_bias or policy.bias,
+            "raw_score": raw,
+            "score": final_score,
+            "fallback_used": True,
+        }
 
-    return max(0.0, min(1.0, final_score))
+    if trace:
+        trace_payload["score"] = float(final_score)
+        Trace.event("search.relevance.scored", trace_payload)
+        return float(final_score), trace_payload
+    return float(final_score)
 
 
 # =============================================================================
 # Rank and Filter
 # =============================================================================
 
-def rank_and_filter(query: str, results: list[dict]) -> list[dict]:
+def rank_and_filter(
+    query: str,
+    results: list[dict],
+    *,
+    runtime_config: EngineRuntimeConfig | None = None,
+) -> list[dict]:
     """
     Score, filter, and rank search results.
     
@@ -277,15 +323,23 @@ def rank_and_filter(query: str, results: list[dict]) -> list[dict]:
         if _is_archive_like(url) and not _has_news_signal(title, content, url):
             continue
 
-        s = relevance_score(
+        score_result = relevance_score(
             query,
             title,
             content,
             url,
             tavily_score=obj.get("score"),
+            runtime_config=runtime_config,
+            trace=True,
         )
+        if isinstance(score_result, tuple):
+            s, trace_payload = score_result
+        else:
+            s, trace_payload = score_result, None
         item = dict(obj)
         item["relevance_score"] = s
+        if trace_payload:
+            item["relevance_trace"] = trace_payload
         scored.append(item)
 
     scored.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)

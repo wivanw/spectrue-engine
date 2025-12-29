@@ -65,18 +65,78 @@ class SearchManager:
     def decide_retrieval_action(
         self,
         *,
-        retrieval_confidence: float,
+        retrieval_eval: dict | None = None,
+        retrieval_confidence: float | None = None,
         claim: dict | None = None,
     ) -> tuple[str, str]:
         """
         Decide stop/continue/correction action for retrieval evaluation.
         """
-        high_threshold = 0.7
-        low_threshold = 0.35
+        if retrieval_eval is not None and retrieval_confidence is None:
+            try:
+                retrieval_confidence = float(retrieval_eval.get("retrieval_confidence", 0.0))
+            except Exception:
+                retrieval_confidence = 0.0
+        retrieval_confidence = float(retrieval_confidence or 0.0)
+
+        expected_gain = None
+        expected_cost = None
+        value_per_cost = None
+        if isinstance(retrieval_eval, dict):
+            expected_gain = retrieval_eval.get("expected_gain")
+            expected_cost = retrieval_eval.get("expected_cost")
+            value_per_cost = retrieval_eval.get("value_per_cost")
+
+        calibration = getattr(getattr(self.config, "runtime", None), "calibration", None)
+        min_value_per_cost = float(getattr(calibration, "retrieval_min_value_per_cost", 0.25) or 0.25)
+        gain_floor = float(getattr(calibration, "retrieval_gain_floor", 0.15) or 0.15)
+        cost_weight = float(getattr(calibration, "retrieval_cost_weight", 1.0) or 1.0)
+
+        if expected_gain is not None:
+            try:
+                expected_gain = float(expected_gain)
+            except Exception:
+                expected_gain = None
+        if expected_cost is not None:
+            try:
+                expected_cost = float(expected_cost)
+            except Exception:
+                expected_cost = None
+        if value_per_cost is None and expected_gain is not None and expected_cost is not None:
+            denom = max(1e-6, expected_cost * max(1e-6, cost_weight))
+            value_per_cost = expected_gain / denom
+
+        if expected_gain is not None and value_per_cost is not None:
+            if expected_gain <= gain_floor or value_per_cost < min_value_per_cost:
+                return "stop_early", "marginal_gain_below_cost"
+
+        calibration = getattr(getattr(self.config, "runtime", None), "calibration", None)
+        low_threshold = float(getattr(calibration, "retrieval_confidence_low", 0.35) or 0.35)
+        high_threshold = float(getattr(calibration, "retrieval_confidence_high", 0.70) or 0.70)
+        guard_applied = False
         if self.policy_profile is not None:
-            base = float(self.policy_profile.quality_thresholds.min_relevance_score or 0.15)
-            low_threshold = max(0.25, min(0.45, base * 2.0))
-            high_threshold = max(0.6, min(0.85, base * 4.0))
+            base = float(self.policy_profile.quality_thresholds.min_relevance_score or 0.0)
+            if base > 0:
+                low_threshold = max(low_threshold, base)
+                high_threshold = max(high_threshold, base)
+        if high_threshold <= low_threshold:
+            high_threshold = min(1.0, low_threshold + 0.05)
+            guard_applied = True
+        if guard_applied:
+            Trace.event(
+                "retrieval.threshold_guard_applied",
+                {
+                    "low_threshold": float(low_threshold),
+                    "high_threshold": float(high_threshold),
+                    "policy_profile_enabled": self.policy_profile is not None,
+                    "base_min_relevance": float(
+                        getattr(getattr(self.policy_profile, "quality_thresholds", None), "min_relevance_score", 0.0)
+                        or 0.0
+                    )
+                    if self.policy_profile is not None
+                    else 0.0,
+                },
+            )
 
         if retrieval_confidence >= high_threshold:
             return "stop_early", "confidence_high"
@@ -102,6 +162,10 @@ class SearchManager:
             return "refine_query", "low_confidence_refine_query"
 
         return "continue", "confidence_medium"
+
+    def estimate_hop_cost(self, *, search_type: str | None = None) -> float:
+        search_key = (search_type or "smart").lower()
+        return float(SEARCH_COSTS.get(search_key, 100))
 
     def calculate_cost(self, model: str, search_type: str) -> int:
         """Calculate total billed cost based on operations performed."""

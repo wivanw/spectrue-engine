@@ -110,6 +110,9 @@ class RetrievalEvaluation:
     retrieval_confidence: float
     action: str
     reason_code: ReasonCode | None = None
+    expected_gain: float = 0.0
+    expected_cost: float = 0.0
+    value_per_cost: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +123,9 @@ class RetrievalEvaluation:
             "retrieval_confidence": float(self.retrieval_confidence),
             "action": self.action,
             "reason_code": self.reason_code.to_dict() if self.reason_code else None,
+            "expected_gain": float(self.expected_gain),
+            "expected_cost": float(self.expected_cost),
+            "value_per_cost": float(self.value_per_cost),
         }
 
 

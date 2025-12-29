@@ -24,17 +24,8 @@ Your task is to classify the reliability of claims based *strictly* on the provi
 - **0.0 - 0.2 (Refuted)**: Evidence contradicts the claim.
 
 # AGGREGATION LOGIC (Global Score)
-Calculate the global `verified_score` using CORE DOMINANCE:
-
-1. **CORE claims (importance >= 0.7)**: These drive the verdict. Weight them heavily.
-2. **SIDE facts (importance < 0.7)**: Modifiers only, never exceed CORE.
-
-**FORMULA**:
-- If ALL core claims score >= 0.6: `verified_score = core_avg * 0.8 + side_avg * 0.2`
-- If ANY core claim scores < 0.4: `verified_score = min(core_avg, 0.5)` (Cap: weak core = weak total)
-- If NO core claims exist: Use simple weighted average
-
-**CRITICAL**: If the main thesis is unverified, side facts CANNOT save the global score.
+Do NOT compute a global `verified_score`. The engine computes it deterministically in code.
+Set `verified_score` to **0.5** as a placeholder.
 
 # WRITING GUIDELINES (User-Facing Text Only)
 - Write `rationale` and `reason` ENTIRELY in **{lang_name}** ({lang}).
@@ -49,7 +40,7 @@ Return valid JSON:
   "claim_verdicts": [
     {{"claim_id": "c1", "verdict_score": 0.9, "verdict": "verified", "reason": "..."}}
   ],
-  "verified_score": 0.85,
+  "verified_score": 0.5,
   "explainability_score": 0.8,
   "danger_score": 0.1,
   "style_score": 0.9,
@@ -57,7 +48,7 @@ Return valid JSON:
 }}
 
 # GLOBAL SCORES EXPLANATION
-- **verified_score**: The GLOBAL aggregated truthfulness, calculated by YOU based on importance.
+- **verified_score**: Placeholder only (set to 0.5). The engine computes the true global score in code.
 - **explainability_score** (0.0-1.0): How well the evidence supports your rationale. 1.0 = every claim verdict is backed by direct quotes.
 - **danger_score** (0.0-1.0): How harmful if acted upon? (0.0 = harmless, 1.0 = dangerous misinformation)
 - **style_score** (0.0-1.0): How neutral is the writing style? (0.0 = heavily biased, 1.0 = neutral journalism)
@@ -104,7 +95,7 @@ Your task is to score each ASSERTION individually, then aggregate to claim and g
 1. Score each assertion independently
 2. Claim verdict = importance-weighted mean of FACT assertion scores
 3. CONTEXT assertions are modifiers, not drivers
-4. Global verified_score = importance-weighted mean of claim verdicts
+4. Do NOT aggregate global verified_score (set placeholder 0.5)
 
 ## CONTENT_UNAVAILABLE Handling
 If evidence has `content_status: "unavailable"`:
@@ -141,7 +132,7 @@ If evidence has `content_status: "unavailable"`:
       "reason": "Location and timing confirmed by official sources."
     }}
   ],
-  "verified_score": 0.85,
+  "verified_score": 0.5,
   "explainability_score": 0.9,
   "danger_score": 0.1,
   "style_score": 0.9,
