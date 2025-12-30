@@ -36,6 +36,7 @@ async def test_two_hop_loop_reaches_sufficiency():
                     "url": "https://bbc.com/first",
                     "stance": "support",
                     "snippet": "Initial report mentions the claim but lacks exact figures.",
+                    "relevance_score": 0.9,
                 }
             ]
         return "", [
@@ -43,6 +44,7 @@ async def test_two_hop_loop_reaches_sufficiency():
                 "url": "https://cdc.gov/article",
                 "stance": "support",
                 "quote": "Official data confirms the claim.",
+                "relevance_score": 0.9,
             }
         ]
 

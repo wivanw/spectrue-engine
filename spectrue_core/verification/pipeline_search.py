@@ -156,6 +156,7 @@ async def run_search_flow(
                 search_type=inp.search_type,
                 max_cost=inp.max_cost,
                 inline_sources=inp.inline_sources,  # Pass verified inline sources
+                agent=agent,
             )
 
             phase_evidence = await runner.run_all_claims(inp.claims, execution_plan)

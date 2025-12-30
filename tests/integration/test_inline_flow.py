@@ -27,8 +27,19 @@ async def test_inline_sources_shortcut_flow():
     # Mock calculate_cost to allow search (even if shortcut skips it)
     mock_search_mgr.calculate_cost.return_value = 0
     mock_search_mgr.can_afford.return_value = True
+    # M109: PhaseRunner expects (context, results) tuple from search_phase
+    mock_search_mgr.search_phase.return_value = ("", [])
+    # M109: Also mock ladder to return input list
+    mock_search_mgr.apply_evidence_acquisition_ladder.side_effect = lambda x, **kwargs: x
     
     mock_agent = AsyncMock()
+    mock_agent.verify_inline_source_relevance.return_value = {
+        "is_relevant": True,
+        "relevance_score": 0.9,
+        "quote_matches": ["PSR J2322-2650b is indeed an exoplanet"],
+        "stance": "SUPPORT",
+        "is_trusted": True
+    }
     
     # Setup Input
     claim_text = "The exoplanet PSR J2322-2650b orbits a millisecond pulsar."
@@ -86,6 +97,9 @@ async def test_inline_sources_shortcut_flow():
     
     assert c1_state.get("is_sufficient") is True, f"Claim should be sufficient via inline shortcut. State: {c1_state}"
     assert c1_state.get("sufficiency_reason") == "inline_sufficient", "Reason should be inline_sufficient"
+
+    # M109 Debug: Ensure verify was called
+    mock_agent.verify_inline_source_relevance.assert_called()
     
     # 3. Final sources should contain our source with SUPPORT stance
     final_sources = result_state.final_sources

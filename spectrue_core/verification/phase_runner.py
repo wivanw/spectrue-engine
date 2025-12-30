@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from spectrue_core.verification.execution_plan import (
     Phase,
@@ -114,6 +114,7 @@ class PhaseRunner:
         search_type: str | None = None,
         max_cost: int | None = None,
         inline_sources: list[dict] | None = None,
+        agent: Any | None = None,
     ) -> None:
         """
         Initialize PhaseRunner.
@@ -123,8 +124,10 @@ class PhaseRunner:
             max_concurrent: Maximum concurrent searches per phase
             progress_callback: Optional async callback for progress updates
             inline_sources: Pre-verified inline sources to include in evidence
+            agent: Agent instance for verification (M109)
         """
         self.search_mgr = search_mgr
+        self.agent = agent
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.execution_state = ExecutionState()
         self.progress_callback = progress_callback
@@ -453,11 +456,28 @@ class PhaseRunner:
 
 
         # CRITICAL SHORTCUT: Check inline sources first (M109)
+        # CRITICAL SHORTCUT: Check inline sources first (M109)
         if self.inline_sources:
             logger.debug("[M109] Checking inline sources shortcut for claim %s", claim_id)
+            
+            # Enrich inline sources if agent is available
+            if self.agent and hasattr(self.agent, "verify_inline_source_relevance"):
+                for src in self.inline_sources:
+                    if isinstance(src, dict) and not src.get("quote_matches"):
+                        try:
+                            verification = await self.agent.verify_inline_source_relevance(
+                                src, 
+                                claim_text
+                            )
+                            if verification:
+                                src.update(verification)
+                        except Exception as e:
+                            logger.warning("[M109] Inline verification failed for %s: %s", src.get("url"), e)
+
             for src in self.inline_sources:
                 if isinstance(src, dict) and not src.get("claim_id"):
                     src["claim_id"] = claim_id
+            
             sufficient, stats = verdict_ready_for_claim(
                 self.inline_sources,
                 claim_id=claim_id,
