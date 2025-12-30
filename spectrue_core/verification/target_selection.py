@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def _assign_semantic_clusters(claims: list[dict], threshold: float = 0.75) -> None:
     """
-    M109: Assign cluster_id to claims based on semantic similarity.
+    Assign cluster_id to claims based on semantic similarity.
     
     Mutates claims in place, adding 'cluster_id' field.
     Falls back gracefully if embeddings unavailable.
@@ -149,7 +149,7 @@ def select_verification_targets(
     elif budget_class == "deep":
         max_targets = min(max_targets, 5)
     
-    # M109: Assign semantic clusters using embeddings (if available)
+    # Assign semantic clusters using embeddings (if available)
     _assign_semantic_clusters(claims)
     
     # Primary ordering comes from EV (harm/uncertainty/centrality/thesis) when graph available
@@ -249,7 +249,7 @@ def select_verification_targets(
                 }
                 result.reasons[claim_id] = f"deferred_shares_{target_id}"
             elif cluster_map:
-                # M108: Fallback - share with first target when no cluster match
+                # Fallback - share with first target when no cluster match
                 # Better than leaving claim without any verdict
                 first_target = next(iter(cluster_map.values()))
                 target_claim = claim_by_id.get(first_target, {})

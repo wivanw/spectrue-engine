@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M70: Schema Evidence Tests
+Schema Evidence Tests
 
 Tests for EvidenceItem, ContentStatus handling, and per-assertion evidence mapping.
 """

@@ -13,7 +13,7 @@ class TestScoringSkill:
 
     @pytest.mark.asyncio
     async def test_score_evidence_llm_aggregation(self, skill, mock_llm_client):
-        """M69 v2: LLM provides verified_score directly."""
+        """v2: LLM provides verified_score directly."""
         mock_llm_client.call_json.return_value = {
             "claim_verdicts": [
                 {"claim_id": "c1", "verdict_score": 0.8}
@@ -40,7 +40,7 @@ class TestScoringSkill:
 
     @pytest.mark.asyncio
     async def test_fallback_when_llm_forgets_verified_score(self, skill, mock_llm_client):
-        """M69 v2: Fallback to mean if LLM forgets verified_score."""
+        """v2: Fallback to mean if LLM forgets verified_score."""
         mock_llm_client.call_json.return_value = {
             "claim_verdicts": [
                 {"claim_id": "c1", "verdict_score": 0.8},

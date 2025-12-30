@@ -64,7 +64,7 @@ class TestOracleOptimization:
         await pipeline.execute(fact="Test fact", search_type="smart", gpt_model="gpt-5-nano", lang="en")
         
         # Verify calls to check_oracle_hybrid
-        # M63 Limit is now 1 candidate to save quota.
+        # Limit is now 1 candidate to save quota.
         assert mock_search_mgr.check_oracle_hybrid.call_count == 1
         
         # Check actual queries
@@ -77,7 +77,7 @@ class TestOracleOptimization:
 
     @pytest.mark.asyncio
     async def test_oracle_limit_max_calls(self, pipeline, mock_agent, mock_search_mgr):
-        """Test that Oracle checks are strictly limited to 1 call max (M63 Optimization)."""
+        """Test that Oracle checks are strictly limited to 1 call max (Optimization)."""
         
         claims = [
             {"id": "c1", "text": "Claim 1", "check_oracle": True},

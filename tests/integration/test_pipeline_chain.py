@@ -53,6 +53,8 @@ async def test_pipeline_algorithmic_chain():
     mock_search_mgr.fetch_url_content = AsyncMock(return_value=real_content)
     mock_search_mgr.calculate_cost.return_value = 0
     mock_search_mgr.can_afford.return_value = True
+    # Pass-through inline sources
+    mock_search_mgr.apply_evidence_acquisition_ladder = AsyncMock(side_effect=lambda x: x)
     
     mock_agent = AsyncMock()
     # Mock verify_inline_source_relevance to return DICT
@@ -121,7 +123,7 @@ async def test_pipeline_algorithmic_chain():
     # -------------------------------------------------------------------------
     # Step 2: Search Flow Input
     # -------------------------------------------------------------------------
-    # Construct SearchFlowInput passing inline sources (The M109 Fix)
+    # Construct SearchFlowInput passing inline sources (The Fix)
     
     target_claim = {"id": "c1", "text": claim_text, "normalized_text": claim_text, "importance": 1.0}
     

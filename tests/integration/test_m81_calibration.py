@@ -1,5 +1,5 @@
 """
-M81 Calibration Integration Tests.
+Calibration Integration Tests.
 
 Tests for:
 - T12: Attribution article handling (interview content)
@@ -101,7 +101,7 @@ class TestT12AttributionArticle:
         # The LLM is instructed to limit core claims to 2
         # We verify by checking the ClaimRole distribution
         
-        # Simulated LLM output for interview article (expected after M81 calibration)
+        # Simulated LLM output for interview article (expected after calibration)
         expected_claims = [
             {"role": ClaimRole.CORE, "text": "Main headline claim"},
             {"role": ClaimRole.CORE, "text": "Secondary important claim"},

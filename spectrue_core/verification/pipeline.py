@@ -80,9 +80,9 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 
-# M63: Intents that should trigger Oracle check
+# Intents that should trigger Oracle check
 ORACLE_CHECK_INTENTS = {"news", "evergreen", "official"}
-# M63: Intents that should skip Oracle (opinion, prediction)
+# Intents that should skip Oracle (opinion, prediction)
 ORACLE_SKIP_INTENTS = {"opinion", "prediction"}
 
 
@@ -106,12 +106,12 @@ class ValidationPipeline:
             getattr(config, "runtime", None)
         )
         EmbedService.configure(openai_api_key=getattr(config, "openai_api_key", None))
-        # M63: Pass oracle_skill to SearchManager for hybrid mode
+        # Pass oracle_skill to SearchManager for hybrid mode
         self.search_mgr = SearchManager(config, oracle_validator=agent.oracle_skill)
-        # M67: Optional translation service for Oracle result localization
+        # Optional translation service for Oracle result localization
         self.translation_service = translation_service
         
-        # M72: ClaimGraph for key claim identification
+        # ClaimGraph for key claim identification
         self._claim_graph: ClaimGraphBuilder | None = None
         claim_graph_enabled = (
             getattr(getattr(getattr(config, "runtime", None), "claim_graph", None), "enabled", False)
@@ -187,8 +187,9 @@ class ValidationPipeline:
         progress_callback=None,
         preloaded_context: str | None = None,
         preloaded_sources: list | None = None,
-        needs_cleaning: bool = False,  # M60: Text from extension needs LLM cleaning
-        source_url: str | None = None,  # M60: Original URL for inline source exclusion
+        needs_cleaning: bool = False,  # Text from extension needs LLM cleaning
+        source_url: str | None = None,  # Original URL for inline source exclusion
+        extract_claims_only: bool = False,  # M105: Deep mode - just extract claims, skip verification
     ) -> dict:
         Trace.event(
             "pipeline.run.start",
@@ -198,6 +199,7 @@ class ValidationPipeline:
                 "needs_cleaning": needs_cleaning,
                 "has_preloaded_context": bool(preloaded_context),
                 "has_preloaded_sources": bool(preloaded_sources),
+                "extract_claims_only": extract_claims_only,
             },
         )
 
@@ -416,7 +418,7 @@ class ValidationPipeline:
             anchor_claim = None
             anchor_claim_id = None
 
-            # M111: Semantic claim dedup right after extraction (pre-oracle/graph/search).
+            # Semantic claim dedup right after extraction (pre-oracle/graph/search).
             # This reduces cost + prevents anchor/secondary duplicates.
             try:
                 before_n = len(claims or [])
@@ -448,6 +450,19 @@ class ValidationPipeline:
             except Exception as e:
                 # Non-fatal: if embeddings unavailable or error occurs, proceed with raw claims.
                 Trace.event("claims.dedup_post_extraction.failed", {"error": str(e)})
+
+            # M105: Deep mode - just extract claims, skip full verification
+            if extract_claims_only:
+                Trace.event("pipeline.extract_claims_only.returning", {"claims_count": len(claims or [])})
+                # Note: extraction phase already ended at line 416
+                return _attach_cost_summary({
+                    "verified_score": 0.0,
+                    "text": fact,
+                    "sources": final_sources,
+                    "details": [],
+                    "_extracted_claims": claims,  # Pass claims back to engine for per-claim verification
+                    "cost": get_cost_summary(ledger).get("total_credits", 0),
+                })
 
             final_sources = await self._verify_inline_sources(
                 inline_sources=inline_sources,
@@ -560,7 +575,7 @@ class ValidationPipeline:
                     },
                 )
 
-            # M104: Build Context Graph for Belief Propagation
+            # Build Context Graph for Belief Propagation
             context_graph = None
             if graph_flow_result and graph_flow_result.graph_result and not graph_flow_result.graph_result.disabled:
                 context_graph = ClaimContextGraph()
@@ -717,7 +732,7 @@ class ValidationPipeline:
                     claims=retrieval_claims,  # Only targets, not all eligible!
                     preloaded_context=preloaded_context,
                     progress_callback=_progress,
-                    inline_sources=prepared.inline_sources,  # M109: Pass verified inline sources
+                    inline_sources=prepared.inline_sources,  # Pass verified inline sources
                 ),
                 state=SearchFlowState(
                     final_context=final_context,
@@ -808,18 +823,58 @@ class ValidationPipeline:
 
             if getattr(search_state, "hard_reject", False):
                 reason = getattr(search_state, "reject_reason", "irrelevant")
-                Trace.event("pipeline.run.completed", {"outcome": "hard_reject", "reason": reason})
-                return _attach_cost_summary({
-                    "verified_score": 0.0,
-                    "analysis": f"Search results are irrelevant to the claim: {reason}",
-                    "rationale": reason,
-                    "cost": self.search_mgr.calculate_cost(gpt_model, search_type),
-                    "text": fact,
-                    "search_meta": self.search_mgr.get_search_meta(),
-                    "sources": [],
-                })
+                
+                # M105: Fallback Extraction Check
+                # If rejection was due to missing input data (e.g. initial URL fetch failed)
+                # but we successfully retrieved search results, try to extract claims now.
+                claims_recovered = False
+                if reason == "No input data" and final_sources:
+                    Trace.event("pipeline.fallback_extraction.start", {"sources_count": len(final_sources)})
+                    try:
+                        # Synthesize text from top results
+                        synth_text = "\n\n".join([
+                            f"{s.get('title', '')}\n{s.get('content', '') or s.get('snippet', '')}"
+                            for s in final_sources[:3]
+                        ])
+                        
+                        fallback_claims, _, _, _ = await self.agent.claims_skill.extract_claims(
+                            synth_text[:15000],  # Cap context
+                            lang=lang,
+                            max_claims=3
+                        )
+                        
+                        if fallback_claims:
+                            claims = fallback_claims
+                            retrieval_claims = fallback_claims
+                            # Assume these are now the 'retrieved' claims for downstream logic
+                            claims_recovered = True
+                            Trace.event("pipeline.fallback_extraction.success", {"claims_count": len(fallback_claims)})
+                            
+                            # Register new claims in ledger
+                            for c in fallback_claims:
+                                cid = c.get("id")
+                                if cid:
+                                    claim_entries[cid] = ClaimLedgerEntry(
+                                        claim_id=cid,
+                                        policy_mode="fallback",
+                                    )
+                    except Exception as e:
+                        Trace.event("pipeline.fallback_extraction.failed", {"error": str(e)})
 
-            # M104: Neutral prior (tier does not influence veracity)
+                if not claims_recovered:
+                    Trace.event("pipeline.run.completed", {"outcome": "hard_reject", "reason": reason})
+                    return _attach_cost_summary({
+                        "verified_score": 0.0,
+                        "analysis": f"Search results are irrelevant to the claim: {reason}",
+                        "rationale": reason,
+                        "cost": self.search_mgr.calculate_cost(gpt_model, search_type),
+                        "text": fact,
+                        "search_meta": self.search_mgr.get_search_meta(),
+                        "sources": [],
+                        "details": [],
+                    })
+
+            # Neutral prior (tier does not influence veracity)
             prior_log_odds = 0.0
             
             prior_belief = BeliefState(log_odds=prior_log_odds)
@@ -860,7 +915,7 @@ class ValidationPipeline:
             )
             _end_phase("evidence_eval")
             
-            # M108: Propagate verdicts to deferred claims (evidence sharing)
+            # Propagate verdicts to deferred claims (evidence sharing)
             if target_selection.evidence_sharing and deferred_claims:
                 result = propagate_deferred_verdicts(
                     result=result,
@@ -881,6 +936,27 @@ class ValidationPipeline:
                 audit = result.get("audit") or {}
                 audit["locale_decision"] = locale_payload
                 result["audit"] = audit
+
+            # Construct RGBA for frontend
+            # [danger, verified, context/explainability, style]
+            r_score = float(result.get("danger_score", -1.0))
+            g_score = float(result.get("verified_score", -1.0))
+            b_score = float(result.get("explainability_score", -1.0))
+            if b_score < 0:
+                b_score = float(result.get("context_score", -1.0))
+            a_score = float(result.get("style_score", -1.0))
+            
+            # Normalize -1.0 to 0.0 for RGBA (visuals) or keep -1.0 if frontend handles it?
+            # Standard RGBA usually expects 0.0-1.0. 
+            # If missing, we use 0.0 to avoid glitches, or 0.5 for neutral.
+            # Let's use max(0.0, score).
+            result["rgba"] = [
+                max(0.0, r_score),
+                max(0.0, g_score),
+                max(0.0, b_score),
+                max(0.0, a_score),
+            ]
+            
             Trace.event("pipeline.run.completed", {"outcome": "scored"})
             _end_phase("verdict")
             return _attach_cost_summary(result)
@@ -1151,7 +1227,7 @@ class ValidationPipeline:
                     },
                 )
                 
-                # M109: Fetch content for primary inline sources
+                # Fetch content for primary inline sources
                 primary_sources = [s for s in verified_inline_sources if s.get("is_primary")]
                 if primary_sources and self.search_mgr:
                     for src in primary_sources[:2]:  # Limit to 2 primary sources
@@ -1223,7 +1299,7 @@ class ValidationPipeline:
         return await resolve_url_content(self.search_mgr, url, log=logger)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # M64: Topic-Aware Round-Robin Query Selection ("Coverage Engine")
+    # Topic-Aware Round-Robin Query Selection ("Coverage Engine")
     # ─────────────────────────────────────────────────────────────────────────
     
     def _select_diverse_queries(
@@ -1244,7 +1320,7 @@ class ValidationPipeline:
     
     def _get_query_by_role(self, claim: dict, role: str) -> str | None:
         """
-        M64: Extract query with specific role from claim's query_candidates.
+        Extract query with specific role from claim's query_candidates.
         
         Args:
             claim: Claim dict with query_candidates and/or search_queries
@@ -1257,7 +1333,7 @@ class ValidationPipeline:
     
     def _normalize_and_sanitize(self, query: str) -> str | None:
         """
-        M64: Normalize query.
+        Normalize query.
         
         Note: Strict gambling keywords removal is deprecated (M64).
         We rely on LLM constraints and Tavily 'topic="news"' mode 
@@ -1273,7 +1349,7 @@ class ValidationPipeline:
     
     def _is_fuzzy_duplicate(self, query: str, existing: list[str], threshold: float = 0.9) -> bool:
         """
-        M64: Check if query is >threshold similar to any existing query.
+        Check if query is >threshold similar to any existing query.
         
         Uses Jaccard similarity on word sets.
         
@@ -1309,9 +1385,9 @@ class ValidationPipeline:
         progress_callback=None
     ) -> dict:
         """
-        M63: Format Oracle JACKPOT result for immediate return.
-        M67: Added lang parameter for localization support.
-        M69: Added granular progress updates (localizing_content).
+        Format Oracle JACKPOT result for immediate return.
+        Added lang parameter for localization support.
+        Added granular progress updates (localizing_content).
         
         Converts OracleCheckResult to FactCheckResponse format.
         """
@@ -1322,7 +1398,7 @@ class ValidationPipeline:
         claim_reviewed = oracle_result.get("claim_reviewed", "")
         summary = oracle_result.get("summary", "")
         
-        # M67: Use LLM-determined scores from OracleValidationSkill (no heuristics!)
+        # Use LLM-determined scores from OracleValidationSkill (no heuristics!)
         verified_score = float(oracle_result.get("verified_score", -1.0))
         danger_score = float(oracle_result.get("danger_score", -1.0))
         
@@ -1344,7 +1420,7 @@ class ValidationPipeline:
         analysis = f"According to {publisher}, this claim is rated as '{rating}'. {summary}"
         rationale = f"Fact check by {publisher}: Rated as '{rating}'. {claim_reviewed}"
         
-        # M67: Translate if non-English and translation_service available
+        # Translate if non-English and translation_service available
         if lang and lang.lower() not in ("en", "en-us") and self.translation_service:
             if progress_callback:
                 await progress_callback("localizing_content")
@@ -1380,12 +1456,13 @@ class ValidationPipeline:
             "rgba": [danger_score, verified_score, 1.0, 1.0],
             "text": fact,
             "search_meta": self.search_mgr.get_search_meta(),
-            "oracle_jackpot": True,  # M63: Flag for frontend
+            "oracle_jackpot": True,  # Flag for frontend
+            "details": [],
         }
 
     def _create_oracle_source(self, oracle_result: dict) -> dict:
         """
-        M63: Create source dict from Oracle result for EVIDENCE scenario.
+        Create source dict from Oracle result for EVIDENCE scenario.
         
         This source is added to the evidence pack as a Tier A (high trust) source.
         """
@@ -1406,7 +1483,7 @@ class ValidationPipeline:
             "source_type": "fact_check",
             "is_trusted": True,
             "origin": "GOOGLE_FACT_CHECK",
-            # M63: Oracle metadata for transparency in scoring
+            # Oracle metadata for transparency in scoring
             "oracle_metadata": {
                 "relevance_score": relevance,
                 "status": status,
@@ -1416,7 +1493,7 @@ class ValidationPipeline:
         }
 
     # ─────────────────────────────────────────────────────────────────────────
-    # M70: Schema-First Query Generation (Assertion-Based)
+    # Schema-First Query Generation (Assertion-Based)
     # ─────────────────────────────────────────────────────────────────────────
 
     def _select_queries_from_claim_units(
@@ -1426,7 +1503,7 @@ class ValidationPipeline:
         fact_fallback: str = "",
     ) -> list[str]:
         """
-        M70: Generate search queries from structured ClaimUnits.
+        Generate search queries from structured ClaimUnits.
         
         Key difference from legacy:
         - Only FACT assertions generate verification queries
@@ -1450,7 +1527,7 @@ class ValidationPipeline:
 
     def _build_assertion_query(self, unit, assertion) -> str | None:
         """
-        M70: Build search query for a specific assertion.
+        Build search query for a specific assertion.
         
         Query structure: "{subject} {assertion.value} {context}"
         
@@ -1474,7 +1551,7 @@ class ValidationPipeline:
         sources: list[dict],
     ) -> dict[str, list[str]]:
         """
-        M70: Map sources to assertion_keys for targeted verification.
+        Map sources to assertion_keys for targeted verification.
         
         This is used by clustering to understand which assertion
         each piece of evidence relates to.

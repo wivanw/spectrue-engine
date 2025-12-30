@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M74: Coverage Sampler & Text Chunking Utilities.
+Coverage Sampler & Text Chunking Utilities.
 
 Provides structure-aware text splitting to prevent blind truncation
 during article cleaning logic.

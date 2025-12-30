@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M80: Execution Plan Types
+Execution Plan Types
 
 Defines the structure for progressive widening search execution:
 - Phase: Single search iteration (locale + channels + depth)

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M72: Hybrid ClaimGraph (B + C) Package
+Hybrid ClaimGraph (B + C) Package
 
 Two-stage sparse graph for claim prioritization:
 - B-stage: cheap candidate generation (embeddings + adjacency)

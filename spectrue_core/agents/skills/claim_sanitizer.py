@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M74: Claim Sanitization Skill (LLM-based).
+Claim Sanitization Skill (LLM-based).
 Removes actionable medical instructions from user-facing text.
 """
 

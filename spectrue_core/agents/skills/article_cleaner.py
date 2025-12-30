@@ -178,7 +178,7 @@ class ArticleCleanerSkill:
         if not raw_text or len(raw_text) < 100:
             return raw_text
             
-        # M74: Coverage Chunking
+        # Coverage Chunking
         if self.runtime.features.coverage_chunking:
             merged, _ = await self.clean_article_chunked(raw_text)
             return merged
@@ -190,7 +190,7 @@ class ArticleCleanerSkill:
         dynamic_timeout = self._calculate_timeout(len(truncated))
         logger.debug("[ArticleCleaner] Input: %d chars, timeout: %.1f sec", len(truncated), dynamic_timeout)
         
-        # M76: Select prompt based on feature flag
+        # Select prompt based on feature flag
         if self.runtime.features.clean_md_output:
             prompt = ARTICLE_CLEAN_MARKDOWN_PROMPT.format(text=truncated)
             instr = "Extract the main article content as Markdown. Preserve headings (#, ##) and lists (-). Remove navigation, ads, footer."
@@ -238,7 +238,7 @@ class ArticleCleanerSkill:
         max_chunk_chars: int = 6000
     ) -> tuple[str, list[TextChunk]]:
         """
-        M74: Clean article in chunks to prevent coverage loss.
+        Clean article in chunks to prevent coverage loss.
         Returns (merged_clean_text, original_chunks).
         """
         sampler = CoverageSampler()
@@ -255,7 +255,7 @@ class ArticleCleanerSkill:
         async def _process_chunk(chunk: TextChunk) -> str:
             async with sem:
                 timeout = self._calculate_timeout(len(chunk.text))
-                # M76: Select prompt based on feature flag
+                # Select prompt based on feature flag
                 if self.runtime.features.clean_md_output:
                     prompt = ARTICLE_CLEAN_MARKDOWN_PROMPT.format(text=chunk.text)
                     instr = "Extract the main article content as Markdown. Preserve headings (#, ##) and lists (-). Remove navigation, ads, footer."

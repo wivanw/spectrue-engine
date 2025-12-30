@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M63: Oracle Validation Skill.
+Oracle Validation Skill.
 
 Provides semantic validation of Google Fact Check API results against user claims.
 Uses LLM to compute relevance_score (0-1) instead of binary yes/no.
@@ -76,7 +76,7 @@ class OracleValidationSkill(BaseSkill):
             status = self._map_status(result.get("status", ""))
             is_jackpot = relevance_score > JACKPOT_THRESHOLD
             
-            # M67: Extract LLM-determined scores (no heuristics!)
+            # Extract LLM-determined scores (no heuristics!)
             verified_score = float(result.get("verified_score", -1.0))
             danger_score = float(result.get("danger_score", -1.0))
             
@@ -121,7 +121,7 @@ class OracleValidationSkill(BaseSkill):
         candidates: list[dict],
     ) -> dict:
         """
-        M63: Batch validate ALL candidates in a SINGLE LLM call.
+        Batch validate ALL candidates in a SINGLE LLM call.
         
         This is more efficient than N separate calls and allows LLM
         to compare candidates against each other.
@@ -167,7 +167,7 @@ class OracleValidationSkill(BaseSkill):
             status = self._map_status(result.get("status", ""))
             is_jackpot = relevance_score > JACKPOT_THRESHOLD
             
-            # M67: Extract LLM-determined scores (no more heuristics!)
+            # Extract LLM-determined scores (no more heuristics!)
             verified_score = float(result.get("verified_score", -1.0))
             danger_score = float(result.get("danger_score", -1.0))
             

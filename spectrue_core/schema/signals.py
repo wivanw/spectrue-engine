@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M71: Evidence Signals - Observable Metrics from Pipeline (Sensors).
+Evidence Signals - Observable Metrics from Pipeline (Sensors).
 Pragmatic strictness: critical invariants only.
 """
 
@@ -26,7 +26,7 @@ class RetrievalSignals(SchemaModel):
     total_sources_considered: int = Field(default=0, ge=0)
     total_sources_read: int = Field(default=0, ge=0)
     
-    # Granular tracking (M71 requirement)
+    # Granular tracking (requirement)
     unreadable_sources: int = Field(default=0, ge=0)
     unreadable_breakdown: Dict[str, int] = Field(default_factory=dict)
     

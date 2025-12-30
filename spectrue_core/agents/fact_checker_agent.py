@@ -34,17 +34,17 @@ class FactCheckerAgent:
         self.scoring_skill = ScoringSkill(self.config, self.llm_client)
         self.query_skill = QuerySkill(self.config, self.llm_client)
         self.article_cleaner = ArticleCleanerSkill(self.config, self.llm_client)
-        # M63: Oracle validation skill for hybrid mode
+        # Oracle validation skill for hybrid mode
         self.oracle_skill = OracleValidationSkill(self.config, self.llm_client)
-        # M66: Relevance skill for semantic gating
+        # Relevance skill for semantic gating
         self.relevance_skill = RelevanceSkill(self.config, self.llm_client)
-        # M72: Edge Typing for ClaimGraph C-stage
+        # Edge Typing for ClaimGraph C-stage
         self.edge_typing_skill = EdgeTypingSkill(self.config, self.llm_client)
 
     async def extract_claims(
         self, text: str, *, lang: str = "en", max_claims: int = 7
     ) -> tuple[list[Claim], bool, ArticleIntent, str]:
-        """Extract claims with article intent for M63 Oracle triggering."""
+        """Extract claims with article intent for Oracle triggering."""
         return await self.claims_skill.extract_claims(text, lang=lang, max_claims=max_claims)
 
     async def cluster_evidence(
@@ -80,7 +80,7 @@ class FactCheckerAgent:
         return await self.article_cleaner.clean_article(raw_text)
 
     async def verify_search_relevance(self, claims: list[Claim], search_results: list[dict]) -> dict:
-        """M66: Verify if search results are semantically relevant to claims."""
+        """Verify if search results are semantically relevant to claims."""
         return await self.relevance_skill.verify_search_relevance(claims, search_results)
         
 

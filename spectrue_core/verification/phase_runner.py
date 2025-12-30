@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M80: Phase Runner
+Phase Runner
 
 Executes progressive widening phases with early exit on sufficiency.
 
@@ -352,13 +352,13 @@ class PhaseRunner:
                     state.mark_sufficient(reason=reason, remaining_phases=remaining)
                 elif decision == SufficiencyDecision.STOP:
                     state.sufficiency_reason = reason
-                    state.stop_reason = reason  # M103: Ensure stop_reason is set for terminal states
+                    state.stop_reason = reason  # Ensure stop_reason is set for terminal states
 
         return evidence
 
     def _get_dependency_layers(self, claims: list[Claim]) -> list[list[Claim]]:
         """
-        M93: Build dependency-ordered layers of claims.
+        Build dependency-ordered layers of claims.
 
         Claims with dependencies are placed after their prerequisites.
         Claims without dependencies remain in the first available layer.
@@ -574,7 +574,7 @@ class PhaseRunner:
 
             claim_sources = [s for s in all_sources if isinstance(s, dict) and s.get("claim_id") == claim_id]
             
-            # M109: Include inline sources in potential evidence
+            # Include inline sources in potential evidence
             # They may not have claim_id set yet; verdict_ready uses strict claim_id matching
             potential_evidence = claim_sources + self.inline_sources
             logger.debug(
@@ -610,7 +610,7 @@ class PhaseRunner:
             # ─────────────────────────────────────────────────────────────────────────────
             # Retrieval Loop
             # ─────────────────────────────────────────────────────────────────────────────
-            # M108: Respect retrieval action from confidence evaluation
+            # Respect retrieval action from confidence evaluation
             # Only sync action with decision - don't blindly override stop_early
             if decision == SufficiencyDecision.ENOUGH:
                 action = "stop_early"
@@ -865,7 +865,7 @@ class PhaseRunner:
 
         # Execute search via SearchManager.
         #
-        # Prefer the M83 `search_phase()` primitive (respects depth/max_results/domains).
+        # Prefer the `search_phase()` primitive (respects depth/max_results/domains).
         # Keep compatibility with older mocks by accepting either tuple or list results.
         if hasattr(self.search_mgr, "search_phase"):
             raw_result = await self.search_mgr.search_phase(

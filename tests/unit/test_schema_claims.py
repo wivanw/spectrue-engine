@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M70: Schema Claims Tests
+Schema Claims Tests
 
 Tests for the core bug fix: time_reference vs location distinction.
 """

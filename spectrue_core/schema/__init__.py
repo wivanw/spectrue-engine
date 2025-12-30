@@ -4,11 +4,11 @@
 Spectrue Core Schema Module
 
 Milestones:
-- M70: Schema-First Pipeline (ClaimUnit, Assertion, StructuredVerdict)
-- M71: Verdict Data Contract (Verdict, EvidenceSignals, Policy)
+- Schema-First Pipeline (ClaimUnit, Assertion, StructuredVerdict)
+- Verdict Data Contract (Verdict, EvidenceSignals, Policy)
 """
 
-# M70: Claims
+# Claims
 from spectrue_core.schema.claims import (
     Dimension,
     VerificationScope,
@@ -26,7 +26,7 @@ from spectrue_core.schema.claims import (
     ClaimUnit,
 )
 
-# M70: Evidence
+# Evidence
 from spectrue_core.schema.evidence import (
     EvidenceStance,
     ContentStatus,
@@ -34,9 +34,9 @@ from spectrue_core.schema.evidence import (
     TimelinessStatus,
 )
 
-# M70: Verdict (keep as primary for backward compat)
+# Verdict (keep as primary for backward compat)
 from spectrue_core.schema.verdict import (
-    VerdictStatus,  # M70 VerdictStatus (has PARTIALLY_VERIFIED)
+    VerdictStatus,  # VerdictStatus (has PARTIALLY_VERIFIED)
     VerdictState,
     AssertionVerdict,
     ClaimVerdict,
@@ -44,7 +44,7 @@ from spectrue_core.schema.verdict import (
     StructuredVerdict,
 )
 
-# M71: Policy
+# Policy
 from spectrue_core.schema.policy import (
     ErrorState,
     DecisionPath,
@@ -52,7 +52,7 @@ from spectrue_core.schema.policy import (
     DEFAULT_POLICY,
 )
 
-# M71: Signals
+# Signals
 from spectrue_core.schema.signals import (
     RetrievalSignals,
     CoverageSignals,
@@ -63,14 +63,14 @@ from spectrue_core.schema.signals import (
     LocaleDecision,
 )
 
-# M71: Verdict Contract (new contract, explicit import)
+# Verdict Contract (new contract, explicit import)
 from spectrue_core.schema.verdict_contract import (
     VerdictStatus as ContractVerdictStatus,
     VerdictHighlight,
     Verdict,
 )
 
-# M80: Claim Metadata for Orchestration
+# Claim Metadata for Orchestration
 from spectrue_core.schema.claim_metadata import (
     ClaimRole,
     VerificationTarget,
@@ -85,26 +85,26 @@ from spectrue_core.schema.claim_metadata import (
 
 
 __all__ = [
-    # M70: Claims
+    # Claims
     "Dimension", "VerificationScope", "ClaimDomain", "ClaimType",
     "ClaimStructureType", "ClaimStructure",
     "Assertion", "SourceSpan", "EvidenceRequirementSpec",
     "LocationQualifier", "EventRules", "BroadcastInfo", "EventQualifiers",
     "ClaimUnit",
-    # M70: Evidence
+    # Evidence
     "EvidenceStance", "ContentStatus", "EvidenceItem",
     "TimelinessStatus",
-    # M70: Verdict (backward compat)
+    # Verdict (backward compat)
     "VerdictStatus", "VerdictState", "AssertionVerdict", "ClaimVerdict",
     "StructuredDebug", "StructuredVerdict",
-    # M71: Policy
+    # Policy
     "ErrorState", "DecisionPath", "VerdictPolicy", "DEFAULT_POLICY",
-    # M71: Signals
+    # Signals
     "RetrievalSignals", "CoverageSignals", "TimelinessSignals", "EvidenceSignals",
     "TimeGranularity", "TimeWindow", "LocaleDecision",
-    # M71: Verdict Contract
+    # Verdict Contract
     "ContractVerdictStatus", "VerdictHighlight", "Verdict",
-    # M80: Claim Metadata
+    # Claim Metadata
     "ClaimRole", "VerificationTarget", "EvidenceChannel", "UsePolicy",
     "MetadataConfidence", "SearchLocalePlan", "RetrievalPolicy",
     "ClaimMetadata", "default_claim_metadata",

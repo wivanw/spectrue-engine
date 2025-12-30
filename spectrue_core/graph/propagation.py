@@ -1,5 +1,5 @@
 """
-M104: Belief Propagation through Claim Context Graph
+Belief Propagation through Claim Context Graph
 
 Mathematical Foundation:
 ------------------------

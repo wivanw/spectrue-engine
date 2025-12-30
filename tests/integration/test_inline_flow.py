@@ -35,13 +35,14 @@ async def test_inline_sources_shortcut_flow():
     
     # Inline source that strongly matches the claim
     inline_src = {
-        "url": "https://example.com/pulsar-planet",
+        "url": "https://nasa.gov/pulsar-planet",
         "title": "Pulsar Planet Discovery",
         "content": "Astronomers confirm that PSR J2322-2650b is indeed an exoplanet orbiting a millisecond pulsar. The planet has a lemon-like shape.",
         "snippet": "PSR J2322-2650b is indeed an exoplanet orbiting a millisecond pulsar.",
         "is_primary": True,
         "is_relevant": True,
-        "relevance_score": 0.9
+        "relevance_score": 0.9,
+        "is_trusted": True
     }
     
     inp = SearchFlowInput(
@@ -98,5 +99,5 @@ async def test_inline_sources_shortcut_flow():
             
     assert found_src is not None, "Inline source missing from final output"
     
-    # This assertion verifies the M109 fix (auto-stance)
+    # This assertion verifies the fix (auto-stance)
     assert found_src.get("stance") == "SUPPORT", f"Stance should be SUPPORT, got {found_src.get('stance')}"

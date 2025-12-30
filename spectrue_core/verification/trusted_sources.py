@@ -92,7 +92,7 @@ TRUSTED_SOURCES: dict[str, list[str]] = {
         "popsci.com", "discovermagazine.com", "smithsonianmag.com", "nationalgeographic.com",
         "ipcc.ch",
     ],
-    # M44: Astronomy & Astrophysics — tiered for evidence scoring
+    # Astronomy & Astrophysics — tiered for evidence scoring
     # Tier A: Professional journals/databases (can raise verified_score)
     "astronomy_tier_a": [
         "arxiv.org",  # Preprints (astro-ph) — ok for "hypothesis exists"
@@ -215,7 +215,7 @@ def get_trusted_domains_by_lang(lang: str) -> list[str]:
     if lang not in supported:
         lang = "en"
 
-    # M61: Removed "international_public_bodies" from base list.
+    # Removed "international_public_bodies" from base list.
     # IGO sites (un.org, imf.org, oecd.org, worldbank.org, ec.europa.eu) return legal PDFs,
     # historical documents, and archives — NOT breaking news.
     # They remain in TRUSTED_SOURCES for topic-gated searches (e.g., claim mentions UN resolution).
@@ -224,7 +224,7 @@ def get_trusted_domains_by_lang(lang: str) -> list[str]:
         + TRUSTED_SOURCES["fact_checking_ifcn"]
         + TRUSTED_SOURCES["science_and_health"]
         + TRUSTED_SOURCES["technology"]
-        # + TRUSTED_SOURCES["international_public_bodies"]  # M61: removed for news queries
+        # + TRUSTED_SOURCES["international_public_bodies"]  # removed for news queries
     )
 
     # Language-group routing (Spec Kit).
@@ -258,7 +258,7 @@ def get_domains_for_language(lang: str) -> list[str]:
     return get_trusted_domains_by_lang(lang)
 
 
-# M105: Academic domains for evidence_need == 'academic'
+# Academic domains for evidence_need == 'academic'
 def get_academic_domains() -> list[str]:
     """
     Returns domains for academic/research claims.
@@ -282,7 +282,7 @@ def get_academic_domains() -> list[str]:
     )
 
 
-# M45: LLM-based topic detection
+# LLM-based topic detection
 # Available topics for LLM to choose from during query generation.
 # LLM receives this list and selects ALL matching topics for the claim.
 AVAILABLE_TOPICS: list[str] = [
@@ -337,11 +337,11 @@ def get_domains_by_topics(topics: list[str]) -> list[str]:
     return out
     
     
-# M67: Tier A Definition Constants
+# Tier A Definition Constants
 TIER_A_TLDS = {".gov", ".mil", ".int", ".edu"}
 TIER_A_SUFFIXES = {".europa.eu", ".ac.uk", ".gov.uk", ".gov.ua", ".gov.pl", ".bund.de", ".gc.ca"}
 
-# M67: Social Platforms Registry
+# Social Platforms Registry
 SOCIAL_PLATFORMS = {
     "twitter.com", "x.com", "facebook.com", "instagram.com", 
     "t.me", "tiktok.com", "youtube.com", "linkedin.com", "threads.net"
@@ -384,10 +384,15 @@ def get_tier_ceiling_for_domain(domain: str) -> float:
         
     # 2. Tier B Checks (Trusted Media)
     if d in ALL_TRUSTED_DOMAINS:
-        return 0.75
+        return 0.90  # TierPrior B
         
-    # 3. Default (Tier C)
-    return 0.55
+    # 3. Default (Tier C / D)
+    # Check social for Tier D
+    if is_social_platform(d):
+        return 0.80 # TierPrior D
+        
+    # Default Tier C (General Web / Local)
+    return 0.85 # TierPrior C
 
 
 def is_social_platform(domain: str) -> bool:

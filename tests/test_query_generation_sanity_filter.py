@@ -26,7 +26,7 @@ def test_query_generation_prompt_has_no_probe_policy(monkeypatch):
 
     captured = {"prompt": None}
 
-    # M49: Mock llm_client.call_json instead of chat.completions.create
+    # Mock llm_client.call_json instead of chat.completions.create
     async def _fake_call_json(*, model, input, **kwargs):  # noqa: A002
         captured["prompt"] = input
         return {
@@ -76,7 +76,7 @@ def test_prompt_contains_full_statement_tail_no_truncation(monkeypatch):
 
     captured = {"prompt": None}
 
-    # M49: Mock llm_client.call_json
+    # Mock llm_client.call_json
     async def _fake_call_json(*, model, input, **kwargs):  # noqa: A002
         captured["prompt"] = input
         return {
@@ -88,14 +88,14 @@ def test_prompt_contains_full_statement_tail_no_truncation(monkeypatch):
                 "when": None,
                 "by_whom": None,
             },
-            # M44: Return 2 queries (EN, UK)
+            # Return 2 queries (EN, UK)
             "queries": ["NASA new moon Earth official statement update today", "NASA нова Місяць Земля офіційна заява"],
         }
 
     monkeypatch.setattr(agent.llm_client, "call_json", _fake_call_json)
 
     res = asyncio.run(agent.generate_search_queries(statement, context=context, lang="en", content_lang="en"))
-    # M44: Now returns 2 queries (EN, UK)
+    # Now returns 2 queries (EN, UK)
     assert len(res) == 2
     assert captured["prompt"] is not None
     assert tail in captured["prompt"]
@@ -108,7 +108,7 @@ def test_prompt_has_no_domain_marker_instructions(monkeypatch):
 
     captured = {"prompt": None}
 
-    # M49: Mock llm_client.call_json
+    # Mock llm_client.call_json
     async def _fake_call_json(*, model, input, **kwargs):  # noqa: A002
         captured["prompt"] = input
         return {
@@ -137,7 +137,7 @@ def test_exactly_one_probe_required_when_missing_fields(monkeypatch):
     cfg = SpectrueConfig(openai_api_key="test")
     agent = FactCheckerAgent(cfg)
 
-    # M49: Mock llm_client.call_json
+    # Mock llm_client.call_json
     async def _fake_call_json(*, model, input, **kwargs):  # noqa: A002
         return {
             "claim": {
@@ -148,14 +148,14 @@ def test_exactly_one_probe_required_when_missing_fields(monkeypatch):
                 "when": None,
                 "by_whom": None,
             },
-            # M44: Return 2 queries (EN, UK)
+            # Return 2 queries (EN, UK)
             "queries": ["NASA new moon Earth official statement", "NASA нова Місяць Земля офіційна заява"],
         }
 
     monkeypatch.setattr(agent.llm_client, "call_json", _fake_call_json)
 
     res = asyncio.run(agent.generate_search_queries("NASA reported a new moon.", lang="en", content_lang="en"))
-    # M44: Now returns 2 queries
+    # Now returns 2 queries
     assert len(res) == 2
     q = res[0].lower()
     # No probe words like where/when in queries
@@ -169,7 +169,7 @@ def test_accepts_exactly_one_probe_when_missing_fields(monkeypatch):
     cfg = SpectrueConfig(openai_api_key="test")
     agent = FactCheckerAgent(cfg)
 
-    # M49: Mock llm_client.call_json
+    # Mock llm_client.call_json
     async def _fake_call_json(*, model, input, **kwargs):  # noqa: A002
         return {
             "claim": {
@@ -180,14 +180,14 @@ def test_accepts_exactly_one_probe_when_missing_fields(monkeypatch):
                 "when": None,
                 "by_whom": None,
             },
-            # M44: Return 2 queries (EN, UK)
+            # Return 2 queries (EN, UK)
             "queries": ["NASA new moon Earth official statement", "NASA нова Місяць Земля офіційна заява"],
         }
 
     monkeypatch.setattr(agent.llm_client, "call_json", _fake_call_json)
 
     res = asyncio.run(agent.generate_search_queries("NASA reported a new moon.", lang="en", content_lang="en"))
-    # M44: Now returns 2 queries
+    # Now returns 2 queries
     assert len(res) == 2
     assert "nasa" in res[0].lower()
     assert "new moon earth" in res[0].lower()

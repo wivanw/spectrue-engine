@@ -27,13 +27,13 @@ logger = logging.getLogger(__name__)
 
 class ClusteringSkill(BaseSkill):
     """
-    M68: Clustering Skill with Evidence Matrix Pattern.
+    Clustering Skill with Evidence Matrix Pattern.
     Maps sources to claims (1:1) with strict relevance gating.
     """
 
     async def cluster_evidence(
         self,
-        claims: list[Union[ClaimUnit, dict]], # Support both M70 ClaimUnit and legacy dict
+        claims: list[Union[ClaimUnit, dict]], # Support both ClaimUnit and legacy dict
         search_results: list[dict],
         *,
         stance_pass_mode: str = "single",
@@ -43,7 +43,7 @@ class ClusteringSkill(BaseSkill):
         
         Refactoring M68/M70:
         - Maps each source to BEST claim (1:1)
-        - M70: Maps to specific `assertion_key` within the claim
+        - Maps to specific `assertion_key` within the claim
         - Gates by relevance < 0.4 (DROP)
         - Filters IRRELEVANT/MENTION stances
         - Extracts quotes directly via LLM
@@ -54,7 +54,7 @@ class ClusteringSkill(BaseSkill):
         claims_lite = build_claims_lite(claims)
         sources_lite, unreadable_indices = build_sources_lite(search_results)
 
-        # M103: Quote contract audit trace
+        # Quote contract audit trace
         Trace.event("stance_clustering.quote_audit", {
             "total_sources": len(sources_lite),
             "sources_with_quote": sum(1 for s in sources_lite if s.get("has_quote")),
@@ -71,7 +71,7 @@ class ClusteringSkill(BaseSkill):
 
         num_sources = len(sources_lite)
         
-        # M105: Batching to prevent context overflow
+        # Batching to prevent context overflow
         STANCE_BATCH_SIZE = 10
         
         cluster_timeout = float(getattr(self.runtime.llm, "cluster_timeout_sec", 35.0) or 35.0)
@@ -146,7 +146,7 @@ class ClusteringSkill(BaseSkill):
 
             single_results = await run_pass(STANCE_PASS_SINGLE, "single")
             
-            # M109 FIX: Restore pre-verified stances (e.g. from PhaseRunner shortcuts)
+            # FIX: Restore pre-verified stances (e.g. from PhaseRunner shortcuts)
             # If Clustering LLM degraded them to CONTEXT, force restore them.
             if single_results and len(single_results) == len(search_results):
                 count_restored = 0
@@ -171,14 +171,14 @@ class ClusteringSkill(BaseSkill):
                                   res["contradiction_span"] = res["quote"]
                          count_restored += 1
                     
-                     # M109 FIX: Always propagate is_primary flag if present (even if stance wasn't restored)
+                     # FIX: Always propagate is_primary flag if present (even if stance wasn't restored)
                      # The Scoring layer needs this to trigger the "[PRIMARY SOURCE]" prompt injection.
                      if original.get("is_primary"):
                          res["is_primary"] = True
                          res["source_type"] = "primary"
                 
                 if count_restored > 0:
-                     logger.info("[Clustering] M109: Restored %d pre-verified stances (overwrote LLM context)", count_restored)
+                     logger.info("[Clustering] Restored %d pre-verified stances (overwrote LLM context)", count_restored)
 
             return single_results
         except Exception as e:

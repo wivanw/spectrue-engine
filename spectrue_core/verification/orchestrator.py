@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M80: Claim Orchestrator
+Claim Orchestrator
 
 Builds ExecutionPlan from claims + metadata.
 Phase selection is driven by:
@@ -350,7 +350,7 @@ class ClaimOrchestrator:
         retrieval_policy: RetrievalPolicy,
     ) -> list[Phase]:
         """
-        M83: Apply RetrievalPolicy to a list of phases.
+        Apply RetrievalPolicy to a list of phases.
         
         - Intersects each Phase.channels with RetrievalPolicy.channels_allowed
         - Drops phases that end up with no channels

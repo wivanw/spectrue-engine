@@ -23,7 +23,7 @@ from spectrue_core.verification.phase_runner import PhaseRunner
 @pytest.mark.asyncio
 async def test_phase_runner_dependency_ordering():
     """
-    M93: Claims with dependencies should run after their premises.
+    Claims with dependencies should run after their premises.
     """
     search_mgr = MagicMock()
     execution_log: list[str] = []

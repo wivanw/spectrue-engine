@@ -28,7 +28,7 @@ def test_trace_keeps_tail_snippet_and_hash(monkeypatch, tmp_path):
     prompt_rec = next(r for r in records if r["event"] == "llm.prompt")
     prompt_payload = prompt_rec["data"]["prompt"]
 
-    # M75: Safe payloads update
+    # Safe payloads update
     # In safe mode (default=True in config), we expect:
     # - No "tail"
     # - "head" limited to 120 (default for prompt/sensitive keys) or 600 (others)

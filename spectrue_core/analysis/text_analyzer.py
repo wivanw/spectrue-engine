@@ -132,7 +132,7 @@ class TextAnalyzer:
     
     def _preserve_links_in_html(self, html_content: str) -> str:
         """
-        M29: Preserve URLs by appending them to anchor text before parsing.
+        Preserve URLs by appending them to anchor text before parsing.
         
         Converts: <a href="https://space.com/article">Space.com</a>
         To: Space.com (https://space.com/article)
@@ -186,7 +186,7 @@ class TextAnalyzer:
         if not html_content or not html_content.strip():
             raise ValueError("HTML content cannot be empty")
         
-        # M29: Preserve links before parsing
+        # Preserve links before parsing
         html_with_links = self._preserve_links_in_html(html_content)
         
         budget_cfg = self._get_budget_config()
@@ -361,7 +361,7 @@ class TextAnalyzer:
     async def analyze_text(self, sentences: List[str], search_type: str, gpt_model: str, lang: str, 
                           progress_callback: Optional[Callable] = None, analysis_mode: str = "general",
                           global_context: str = None, global_sources: list = None,
-                          content_lang: str = None) -> dict:  # M31: Added content_lang
+                          content_lang: str = None) -> dict:  # Added content_lang
         """
         Analyze a list of sentences using the configured verifier.
         Runs analysis in parallel for better performance.
@@ -375,7 +375,7 @@ class TextAnalyzer:
             analysis_mode: Analysis mode (general/lite)
             global_context: Pre-fetched context for the entire text
             global_sources: Sources associated with global context
-            content_lang: M31 - Detected content language for query generation
+            content_lang: - Detected content language for query generation
             
         Returns:
             Dictionary with analysis results
@@ -394,7 +394,7 @@ class TextAnalyzer:
             # e.g. "It is red." -> "The car is red."
             context_text = sentences[idx-1] if idx > 0 else ""
             
-            # M31: Pass content_lang to verify_fact
+            # Pass content_lang to verify_fact
             res = await self.verifier.verify_fact(
                 sent, search_type, gpt_model, lang, analysis_mode, callback, 
                 context_text=context_text,

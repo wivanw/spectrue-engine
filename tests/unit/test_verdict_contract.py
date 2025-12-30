@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M71: Verdict Data Contract Tests - Pragmatic Edition.
+Verdict Data Contract Tests - Pragmatic Edition.
 """
 
 import json
@@ -210,7 +210,7 @@ class TestVerdictScoreValidation:
             Verdict(confidence_score=-0.1)
     
     def test_default_confidence_is_zero(self):
-        """M71 Critical: Confidence = 0.0 by default (Blind until proven)."""
+        """Critical: Confidence = 0.0 by default (Blind until proven)."""
         verdict = Verdict()
         assert verdict.confidence_score == 0.0
     

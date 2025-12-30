@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M109: ClaimGraph orchestration without heuristics.
+ClaimGraph orchestration without heuristics.
 
 Deterministic flow:
 - compute embeddings and pre-graph metadata

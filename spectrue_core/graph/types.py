@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M72: ClaimGraph Type Definitions
+ClaimGraph Type Definitions
 
 Dataclasses for claim graph nodes, edges, and results.
 """
@@ -78,7 +78,7 @@ class ClaimNode:
     anchor: str             # Offset or short quote pointer (first 50 chars)
     importance: float       # 0.0-1.0
     topic_key: str          # Topic grouping key
-    harm_potential: int = 1 # M77: Harm Potential (1-5)
+    harm_potential: int = 1 # Harm Potential (1-5)
     
     # For deduplication
     text_hash: str = ""     # Hash of normalized text for caching
@@ -116,7 +116,7 @@ class CandidateEdge:
     reason: Literal["sim", "adjacent", "keyword"]
     sim_score: float        # 0.0-1.0 (embeddings) or Jaccard (keywords)
     same_section: bool
-    cross_topic: bool = False  # M74: Edge crosses topic boundaries
+    cross_topic: bool = False  # Edge crosses topic boundaries
 
 
 @dataclass
@@ -132,7 +132,7 @@ class TypedEdge:
     score: float            # 0.0-1.0 confidence
     rationale_short: str    # 10-25 words, logs only
     evidence_spans: str     # Key text supporting classification, ≤25 words
-    cross_topic: bool = False  # M75: Preserved from CandidateEdge
+    cross_topic: bool = False  # Preserved from CandidateEdge
     
     def to_trace_dict(self) -> dict:
         """Convert to dict for tracing."""
@@ -192,7 +192,7 @@ class GraphResult:
     candidate_edges_count: int = 0
     typed_edges_kept_count: int = 0
     kept_ratio: float = 0.0
-    # M75: Topic-aware metrics
+    # Topic-aware metrics
     within_topic_edges_count: int = 0
     cross_topic_edges_count: int = 0
     kept_ratio_within_topic: float = 0.0
@@ -206,11 +206,11 @@ class GraphResult:
     # Disable state
     disabled: bool = False
     disabled_reason: str | None = None  # "budget_exceeded_preflight" | "quality_gate_failed"
-    fallback_used: bool = False  # M74: Fallback Key Claims used when graph disabled
-    sparse_graph: bool = False  # M76: Graph valid but has few/no edges (kept_ratio < min)
+    fallback_used: bool = False  # Fallback Key Claims used when graph disabled
+    sparse_graph: bool = False  # Graph valid but has few/no edges (kept_ratio < min)
     confidence_scalar: float = 1.0
 
-    # M109: Pre/Post metadata and similarity edges (post-graph metadata is explainability-only)
+    # Pre/Post metadata and similarity edges (post-graph metadata is explainability-only)
     pre_meta: dict[str, ClaimPreGraphMeta] = field(default_factory=dict)
     post_meta: dict[str, ClaimPostGraphMeta] = field(default_factory=dict)
     sim_edges: list[tuple[str, str, float]] = field(default_factory=list)
@@ -223,7 +223,7 @@ class GraphResult:
         return [c.claim_id for c in self.key_claims]
     
     def get_ranked_by_id(self, claim_id: str) -> RankedClaim | None:
-        """Get RankedClaim by claim_id (M73 Layer 2)."""
+        """Get RankedClaim by claim_id (Layer 2)."""
         for c in self.all_ranked:
             if c.claim_id == claim_id:
                 return c
@@ -232,7 +232,7 @@ class GraphResult:
     @property
     def high_tension_claims(self) -> list[RankedClaim]:
         """
-        Claims with significant incoming contradictions (M73 Layer 3).
+        Claims with significant incoming contradictions (Layer 3).
         
         Returns top 5 claims sorted by tension score descending.
         Threshold is hardcoded at 0.5; use config for runtime tuning.
@@ -244,7 +244,7 @@ class GraphResult:
         )[:5]
     
     def get_tension_score(self, claim_id: str) -> float:
-        """Get tension score (in_contradict_weight) for a claim (M73 Layer 3)."""
+        """Get tension score (in_contradict_weight) for a claim (Layer 3)."""
         ranked = self.get_ranked_by_id(claim_id)
         return ranked.in_contradict_weight if ranked else 0.0
     

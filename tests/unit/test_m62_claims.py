@@ -1,5 +1,5 @@
 """
-M62 Tests: Claim Extraction & Query Generation Refactoring
+Tests: Claim Extraction & Query Generation Refactoring
 
 Tests for:
 - Context-aware claim extraction (normalized_text, topic_group, check_worthiness)
@@ -35,13 +35,13 @@ class TestM62ClaimExtraction:
             }]
         }
         
-        # M63: extract_claims returns 3-tuple now
+        # extract_claims returns 3-tuple now
         claims, should_check_oracle, article_intent, _ = await skill.extract_claims("Some article text", lang="en")
         
         assert len(claims) == 1
         claim = claims[0]
         
-        # M62 fields present
+        # fields present
         assert claim["normalized_text"] == "Donald Trump announced new tariffs on China on December 19, 2025."
         assert claim["topic_group"] == "Economy"
         assert claim["check_worthiness"] == 0.85
@@ -58,7 +58,7 @@ class TestM62ClaimExtraction:
             }]
         }
         
-        # M63: extract_claims returns 3-tuple now
+        # extract_claims returns 3-tuple now
         claims, _, _, _ = await skill.extract_claims("Text", lang="en")
         
         assert claims[0]["topic_group"] == "Other"
@@ -75,7 +75,7 @@ class TestM62ClaimExtraction:
             }]
         }
         
-        # M63: extract_claims returns 3-tuple now
+        # extract_claims returns 3-tuple now
         claims, _, _, _ = await skill.extract_claims("Text", lang="en")
         
         # Should fallback to importance
@@ -84,7 +84,7 @@ class TestM62ClaimExtraction:
 
 @pytest.mark.unit
 class TestM62QuerySelection:
-    """Test M64 Topic-Aware Round-Robin query selection (Coverage Engine)."""
+    """Test Topic-Aware Round-Robin query selection (Coverage Engine)."""
     
     @pytest.fixture
     def pipeline(self, mock_config):
@@ -97,7 +97,7 @@ class TestM62QuerySelection:
         return pipeline
     
     def test_select_diverse_queries_round_robin_topics(self, pipeline):
-        """M64: Round-robin should cover all topics before adding depth."""
+        """Round-robin should cover all topics before adding depth."""
         claims = [
             {
                 "id": "c1",
@@ -140,7 +140,7 @@ class TestM62QuerySelection:
         
         queries = pipeline._select_diverse_queries(claims, max_queries=3)
         
-        # M64: Should get 3 queries covering 3 different topic_keys
+        # Should get 3 queries covering 3 different topic_keys
         assert len(queries) == 3
         # First should be from highest importance topic
         assert "trump" in queries[0].lower() or "tariffs" in queries[0].lower()
@@ -206,7 +206,7 @@ class TestM62QuerySelection:
         assert "worthy" in queries[0]
     
     def test_select_diverse_queries_multi_topic_cores(self, pipeline):
-        """M64: Different topic_keys get round-robin coverage."""
+        """Different topic_keys get round-robin coverage."""
         claims = [
             {
                 "id": "c1",
@@ -248,7 +248,7 @@ class TestM62QuerySelection:
         
         queries = pipeline._select_diverse_queries(claims, max_queries=3)
         
-        # M64: Should get 3 queries from 3 different topic_keys (round-robin coverage)
+        # Should get 3 queries from 3 different topic_keys (round-robin coverage)
         assert len(queries) == 3
         # Verify each topic is covered
         all_queries_lower = " ".join(queries).lower()
@@ -259,7 +259,7 @@ class TestM62QuerySelection:
 
     
     def test_fuzzy_dedup_removes_near_identical_queries(self, pipeline):
-        """M64: Near-identical queries (90%+ word overlap) should be deduplicated."""
+        """Near-identical queries (90%+ word overlap) should be deduplicated."""
         claims = [
             {
                 "id": "c1",
@@ -281,7 +281,7 @@ class TestM62QuerySelection:
         assert len(queries) == 1
     
     def test_legacy_search_queries_fallback(self, pipeline):
-        """M64: Claims without query_candidates should fallback to search_queries."""
+        """Claims without query_candidates should fallback to search_queries."""
         claims = [
             {
                 "id": "c1",

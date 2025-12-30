@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M72: Edge Typing Skill for ClaimGraph C-Stage
+Edge Typing Skill for ClaimGraph C-Stage
 
 Classifies candidate edges using LLM (GPT-5 nano).
 Injection-hardened prompt design.
@@ -33,7 +33,7 @@ PROMPT_VERSION = "v1"
 
 class EdgeTypingSkill(BaseSkill):
     """
-    M72: Edge Typing for ClaimGraph C-Stage.
+    Edge Typing for ClaimGraph C-Stage.
     
     Classifies relationships between claim pairs:
     - supports: C2 provides evidence for C1

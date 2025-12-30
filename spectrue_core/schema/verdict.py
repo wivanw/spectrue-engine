@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M70: Structured Verdict Pydantic Models
+Structured Verdict Pydantic Models
 
 Verdict is the OUTPUT of scoring.
 It contains per-assertion verdicts for explainability.
@@ -39,7 +39,7 @@ class VerdictStatus(str, Enum):
     """No evidence found."""
 
     SATIRICAL = "satirical"
-    """M78: Content identified as satire/parody. Not a factual claim."""
+    """Content identified as satire/parody. Not a factual claim."""
 
 
 class VerdictState(str, Enum):

@@ -64,7 +64,7 @@ async def run_search_flow(
     state: SearchFlowState,
 ) -> SearchFlowState:
     """
-    M80/M81: Search phase (orchestration or legacy unified + CSE fallback).
+    M80/Search phase (orchestration or legacy unified + CSE fallback).
 
     Mutates state by appending context/sources, matching existing pipeline behavior.
     """
@@ -155,7 +155,7 @@ async def run_search_flow(
                 gpt_model=inp.gpt_model,
                 search_type=inp.search_type,
                 max_cost=inp.max_cost,
-                inline_sources=inp.inline_sources,  # M109: Pass verified inline sources
+                inline_sources=inp.inline_sources,  # Pass verified inline sources
             )
 
             phase_evidence = await runner.run_all_claims(inp.claims, execution_plan)

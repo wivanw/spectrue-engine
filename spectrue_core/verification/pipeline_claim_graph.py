@@ -27,7 +27,7 @@ async def run_claim_graph_flow(
     progress_callback: ProgressCallback | None,
 ) -> ClaimGraphFlowResult:
     """
-    M72/M73/M81: ClaimGraph build + enrichment + tracing.
+    M72/M73/ClaimGraph build + enrichment + tracing.
 
     Mutates `claims` in-place (importance boosts + graph signal fields), matching
     existing pipeline behavior.
@@ -69,7 +69,7 @@ async def run_claim_graph_flow(
                 },
             )
 
-    # M73 Layer 2-3: Claim Enrichment with Graph Signals
+    # Layer 2-3: Claim Enrichment with Graph Signals
     enriched_count = 0
     high_tension_count = 0
     if graph_result and not graph_result.disabled:
@@ -132,7 +132,7 @@ async def run_claim_graph_flow(
                     high_tension_count,
                 )
 
-    # M73 Layer 4: Evidence-Need Routing Tracing
+    # Layer 4: Evidence-Need Routing Tracing
     if runtime_config.claim_graph.evidence_need_routing_enabled and claims:
         evidence_need_dist: dict[str, int] = {}
         for claim in claims:

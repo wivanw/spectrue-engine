@@ -27,7 +27,7 @@ from spectrue_core.verification.temporal import (
 from spectrue_core.verification.source_utils import canonicalize_sources
 from spectrue_core.verification.trusted_sources import is_social_platform
 
-# M108: Suppress deprecation warning - full migration to Bayesian scoring is future work
+# Suppress deprecation warning - full migration to Bayesian scoring is future work
 import warnings
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -475,7 +475,7 @@ async def run_evidence_flow(
     if inp.progress_callback:
         await inp.progress_callback("score_evidence")
 
-    # M108: Single batch LLM call for all claims (not per-claim to avoid 6x cost)
+    # Single batch LLM call for all claims (not per-claim to avoid 6x cost)
     result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
     if str(result.get("status", "")).lower() == "error":
         result["status"] = "error"
@@ -496,7 +496,7 @@ async def run_evidence_flow(
         },
     )
 
-    # M93: Apply dependency penalties after scoring
+    # Apply dependency penalties after scoring
     claim_verdicts = result.get("claim_verdicts")
     if isinstance(claim_verdicts, list):
         changed = apply_dependency_penalties(claim_verdicts, claims)
@@ -746,7 +746,7 @@ async def run_evidence_flow(
     except Exception as e:
         logger.warning("Anchor dedup failed (non-fatal): %s", e)
 
-    # M104: Bayesian Scoring
+    # Bayesian Scoring
     if inp.prior_belief:
         current_belief = inp.prior_belief
         

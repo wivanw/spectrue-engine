@@ -46,7 +46,7 @@ async def run_oracle_flow(
     create_evidence_source: CreateEvidenceSource,
 ) -> OracleFlowResult:
     """
-    M63/M81: Hybrid Oracle flow (Jackpot/Evidence/Miss) with quota gating.
+    M63/Hybrid Oracle flow (Jackpot/Evidence/Miss) with quota gating.
 
     Returns:
     - early_result: final pipeline result for JACKPOT (caller should return immediately)
@@ -100,7 +100,7 @@ async def run_oracle_flow(
     if inp.progress_callback:
         await inp.progress_callback("checking_oracle")
 
-    # M63: Identify claims to check - use normalized_text if available
+    # Identify claims to check - use normalized_text if available
     candidates = [c for c in inp.claims if c.get("check_oracle")]
 
     # Fallback: Use first core claim with high importance
@@ -117,7 +117,7 @@ async def run_oracle_flow(
     oracle_evidence_source = None
 
     for cand in candidates:
-        # M71: Try English query first (Google Fact Check has better EN coverage)
+        # Try English query first (Google Fact Check has better EN coverage)
         en_query = None
         for qc in cand.get("query_candidates", []):
             qc_text = qc.get("text", "")

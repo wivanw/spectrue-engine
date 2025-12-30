@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M71: Verdict Data Contract.
+Verdict Data Contract.
 """
 
 from __future__ import annotations
@@ -51,14 +51,14 @@ class VerdictHighlight(SchemaModel):
 
 class Verdict(SchemaModel):
     """
-    Complete verdict output - the M71 Data Contract.
+    Complete verdict output - the Data Contract.
     
     Key: confidence_score = 0.0 by default (Blind until proven seeing).
     """
     
     # Core Scores
     veracity_score: float = Field(default=0.5, ge=0.0, le=1.0)
-    # M71 Critical Fix: Default confidence is 0.0 (Blind until proven seeing)
+    # Critical Fix: Default confidence is 0.0 (Blind until proven seeing)
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
     verdict_state: VerdictState | None = None

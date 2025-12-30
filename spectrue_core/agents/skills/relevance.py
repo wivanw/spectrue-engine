@@ -3,7 +3,7 @@ from spectrue_core.verification.evidence_pack import Claim
 
 class RelevanceSkill(BaseSkill):
     """
-    M66: Semantic Gating for Search Results.
+    Semantic Gating for Search Results.
     Filters out irrelevant search results using lightweight LLM checks before expensive processing.
     """
     
@@ -72,7 +72,7 @@ Return JSON:
             match_type = result.get("match_type", "TOPIC")
             reason = result.get("reason", "No reason provided")
             
-            # M74: Two-Level Gating
+            # Two-Level Gating
             # Accept both EXACT and TOPIC as "RELEVANT" to prevent coverage loss
             is_relevant = match_type in ("EXACT", "TOPIC")
             status = "RELEVANT" if is_relevant else "OFF_TOPIC"

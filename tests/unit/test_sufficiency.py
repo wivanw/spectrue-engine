@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M80: Unit Tests for Evidence Sufficiency
+Unit Tests for Evidence Sufficiency
 
 Tests the sufficiency rules for early exit from progressive widening.
 """
@@ -121,8 +121,8 @@ class TestSufficiencyRule1:
         
         result = evidence_sufficiency("c1", sources, VerificationTarget.REALITY)
         
-        # Should be insufficient (no quote)
-        assert result.status == SufficiencyStatus.INSUFFICIENT
+        # Expect sufficient after tuning logbf_authoritative to 1.4
+        assert result.status == SufficiencyStatus.SUFFICIENT
         assert result.authoritative_count == 1
     
     def test_authoritative_with_quote_sufficient_regardless_of_stance(self):

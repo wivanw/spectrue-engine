@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M80: Evidence Sufficiency Check
+Evidence Sufficiency Check
 
 Determines if collected evidence is sufficient to make a verdict,
 enabling early exit from progressive widening.
@@ -128,6 +128,17 @@ class SufficiencyDecisionResult:
     degraded_confidence: bool = False
     coverage: float = 0.0
     diversity: float = 0.0
+
+
+# M104: Bayesian Parameters (Scientific Scoring)
+base_prior: float = 0.5       # Neutral starting point
+sufficiency_threshold: float = 0.95
+
+# Bayes Factors (Log-Odds contributions)
+logbf_authoritative: float = 3.0  # Strong evidence (one source can prove)
+logbf_reliable: float = 0.8       # Good evidence (needs corroboration)
+logbf_unreliable: float = 0.1     # Weak evidence
+logbf_irrelevant: float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -408,7 +419,7 @@ def evidence_sufficiency(
             has_text_content = False
         else:
             url = source.get("url", "") or source.get("link", "")
-            # M103: Strict quote contract - only actual quote field counts as "having quote"
+            # Strict quote contract - only actual quote field counts as "having quote"
             # for sufficiency rules that require "sources with quotes".
             has_quote = bool(source.get("quote"))
             # T003: has_text_content is used for evidence candidacy (can potentially be scored)

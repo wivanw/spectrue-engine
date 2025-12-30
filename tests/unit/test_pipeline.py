@@ -60,13 +60,13 @@ class TestValidationPipeline:
         mgr = MagicMock()
         mgr.search_tier1 = AsyncMock(return_value=("Context T1", [{"url": "http://t1.com", "content": "c1"}]))
         mgr.search_tier2 = AsyncMock(return_value=("Context T2", [{"url": "http://t2.com", "content": "c2"}]))
-        # M65: Add search_unified mock
+        # Add search_unified mock
         mgr.search_unified = AsyncMock(return_value=("Unified Context", [{"url": "http://unified.com", "content": "u1"}]))
         mgr.search_google_cse = AsyncMock(return_value=("CSE Context", [{"link": "http://cse.com", "snippet": "cse1", "title": "CSE"}]))
         mgr.check_oracle = AsyncMock(return_value=None)
         mgr.check_oracle_hybrid = AsyncMock(return_value={"status": "MISS", "relevance_score": 0.1})
         mgr.fetch_url_content = AsyncMock(return_value="Fetched content")
-        # M109: Add async mock for evidence acquisition ladder
+        # Add async mock for evidence acquisition ladder
         mgr.apply_evidence_acquisition_ladder = AsyncMock(return_value=[])
         mgr.calculate_cost = MagicMock(return_value=10)
         mgr.can_afford = MagicMock(return_value=True)
@@ -103,18 +103,18 @@ class TestValidationPipeline:
         
         # Verify
         mock_agent.extract_claims.assert_called_once()
-        # M65: Should call search_unified instead of search_tier1
+        # Should call search_unified instead of search_tier1
         mock_search_mgr.search_unified.assert_called()
         # Should not check oracle as should_check_oracle=False and intent="news" isn't strictly forcing it in this mock unless intent logic
-        # But wait, news intent triggers Oracle Check in M63 logic.
+        # But wait, news intent triggers Oracle Check in logic.
         # Let's adjust mock intent or assert oracle checked.
         # "news" -> ORACLE_CHECK_INTENT is True. So it SHOULD check oracle.
         # Original test asserted not checked.
-        # Let's verify M63/M65 behavior: Intent="news" -> Check Oracle.
+        # Let's verify M63/behavior: Intent="news" -> Check Oracle.
         # So check_oracle_hybrid should be called.
         mock_search_mgr.check_oracle_hybrid.assert_called()
         
-        # M104: Without quoted evidence in sources, Bayesian scoring defaults to 0.5 (uncertain)
+        # Without quoted evidence in sources, Bayesian scoring defaults to 0.5 (uncertain)
         # The LLM's verified_score is now only one signal, not the final score
         assert result["verified_score"] == 0.5
         # Sources may be empty if evidence flow doesn't process them (mocked pipeline)
@@ -135,6 +135,18 @@ class TestValidationPipeline:
             "summary": "Debunked by Snopes"
         }
         
+        # Update unified search mock to return strong evidence for the second call
+        mock_search_mgr.search_unified.return_value = (
+            "Unified Context", 
+            [{
+                "url": "http://unified.com", 
+                "content": "u1", 
+                "stance": "SUPPORT", 
+                "quote": "Jackpot evidence found.", 
+                "is_trusted": True
+            }]
+        )
+
         result = await pipeline.execute(
             fact="Fake news",
             search_type="standard",
@@ -165,7 +177,7 @@ class TestValidationPipeline:
 
     @pytest.mark.asyncio
     async def test_smart_mode_waterfall(self, pipeline, mock_agent, mock_search_mgr):
-        """T9/M65: Verify Smart Mode uses Unified Search."""
+        """T9/Verify Smart Mode uses Unified Search."""
         mock_agent.extract_claims.return_value = ([{"search_queries": ["q1"]}], False, "news", "")
         mock_agent.score_evidence.return_value = {}
         
@@ -203,7 +215,7 @@ class TestValidationPipeline:
             "reason": "Official statement from the person quoted in the claim"
         }
         
-        # M109: Mock apply_evidence_acquisition_ladder to return inline sources
+        # Mock apply_evidence_acquisition_ladder to return inline sources
         mock_inline_source = {
             "url": "https://example.com/statement/12345",
             "source_type": "inline",
@@ -262,7 +274,7 @@ class TestValidationPipeline:
 
     @pytest.mark.asyncio
     async def test_semantic_gating_rejection(self, pipeline, mock_agent, mock_search_mgr):
-        """M66: Verify pipeline stops if search results are semantically irrelevant."""
+        """Verify pipeline stops if search results are semantically irrelevant."""
         mock_agent.extract_claims.return_value = ([{"id": "c1", "search_queries": ["q1"], "search_method": "news"}], False, "news", "")
         
         # Search returns results

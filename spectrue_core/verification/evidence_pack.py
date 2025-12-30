@@ -79,14 +79,14 @@ SourceType = Literal[
     "independent_media",  # Independent news outlet
     "aggregator",     # News aggregator, syndication
     "social",         # Social media post
-    "fact_check",     # M63: Fact-check from Oracle (Google Fact Check API)
+    "fact_check",     # Fact-check from Oracle (Google Fact Check API)
     "unknown",        # Cannot determine
 ]
 """Classification of source authority."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# M63: Oracle Check Result
+# Oracle Check Result
 # ─────────────────────────────────────────────────────────────────────────────
 
 OracleStatus = Literal["CONFIRMED", "REFUTED", "MIXED", "EMPTY", "ERROR", "DISABLED"]
@@ -112,7 +112,7 @@ Article intent classification for Oracle triggering:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# M64: Query Candidates for Round-Robin Selection
+# Query Candidates for Round-Robin Selection
 # ─────────────────────────────────────────────────────────────────────────────
 
 QueryRole = Literal["CORE", "NUMERIC", "ATTRIBUTION", "LOCAL"]
@@ -135,7 +135,7 @@ QUERY_ROLE_SCORES: dict[str, float] = {
 
 class QueryCandidate(TypedDict, total=False):
     """
-    M64: A typed search query candidate with priority score.
+    A typed search query candidate with priority score.
     
     Used by the Coverage Engine for topic-aware round-robin selection.
     The 'role' determines priority: CORE queries are selected first (Pass 1),
@@ -149,7 +149,7 @@ class QueryCandidate(TypedDict, total=False):
 
 class OracleCheckResult(TypedDict, total=False):
     """
-    M63: Result from Google Fact Check API with LLM semantic validation.
+    Result from Google Fact Check API with LLM semantic validation.
     
     Used in hybrid Oracle flow:
     - JACKPOT (relevance > 0.9): Stop pipeline, return immediately
@@ -286,7 +286,7 @@ class EvidenceNeed(TypedDict, total=False):
     level: str | None
 
 class ClaimAnchor(TypedDict, total=False):
-    """M74: Tracks claim's position in original text."""
+    """Tracks claim's position in original text."""
     chunk_id: str
     char_start: int
     char_end: int
@@ -319,39 +319,39 @@ class Claim(TypedDict, total=False):
     evidence_requirement: EvidenceRequirement
     search_queries: list[str]       # Generated queries for this claim (legacy)
     check_oracle: bool              # T10: Should this specific claim be checked against Oracle?
-    # M62: Context-aware atomization fields
+    # Context-aware atomization fields
     normalized_text: str            # Self-sufficient statement with pronouns resolved
     topic_group: str                # Topic tag (e.g., "Economy", "War", "Science")
     check_worthiness: float         # 0-1, how important to verify (filters opinions)
-    # M64: Topic-Aware Round-Robin fields
+    # Topic-Aware Round-Robin fields
     topic_key: str                  # Specific entity tag (e.g., "Fomalhaut System", "Bitcoin Price")
     query_candidates: list["QueryCandidate"]  # Typed query candidates with roles
-    # M66: Smart Routing method
+    # Smart Routing method
     search_method: Literal["news", "general_search", "academic"]
-    # M73 Layer 4: Evidence-Need Routing
+    # Layer 4: Evidence-Need Routing
     evidence_need: Literal[
         "empirical_study", "guideline", "official_stats",
         "expert_opinion", "anecdotal", "news_report", "unknown"
     ]
-    # M74 Safety & Coverage
+    # Safety & Coverage
     anchor: ClaimAnchor
     text_safe: str
     is_actionable_medical: bool
     danger_tags: list[str]
     redacted_spans: list[dict]
-    # M77: Salience
+    # Salience
     harm_potential: int  # 1-5 scale (5=Highest Harm Risk)
-    # M78: Claim Category (Satire Detection)
+    # Claim Category (Satire Detection)
     claim_category: Literal["FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"]
     satire_likelihood: float  # 0.0-1.0, probability claim is satirical
-    # M93: Claim structure + role
+    # Claim structure + role
     claim_role: ClaimRoleType
     structure: ClaimStructure
-    # M80: Claim-Centric Orchestration Metadata
+    # Claim-Centric Orchestration Metadata
     # Optional: When present, enables metadata-driven routing
     # Import: from spectrue_core.schema.claim_metadata import ClaimMetadata
     metadata: Any  # ClaimMetadata | None (use Any to avoid circular import)
-    # M97: Core data contract alignment
+    # Core data contract alignment
     verification_target: VerificationTarget
     role: ClaimRoleType
     temporality: TemporalAnchor
@@ -393,10 +393,10 @@ class SearchResult(TypedDict, total=False):
     evidence_refs: list[str]        # Source URLs or references
     stance_confidence: str | None   # "low" for low-tier SUPPORT
     
-    # M70: Assertion-level mapping
+    # Assertion-level mapping
     assertion_key: str | None       # Which assertion this evidence maps to (e.g., "event.location.city")
     
-    # M70: Content availability status
+    # Content availability status
     content_status: Literal["available", "unavailable", "blocked", "error"]
     unavailable_reason: str | None  # Why content couldn't be retrieved
 
@@ -446,19 +446,19 @@ class ClaimMetrics(TypedDict, total=False):
     stance_distribution: dict[str, int]  # {"support": 3, "contradict": 1, ...}
     coverage: float                 # 0-1, how well is claim covered?
     freshness_days_median: int | None
-    # M62: Additional claim metadata for scoring
+    # Additional claim metadata for scoring
     topic_group: str | None         # Topic category from claim extraction
     claim_type: str | None          # Claim type (core, numeric, etc.)
 
 
 class AssertionMetrics(TypedDict, total=False):
-    """M70: Metrics for a single assertion (field-level fact)."""
+    """Metrics for a single assertion (field-level fact)."""
     support_count: int              # Number of supporting sources
     refute_count: int               # Number of refuting sources
     tier_coverage: dict[str, int]   # Tiers present (A, B, C, D)
     primary_present: bool
     official_present: bool
-    content_unavailable_count: int  # M70: Count of sources with unavailable content
+    content_unavailable_count: int  # Count of sources with unavailable content
 
 
 class EvidenceGap(TypedDict, total=False):
@@ -520,7 +520,7 @@ class EvidencePack(TypedDict, total=False):
 
     # Claims (multi-claim extraction)
     claims: list[Claim]
-    claim_units: list[Any] | None   # M70: Structured ClaimUnits (Pydantic objects)
+    claim_units: list[Any] | None   # Structured ClaimUnits (Pydantic objects)
 
     # Evidence
     search_results: list[SearchResult]  # All sources (scored + context)
@@ -533,7 +533,7 @@ class EvidencePack(TypedDict, total=False):
     # Constraints (code-enforced)
     constraints: ConfidenceConstraints
 
-    # M97: Canonical scoring inputs
+    # Canonical scoring inputs
     claim_id: str
     items: list[EvidenceItem]
     stats: EvidencePackStats

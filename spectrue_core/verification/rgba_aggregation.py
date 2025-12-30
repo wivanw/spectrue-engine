@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M80: Weighted RGBA Aggregation
+Weighted RGBA Aggregation
 
 Fixes the "mixed article dilution" problem where non-verifiable claims
 (horoscopes, predictions, opinions) were averaging down factual claim scores.
@@ -247,7 +247,7 @@ def apply_dependency_penalties(
     cap_on_refute: float = 0.4,
 ) -> bool:
     """
-    M93: Propagate premise failures to dependent conclusions.
+    Propagate premise failures to dependent conclusions.
 
     If any dependency is refuted (score <= refute_threshold),
     cap the dependent claim's verdict_score to cap_on_refute.

@@ -91,7 +91,7 @@ class EngineFeatureFlags:
     # Optional crawler behavior: default False to avoid server-side crawling / IP reputation issues.
     fulltext_fetch: bool = False
     
-    # M74 Flags
+    # Flags
     coverage_chunking: bool = False
     topic_aware_claim_graph: bool = False
     semantic_gating_v2: bool = False
@@ -101,9 +101,9 @@ class EngineFeatureFlags:
     trace_safe_payloads: bool = True
     # M76
     clean_md_output: bool = True
-    # M80: Claim-Centric Orchestration (progressive widening, metadata-driven routing)
+    # Claim-Centric Orchestration (progressive widening, metadata-driven routing)
     claim_orchestration: bool = True
-    # M109: Embeddings for semantic matching
+    # Embeddings for semantic matching
     embeddings_verdict_ready: bool = True  # Use embeddings in verdict_ready_for_claim
     embeddings_clustering: bool = True     # Use embeddings for claim clustering
     embeddings_quotes: bool = True         # Use embeddings for quote extraction
@@ -123,12 +123,12 @@ class EngineLLMConfig:
     timeout_sec: float = 60.0
     concurrency: int = 6
     nano_timeout_sec: float = 20.0
-    nano_max_output_tokens: int = 700  # M45: increased for topics field
+    nano_max_output_tokens: int = 700  # increased for topics field
     max_output_tokens_general: int = 900
     max_output_tokens_lite: int = 500
     max_output_tokens_deep: int = 1100
 
-    # M49: Responses API configuration
+    # Responses API configuration
     cluster_timeout_sec: float = 60.0
 
     @property
@@ -145,7 +145,7 @@ class EngineSearchConfig:
     # None means "auto" (depth/domain-filter aware); otherwise forced on/off.
     tavily_include_raw_content: Optional[bool] = None
     tavily_raw_max_results: int = 4
-    # M80: Phase runner concurrency limit
+    # Phase runner concurrency limit
     max_concurrent_searches: int = 3
 
 
@@ -329,7 +329,7 @@ class ContentBudgetConfig:
 @dataclass(frozen=True)
 class ClaimGraphConfig:
     """
-    M72: Hybrid ClaimGraph (B + C) configuration.
+    Hybrid ClaimGraph (B + C) configuration.
     
     Two-stage graph for claim prioritization:
     - B-stage: cheap candidate generation (embeddings + adjacency)
@@ -370,12 +370,12 @@ class ClaimGraphConfig:
     beta_prior_alpha: float = 1.0
     beta_prior_beta: float = 1.0
     
-    # M73 Layer 2: Structural Claim Prioritization
+    # Layer 2: Structural Claim Prioritization
     structural_prioritization_enabled: bool = True
     structural_weight_threshold: float = 0.5  # min weight for priority boost
     structural_boost: float = 0.1             # importance boost for high structural weight
     
-    # M73 Layer 3: Tension Signal
+    # Layer 3: Tension Signal
     tension_signal_enabled: bool = True
     
     # M74
@@ -383,7 +383,7 @@ class ClaimGraphConfig:
     tension_threshold: float = 0.5            # min in_contradict_weight for "high tension"
     tension_boost: float = 0.15               # importance boost for high-tension claims
     
-    # M73 Layer 4: Evidence-Need Routing
+    # Layer 4: Evidence-Need Routing
     evidence_need_routing_enabled: bool = True
 
 
@@ -430,7 +430,7 @@ class EngineRuntimeConfig:
             query_rewrite_short=_parse_bool(os.getenv("SPECTRUE_LLM_QUERY_REWRITE_SHORT"), default=False),
             trace_enabled=not _parse_bool(os.getenv("SPECTRUE_TRACE_DISABLE"), default=False),
             fulltext_fetch=_parse_bool(os.getenv("SPECTRUE_FULLTEXT_FETCH"), default=False),
-            # M74 Feature Flags
+            # Feature Flags
             coverage_chunking=_parse_bool(os.getenv("FEATURE_COVERAGE_CHUNKING"), default=False),
             topic_aware_claim_graph=_parse_bool(os.getenv("FEATURE_TOPIC_AWARE_CLAIM_GRAPH"), default=False),
             semantic_gating_v2=_parse_bool(os.getenv("FEATURE_SEMANTIC_GATING_V2"), default=False),
@@ -440,9 +440,9 @@ class EngineRuntimeConfig:
             trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=True),
             # M76
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
-            # M80 Claim Orchestration
+            # Claim Orchestration
             claim_orchestration=_parse_bool(os.getenv("FEATURE_CLAIM_ORCHESTRATION"), default=True),
-            # M109 Embeddings
+            # Embeddings
             embeddings_verdict_ready=_parse_bool(os.getenv("FEATURE_EMBEDDINGS_VERDICT_READY"), default=True),
             embeddings_clustering=_parse_bool(os.getenv("FEATURE_EMBEDDINGS_CLUSTERING"), default=True),
             embeddings_quotes=_parse_bool(os.getenv("FEATURE_EMBEDDINGS_QUOTES"), default=True),
@@ -464,7 +464,7 @@ class EngineRuntimeConfig:
             tavily_exclude_domains=_parse_csv_domains(os.getenv("SPECTRUE_TAVILY_EXCLUDE_DOMAINS", "")),
             tavily_include_raw_content=include_raw,
             tavily_raw_max_results=_parse_int(os.getenv("SPECTRUE_TAVILY_RAW_MAX_RESULTS"), default=4, min_v=1, max_v=10),
-            # M80: Phase runner concurrency limit
+            # Phase runner concurrency limit
             max_concurrent_searches=_parse_int(os.getenv("M80_MAX_CONCURRENT_SEARCHES"), default=3, min_v=1, max_v=10),
         )
 
@@ -549,7 +549,7 @@ class EngineRuntimeConfig:
             max_output_tokens_deep=int(max_out_deep),
         )
 
-        # M72: ClaimGraph configuration
+        # ClaimGraph configuration
         claim_graph = ClaimGraphConfig(
             enabled=_parse_bool(os.getenv("CLAIM_GRAPH_ENABLED"), default=True),
             k_sim=_parse_int(os.getenv("CLAIM_GRAPH_K_SIM"), default=10, min_v=1, max_v=200),
@@ -575,7 +575,7 @@ class EngineRuntimeConfig:
             trace_top_k=_parse_int(os.getenv("CLAIM_GRAPH_TRACE_TOP_K"), default=5, min_v=1, max_v=100),
             beta_prior_alpha=_parse_float(os.getenv("CLAIM_GRAPH_BETA_PRIOR_ALPHA"), default=1.0, min_v=0.1, max_v=10.0),
             beta_prior_beta=_parse_float(os.getenv("CLAIM_GRAPH_BETA_PRIOR_BETA"), default=1.0, min_v=0.1, max_v=10.0),
-            # M73 Layer 2-4
+            # Layer 2-4
             structural_prioritization_enabled=_parse_bool(os.getenv("CLAIM_GRAPH_STRUCTURAL_ENABLED"), default=True),
             structural_weight_threshold=_parse_float(os.getenv("CLAIM_GRAPH_STRUCTURAL_THRESHOLD"), default=0.5, min_v=0.0, max_v=2.0),
             structural_boost=_parse_float(os.getenv("CLAIM_GRAPH_STRUCTURAL_BOOST"), default=0.1, min_v=0.0, max_v=0.5),

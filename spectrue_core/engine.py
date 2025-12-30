@@ -50,7 +50,7 @@ class SpectrueEngine:
     
     def __init__(self, config: SpectrueConfig, translation_service=None):
         self.config = config
-        # M67: Optional translation_service for Oracle result localization
+        # Optional translation_service for Oracle result localization
         self.verifier = FactVerifier(config, translation_service=translation_service)
         try:
             logger.debug("Effective config: %s", json.dumps(self.config.runtime.to_safe_log_dict(), ensure_ascii=False))
@@ -70,7 +70,7 @@ class SpectrueEngine:
         search_type: str = "advanced",
         progress_callback = None,
         max_credits: Optional[int] = None,
-        sentences: Optional[List[str]] = None,  # M67: Pre-segmented sentences (skip segmentation)
+        sentences: Optional[List[str]] = None,  # Pre-segmented sentences (skip segmentation)
     ) -> Dict[str, Any]:
         """
         Analyze text with content detection and waterfall verification.
@@ -98,116 +98,147 @@ class SpectrueEngine:
             min_prob = float(getattr(self.config.runtime.tunables, "langdetect_min_prob", 0.80) or 0.80)
             content_lang = detected_lang if detected_prob >= min_prob else lang
 
+            Trace.event("engine.analyze_text.start", {
+                "analysis_mode": analysis_mode,
+                "text_len": len(text),
+                "model": model,
+            })
+
             if analysis_mode == "deep":
                 if progress_callback:
                     await progress_callback("extracting_claims")
 
-                # Cost-aware: cap number of separate claim analyses.
-                max_claims = max(
-                    1, int(getattr(self.config.runtime.tunables, "max_claims_deep", 2) or 2)
-                )
+                # Deep analysis: if input is a URL, first extract the article content
+                working_text = text
+                if text.strip().startswith("http://") or text.strip().startswith("https://"):
+                    # Fetch article content before claim extraction
+                    extracted = await self.fetch_url_content(text.strip())
+                    if extracted:
+                        working_text = extracted
+                        Trace.event("engine.deep.url_extracted", {"chars": len(extracted)})
+                    else:
+                        Trace.event("engine.deep.url_extraction_failed", {"url": text.strip()[:100]})
 
-                # M67: Use pre-segmented sentences if provided, otherwise use regex segmentation
-                if sentences:
-                    claims = sentences[:max_claims]
-                else:
-                    # Use regex for proper sentence segmentation
-                    analyzer = TextAnalyzer()
-                    claims = analyzer.get_sentences(text, content_lang)[:max_claims]
-                
-                if not claims:
-                    claims = [text.strip()]
-
-                primary = claims[0]
-                primary_result = await self.verifier.verify_fact(
-                    fact=primary,
+                # Deep analysis: Extract claims from the ENTIRE text once
+                # Then verify each claim with a full pipeline pass
+                # First, run one pipeline pass to extract claims
+                initial_result = await self.verifier.verify_fact(
+                    fact=working_text,
                     search_type=search_type,
                     gpt_model=model,
                     lang=lang,
                     progress_callback=progress_callback,
                     content_lang=content_lang,
                     max_cost=max_credits,
+                    extract_claims_only=True,  # New flag: just extract claims, don't verify
                 )
-
-                internal = primary_result.pop("_internal", None) or {}
-                shared_context = internal.get("context") or ""
-                shared_sources = internal.get("sources") or primary_result.get("sources") or []
-
-                if not shared_context:
-                    claims = claims[:1]
+                
+                # Get extracted claims from the initial run
+                extracted_claims = initial_result.get("_extracted_claims", [])
+                if not extracted_claims:
+                    # Fallback: use the full text as single claim
+                    extracted_claims = [{"id": "c1", "text": working_text.strip()[:500]}]
+                
+                Trace.event("engine.deep.claims_extracted", {
+                    "count": len(extracted_claims),
+                    "claims": [c.get("text", "")[:80] for c in extracted_claims[:5]]
+                })
 
                 details = []
-                total_cost = int(primary_result.get("cost", 0) or 0)
-                remaining_budget = None
-                if max_credits is not None:
-                    try:
-                        remaining_budget = int(max_credits) - total_cost
-                    except Exception:
-                        remaining_budget = None
+                total_cost = int(initial_result.get("cost", 0) or 0)  # Include initial extraction cost
+                accumulated_sources: list[dict] = initial_result.get("sources", []) or []
+                all_verified_claims: list[str] = []
 
-                details.append(
-                    {
-                        "text": primary,
-                        "rgba": primary_result.get("rgba"),
-                        "rationale": primary_result.get("rationale", ""),
-                        "sources": primary_result.get("sources", []),
-                    }
-                )
+                # Verify each extracted claim with full pipeline
+                for idx, claim_obj in enumerate(extracted_claims):
+                    claim_text = claim_obj.get("text", "").strip()
+                    if not claim_text:
+                        continue
+                        
+                    # Budget check: stop if no credits remain
+                    if max_credits is not None:
+                        remaining = max_credits - total_cost
+                        if remaining < per_claim_model_cost:
+                            break
 
-                extra_claims: list[str] = []
-                for claim in claims[1:]:
-                    if remaining_budget is not None and remaining_budget < per_claim_model_cost:
-                        break
-                    extra_claims.append(claim)
-                    if remaining_budget is not None:
-                        remaining_budget -= per_claim_model_cost
+                    # Emit per-claim progress status
+                    if progress_callback:
+                        await progress_callback(f"verifying_claim:{idx + 1}:{len(extracted_claims)}")
 
-                for claim in extra_claims:
+                    # Each claim gets full verification (primary treatment)
+                    # Pass accumulated sources as preloaded, but pipeline will supplement if not relevant
                     claim_result = await self.verifier.verify_fact(
-                        fact=claim,
+                        fact=claim_text,
                         search_type=search_type,
                         gpt_model=model,
                         lang=lang,
                         progress_callback=progress_callback,
-                        preloaded_context=shared_context,
-                        preloaded_sources=shared_sources,
                         content_lang=content_lang,
-                        max_cost=per_claim_model_cost if max_credits is not None else None,
-                    )
-                    total_cost += int(claim_result.get("cost", 0) or 0)
-                    details.append(
-                        {
-                            "text": claim,
-                            "rgba": claim_result.get("rgba"),
-                            "rationale": claim_result.get("rationale", ""),
-                            "sources": claim_result.get("sources", []),
-                        }
+                        preloaded_sources=accumulated_sources if accumulated_sources else None,
+                        max_cost=max_credits - total_cost if max_credits is not None else None,
                     )
 
-                # Aggregate for UI compatibility
-                rgba_list = [d.get("rgba") for d in details if isinstance(d.get("rgba"), list) and len(d.get("rgba")) == 4]
+                    claim_cost = int(claim_result.get("cost", 0) or 0)
+                    total_cost += claim_cost
+                    all_verified_claims.append(claim_text)
+
+                    # Accumulate new sources for subsequent claims
+                    new_sources = claim_result.get("sources", []) or []
+                    seen_urls = {s.get("url") for s in accumulated_sources if s.get("url")}
+                    for src in new_sources:
+                        if src.get("url") and src.get("url") not in seen_urls:
+                            accumulated_sources.append(src)
+                            seen_urls.add(src.get("url"))
+
+                    # Uniform detail entry for all claims
+                    details.append({
+                        "text": claim_text,
+                        "rgba": claim_result.get("rgba") or [0.0, 0.0, 0.0, 0.5],
+                        "rationale": claim_result.get("rationale", ""),
+                        "sources": new_sources,
+                        "verified_score": claim_result.get("verified_score"),
+                        "danger_score": claim_result.get("danger_score"),
+                    })
+
+                # Aggregate RGBA for overall score
+                rgba_list = [
+                    d.get("rgba") for d in details 
+                    if isinstance(d.get("rgba"), list) and len(d.get("rgba")) == 4
+                ]
                 if rgba_list:
-                    avg = [
+                    avg_rgba = [
                         sum(v[i] for v in rgba_list) / len(rgba_list)
                         for i in range(4)
                     ]
                 else:
-                    avg = primary_result.get("rgba")
+                    avg_rgba = [0.0, 0.0, 0.0, 0.5]
 
-                final = dict(primary_result)
-                final["text"] = text
-                final["details"] = details
-                final["average_rgba"] = avg
-                final["cost"] = total_cost
-                final["claims"] = [primary] + extra_claims
-                final["detected_lang"] = detected_lang
-                final["detected_lang_prob"] = detected_prob
-                final["search_lang"] = content_lang
+                # Aggregate verified_score (average of all claims)
+                verified_scores = [
+                    d.get("verified_score") for d in details 
+                    if isinstance(d.get("verified_score"), (int, float))
+                ]
+                avg_verified = sum(verified_scores) / len(verified_scores) if verified_scores else 0.0
+
+                final = {
+                    "text": text,
+                    "verified_score": avg_verified,
+                    "rgba": avg_rgba,
+                    "average_rgba": avg_rgba,
+                    "details": details,
+                    "sources": accumulated_sources,
+                    "cost": total_cost,
+                    "claims": all_verified_claims,
+                    "detected_lang": detected_lang,
+                    "detected_lang_prob": detected_prob,
+                    "search_lang": content_lang,
+                    "analysis_mode": "deep",
+                }
                 if max_credits is not None:
                     final["budget"] = {
                         "max_credits": int(max_credits),
                         "spent": total_cost,
-                        "limited": len(extra_claims) < max(0, len(claims) - 1),
+                        "limited": len(all_verified_claims) < len(claims),
                     }
                 return final
 

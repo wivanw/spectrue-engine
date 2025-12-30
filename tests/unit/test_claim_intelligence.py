@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M73: Claim Intelligence Layer Tests
+Claim Intelligence Layer Tests
 
 Tests for Layer 2-4 functionality:
 - Structural Claim Prioritization
@@ -18,7 +18,7 @@ from spectrue_core.runtime_config import EngineRuntimeConfig, ClaimGraphConfig
 
 
 class TestGraphResultM73Methods:
-    """Test M73 convenience methods on GraphResult."""
+    """Test convenience methods on GraphResult."""
 
     def test_get_ranked_by_id_found(self):
         """Should return RankedClaim when ID exists."""
@@ -105,7 +105,7 @@ class TestGraphResultM73Methods:
 
 
 class TestEvidenceNeedType:
-    """Test M73 Layer 4 EvidenceNeedType enum."""
+    """Test Layer 4 EvidenceNeedType enum."""
 
     def test_all_values_exist(self):
         """Should have all required evidence need types."""
@@ -137,10 +137,10 @@ class TestEvidenceNeedType:
 
 
 class TestClaimGraphConfigM73:
-    """Test M73 feature flags in ClaimGraphConfig."""
+    """Test feature flags in ClaimGraphConfig."""
 
     def test_default_values(self):
-        """Should have correct default values for M73 flags."""
+        """Should have correct default values for flags."""
         cfg = ClaimGraphConfig()
         
         # Layer 2
@@ -157,7 +157,7 @@ class TestClaimGraphConfigM73:
         assert cfg.evidence_need_routing_enabled is True
 
     def test_load_from_env_defaults(self):
-        """Should load M73 flags from env with defaults."""
+        """Should load flags from env with defaults."""
         import os
         
         # Clear any existing env vars
@@ -195,7 +195,7 @@ class TestClaimGraphConfigM73:
             os.environ.pop("CLAIM_GRAPH_EVIDENCE_NEED_ENABLED", None)
 
     def test_to_safe_log_dict_includes_m73(self):
-        """Should include M73 flags in safe log dict."""
+        """Should include flags in safe log dict."""
         cfg = EngineRuntimeConfig.load_from_env()
         log_dict = cfg.to_safe_log_dict()
         
@@ -205,7 +205,7 @@ class TestClaimGraphConfigM73:
 
 
 class TestClaimEnrichmentLogic:
-    """Test M73 Layer 2-3 claim enrichment logic."""
+    """Test Layer 2-3 claim enrichment logic."""
 
     def test_structural_boost_calculation(self):
         """Structural weight > threshold should add boost."""

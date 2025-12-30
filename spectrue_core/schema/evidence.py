@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M70: EvidenceItem Pydantic Model
+EvidenceItem Pydantic Model
 
 Evidence is a DOWNSTREAM CONSUMER of the schema.
 It maps to specific assertion_key, not just claim_id.
@@ -54,7 +54,7 @@ class TimelinessStatus(str, Enum):
 
 class EvidenceNeedType(str, Enum):
     """
-    M73 Layer 4: Evidence type classification for routing.
+    Layer 4: Evidence type classification for routing.
     
     Used ONLY to route search strategies and sources.
     Does NOT assert existence or quality of evidence.
@@ -182,7 +182,7 @@ class EvidenceItem(SchemaModel):
     0.0-1.0 = actual relevance
     """
 
-    # M70: Handle unavailable content (THE BUG FIX)
+    # Handle unavailable content (THE BUG FIX)
     content_status: ContentStatus = ContentStatus.AVAILABLE
     """
     Was content successfully retrieved?

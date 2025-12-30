@@ -41,7 +41,7 @@ _trace_phase_starts: contextvars.ContextVar[dict[str, int]] = contextvars.Contex
     "spectrue_trace_phase_starts", default={}
 )
 
-# M74: PII Regex Patterns
+# PII Regex Patterns
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 PHONE_REGEX = re.compile(r"\b(?:\+?1[-. ]?)?\(?([0-9]{3})\)?[-. ]?([0-9]{3})[-. ]?([0-9]{4})\b")
 CC_REGEX = re.compile(r"\b(?:\d{4}[- ]?){3}\d{4}\b")
@@ -65,10 +65,10 @@ def _redact_text(s: str) -> str:
     s = re.sub(r"(Authorization:\s*Bearer\s+)[^\s]+", r"\1***", s, flags=re.IGNORECASE)
     s = re.sub(r"(Bearer\s+)[A-Za-z0-9._-]+", r"\1***", s)
 
-    # M74: Medical content redaction
+    # Medical content redaction
     s = _redact_medical(s)
 
-    # M74: PII Redaction (Email, Phone, Credit Card)
+    # PII Redaction (Email, Phone, Credit Card)
     if _redact_pii_enabled_var.get():
         s = EMAIL_REGEX.sub("[EMAIL]", s)
         s = PHONE_REGEX.sub("[PHONE]", s)
@@ -77,7 +77,7 @@ def _redact_text(s: str) -> str:
     return s
 
 
-# M74: Medical Patterns for Log Redaction
+# Medical Patterns for Log Redaction
 # These patterns match actionable medical instructions that should not be stored in logs.
 # We preserve sha256 + safe_head for debugging while removing doses/instructions.
 _MEDICAL_PATTERNS = [
@@ -102,7 +102,7 @@ _MEDICAL_PATTERNS = [
 
 def _redact_medical(s: str) -> str:
     """
-    M74: Redact medical dosing and instructions from text.
+    Redact medical dosing and instructions from text.
     
     Removes actionable medical content while preserving structure for debugging.
     Patterns are designed to catch common dosing formats without false positives.
@@ -143,7 +143,7 @@ def _sanitize(
     if isinstance(obj, str):
         s = _redact_text(obj)
         
-        # M75: Safe Payloads Logic
+        # Safe Payloads Logic
         safe_mode = _trace_safe_payloads_var.get()
         if safe_mode:
             # Check if this is a sensitive key
@@ -245,7 +245,7 @@ class Trace:
         _trace_max_head_var.set(runtime.debug.trace_max_head_chars)
         _trace_max_inline_var.set(runtime.debug.trace_max_inline_chars)
         if enabled:
-            # M47: Clean up old traces, keep only the latest one
+            # Clean up old traces, keep only the latest one
             try:
                 trace_dir = _trace_dir()
                 for old_file in trace_dir.glob("*.jsonl"):
@@ -285,7 +285,7 @@ class Trace:
             "data": _sanitize(data),
         }
         try:
-            # M53: Sanitize trace_id for filename safety (e.g. replace ':' with '_')
+            # Sanitize trace_id for filename safety (e.g. replace ':' with '_')
             safe_tid = "".join(c if c.isalnum() or c in "._-" else "_" for c in tid)
             path = _trace_dir() / f"{safe_tid}.jsonl"
             with path.open("a", encoding="utf-8") as f:

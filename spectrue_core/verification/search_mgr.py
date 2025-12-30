@@ -35,11 +35,11 @@ class SearchManager:
         
         Args:
             config: Spectrue configuration
-            oracle_validator: Optional OracleValidationSkill for M63 hybrid mode
+            oracle_validator: Optional OracleValidationSkill for hybrid mode
         """
         self.config = config
         self.web_tool = WebSearchTool(config)
-        # M63: Pass validator to GoogleFactCheckTool for hybrid mode
+        # Pass validator to GoogleFactCheckTool for hybrid mode
         self.oracle_tool = GoogleFactCheckTool(config, oracle_validator=oracle_validator)
         self.cse_tool = GoogleCSESearchTool(config)
         
@@ -47,8 +47,8 @@ class SearchManager:
         self.tavily_calls = 0
         self.google_cse_calls = 0
         self.page_fetches = 0
-        self.oracle_calls = 0  # M63: Track Oracle API calls
-        self.global_extracts_used = 0  # M108: Global EAL limit
+        self.oracle_calls = 0  # Track Oracle API calls
+        self.global_extracts_used = 0  # Global EAL limit
         self.policy_profile: SearchPolicyProfile | None = None
         
     def reset_metrics(self):
@@ -56,7 +56,7 @@ class SearchManager:
         self.google_cse_calls = 0
         self.page_fetches = 0
         self.oracle_calls = 0
-        self.global_extracts_used = 0  # M108: Global EAL limit
+        self.global_extracts_used = 0  # Global EAL limit
         self.policy_profile = None
 
     def set_policy_profile(self, profile: SearchPolicyProfile | None) -> None:
@@ -202,11 +202,11 @@ class SearchManager:
         """
         EAL: Enrich snippet-only sources with content + quote candidates.
         
-        M104: Two-phase approach:
+        Two-phase approach:
         1. If source has content but no quote, extract quote from existing content
         2. If source has no content, fetch URL and extract quote
         
-        M111: Uses batch quote extraction for efficiency (single embedding call).
+        Uses batch quote extraction for efficiency (single embedding call).
         """
         if not needs_evidence_acquisition_ladder(sources):
             return sources
@@ -232,7 +232,7 @@ class SearchManager:
             should_fetch = False
             
             if fetch_count < max_fetches:
-                # M108: Check global limit (across all claims)
+                # Check global limit (across all claims)
                 if self.global_extracts_used >= 4:
                     Trace.event(
                         "eal.global_limit_reached",
@@ -249,7 +249,7 @@ class SearchManager:
             if should_fetch:
                 url = src.get("url") or src.get("link")
                 if url:
-                    # M105: Deduplication to avoid wasted fetches
+                    # Deduplication to avoid wasted fetches
                     if url in processed_urls:
                         continue
                     
@@ -261,7 +261,7 @@ class SearchManager:
                         src["fulltext"] = True
                         current_content = fetched
                         fetch_count += 1
-                        self.global_extracts_used += 1  # M108: Track globally
+                        self.global_extracts_used += 1  # Track globally
             
             # Collect sources that need quote extraction
             if current_content and len(current_content) >= 50:
@@ -353,7 +353,7 @@ class SearchManager:
 
     async def check_oracle_hybrid(self, user_claim: str, intent: str = "news") -> OracleCheckResult:
         """
-        M63: Check Oracle with LLM semantic validation.
+        Check Oracle with LLM semantic validation.
         
         Returns OracleCheckResult with status, relevance_score, is_jackpot.
         """
@@ -381,14 +381,14 @@ class SearchManager:
 
     async def search_unified(self, query: str, topic: str = "general", intent: str = "news", article_intent: str = "news") -> SearchResponse:
         """
-        M65: Unified search replacing Tier 1/2 split.
+        Unified search replacing Tier 1/2 split.
         Performs single search (limit=5) and filters garbage.
         
-        M76: Added Fallback Ladder:
+        Added Fallback Ladder:
         - If article_intent == "evergreen", force topic="general"
         - If topic="news" AND results are poor (<2 or low score), auto-retry with "general"
         """
-        # M76: Force general search for evergreen content
+        # Force general search for evergreen content
         if article_intent == "evergreen" and topic == "news":
             logger.debug("[SearchMgr] forcing topic='general' for evergreen intent (was 'news')")
             topic = "general"
@@ -446,7 +446,7 @@ class SearchManager:
         exclude_domains: list[str] | None = None,
     ) -> SearchResponse:
         """
-        M83: PhaseRunner search primitive.
+        PhaseRunner search primitive.
         
         Unlike `search_unified` (legacy pipeline with topic fallback ladder and
         additional filtering for older Tavily response shapes), this is a thin

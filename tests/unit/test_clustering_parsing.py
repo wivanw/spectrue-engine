@@ -11,7 +11,7 @@ class TestBuildClaimsLite:
     """Tests for build_claims_lite function."""
 
     def test_extracts_search_query_from_query_candidates(self):
-        """M105: search_query should be extracted from query_candidates[0]['text']."""
+        """search_query should be extracted from query_candidates[0]['text']."""
         claims = [
             {
                 "id": "c1",
@@ -30,7 +30,7 @@ class TestBuildClaimsLite:
         assert result[0]["search_query"] == "age of universe billion years"
 
     def test_extracts_search_query_from_search_queries(self):
-        """M105: search_query should be extracted from search_queries array."""
+        """search_query should be extracted from search_queries array."""
         claims = [
             {
                 "id": "c1",

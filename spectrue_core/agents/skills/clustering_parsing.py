@@ -24,7 +24,7 @@ UNREADABLE_MARKERS = [
 
 def get_source_text_for_llm(source: dict, *, max_len: int = 350) -> tuple[str, bool, list[str]]:
     """
-    M103: Return canonical text for LLM and metadata about source fields.
+    Return canonical text for LLM and metadata about source fields.
 
     Priority: quote > snippet > content/extracted_content
 
@@ -81,7 +81,7 @@ def get_source_text_for_llm(source: dict, *, max_len: int = 350) -> tuple[str, b
 
 def build_claims_lite(claims: list[Union[ClaimUnit, dict]]) -> list[dict]:
     """
-    M103/M105: Build lightweight claim dicts for stance clustering LLM.
+    M103/Build lightweight claim dicts for stance clustering LLM.
     
     Includes search_query to help LLM match sources to claims.
     Claims have queries in both search_queries (strings) and query_candidates (dicts).
@@ -150,7 +150,7 @@ def _extract_search_query(claim) -> str:
 
 def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]]:
     """
-    M103: Build lightweight source dicts for LLM with quote-carrying contract.
+    Build lightweight source dicts for LLM with quote-carrying contract.
 
     Uses get_source_text_for_llm() for canonical text extraction.
     Adds has_quote and fields_present for contract audit.
@@ -163,7 +163,7 @@ def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]
         if r.get("content_status") == "unavailable":
             status_hint = "[CONTENT UNAVAILABLE - JUDGE BY SNIPPET/TITLE]"
 
-        # M103: Use canonical text extraction with quote priority
+        # Use canonical text extraction with quote priority
         source_text, has_quote, fields_present = get_source_text_for_llm(r, max_len=350)
 
         # Check for unreadable content markers
@@ -194,7 +194,7 @@ def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]
                 "title": r.get("title", ""),
                 "text": f"{status_hint} {source_text}".strip(),
                 "quote": quote_value[:max_quote_len] if quote_value else "",
-                # M103: Quote contract audit fields
+                # Quote contract audit fields
                 "has_quote": has_quote,
                 "fields_present": fields_present,
             }

@@ -48,7 +48,7 @@ def calculate_consensus(evidence_list: List[EvidenceItem]) -> ConsensusState:
 
     # 3. Stability
     # For now, we assume standard stability. 
-    # M96 Temporal logic would refine this based on timeliness consistency.
+    # Temporal logic would refine this based on timeliness consistency.
     stability = 1.0 
 
     return ConsensusState(

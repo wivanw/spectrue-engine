@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def get_query_by_role(claim: dict, role: str) -> str | None:
     """
-    M64: Extract query with specific role from claim's query_candidates.
+    Extract query with specific role from claim's query_candidates.
 
     Args:
         claim: Claim dict with query_candidates and/or search_queries
@@ -37,7 +37,7 @@ def get_query_by_role(claim: dict, role: str) -> str | None:
 
 def normalize_and_sanitize(query: str) -> str | None:
     """
-    M64: Normalize query.
+    Normalize query.
 
     Note: Strict gambling keywords removal is deprecated (M64).
     We rely on LLM constraints and Tavily 'topic="news"' mode
@@ -57,7 +57,7 @@ def is_fuzzy_duplicate(
     log: logging.Logger = logger,
 ) -> bool:
     """
-    M64: Check if query is >threshold similar to any existing query.
+    Check if query is >threshold similar to any existing query.
 
     Uses Jaccard similarity on word sets.
     """
@@ -94,7 +94,7 @@ def select_diverse_queries(
     log: logging.Logger = logger,
 ) -> list[str]:
     """
-    M64: Topic-Aware Round-Robin Query Selection ("Coverage Engine").
+    Topic-Aware Round-Robin Query Selection ("Coverage Engine").
 
     Ensures every topic_key gets at least 1 query before any topic gets
     a 2nd query. This solves the "Digest Problem" where multi-topic
@@ -242,7 +242,7 @@ def resolve_budgeted_max_queries(claims: list, *, default_max: int = 3) -> int:
 
 def build_assertion_query(unit: Any, assertion: Any) -> str | None:
     """
-    M70: Build search query for a specific assertion.
+    Build search query for a specific assertion.
 
     Query structure: "{subject} {assertion.value} {context}" (heuristics unchanged).
     """
@@ -289,7 +289,7 @@ def select_queries_from_claim_units(
     log: logging.Logger = logger,
 ) -> list[str]:
     """
-    M70: Extract verification queries for FACT assertions in structured ClaimUnits.
+    Extract verification queries for FACT assertions in structured ClaimUnits.
     """
     from spectrue_core.schema import ClaimUnit
 
@@ -329,7 +329,7 @@ def select_queries_from_claim_units(
 
 def get_claim_units_for_evidence_mapping(claim_units: list, sources: list[dict]) -> dict[str, list[str]]:
     """
-    M70: Map claim_id -> assertion_keys (FACT) for targeted verification.
+    Map claim_id -> assertion_keys (FACT) for targeted verification.
 
     `sources` is accepted for back-compat with current call sites.
     """

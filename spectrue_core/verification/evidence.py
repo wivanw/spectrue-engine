@@ -169,13 +169,13 @@ def needs_evidence_acquisition_ladder(sources: list[dict]) -> bool:
     """
     Determine whether to escalate via the Evidence Acquisition Ladder (EAL).
     
-    M104: EAL is needed if any source lacks a `quote` field.
+    EAL is needed if any source lacks a `quote` field.
     Content/snippet alone is not sufficient for evidence scoring.
     """
     if not sources:
         return False
     
-    # M104: EAL needed if ANY source lacks quote
+    # EAL needed if ANY source lacks quote
     any_missing_quote = any(
         isinstance(s, dict) and not s.get("quote")
         for s in sources
@@ -208,7 +208,7 @@ def build_evidence_pack(
     search_results_clustered: list[SearchResult] | None = None,
     article_context: ArticleContext | None = None,
     content_lang: str | None = None,
-    claim_units: list[Any] | None = None,  # M70: Structured ClaimUnits
+    claim_units: list[Any] | None = None,  # Structured ClaimUnits
 ) -> EvidencePack:
     """
     Build structured Evidence Pack for LLM scorer.
@@ -230,11 +230,11 @@ def build_evidence_pack(
             Claim(
                 id="c1",
                 text=fact,
-                normalized_text=fact,  # M62: Use fact as-is
+                normalized_text=fact,  # Use fact as-is
                 type="core",
-                topic_group="Other",   # M62: Default topic
+                topic_group="Other",   # Default topic
                 importance=1.0,
-                check_worthiness=0.5,  # M62: Default worthiness
+                check_worthiness=0.5,  # Default worthiness
                 evidence_requirement={
                     "needs_primary_source": False,
                     "needs_independent_2x": True,
@@ -409,12 +409,12 @@ def build_evidence_pack(
             coverage=coverage,
             freshness_days_median=None,
             source_type_distribution=type_dist,  # type: ignore
-            # M62: Include claim metadata for scoring caps
+            # Include claim metadata for scoring caps
             topic_group=claim.get("topic_group"),
             claim_type=claim.get("type"),
         )
     
-    # M70: Per-Assertion Metrics
+    # Per-Assertion Metrics
     assertion_metrics: dict[str, AssertionMetrics] = {}
     if claim_units:
         # Map all assertions
@@ -479,7 +479,7 @@ def build_evidence_pack(
     # An LLM cannot "hallucinate" high confidence if the Evidence Tier is low.
     
     # Default with no sources: do not cap (tests expect 1.0).
-    # M50: Cap logic removed. LLM has full discretion over confidence scores.
+    # Cap logic removed. LLM has full discretion over confidence scores.
     global_cap = 1.0
     cap_reasons = ["Confidence caps disabled (M50)"]
     

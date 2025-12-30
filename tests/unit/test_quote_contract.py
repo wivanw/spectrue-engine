@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M103: Quote-Carrying Contract Unit Tests
+Quote-Carrying Contract Unit Tests
 
 Tests the invariant that quote fields are preserved through
 the evidence matrix pipeline.

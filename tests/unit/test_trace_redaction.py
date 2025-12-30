@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M74: Unit tests for medical log redaction.
+Unit tests for medical log redaction.
 """
 
 import pytest

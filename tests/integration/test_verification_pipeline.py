@@ -42,11 +42,11 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     
     # Mock search tools to return immediate results
     # Return 3+ sources to be considered "good" and avoid Google CSE fallback
-    # M48: Use "is_trusted": True to ensure confidence cap allows > 0.5 score
+    # Use "is_trusted": True to ensure confidence cap allows > 0.5 score
     # Use unique domains to satisfy "independent sources" requirement (typically 2+)
     mock_sources = [{"url": f"http://example{i}.com/page", "title": f"Source {i}", "relevance_score": 0.9, "is_trusted": True} for i in range(5)]
     # Mock search tools
-    # M50: Support new Pipeline structure or fall back to legacy
+    # Support new Pipeline structure or fall back to legacy
     if hasattr(verifier, "pipeline") and verifier.pipeline:
         target_web = verifier.pipeline.search_mgr.web_tool
         target_oracle = verifier.pipeline.search_mgr.oracle_tool
@@ -63,7 +63,7 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     # Setup varying responses for different calls
     
     # 1. Claim Extraction Response
-    # M62: Include importance, check_worthiness, topic_group for proper aggregation
+    # Include importance, check_worthiness, topic_group for proper aggregation
     claim_resp = {
         "claims": [{
             "text": "The sky is blue.",
@@ -100,8 +100,8 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
         ]
     }
     
-    # 3. Score Evidence Response (M48 / T164)
-    # M62: Must include claim_verdicts for aggregation logic
+    # 3. Score Evidence Response (/ T164)
+    # Must include claim_verdicts for aggregation logic
     score_resp = {
         "claim_verdicts": [
             {
@@ -112,7 +112,7 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
             }
         ],
         "danger_score": 0.0,
-        "rationale": "M48 logic working.",
+        "rationale": "logic working.",
         "explainability_score": 0.8,
         "style_score": 0.9
     }
@@ -134,12 +134,12 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     result = await verifier.verify_fact("The sky is blue", "advanced", "gpt-5.2", "en")
     
     # Assert result
-    # M104: Bayesian scoring may produce non-0.5 values based on evidence signals.
+    # Bayesian scoring may produce non-0.5 values based on evidence signals.
     # Without quoted evidence in clustering (LLM returned empty matrix), scored sources fallback to CONTEXT.
     # The Bayesian scorer can still produce > 0.5 if LLM reports high verdict_score.
     verified_score = result["verified_score"]
     assert 0.0 <= verified_score <= 1.0, f"Score out of bounds: {verified_score}"
-    assert result["rationale"] == "M48 logic working."
+    assert result["rationale"] == "logic working."
     assert "cost" in result
     
     # Verify LLM calls
@@ -158,7 +158,7 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
 @pytest.mark.asyncio
 async def test_causal_dependency_penalty_applied(mock_config):
     """
-    M93: If a premise is refuted, dependent conclusions are capped.
+    If a premise is refuted, dependent conclusions are capped.
     """
     verifier = FactVerifier(mock_config)
 

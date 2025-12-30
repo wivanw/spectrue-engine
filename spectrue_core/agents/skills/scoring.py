@@ -8,14 +8,14 @@ from spectrue_core.agents.llm_client import is_schema_failure
 from datetime import datetime
 import hashlib
 
-# M111: Structured output schemas
+# Structured output schemas
 from spectrue_core.agents.llm_schemas import (
     ANALYSIS_RESPONSE_SCHEMA,
     SCORE_EVIDENCE_STRUCTURED_SCHEMA,
     SCORING_RESPONSE_SCHEMA,
 )
 
-# M87: Decomposition helpers
+# Decomposition helpers
 from .scoring_contract import (
     build_score_evidence_instructions,
     build_score_evidence_prompt,
@@ -33,7 +33,7 @@ from .scoring_sanitization import (
     strip_internal_source_markers,
 )
 
-# M70: Schema imports for structured scoring
+# Schema imports for structured scoring
 from spectrue_core.schema import (
     ClaimUnit,
     StructuredVerdict,
@@ -93,7 +93,7 @@ class ScoringSkill(BaseSkill):
                 stance=stance,
             )
             
-            # M109 FIX: Explicitly label PRIMARY sources for LLM
+            # FIX: Explicitly label PRIMARY sources for LLM
             if r.get("is_primary"):
                 content_text = f"⭐ [PRIMARY SOURCE / OFFICIAL]\n{content_text}"
             
@@ -333,7 +333,7 @@ class ScoringSkill(BaseSkill):
         return result
 
     # ─────────────────────────────────────────────────────────────────────────
-    # M70: Schema-First Scoring (Per-Assertion Verdicts)
+    # Schema-First Scoring (Per-Assertion Verdicts)
     # ─────────────────────────────────────────────────────────────────────────
 
     async def score_evidence_structured(
@@ -345,7 +345,7 @@ class ScoringSkill(BaseSkill):
         lang: str = "en",
     ) -> StructuredVerdict:
         """
-        M70: Score claims with per-assertion verdicts.
+        Score claims with per-assertion verdicts.
         
         Key Design:
         - FACT assertions: Strictly verified (can be VERIFIED/REFUTED/AMBIGUOUS)
@@ -424,7 +424,7 @@ class ScoringSkill(BaseSkill):
             else:
                 content_text = safe_content
 
-            # M109 FIX: Explicitly label PRIMARY sources for LLM
+            # FIX: Explicitly label PRIMARY sources for LLM
             if e.get("is_primary"):
                 content_text = f"⭐ [PRIMARY SOURCE / OFFICIAL]\n{content_text}"
             
@@ -465,7 +465,7 @@ class ScoringSkill(BaseSkill):
             return self._parse_structured_verdict(result, lang=lang)
 
         except Exception as e:
-            logger.exception("[M70 Scoring] Failed: %s", e)
+            logger.exception("[Scoring] Failed: %s", e)
             Trace.event("llm.error", {"kind": "score_evidence_structured", "error": str(e)})
             if is_schema_failure(e):
                 raise
@@ -482,7 +482,7 @@ class ScoringSkill(BaseSkill):
 
     def _parse_structured_verdict(self, raw: dict, *, lang: str = "en") -> StructuredVerdict:
         """
-        M70: Parse LLM response into StructuredVerdict.
+        Parse LLM response into StructuredVerdict.
         
         Uses -1.0 sentinel for missing scores.
         """

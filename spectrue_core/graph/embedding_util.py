@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M72: Embedding Utilities for ClaimGraph B-Stage
+Embedding Utilities for ClaimGraph B-Stage
 
 Uses OpenAI text-embedding-3-small for claim similarity.
 Includes caching to avoid redundant API calls.

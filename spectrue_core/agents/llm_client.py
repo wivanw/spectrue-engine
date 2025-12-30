@@ -218,7 +218,7 @@ class LLMClient:
         openai_api_key: str | None = None,
         default_timeout: float = 60.0,  # Increased from 30.0 for complex tasks
         max_retries: int = 3,
-        cache_retention: CacheRetention = "in_memory", # M56: Fix default
+        cache_retention: CacheRetention = "in_memory", # Fix default
         meter: LLMMeter | None = None,
     ):
         """
@@ -320,7 +320,7 @@ class LLMClient:
         # Prompt caching
         if cache_key:
             params["prompt_cache_key"] = cache_key
-            # M56: Fix retention literal (in_memory vs in-memory)
+            # Fix retention literal (in_memory vs in-memory)
             # CAUTION: gpt-5-nano throws 400 "invalid_parameter" for this.
             # params["prompt_cache_retention"] = self.cache_retention
         
@@ -345,7 +345,7 @@ class LLMClient:
             "json_output": json_output_requested,
             "response_schema": bool(response_schema),
             "cache_key": cache_key,
-            # M67: Log full prompts for debugging
+            # Log full prompts for debugging
             "input_text": input[:10000], # Truncate to 10k chars
             "instructions_text": (instructions or "")[:5000],
         })
@@ -404,7 +404,7 @@ class LLMClient:
                 request_id = getattr(response, "id", "unknown")
                 
                 if response.usage:
-                    # M56: Extract detailed cache hits via prompt_tokens_details
+                    # Extract detailed cache hits via prompt_tokens_details
                     cached_tokens = 0
                     if hasattr(response.usage, "prompt_tokens_details"):
                         ptd = response.usage.prompt_tokens_details
@@ -421,7 +421,7 @@ class LLMClient:
                         "cached_tokens": cached_tokens,
                         "latency_ms": latency_ms,
                         "request_id": request_id, 
-                        # M56: Log raw usage for debugging SDK mapping issues
+                        # Log raw usage for debugging SDK mapping issues
                         "raw": response.usage.model_dump() if hasattr(response.usage, "model_dump") else response.usage.to_dict() if hasattr(response.usage, "to_dict") else str(response.usage)
                     }
 
@@ -474,7 +474,7 @@ class LLMClient:
                     "cache_status": cache_status,
                     "attempt": attempt + 1,
                     "payload_hash": payload_hash,
-                    # M67: Log full response for debugging
+                    # Log full response for debugging
                     "response_text": content[:15000], # Truncate to 15k chars
                 })
                 

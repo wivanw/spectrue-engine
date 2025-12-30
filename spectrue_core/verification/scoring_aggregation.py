@@ -22,7 +22,7 @@ from spectrue_core.utils.trace import Trace
 warnings.warn(
     "spectrue_core.verification.scoring_aggregation is deprecated. "
     "Migrate to spectrue_core.scoring.belief (Bayesian scoring). "
-    "See M104 FR-010.",
+    "See FR-010.",
     DeprecationWarning,
     stacklevel=2,
 )

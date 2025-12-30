@@ -28,7 +28,7 @@ def default_channels(
     verification_target: VerificationTarget,
 ) -> list[EvidenceChannel]:
     """
-    M80: Determine default channels based on harm and target.
+    Determine default channels based on harm and target.
 
     High harm → authoritative only
     No verification target → empty (no search)

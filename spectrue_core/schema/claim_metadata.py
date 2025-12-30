@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M80: Claim-Centric Orchestration Metadata Types
+Claim-Centric Orchestration Metadata Types
 
 This module defines metadata types for claim-level verification routing:
 - ClaimRole: Role of claim in document structure
@@ -57,7 +57,7 @@ class ClaimRole(str, Enum):
     SUBCLAIM = "subclaim"
     """Subordinate detail within a larger claim."""
 
-    # M93: Structured document roles
+    # Structured document roles
     THESIS = "thesis"
     """Main thesis or conclusion of the article."""
 

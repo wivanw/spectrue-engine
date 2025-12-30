@@ -170,7 +170,7 @@ CONTEXT:
 {full_context}
 """
         
-        # M56: Fix for OpenAI 400 "Response input messages must contain the word 'json'"
+        # Fix for OpenAI 400 "Response input messages must contain the word 'json'"
         # REQUIRED: The word "JSON" must appear in the INPUT message, not just system instructions.
         prompt += "\n\nReturn the result in JSON format."
 

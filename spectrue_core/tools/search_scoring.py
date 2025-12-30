@@ -19,7 +19,7 @@
 Search Scoring Module
 =====================
 Provides relevance scoring, filtering, and ranking for search results.
-Extracted from search_tool.py for maintainability (M61 refactoring).
+Extracted from search_tool.py for maintainability (refactoring).
 """
 
 import datetime
@@ -344,7 +344,7 @@ def rank_and_filter(
 
     scored.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)
     
-    # M67: Log input stats for debugging
+    # Log input stats for debugging
     if scored:
         tavily_scores = [r.get("score", 0) or 0 for r in scored]
         our_scores = [r.get("relevance_score", 0) for r in scored]
@@ -375,10 +375,10 @@ def rank_and_filter(
         logger.debug("[Search] All results below 0.15, keeping top 2 borderline results as fallback")
         kept = scored[:2]
     
-    # M67: Log output stats
+    # Log output stats
     logger.debug("[Search] Output: %d kept, %d discarded", len(kept), len(discarded_reasons))
 
-    # M54: Enforce domain diversity
+    # Enforce domain diversity
     # Select best result per domain first, then fill rest
     selected: list[dict] = []
     seen_domains: set[str] = set()

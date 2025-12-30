@@ -18,7 +18,7 @@ class StageTokenEstimate:
     per_claim_output: int = 0
 
 
-# M105: Calibrated based on real pipeline traces (2025-12-26)
+# Calibrated based on real pipeline traces (2025-12-26)
 # Previous estimates were ~3x higher than actual usage
 DEFAULT_STAGE_ESTIMATES: dict[str, StageTokenEstimate] = {
     "extract": StageTokenEstimate(input_tokens=400, output_tokens=200),  # URL extraction (if applicable)

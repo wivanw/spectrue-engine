@@ -16,7 +16,7 @@
 # along with Spectrue Engine. If not, see <https://www.gnu.org/licenses/>.
 
 """
-M80 Integration Tests: Claim-Centric Orchestration
+Integration Tests: Claim-Centric Orchestration
 
 Tests the metadata extraction and orchestration logic:
 - T9: Horoscope claims get verification_target="none"

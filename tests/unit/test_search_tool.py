@@ -31,7 +31,7 @@ class TestWebSearchTool:
             
     @pytest.mark.asyncio
     async def test_search_basic(self, tool):
-        # Prepare the Response object with 3 unique domains to avoid M61 diversification pass
+        # Prepare the Response object with 3 unique domains to avoid diversification pass
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
@@ -116,7 +116,7 @@ class TestWebSearchTool:
         assert ranked[0]["title"] == "Exact Match"
 
     def test_tavily_score_blending(self, tool):
-        """M112: Calibrated logistic scoring replaces heuristic blending.
+        """Calibrated logistic scoring replaces heuristic blending.
         
         With calibrated models, scores pass through sigmoid, so:
         - High lexical match + low provider score → moderate output (sigmoid saturation)
@@ -143,7 +143,7 @@ class TestWebSearchTool:
         # Perfect lexical match → high raw, but sigmoid compresses to ~0.73
         assert res2 > 0.7
 
-    # M108: Removed heuristic-based tests (test_archive_domain_filtered, etc.)
+    # Removed heuristic-based tests (test_archive_domain_filtered, etc.)
     # per design decision: no URL-based heuristic filtering
 
 @pytest.mark.unit

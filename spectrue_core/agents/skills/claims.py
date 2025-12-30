@@ -19,12 +19,12 @@ from .claims_parsing import (
     normalize_topic_group,
 )
 
-# M70: Import schema module for structured claims
+# Import schema module for structured claims
 from spectrue_core.schema import (
     ClaimStructureType,
 )
 
-# M80: Import claim metadata types
+# Import claim metadata types
 from spectrue_core.schema.claim_metadata import (
     ClaimMetadata,
     VerificationTarget,

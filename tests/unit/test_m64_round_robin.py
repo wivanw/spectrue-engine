@@ -14,7 +14,7 @@ def mock_config():
     config.google_fact_check_key = "test-key"
     config.google_search_api_key = "test-key"
     config.google_search_cse_id = "test-cse-id"
-    # M72: Disable ClaimGraph in tests
+    # Disable ClaimGraph in tests
     config.runtime.claim_graph = MagicMock()
     config.runtime.claim_graph.enabled = False
     return config
@@ -52,7 +52,7 @@ def pipeline(mock_config):
 class TestM64RoundRobin:
     
     def test_round_robin_selection_basic(self, pipeline):
-        """M64: Verify round-robin selection ensures topic coverage."""
+        """Verify round-robin selection ensures topic coverage."""
         claims = [
             {
                 "id": "c1", "topic_key": "Topic A", "type": "core", "importance": 1.0, "check_worthiness": 0.9,
@@ -77,7 +77,7 @@ class TestM64RoundRobin:
         assert "B1 Core" in queries
 
     def test_round_robin_depth_fill(self, pipeline):
-        """M64: Verify depth fill if budget allows (Round 2)."""
+        """Verify depth fill if budget allows (Round 2)."""
         claims = [
             {
                 "id": "c1", "topic_key": "Topic A", "type": "core", "importance": 1.0, "check_worthiness": 0.9,
@@ -103,7 +103,7 @@ class TestM64RoundRobin:
         assert "A2 Local" in queries
 
     def test_fuzzy_deduplication(self, pipeline):
-        """M64: Verify fuzzy deduplication removes similar queries."""
+        """Verify fuzzy deduplication removes similar queries."""
         claims = [
             {
                 "id": "c1", "topic_key": "Topic A", "type": "core", "importance": 1.0, "check_worthiness": 0.9,
@@ -121,7 +121,7 @@ class TestM64RoundRobin:
 
     @pytest.mark.asyncio
     async def test_tavily_topic_guardrail_news(self, pipeline):
-        """M64/M65: Verify 'news' topic is passed to Unified Search for 'news' intent."""
+        """M64/Verify 'news' topic is passed to Unified Search for 'news' intent."""
         # Setup
         pipeline.agent.extract_claims = AsyncMock(return_value=(
             [], # claims
@@ -152,7 +152,7 @@ class TestM64RoundRobin:
 
     @pytest.mark.asyncio
     async def test_tavily_topic_guardrail_general(self, pipeline):
-        """M64/M65: Verify 'general' topic is passed for 'evergreen' intent."""
+        """M64/Verify 'general' topic is passed for 'evergreen' intent."""
         # Setup
         pipeline.agent.extract_claims = AsyncMock(return_value=(
             [], False, "evergreen", "" # intent -> topic="general"

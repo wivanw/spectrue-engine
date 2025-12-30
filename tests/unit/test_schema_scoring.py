@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M70: Schema Scoring Integration Tests
+Schema Scoring Integration Tests
 
 Tests for assertion-level scoring with structured verdicts.
 These tests verify the scoring logic WITHOUT real LLM calls (mocked).

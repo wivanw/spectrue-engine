@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
-M70: ClaimUnit and Assertion Pydantic Models
+ClaimUnit and Assertion Pydantic Models
 
 This is the SPEC PRODUCER output format.
 Claim Extraction LLM fills these structures - it's a parser, not a judge.
