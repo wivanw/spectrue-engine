@@ -74,7 +74,8 @@ class WebSearchTool:
         if depth not in ("basic", "advanced"):
             depth = "basic"
         m = int(max_results) if max_results else 5
-        return depth, max(1, min(m, 5))
+        # M106: Remove artificial cap=5, use Tavily API limit (1-10)
+        return depth, max(1, min(m, 10))
 
     def _is_trusted_host(self, host: str) -> bool:
         return is_trusted_host(host)
@@ -384,6 +385,7 @@ class WebSearchTool:
                 include_domains=normalized_include,
                 exclude_domains=normalized_exclude,
                 topic=topic,
+                include_raw_content=raw_mode,  # M106: Pass through raw mode
             )
             results_raw = response.get("results", [])
             logger.debug("[Tavily] Got %d raw results", len(results_raw))
@@ -449,6 +451,7 @@ class WebSearchTool:
                             include_domains=normalized_include,
                             exclude_domains=diversify_exclude,
                             topic="general",
+                            include_raw_content=raw_mode,  # M106: Consistent with main search
                         )
                         results2 = clean_tavily_results(response2.get("results", []))
                         merged = cleaned + results2

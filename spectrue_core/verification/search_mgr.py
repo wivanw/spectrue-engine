@@ -379,10 +379,19 @@ class SearchManager:
             skip_extensions=SKIP_EXTENSIONS,
         )
 
-    async def search_unified(self, query: str, topic: str = "general", intent: str = "news", article_intent: str = "news") -> SearchResponse:
+    async def search_unified(
+        self,
+        query: str,
+        topic: str = "general",
+        intent: str = "news",
+        article_intent: str = "news",
+        num_results: int = 5,  # M106: Allow caller to control, default 5 for back-compat
+    ) -> SearchResponse:
         """
         Unified search replacing Tier 1/2 split.
-        Performs single search (limit=5) and filters garbage.
+        
+        DEPRECATED: Prefer search_phase() for new code. This method has legacy
+        fallback ladder logic that may not be needed.
         
         Added Fallback Ladder:
         - If article_intent == "evergreen", force topic="general"
@@ -394,10 +403,10 @@ class SearchManager:
             topic = "general"
 
         self.tavily_calls += 1
-        # Use limit=5 to strictly match Tavily billing unit and avoid noise from results 6-10
+        # M106: Use caller-provided num_results instead of hardcoded 5
         context, results = await self.web_tool.search(
             query,
-            num_results=5,
+            num_results=num_results,
             depth="advanced",
             topic=topic
         )
@@ -412,7 +421,7 @@ class SearchManager:
             self.tavily_calls += 1
             fb_context, fb_results = await self.web_tool.search(
                 query,
-                num_results=5,
+                num_results=num_results,  # M106: Use same limit for fallback
                 depth="advanced",
                 topic="general"
             )
