@@ -456,7 +456,6 @@ class PhaseRunner:
 
 
         # CRITICAL SHORTCUT: Check inline sources first (M109)
-        # CRITICAL SHORTCUT: Check inline sources first (M109)
         if self.inline_sources:
             logger.debug("[M109] Checking inline sources shortcut for claim %s", claim_id)
             
