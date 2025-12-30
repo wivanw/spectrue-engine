@@ -47,9 +47,9 @@ class TestOracleOptimization:
         """Test that Oracle checks are performed specifically on flagged claims."""
         
         claims = [
-            {"id": "c1", "text": "Claim One", "check_oracle": True},
-            {"id": "c2", "text": "Claim Two", "check_oracle": False},
-            {"id": "c3", "text": "Claim Three", "check_oracle": True},
+            {"id": "c1", "text": "Claim One is the most important and longest claim here", "check_oracle": True, "importance": 0.9, "check_worthiness": 0.9, "claim_role": "thesis"},
+            {"id": "c2", "text": "Claim Two", "check_oracle": False, "importance": 0.8, "check_worthiness": 0.8},
+            {"id": "c3", "text": "Claim Three", "check_oracle": True, "importance": 0.7, "check_worthiness": 0.7},
         ]
         # should_check_oracle = True
         mock_agent.extract_claims.return_value = (claims, True, "news", "")
@@ -80,8 +80,8 @@ class TestOracleOptimization:
         """Test that Oracle checks are strictly limited to 1 call max (Optimization)."""
         
         claims = [
-            {"id": "c1", "text": "Claim 1", "check_oracle": True},
-            {"id": "c2", "text": "Claim 2", "check_oracle": True},
+            {"id": "c1", "text": "Claim 1", "check_oracle": True, "importance": 0.9, "check_worthiness": 0.9},
+            {"id": "c2", "text": "Claim 2", "check_oracle": True, "importance": 0.8, "check_worthiness": 0.8},
         ]
         # All true
         mock_agent.extract_claims.return_value = (claims, True, "news", "")
@@ -100,7 +100,7 @@ class TestOracleOptimization:
         """Test fallback to core claim/fact if flag is True but no explicit check_oracle claims."""
         
         claims = [
-            {"id": "c1", "text": "Claim 1", "check_oracle": False, "type": "core"},
+            {"id": "c1", "text": "Claim 1", "check_oracle": False, "type": "core", "importance": 0.9, "check_worthiness": 0.9},
         ]
         # Flag True (heuristic override)
         mock_agent.extract_claims.return_value = (claims, True, "news", "")
