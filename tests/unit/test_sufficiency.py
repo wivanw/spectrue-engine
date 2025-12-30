@@ -121,9 +121,9 @@ class TestSufficiencyRule1:
         
         result = evidence_sufficiency("c1", sources, VerificationTarget.REALITY)
         
-        # Expect sufficient after tuning logbf_authoritative to 1.4
-        assert result.status == SufficiencyStatus.SUFFICIENT
-        assert result.authoritative_count == 1
+        # Rule1 requires quote for authoritative sources
+        assert result.status == SufficiencyStatus.INSUFFICIENT
+        assert result.authoritative_count == 1  # Counted but not in sources list
     
     def test_authoritative_with_quote_sufficient_regardless_of_stance(self):
         """T003: Authoritative source with quote IS sufficient during retrieval.

@@ -79,7 +79,8 @@ class TestDeepScoringPipeline:
             "rationale": "Test rationale"
         }
 
-        # Execute in DEEP mode
+        # Execute in DEEP mode via pipeline (pipeline itself doesn't do per-claim)
+        # Deep per-claim scoring happens at engine level, not pipeline level
         await pipeline.execute(
             fact="Test Fact",
             search_type="deep",
@@ -87,9 +88,9 @@ class TestDeepScoringPipeline:
             lang="en"
         )
 
-        # Pipeline limits verification targets to 2 by default (see pipeline.py select_verification_targets)
-        # So we expect 2 calls, not 3
-        assert mock_agent.score_evidence.call_count == 2
+        # Pipeline.execute() does single pass scoring regardless of search_type
+        # Per-claim verification happens at SpectrueEngine level for deep mode
+        assert mock_agent.score_evidence.call_count == 1
 
     @pytest.mark.asyncio
     async def test_smart_mode_uses_batch_scoring(self, pipeline, mock_agent, mock_search_mgr):

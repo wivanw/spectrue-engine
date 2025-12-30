@@ -69,7 +69,7 @@ class WebSearchTool:
     def client(self, value) -> None:
         self._tavily._client = value
 
-    def _normalize_params(self, search_depth: str, max_results: int) -> Tuple[str, int]:
+    def _normalize_params(self, search_depth: str, max_results: int | None) -> Tuple[str, int]:
         """
         Validate search parameters against Tavily API limits.
         
@@ -80,9 +80,11 @@ class WebSearchTool:
         depth = (search_depth or "basic").lower()
         if depth not in ("basic", "advanced"):
             depth = "basic"
-        # M106: Pure validation - clamp to API limits only
-        # Caller is responsible for providing a sensible default
-        m = int(max_results) if max_results else 5  # 5 is signature default, not hidden here
+
+        if max_results is None:
+            raise ValueError("max_results must be provided by caller (policy lives outside validator)")
+
+        m = int(max_results)
         return depth, max(1, min(m, 10))
 
     def _is_trusted_host(self, host: str) -> bool:
