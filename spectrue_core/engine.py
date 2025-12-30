@@ -12,7 +12,7 @@ from spectrue_core.config import SpectrueConfig
 from spectrue_core.verification.verifier import FactVerifier
 from spectrue_core.verification.costs import MODEL_COSTS
 from spectrue_core.utils.trace import Trace
-from spectrue_core.analysis.text_analyzer import TextAnalyzer
+
 
 # Make language detection deterministic
 DetectorFactory.seed = 0
@@ -238,7 +238,7 @@ class SpectrueEngine:
                     final["budget"] = {
                         "max_credits": int(max_credits),
                         "spent": total_cost,
-                        "limited": len(all_verified_claims) < len(claims),
+                        "limited": len(all_verified_claims) < len(extracted_claims),
                     }
                 return final
 

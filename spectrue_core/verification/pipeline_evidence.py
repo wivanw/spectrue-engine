@@ -25,7 +25,6 @@ from spectrue_core.verification.temporal import (
     normalize_time_window,
 )
 from spectrue_core.verification.source_utils import canonicalize_sources
-from spectrue_core.verification.trusted_sources import is_social_platform
 
 # Suppress deprecation warning - full migration to Bayesian scoring is future work
 import warnings

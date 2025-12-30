@@ -461,7 +461,7 @@ class ValidationPipeline:
                     "sources": final_sources,
                     "details": [],
                     "_extracted_claims": claims,  # Pass claims back to engine for per-claim verification
-                    "cost": get_cost_summary(ledger).get("total_credits", 0),
+                    "cost": ledger.total_credits,
                 })
 
             final_sources = await self._verify_inline_sources(
