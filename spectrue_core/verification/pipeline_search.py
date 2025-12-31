@@ -40,6 +40,11 @@ class SearchFlowInput:
     preloaded_context: str | None
     progress_callback: ProgressCallback | None
     inline_sources: list[dict] = field(default_factory=list)
+    # M113: Pipeline profile selection
+    pipeline: str | None = None
+    """Pipeline profile name (e.g., 'normal', 'deep'). If None, uses search_type mapping."""
+    pipeline_overrides: dict | None = None
+    """Per-run overrides for pipeline profile settings."""
 
 
 @dataclass(slots=True)
@@ -76,20 +81,101 @@ async def run_search_flow(
         claim_orchestration_flag is True and inp.claims and not inp.preloaded_context
     )
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # M114: Preflight invariant validation for Step-based pipeline
+    # ─────────────────────────────────────────────────────────────────────────
+    # Run invariant checks before expensive operations (search, LLM calls).
+    # For "normal" mode, this validates single-claim and single-language.
+    # On violation, logs warning and continues (non-blocking in Phase 5).
+    #
+    # Future: After Phase 5 stabilizes, this will return early with error.
+    # ─────────────────────────────────────────────────────────────────────────
+    try:
+        from spectrue_core.pipeline import validate_claims_for_mode, PipelineViolation
+
+        # Map pipeline profile or search_type to mode name
+        mode_for_validation = inp.pipeline or ("deep" if inp.search_type == "deep" else "normal")
+
+        await validate_claims_for_mode(mode_for_validation, inp.claims)
+
+        Trace.event(
+            "pipeline.preflight_validation.passed",
+            {"mode": mode_for_validation, "claims_count": len(inp.claims)},
+        )
+    except PipelineViolation as pv:
+        # M114 Phase 5: Log warning but continue (non-blocking)
+        # TODO(M114-Phase6): Make this blocking after stabilization
+        logger.warning(
+            "[M114] Preflight validation failed for mode '%s': %s. Continuing anyway.",
+            mode_for_validation,
+            pv,
+        )
+        Trace.event("pipeline.preflight_validation.violation", pv.to_trace_dict())
+    except Exception as e:
+        # Import or runtime failure — don't block on infra issues
+        logger.debug("[M114] Preflight validation skipped: %s", e)
+
     policy = default_search_policy()
     profile_name = resolve_profile_name(inp.search_type)
     profile = policy.get_profile(profile_name)
     search_mgr.set_policy_profile(profile)
 
+    # M113: Check if pipeline profile is specified
+    use_pipeline_builder = inp.pipeline is not None
+
     if use_orchestration:
         logger.debug("[M81] Using PhaseRunner for progressive widening (orchestration enabled)")
 
         try:
-            orchestrator = ClaimOrchestrator()
-            budget_class = budget_class_for_profile(profile)
-            execution_plan = orchestrator.build_plan(inp.claims, budget_class=budget_class)
-            execution_plan = apply_search_policy_to_plan(execution_plan, profile=profile)
-            execution_plan = apply_claim_retrieval_policy(execution_plan, claims=inp.claims)
+            # M113: Build execution plan from pipeline profile if specified
+            if use_pipeline_builder:
+                try:
+                    from spectrue_core.pipeline_builder import (
+                        PipelineBuilder,
+                        load_profile as load_pipeline_profile,
+                    )
+                    from spectrue_core.verification.stop_decision import ev_stop_params_from_pipeline_profile
+
+                    pipeline_profile = load_pipeline_profile(inp.pipeline)
+                    builder = PipelineBuilder(pipeline_profile, overrides=inp.pipeline_overrides)
+                    execution_plan = builder.build_plan(inp.claims, default_locale=inp.lang)
+
+                    ev_stop_params = ev_stop_params_from_pipeline_profile(pipeline_profile)
+
+                    # Emit trace for pipeline profile usage
+                    Trace.event(
+                        "pipeline.profile_loaded",
+                        {**builder.get_trace_metadata(), "ev_stop_enabled": ev_stop_params is not None},
+                    )
+
+                    logger.debug(
+                        "[M113] Built ExecutionPlan from pipeline profile: %s",
+                        inp.pipeline,
+                    )
+                except FileNotFoundError as e:
+                    logger.warning(
+                        "[M113] Pipeline profile '%s' not found, falling back to orchestrator: %s",
+                        inp.pipeline,
+                        e,
+                    )
+                    use_pipeline_builder = False
+                except Exception as e:
+                    logger.warning(
+                        "[M113] Error loading pipeline profile '%s', falling back to orchestrator: %s",
+                        inp.pipeline,
+                        e,
+                    )
+                    use_pipeline_builder = False
+
+            if not use_pipeline_builder:
+                ev_stop_params = None
+                # Fallback to ClaimOrchestrator if pipeline builder not used
+                orchestrator = ClaimOrchestrator()
+                budget_class = budget_class_for_profile(profile)
+                execution_plan = orchestrator.build_plan(inp.claims, budget_class=budget_class)
+                execution_plan = apply_search_policy_to_plan(execution_plan, profile=profile)
+                execution_plan = apply_claim_retrieval_policy(execution_plan, claims=inp.claims)
+
             locale_config = getattr(getattr(config, "runtime", None), "locale", None)
             default_primary = getattr(locale_config, "default_primary_locale", inp.lang)
             default_fallbacks = getattr(locale_config, "default_fallback_locales", ["en"])
@@ -147,7 +233,7 @@ async def run_search_flow(
             )
 
             runner = PhaseRunner(
-                search_mgr=search_mgr,
+                search_mgr,
                 progress_callback=inp.progress_callback,
                 use_retrieval_loop=True,
                 policy_profile=profile,
@@ -155,8 +241,9 @@ async def run_search_flow(
                 gpt_model=inp.gpt_model,
                 search_type=inp.search_type,
                 max_cost=inp.max_cost,
-                inline_sources=inp.inline_sources,  # Pass verified inline sources
+                inline_sources=inp.inline_sources,
                 agent=agent,
+                ev_stop_params=ev_stop_params,
             )
 
             phase_evidence = await runner.run_all_claims(inp.claims, execution_plan)

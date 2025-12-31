@@ -11,21 +11,18 @@ This module provides:
 - Pipeline: Executor that runs steps in sequence
 - PipelineContext: Immutable context threaded through steps
 - PipelineFactory: Builds pipelines with correct step composition
+- execute_pipeline: Entry point for pipeline execution
 
 Example:
-    from spectrue_core.pipeline import (
-        PipelineFactory,
-        PipelineContext,
-        NORMAL_MODE,
+    from spectrue_core.pipeline import execute_pipeline
+
+    # Execute claims through pipeline
+    result = await execute_pipeline(
+        mode_name="normal",
+        claims=claims,
+        search_mgr=search_mgr,
+        agent=agent,
     )
-
-    # Build a pipeline for normal mode
-    factory = PipelineFactory(search_mgr=search_mgr, agent=agent)
-    pipeline = factory.build("normal")
-
-    # Execute
-    ctx = PipelineContext(mode=NORMAL_MODE, claims=claims)
-    result = await pipeline.run(ctx)
 """
 
 from spectrue_core.pipeline.mode import (
@@ -44,6 +41,10 @@ from spectrue_core.pipeline.errors import (
     PipelineExecutionError,
 )
 from spectrue_core.pipeline.factory import PipelineFactory
+from spectrue_core.pipeline.executor import (
+    execute_pipeline,
+    validate_claims_for_mode,
+)
 
 
 __all__ = [
@@ -58,6 +59,9 @@ __all__ = [
     "Pipeline",
     # Factory
     "PipelineFactory",
+    # Executor
+    "execute_pipeline",
+    "validate_claims_for_mode",
     # Errors
     "PipelineViolation",
     "PipelineExecutionError",
