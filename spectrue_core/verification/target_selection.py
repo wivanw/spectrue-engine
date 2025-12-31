@@ -358,10 +358,11 @@ def propagate_deferred_verdicts(
 
     registry = calibration_registry or CalibrationRegistry.from_runtime(None)
     policy = registry.policy
-    min_shrink = float(policy.propagation_min_shrink)
-    max_shrink = float(policy.propagation_max_shrink)
-    sim_weight = float(policy.propagation_similarity_weight)
-    cohesion_weight = float(policy.propagation_cohesion_weight)
+    # M117: Disable shrinkage (postprocessing) for Deep Analysis
+    # min_shrink = float(policy.propagation_min_shrink)
+    # max_shrink = float(policy.propagation_max_shrink)
+    # sim_weight = float(policy.propagation_similarity_weight)
+    # cohesion_weight = float(policy.propagation_cohesion_weight)
     
     # Build lookup: target_claim_id -> verdict
     target_verdicts: dict[str, dict] = {}
@@ -428,11 +429,10 @@ def propagate_deferred_verdicts(
             propagated_count += 1
             continue
         
-        # Inherit from target with similarity/cohesion shrinkage
+        # Inherit directly from target (no shrinkage/postprocessing per M117 Spec)
+        # "Deep analysis returns per-claim results... no backend postprocessing"
         target_score = float(target_cv.get("verdict_score", 0.5) or 0.5)
-        affinity = max(0.0, min(1.0, (sim_weight * similarity) + (cohesion_weight * cohesion)))
-        shrinkage = max(min_shrink, min(max_shrink, max_shrink - ((max_shrink - min_shrink) * affinity)))
-        derived_score = target_score * (1.0 - shrinkage) + 0.5 * shrinkage
+        derived_score = target_score
         
         payload = {
             "claim_id": claim_id,
@@ -445,22 +445,15 @@ def propagate_deferred_verdicts(
             "propagation": {
                 "similarity": similarity,
                 "cohesion": cohesion,
-                "affinity": affinity,
-                "shrinkage": shrinkage,
+                "mode": "direct_copy",
             },
             # Inherit sources and reason
             "sources": target_cv.get("sources", []),
             "reason": f"(Derived from {target_id}) " + (target_cv.get("reason") or ""),
+            # Copy RGBA directly (same verdict = same color)
+            "rgba": target_cv.get("rgba"),
         }
         
-        # Inherit RGBA but update Green channel (verified score) with derived score
-        target_rgba = target_cv.get("rgba")
-        if target_rgba and len(target_rgba) >= 4:
-            # Copy [R, G, B, A], update G to derived_score
-            payload["rgba"] = [target_rgba[0], float(derived_score), target_rgba[2], target_rgba[3]]
-        else:
-            payload["rgba"] = None
-
         if claim_id in verdict_index:
             claim_verdicts[verdict_index[claim_id]] = payload
         else:
