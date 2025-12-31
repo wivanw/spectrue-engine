@@ -7,6 +7,11 @@ from spectrue_core.schema import ClaimUnit
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.evidence_pack import SearchResult
 from spectrue_core.verification.source_utils import has_evidence_chunk
+from spectrue_core.verification.stance_posterior import (
+    StanceFeatures,
+    compute_stance_posterior,
+    source_prior_from_tier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -358,19 +363,52 @@ def postprocess_evidence_matrix(
                 if not quote:
                     quote = r.get("snippet", "")
 
-        if (
-            stance in {"CONTEXT", "IRRELEVANT"}
-            and cid
-            and has_evidence_chunk(r)
-        ):
+        # =========================================================================
+        # BAYESIAN STANCE POSTERIOR (M113+)
+        # Replaces hard rule: if relevance < 0.4 => NEUTRAL
+        # Now uses soft P(S|features) calculation
+        # =========================================================================
+        
+        # Prepare structural features for posterior calculation
+        quote_for_features = quote or r.get("quote") or ""
+        has_chunk = has_evidence_chunk(r)
+        tier = r.get("evidence_tier")
+        source_prior = source_prior_from_tier(tier)
+        
+        features = StanceFeatures(
+            llm_stance=stance,
+            llm_relevance=relevance if relevance > 0 else None,
+            quote_present=bool(quote_for_features and str(quote_for_features).strip()),
+            has_evidence_chunk=has_chunk,
+            source_prior=source_prior,
+        )
+        
+        posterior = compute_stance_posterior(features)
+        
+        # Decision: Use argmax stance if p_evidence > threshold
+        # This is softer than hard rule: we trust LLM more when evidence signals are strong
+        EVIDENCE_THRESHOLD = 0.35  # P(S ∈ {SUPPORT, REFUTE}) threshold
+        
+        if posterior.p_evidence >= EVIDENCE_THRESHOLD:
+            # Strong evidence signal - use argmax (likely SUPPORT or REFUTE)
+            stance = posterior.argmax_stance.upper()
+            # Boost relevance proportionally to p_evidence
+            relevance = max(relevance, posterior.p_evidence)
+            stats["bayesian_kept"] = stats.get("bayesian_kept", 0) + 1
+        elif stance in {"SUPPORT", "REFUTE", "MIXED"}:
+            # LLM said evidence but posterior disagrees - soft downgrade
+            if posterior.p_neutral > posterior.p_evidence:
+                stance = "NEUTRAL"
+                stats["bayesian_downgraded"] = stats.get("bayesian_downgraded", 0) + 1
+            else:
+                # Keep stance but note uncertainty
+                stats["bayesian_uncertain"] = stats.get("bayesian_uncertain", 0) + 1
+        elif stance in {"CONTEXT", "IRRELEVANT"} and cid and has_chunk:
+            # Context promotion based on structural signals
             stance = "NEUTRAL"
             stats["context_promoted"] += 1
             if quote is None:
                 quote = r.get("quote") or r.get("snippet") or r.get("content") or ""
-        if stance in {"SUPPORT", "REFUTE", "MIXED"} and relevance < 0.4:
-            stats["downgraded_low_relevance"] += 1
-            stance = "NEUTRAL"
-            relevance = 0.0
 
         if stance not in valid_scoring_stances:
             if stance == "MENTION":
@@ -413,6 +451,12 @@ def postprocess_evidence_matrix(
                 assertion_key=akey,
                 content_status=r.get("content_status", "available"),
                 evidence_tier=r.get("evidence_tier"),
+                # Bayesian posterior (M113+)
+                p_support=posterior.p_support,
+                p_refute=posterior.p_refute,
+                p_neutral=posterior.p_neutral,
+                p_evidence=posterior.p_evidence,
+                posterior_entropy=posterior.entropy,
             )
         )
 
@@ -432,6 +476,24 @@ def postprocess_evidence_matrix(
         )
 
     Trace.event("evidence.synthesis_stats", stats)
+    
+    # M113+: Bayesian posterior summary for calibration monitoring
+    if clustered_results:
+        effective_support = sum(r.get("p_support", 0) for r in clustered_results)
+        effective_refute = sum(r.get("p_refute", 0) for r in clustered_results)
+        effective_evidence = sum(r.get("p_evidence", 0) for r in clustered_results)
+        mean_entropy = sum(r.get("posterior_entropy", 0) for r in clustered_results) / len(clustered_results)
+        Trace.event("evidence.bayesian_summary", {
+            "effective_support": round(effective_support, 3),
+            "effective_refute": round(effective_refute, 3),
+            "effective_evidence": round(effective_evidence, 3),
+            "mean_entropy": round(mean_entropy, 3),
+            "total_sources": len(clustered_results),
+            "bayesian_kept": stats.get("bayesian_kept", 0),
+            "bayesian_downgraded": stats.get("bayesian_downgraded", 0),
+            "bayesian_uncertain": stats.get("bayesian_uncertain", 0),
+        })
+    
     logger.debug("[Clustering] Matrix stats: %s", stats)
 
     return clustered_results, stats

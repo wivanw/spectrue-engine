@@ -399,6 +399,14 @@ class SearchResult(TypedDict, total=False):
     # Content availability status
     content_status: Literal["available", "unavailable", "blocked", "error"]
     unavailable_reason: str | None  # Why content couldn't be retrieved
+    
+    # Bayesian stance posterior (M113+)
+    # Soft probabilities instead of hard stance labels
+    p_support: float                # P(S* = SUPPORT | features)
+    p_refute: float                 # P(S* = REFUTE | features)
+    p_neutral: float                # P(S* = NEUTRAL | features)
+    p_evidence: float               # P(S* ∈ {SUPPORT, REFUTE})
+    posterior_entropy: float        # Uncertainty in stance classification
 
 
 # ─────────────────────────────────────────────────────────────────────────────

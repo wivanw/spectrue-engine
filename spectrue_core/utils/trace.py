@@ -26,6 +26,7 @@ import hashlib
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Any
+import os
 
 from spectrue_core.utils.runtime import is_local_run
 from spectrue_core.runtime_config import EngineRuntimeConfig
@@ -234,6 +235,25 @@ class Trace:
     """
 
     @staticmethod
+    def _emit_trace_id() -> bool:
+        """Whether to include trace_id field in each JSONL record.
+
+        By default we can omit it because the trace file name already contains
+        the trace id (and we write one file per trace).
+        """
+        try:
+            runtime = EngineRuntimeConfig.load_from_env()
+            flag = getattr(getattr(runtime, "features", None), "trace_emit_trace_id", None)
+            if flag is not None:
+                return bool(flag)
+        except Exception:
+            pass
+        env = os.getenv("SPECTRUE_TRACE_EMIT_TRACE_ID")
+        if env is None:
+            return False
+        return env.strip().lower() in ("1", "true", "yes", "y", "on")
+
+    @staticmethod
     def start(trace_id: str, *, runtime: EngineRuntimeConfig | None = None) -> TraceContext:
         # Centralized config: trace is local-only and can be disabled via runtime.features.trace_enabled.
         runtime = runtime or EngineRuntimeConfig.load_from_env()
@@ -256,17 +276,22 @@ class Trace:
             except Exception:
                 pass
             
-            Trace.event("trace.start", {
-                "trace_id": trace_id,
+            payload = {
                 "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            })
+            }
+            if Trace._emit_trace_id():
+                payload["trace_id"] = trace_id
+            Trace.event("trace.start", payload)
         return TraceContext(trace_id=trace_id, enabled=enabled)
 
     @staticmethod
     def stop() -> None:
         tid = current_trace_id()
         if trace_enabled() and tid:
-            Trace.event("trace.stop", {"trace_id": tid})
+            payload = {}
+            if Trace._emit_trace_id():
+                payload["trace_id"] = tid
+            Trace.event("trace.stop", payload)
         _trace_enabled_var.set(False)
         _trace_id_var.set(None)
 
@@ -280,10 +305,11 @@ class Trace:
 
         rec = {
             "ts_ms": _now_ms(),
-            "trace_id": tid,
             "event": str(name),
             "data": _sanitize(data),
         }
+        if Trace._emit_trace_id():
+            rec["trace_id"] = tid
         try:
             # Sanitize trace_id for filename safety (e.g. replace ':' with '_')
             safe_tid = "".join(c if c.isalnum() or c in "._-" else "_" for c in tid)

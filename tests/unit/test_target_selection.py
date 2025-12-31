@@ -100,3 +100,53 @@ def test_reasons_recorded_for_all_claims():
     assert "c2" in result.reasons
     assert "target" in result.reasons["c1"]
     assert "deferred" in result.reasons["c2"]
+
+
+def test_anchor_claim_forced_into_targets():
+    """Anchor claim MUST be in targets for normal pipeline, even if not top-K by EV."""
+    from spectrue_core.graph.types import GraphResult, RankedClaim
+
+    claims = [
+        {"id": "c1", "text": "Claim 1", "check_worthiness": 0.9, "harm_potential": 4},
+        {"id": "c2", "text": "Claim 2", "check_worthiness": 0.8, "harm_potential": 3},
+        {"id": "c3", "text": "Claim 3 (anchor)", "check_worthiness": 0.3, "harm_potential": 1},  # Low EV
+    ]
+    # Graph ranks c1, c2 higher than c3
+    graph_result = GraphResult(
+        key_claims=[],
+        all_ranked=[
+            RankedClaim(claim_id="c1", centrality_score=0.9, in_structural_weight=0.0, in_contradict_weight=0.0, is_key_claim=True),
+            RankedClaim(claim_id="c2", centrality_score=0.8, in_structural_weight=0.0, in_contradict_weight=0.0, is_key_claim=False),
+            RankedClaim(claim_id="c3", centrality_score=0.2, in_structural_weight=0.0, in_contradict_weight=0.0, is_key_claim=False),
+        ],
+    )
+    
+    # Without anchor_claim_id, c3 would be deferred
+    result_no_anchor = select_verification_targets(
+        claims, max_targets=2, graph_result=graph_result
+    )
+    target_ids_no_anchor = {c["id"] for c in result_no_anchor.targets}
+    assert "c3" not in target_ids_no_anchor, "c3 should be deferred without anchor forcing"
+    
+    # With anchor_claim_id=c3, it MUST be in targets
+    result_with_anchor = select_verification_targets(
+        claims, max_targets=2, graph_result=graph_result, anchor_claim_id="c3"
+    )
+    target_ids_with_anchor = {c["id"] for c in result_with_anchor.targets}
+    assert "c3" in target_ids_with_anchor, "anchor claim c3 MUST be in targets"
+    assert len(result_with_anchor.targets) == 2
+
+
+def test_anchor_already_in_top_k_no_forcing():
+    """When anchor is already in top-K, no forcing needed."""
+    claims = [
+        {"id": "c1", "text": "Claim 1 (anchor)", "check_worthiness": 0.9, "harm_potential": 4},
+        {"id": "c2", "text": "Claim 2", "check_worthiness": 0.5, "harm_potential": 2},
+    ]
+    
+    result = select_verification_targets(claims, max_targets=2, anchor_claim_id="c1")
+    target_ids = {c["id"] for c in result.targets}
+    assert "c1" in target_ids
+    # c1 should be first (highest EV), not just forced
+    assert result.targets[0]["id"] == "c1"
+

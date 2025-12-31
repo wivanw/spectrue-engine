@@ -124,7 +124,7 @@ class TestM64RoundRobin:
         """M64/Verify 'news' topic is passed to Unified Search for 'news' intent."""
         # Setup
         pipeline.agent.extract_claims = AsyncMock(return_value=(
-            [], # claims
+            [{"id": "c1", "text": "Test claim", "importance": 0.8, "check_worthiness": 0.9}],  # at least 1 claim
             False, # check_oracle
             "news", # article_intent -> triggers topic="news"
             "",
@@ -155,7 +155,8 @@ class TestM64RoundRobin:
         """M64/Verify 'general' topic is passed for 'evergreen' intent."""
         # Setup
         pipeline.agent.extract_claims = AsyncMock(return_value=(
-            [], False, "evergreen", "" # intent -> topic="general"
+            [{"id": "c1", "text": "Test claim", "importance": 0.8, "check_worthiness": 0.9}],  # at least 1 claim
+            False, "evergreen", "" # intent -> topic="general"
         ))
         pipeline._select_diverse_queries = MagicMock(return_value=["Query 1"])
         

@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2024-2025 Spectrue Contributors
+#
+# Pipeline Profile: normal
+# Standard verification with balanced cost and coverage.
+#
+# Usage: Select this profile for typical verification runs
+# where cost efficiency is preferred over exhaustive search.
+
+name: normal
+description: "Standard verification with balanced cost and coverage"
+version: "1.0.0"
+
+# Budget configuration
+budget:
+  max_credits: 100          # Maximum credits per run
+  budget_class: standard    # standard = Phases A + B
+
+# Search depth by step
+search:
+  depth: basic              # basic | advanced
+  max_results: 5            # Maximum results per query
+  include_raw_content: false
+
+# Fulltext extraction
+fulltext:
+  enabled: false            # Skip fulltext for normal profile
+  topk: 0                   # No fulltext extraction
+
+# Stop policy (value-based stopping)
+stop_policy:
+  enabled: false            # No early stopping for normal
+  min_entropy: 0.15
+  marginal_cost: 0.25
+  value_uncertainty: 1.0
+
+# Phase configuration
+phases:
+  enabled:
+    - A
+    - B
+  max_depth: 2              # Maximum phase depth
+
+# Channels configuration
+channels:
+  allowed:
+    - authoritative
+    - reputable_news
+    - local_media
+  blocked: []
+
+# Locale configuration (null = use claim signals)
+locale:
+  primary: null
+  fallback: null
+

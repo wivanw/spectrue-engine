@@ -32,6 +32,22 @@ class CostLedger:
     def set_reason_summaries(self, summaries: list[dict]) -> None:
         self.reason_summaries = list(summaries)
 
+    @property
+    def total_credits(self):
+        """Backward-compatible accessor used by legacy pipeline code."""
+        try:
+            return self.get_summary().total_credits
+        except Exception:
+            return Decimal("0")
+
+    @property
+    def total_usd(self):
+        """Convenience accessor for total USD in this ledger."""
+        try:
+            return float(self.get_summary().total_usd)
+        except Exception:
+            return 0.0
+
     def get_summary(self) -> RunCostSummary:
         by_stage_usd: dict[str, float] = {}
         by_stage_credits: dict[str, Decimal] = {}

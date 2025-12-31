@@ -356,6 +356,8 @@ class EvidenceFlowInput:
     prior_belief: BeliefState | None = None
     context_graph: ClaimContextGraph | None = None
     claim_extraction_text: str = ""
+    # M113: Pipeline profile name (e.g., 'normal', 'deep').
+    pipeline: str | None = None
 
 
 async def run_evidence_flow(
@@ -457,6 +459,25 @@ async def run_evidence_flow(
         ) or claims[0]
         anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
+    # NORMAL pipeline must be SINGLE-CLAIM (execution unit invariant).
+    # This prevents multi-claim batch leakage (c1/c2 mentions) and cross-language mixing.
+    # NOTE: pipeline profile is passed via inp.pipeline by ValidationPipeline.
+    pipeline_profile = (inp.pipeline or "normal")
+    if pipeline_profile == "normal" and claims:
+        if anchor_claim_id:
+            claims = [
+                c for c in claims
+                if isinstance(c, dict) and str(c.get("id") or c.get("claim_id")) == str(anchor_claim_id)
+            ]
+        if len(claims) != 1:
+            raise RuntimeError(
+                f"Normal evidence flow violation: expected 1 claim, got {len(claims)}"
+            )
+        Trace.event(
+            "evidence_flow.single_claim.enforced",
+            {"profile": pipeline_profile, "anchor_claim_id": str(anchor_claim_id or "")},
+        )
+
     # T7: Deterministic Ranking
     claims.sort(key=lambda c: (-c.get("importance", 0.0), c.get("text", "")))
 
@@ -474,7 +495,9 @@ async def run_evidence_flow(
     if inp.progress_callback:
         await inp.progress_callback("score_evidence")
 
-    # Single batch LLM call for all claims (not per-claim to avoid 6x cost)
+    # LLM call.
+    # - Language is explicitly fixed by inp.lang.
+    # - In 'normal' profile, `claims` is enforced to exactly one claim.
     result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
     if str(result.get("status", "")).lower() == "error":
         result["status"] = "error"
@@ -726,6 +749,52 @@ async def run_evidence_flow(
                 result["explainability_score"] = res["explainability_update"]
             if res["has_conflict"]:
                 conflict_detected = True
+
+        # Enrich verdicts with per-claim sources and RGBA
+        # This fixes the UI showing cumulative sources and identical RGBA for all claims
+        # RGBA order: [R=danger, G=verified, B=style, A=explainability]
+        global_r = float(result.get("danger_score", -1.0))
+        if global_r < 0: global_r = 0.0
+        
+        global_b = float(result.get("style_score", -1.0))
+        if global_b < 0:
+            global_b = float(result.get("context_score", -1.0))
+        if global_b < 0: global_b = 1.0 # Default B=1.0 if missing?
+        
+        global_a = float(result.get("explainability_score", -1.0))
+        if global_a < 0: global_a = 1.0 # Default A=1.0 if missing?
+        
+        all_scored = pack.get("scored_sources") or []
+        all_context = pack.get("context_sources") or []
+        
+        for cv in claim_verdicts:
+            if not isinstance(cv, dict):
+                continue
+            cid = _norm_id(cv.get("claim_id"))
+            if not cid:
+                continue
+                
+            # Filter sources for this claim
+            claim_sources = []
+            seen_urls = set()
+            for s in all_scored + all_context:
+                if not isinstance(s, dict): continue
+                scid = _norm_id(s.get("claim_id"))
+                if scid == cid:
+                    url = s.get("url")
+                    if url and url not in seen_urls:
+                        claim_sources.append(s)
+                        seen_urls.add(url)
+            
+            # Enrich per-claim sources
+            cv["sources"] = enrich_sources_with_trust(claim_sources)
+            
+            # Calculate per-claim RGBA
+            # G is specific to claim
+            g_score = float(cv.get("verdict_score", 0.5) or 0.5)
+            
+            # R, B, A are global for now (unless claim has specific overrides later)
+            cv["rgba"] = [global_r, g_score, global_b, global_a]
 
         changed = apply_dependency_penalties(claim_verdicts, claims)
         # Do NOT recompute article-level G as an average across claims.

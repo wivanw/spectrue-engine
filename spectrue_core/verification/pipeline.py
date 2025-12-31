@@ -75,6 +75,9 @@ from spectrue_core.verification.target_selection import (
 from spectrue_core.verification.costs import summarize_reason_codes, map_stage_costs_to_phases
 import logging
 import asyncio
+import time
+import math
+from typing import Any
 from dataclasses import dataclass
 import hashlib
 
@@ -190,6 +193,7 @@ class ValidationPipeline:
         needs_cleaning: bool = False,  # Text from extension needs LLM cleaning
         source_url: str | None = None,  # Original URL for inline source exclusion
         extract_claims_only: bool = False,  # M105: Deep mode - just extract claims, skip verification
+        pipeline_profile: str | None = None, # M113: Pipeline profile (normal/deep)
     ) -> dict:
         Trace.event(
             "pipeline.run.start",
@@ -200,6 +204,7 @@ class ValidationPipeline:
                 "has_preloaded_context": bool(preloaded_context),
                 "has_preloaded_sources": bool(preloaded_sources),
                 "extract_claims_only": extract_claims_only,
+                "pipeline_profile": pipeline_profile,
             },
         )
 
@@ -207,6 +212,14 @@ class ValidationPipeline:
         ledger = CostLedger(run_id=current_trace_id())
         tavily_meter = TavilyMeter(ledger=ledger, policy=policy)
         llm_meter = LLMMeter(ledger=ledger, policy=policy)
+
+        # Configure embedding metering (M113+): embeddings also cost money.
+        EmbedService.configure(
+            openai_api_key=getattr(self.config, "openai_api_key", None),
+            meter=llm_meter,
+            meter_stage="embed",
+        )
+        
         progress_emitter = CostProgressEmitter(
             ledger=ledger,
             min_delta_to_show=policy.min_delta_to_show,
@@ -346,6 +359,26 @@ class ValidationPipeline:
 
             summary = ledger.get_summary().to_dict()
             payload["cost_summary"] = summary
+
+            # --- Backward-compatible, UI-safe cost fields ---
+            # UI often treats "credits" as integer and will show 0 for fractional runs (e.g. 0.18).
+            # Provide:
+            # - credits_used: float (raw)
+            # - credits_used_display: string (2 decimals)
+            # - credits_used_micro: int microcredits (1e4) for stable integer display if needed
+            #
+            # NOTE: 1 Spectrue credit == $0.01 in current policy (see cost_summary.total_usd mapping),
+            # so fractional credits are common and MUST NOT disappear.
+            total_credits = float(summary.get("total_credits") or 0.0)
+            payload["credits_used"] = total_credits
+            payload["credits_used_display"] = f"{total_credits:.2f}"
+            payload["credits_used_micro"] = int(round(total_credits * 10000.0))
+
+            # Legacy field: keep "cost" but make it display-safe (2 decimals).
+            # If frontend casts to int, it will still show 0 for <1; use credits_used_display then.
+            # But many frontends will render float as-is; rounding reduces noise.
+            payload["cost"] = float(f"{total_credits:.2f}")
+
             audit = payload.get("audit") or {}
             audit["usage_ledger"] = run_ledger.to_dict()
             payload["audit"] = audit
@@ -680,21 +713,39 @@ class ValidationPipeline:
             # TARGET SELECTION GATE: Only top-K claims get actual Tavily searches
             # This prevents per-claim search explosion (6 claims × 2 searches = 12 Tavily calls)
             # Instead, we search for top 2 key claims and share evidence with others
-            budget_class_str = "minimal"  # Default to most cost-effective
-            if search_type == "smart":
-                budget_class_str = "standard"
-            elif search_type == "deep":
-                budget_class_str = "deep"
+            #
+            # M114: Derive budget_class from PipelineMode instead of scattered if-statements
+            try:
+                from spectrue_core.pipeline import get_mode
+                mode = get_mode(pipeline_profile or search_type)
+                # Map mode.search_depth to budget_class
+                budget_class_str = {
+                    "basic": "minimal",
+                    "advanced": "deep",
+                }.get(mode.search_depth, "standard")
+            except Exception:
+                # Fallback for backward compatibility
+                budget_class_str = "minimal"
+                if search_type == "smart":
+                    budget_class_str = "standard"
+                elif search_type == "deep":
+                    budget_class_str = "deep"
             
             graph_result_for_selection = None
             if graph_flow_result and graph_flow_result.graph_result:
                 graph_result_for_selection = graph_flow_result.graph_result
+            
+            # For normal profile, pass anchor_claim_id to guarantee it's in targets.
+            # This prevents normal_pipeline.violation when anchor would be deferred.
+            profile = (pipeline_profile or "normal")
+            anchor_for_selection = anchor_claim_id if profile == "normal" else None
             
             target_selection = select_verification_targets(
                 claims=eligible_claims,
                 max_targets=2,  # Core limit: max 2 claims trigger Tavily
                 graph_result=graph_result_for_selection,
                 budget_class=budget_class_str,
+                anchor_claim_id=anchor_for_selection,
             )
             
             # Only target claims go through retrieval
@@ -733,6 +784,7 @@ class ValidationPipeline:
                     preloaded_context=preloaded_context,
                     progress_callback=_progress,
                     inline_sources=prepared.inline_sources,  # Pass verified inline sources
+                    pipeline=pipeline_profile, # M113
                 ),
                 state=SearchFlowState(
                     final_context=final_context,
@@ -823,12 +875,26 @@ class ValidationPipeline:
 
             if getattr(search_state, "hard_reject", False):
                 reason = getattr(search_state, "reject_reason", "irrelevant")
-                
+
                 # M105: Fallback Extraction Check
                 # If rejection was due to missing input data (e.g. initial URL fetch failed)
                 # but we successfully retrieved search results, try to extract claims now.
                 claims_recovered = False
-                if reason == "No input data" and final_sources:
+
+                allow_salvage = bool(
+                    getattr(getattr(self.config, "runtime", None), "features", None)
+                    and getattr(self.config.runtime.features, "allow_salvage_mode", False)
+                )
+
+                # IMPORTANT: salvage mode is explicitly gated. Without it, we MUST NOT
+                # change the task definition by inventing new claims from retrieved snippets.
+                if reason == "No input data" and final_sources and not allow_salvage:
+                    Trace.event(
+                        "pipeline.fallback_extraction.skipped",
+                        {"reason": "salvage_disabled", "sources_count": len(final_sources)},
+                    )
+
+                if reason == "No input data" and final_sources and allow_salvage:
                     Trace.event("pipeline.fallback_extraction.start", {"sources_count": len(final_sources)})
                     try:
                         # Synthesize text from top results
@@ -836,20 +902,23 @@ class ValidationPipeline:
                             f"{s.get('title', '')}\n{s.get('content', '') or s.get('snippet', '')}"
                             for s in final_sources[:3]
                         ])
-                        
+
                         fallback_claims, _, _, _ = await self.agent.claims_skill.extract_claims(
                             synth_text[:15000],  # Cap context
                             lang=lang,
                             max_claims=3
                         )
-                        
+
                         if fallback_claims:
                             claims = fallback_claims
                             retrieval_claims = fallback_claims
                             # Assume these are now the 'retrieved' claims for downstream logic
                             claims_recovered = True
-                            Trace.event("pipeline.fallback_extraction.success", {"claims_count": len(fallback_claims)})
-                            
+                            Trace.event(
+                                "pipeline.fallback_extraction.success",
+                                {"claims_count": len(fallback_claims), "mode": "salvage"},
+                            )
+
                             # Register new claims in ledger
                             for c in fallback_claims:
                                 cid = c.get("id")
@@ -865,7 +934,12 @@ class ValidationPipeline:
                     Trace.event("pipeline.run.completed", {"outcome": "hard_reject", "reason": reason})
                     return _attach_cost_summary({
                         "verified_score": 0.0,
-                        "analysis": f"Search results are irrelevant to the claim: {reason}",
+                        "analysis": (
+                            f"Hard reject: {reason}. "
+                            "Input text is missing or empty; refusing to synthesize new claims from search results "
+                            "unless salvage mode is explicitly enabled."
+                            if reason == "No input data" else f"Search results are irrelevant to the claim: {reason}"
+                        ),
                         "rationale": reason,
                         "cost": self.search_mgr.calculate_cost(gpt_model, search_type),
                         "text": fact,
@@ -883,6 +957,7 @@ class ValidationPipeline:
             Trace.event(
                 "evidence_flow.claim_scope",
                 {
+                    "profile": (pipeline_profile or "normal"),
                     "claims_total": len(claims or []),
                     "retrieval_claims": len(retrieval_claims or []),
                     "deferred_claims": len(deferred_claims or []),
@@ -892,6 +967,50 @@ class ValidationPipeline:
                 },
             )
             claims_for_scoring = retrieval_claims if retrieval_claims else claims
+
+            # NORMAL pipeline must be SINGLE-CLAIM (execution unit invariant).
+            profile = (pipeline_profile or "normal")
+            if profile == "normal":
+                # In normal mode, the UI/response must be anchored to the selected main claim.
+                # Target selection may choose a different retrieval claim set; do NOT silently drop the anchor.
+                if anchor_claim_id:
+                    filtered = [
+                        c for c in (claims_for_scoring or [])
+                        if str((c or {}).get("id")) == str(anchor_claim_id)
+                    ]
+                    if filtered:
+                        claims_for_scoring = filtered
+                    else:
+                        # Anchor isn't in retrieval_claims (common when target-selection picks a different claim).
+                        # Score exactly the anchor claim to satisfy normal contract.
+                        if isinstance(anchor_claim, dict) and str(anchor_claim.get("id")) == str(anchor_claim_id):
+                            claims_for_scoring = [anchor_claim]
+                        else:
+                            # Last resort: search original claims for the anchor id.
+                            claims_for_scoring = [
+                                c for c in (claims or [])
+                                if isinstance(c, dict) and str(c.get("id")) == str(anchor_claim_id)
+                            ]
+
+                # Hard assert: normal pipeline must not score more than one claim
+                if len(claims_for_scoring or []) != 1:
+                    Trace.event(
+                        "normal_pipeline.violation",
+                        {
+                            "anchor_claim_id": str(anchor_claim_id or ""),
+                            "claims_for_scoring_ids": [str((c or {}).get("id")) for c in (claims_for_scoring or [])],
+                            "retrieval_ids": [str((c or {}).get("id")) for c in (retrieval_claims or [])],
+                        },
+                    )
+                    raise RuntimeError(
+                        f"Normal pipeline violation: expected 1 claim, got {len(claims_for_scoring or [])}"
+                    )
+
+                Trace.event(
+                    "evidence_flow.single_claim.enforced",
+                    {"profile": "normal", "anchor_claim_id": str(anchor_claim_id or "")},
+                )
+
             result = await run_evidence_flow(
                 agent=self.agent,
                 search_mgr=self.search_mgr,
@@ -909,11 +1028,176 @@ class ValidationPipeline:
                     prior_belief=prior_belief,
                     context_graph=context_graph,
                     claim_extraction_text=self._claim_extraction_text,
+                    pipeline=pipeline_profile,
                 ),
                 claims=claims_for_scoring,
                 sources=final_sources,
             )
             _end_phase("evidence_eval")
+
+            # Cost invariant: if we did retrieval/scoring work but credits are still zero,
+            # we likely have a ledger visibility/scope bug (or metering not wired).
+            try:
+                summary_obj = ledger.get_summary()
+                total_credits = float(getattr(summary_obj, "total_credits", 0.0) or 0.0)
+                did_retrieval = bool(run_ledger.counts.queries_total or run_ledger.counts.docs_total)
+                if did_retrieval and total_credits <= 0.0:
+                    Trace.event(
+                        "cost.invariant.violation",
+                        {
+                            "message": "Search/scoring executed but total_credits == 0",
+                            "queries_total": int(run_ledger.counts.queries_total or 0),
+                            "docs_total": int(run_ledger.counts.docs_total or 0),
+                            "by_stage_credits": getattr(summary_obj, "by_stage_credits", None),
+                        },
+                    )
+            except Exception:
+                # Never break the run for metering diagnostics.
+                pass
+
+            # --- Per-claim view materialization (fix UI mixing / c1,c2 batch leakage) ---
+            # scoring returns claim_verdicts[], but some UIs rely on "details" for per-claim cards.
+            # We materialize deterministic per-claim details from claim_verdicts + final_sources.
+            try:
+                raw_cvs = result.get("claim_verdicts") or []
+                if isinstance(raw_cvs, list) and raw_cvs:
+                    # Map claim_id -> claim text
+                    claim_text_by_id: dict[str, str] = {}
+                    for c in (claims_for_scoring or []):
+                        if isinstance(c, dict) and c.get("id"):
+                            claim_text_by_id[str(c["id"])] = str(c.get("text") or c.get("claim_text") or "")
+
+                    # Map url -> source object for stable UI rendering
+                    # Use result["sources"] which are already enriched with trust metadata
+                    enriched_sources = result.get("sources") or final_sources or []
+                    src_by_url: dict[str, dict] = {}
+                    for s in enriched_sources:
+                        if isinstance(s, dict) and (s.get("url") or s.get("link")):
+                            key = str(s.get("url") or s.get("link"))
+                            src_by_url[key] = s
+
+                    per_claim_details: list[dict] = []
+                    per_claim_analysis: dict[str, str] = {}
+                    per_claim_sources: dict[str, list[dict]] = {}
+
+                    # Use global R/B/A from LLM scores; compute per-claim G from verdict_score
+                    # RGBA order: [R=danger, G=verified, B=style, A=explainability]
+                    global_r = float(result.get("danger_score", 0.0) or 0.0)
+                    global_b = float(result.get("style_score", -1.0) or -1.0)
+                    if global_b < 0:
+                        global_b = float(result.get("context_score", 0.0) or 0.0)
+                    global_a = float(result.get("explainability_score", 0.0) or 0.0)
+
+                    for cv in raw_cvs:
+                        if not isinstance(cv, dict):
+                            continue
+                        cid = str(cv.get("claim_id") or "")
+                        if not cid:
+                            continue
+
+                        verdict_score = float(cv.get("verdict_score", -1.0))
+                        if verdict_score < 0:
+                            verdict_score = float(cv.get("verdict_score") or 0.0)
+
+                        ev_count = int(cv.get("evidence_count", 0) or 0)
+
+                        # Build sources for this claim from supporting_urls inside assertion_verdicts
+                        urls: list[str] = []
+                        avs = cv.get("assertion_verdicts") or []
+                        if isinstance(avs, list):
+                            for av in avs:
+                                if not isinstance(av, dict):
+                                    continue
+                                su = av.get("supporting_urls") or []
+                                if isinstance(su, list):
+                                    for u in su:
+                                        if isinstance(u, str) and u:
+                                            urls.append(u)
+                        # Deduplicate while preserving order
+                        seen = set()
+                        uniq_urls = []
+                        for u in urls:
+                            if u in seen:
+                                continue
+                            seen.add(u)
+                            uniq_urls.append(u)
+
+                        claim_sources = [src_by_url[u] for u in uniq_urls if u in src_by_url]
+                        # Fallback: if no sources from assertion_verdicts, use all enriched sources
+                        if not claim_sources and enriched_sources:
+                            claim_sources = enriched_sources
+                        per_claim_sources[cid] = claim_sources
+
+                        # Deterministic per-claim explanation from structured fields (no batch refs like c1/c2)
+                        status = str(cv.get("status") or cv.get("verdict") or "")
+                        confidence = str(cv.get("confidence") or "")
+                        reasons_short = cv.get("reasons_short") or []
+                        if not isinstance(reasons_short, list):
+                            reasons_short = []
+                        reasons_str = "; ".join([str(r) for r in reasons_short if r])[:400]
+                        
+                        # Prefer per-claim reason, fallback to article-level rationale, then deterministic
+                        expl = str(cv.get("reason") or "").strip()
+                        if not expl:
+                            expl = str(result.get("rationale") or "").strip()
+                        if not expl:
+                            expl = (
+                                f"Claim {cid}: status={status}, confidence={confidence}, "
+                                f"evidence_count={ev_count}, verdict_score={verdict_score:.2f}."
+                            )
+                            if reasons_str:
+                                expl += f" Reasons: {reasons_str}"
+                        per_claim_analysis[cid] = expl
+
+                        per_claim_details.append({
+                            "id": cid,
+                            "text": claim_text_by_id.get(cid, ""),
+                            "rgba": [
+                                max(0.0, global_r),
+                                max(0.0, verdict_score),
+                                max(0.0, global_b),
+                                max(0.0, global_a),
+                            ],
+                            "analysis": expl,
+                            "rationale": expl,  # UI expects 'rationale' field
+                            "sources": claim_sources,
+                            "status": status,
+                            "confidence": confidence,
+                            "evidence_count": ev_count,
+                            "verdict_score": verdict_score,
+                        })
+
+                    if per_claim_details:
+                        result["details"] = per_claim_details
+
+                        # Anchor-focused top-level fields to stop UI showing batch (c1/c2) in single-claim view.
+                        # Preserve original batch analysis for export/debug.
+                        if "analysis" in result:
+                            result["analysis_batch"] = result.get("analysis")
+
+                        if anchor_claim_id and isinstance(anchor_claim_id, str):
+                            if anchor_claim_id in per_claim_analysis:
+                                result["analysis"] = per_claim_analysis[anchor_claim_id]
+                            # M114: Prefer per-claim sources, but fallback to all sources if empty
+                            anchor_sources = per_claim_sources.get(anchor_claim_id, [])
+                            if anchor_sources:
+                                result["sources"] = anchor_sources
+                            elif final_sources:
+                                # Fallback: LLM didn't provide supporting_urls, use all retrieved sources
+                                result["sources"] = final_sources
+                            # Anchor RGBA for main banner if UI uses top-level rgba
+                            for d in per_claim_details:
+                                if d.get("id") == anchor_claim_id and isinstance(d.get("rgba"), list):
+                                    result["rgba"] = d["rgba"]
+                                    break
+
+            except Exception:
+                # Never break verification due to UI materialization.
+                pass
+            
+            # M114: Guarantee sources are always populated for frontend
+            if not result.get("sources") and final_sources:
+                result["sources"] = final_sources
             
             # Propagate verdicts to deferred claims (evidence sharing)
             if target_selection.evidence_sharing and deferred_claims:
@@ -938,13 +1222,17 @@ class ValidationPipeline:
                 result["audit"] = audit
 
             # Construct RGBA for frontend
-            # [danger, verified, context/explainability, style]
+            # [danger, verified, style, explainability]
+            # R = danger_score (0-1, higher = more dangerous)
+            # G = verified_score (0-1, higher = more truthful)
+            # B = style_score (0-1, higher = more honest presentation)
+            # A = explainability_score (0-1, higher = better explained)
             r_score = float(result.get("danger_score", -1.0))
             g_score = float(result.get("verified_score", -1.0))
-            b_score = float(result.get("explainability_score", -1.0))
+            b_score = float(result.get("style_score", -1.0))
             if b_score < 0:
                 b_score = float(result.get("context_score", -1.0))
-            a_score = float(result.get("style_score", -1.0))
+            a_score = float(result.get("explainability_score", -1.0))
             
             # Normalize -1.0 to 0.0 for RGBA (visuals) or keep -1.0 if frontend handles it?
             # Standard RGBA usually expects 0.0-1.0. 

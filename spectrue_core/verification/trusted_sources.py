@@ -111,6 +111,11 @@ TRUSTED_SOURCES: dict[str, list[str]] = {
         "mpifr-bonn.mpg.de",  # Max Planck Radio Astronomy
         "mpia.de",  # Max Planck Astronomy
         "aas.org",  # American Astronomical Society
+        "lbl.gov",  # Lawrence Berkeley National Lab (DESI host)
+        "noirlab.edu",  # NSF NOIRLab (Kitt Peak, Gemini)
+        "slac.stanford.edu",  # SLAC National Accelerator Lab
+        "cern.ch",  # CERN
+        "fnal.gov",  # Fermilab
     ],
     # Tier B: Semi-professional/curated (supportive, capped weight)
     "astronomy_tier_b": [

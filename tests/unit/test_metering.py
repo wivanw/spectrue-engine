@@ -19,7 +19,13 @@ def _policy() -> CreditPricingPolicy:
                 usd_per_input_token=0.00000005,
                 usd_per_output_token=0.0000004,
                 usd_per_reasoning_token=0.0000004,
-            )
+            ),
+            # Embeddings model (treated as input-only): $0.02 / 1M tokens
+            "text-embedding-3-small": ModelPrice(
+                usd_per_input_token=0.00000002,
+                usd_per_output_token=0.0,
+                usd_per_reasoning_token=0.0,
+            ),
         },
     )
 
@@ -83,3 +89,19 @@ def test_safety_multiplier_applied() -> None:
     # credits = 0.0108 / 0.01 = 1.08 SC (no rounding)
     # Note: actual implementation may have slight floating point variance
     assert ledger.events[0].cost_credits == Decimal("1.0799999999999999")
+
+
+def test_llm_embedding_usage_tokens() -> None:
+    ledger = CostLedger(run_id="run-embed")
+    meter = LLMMeter(ledger=ledger, policy=_policy())
+    meter.record_embedding(
+        model="text-embedding-3-small",
+        stage="embed",
+        usage={"total_tokens": 1000},
+        input_texts=["hello", "world"],
+    )
+    # cost_usd = 1000 * (0.02 / 1_000_000) = 0.00002
+    # with safety 1.2: 0.000024
+    # credits = 0.000024 / 0.01 = 0.0024
+    assert ledger.events[0].stage == "embed"
+    assert ledger.events[0].cost_credits == Decimal("0.0024")

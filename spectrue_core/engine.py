@@ -12,6 +12,9 @@ from spectrue_core.config import SpectrueConfig
 from spectrue_core.verification.verifier import FactVerifier
 from spectrue_core.verification.costs import MODEL_COSTS
 from spectrue_core.utils.trace import Trace
+from spectrue_core.billing.cost_ledger import CostLedger
+from spectrue_core.billing.metering import TavilyMeter
+from spectrue_core.billing.config_loader import load_pricing_policy
 
 
 # Make language detection deterministic
@@ -104,6 +107,19 @@ class SpectrueEngine:
                 "model": model,
             })
 
+            # Setup metering for pre-pipeline operations (like URL fetch)
+            policy = load_pricing_policy()
+            engine_ledger = CostLedger(run_id=trace_id)
+            tavily_meter = TavilyMeter(ledger=engine_ledger, policy=policy)
+            
+            # Temporarily inject meter into WebSearchTool for fetch_url_content
+            # Note: This affects the singleton web_tool instance, so strictly scoped.
+            web_tool = self.verifier.pipeline.search_mgr.web_tool
+            prior_meter = getattr(web_tool._tavily, "_meter", None)
+            web_tool._tavily._meter = tavily_meter
+            
+            fetch_cost = 0.0
+
             if analysis_mode == "deep":
                 if progress_callback:
                     await progress_callback("extracting_claims")
@@ -111,13 +127,18 @@ class SpectrueEngine:
                 # Deep analysis: if input is a URL, first extract the article content
                 working_text = text
                 if text.strip().startswith("http://") or text.strip().startswith("https://"):
-                    # Fetch article content before claim extraction
-                    extracted = await self.fetch_url_content(text.strip())
-                    if extracted:
-                        working_text = extracted
-                        Trace.event("engine.deep.url_extracted", {"chars": len(extracted)})
-                    else:
-                        Trace.event("engine.deep.url_extraction_failed", {"url": text.strip()[:100]})
+                    try:
+                        # Fetch article content before claim extraction
+                        extracted = await self.fetch_url_content(text.strip())
+                        if extracted:
+                            working_text = extracted
+                            Trace.event("engine.deep.url_extracted", {"chars": len(extracted)})
+                        else:
+                            Trace.event("engine.deep.url_extraction_failed", {"url": text.strip()[:100]})
+                    finally:
+                        # Capture cost and restore meter
+                        fetch_cost = float(engine_ledger.total_credits)
+                        web_tool._tavily._meter = prior_meter
 
                 # Deep analysis: Extract claims from the ENTIRE text once
                 # Then verify each claim with a full pipeline pass
@@ -145,7 +166,24 @@ class SpectrueEngine:
                 })
 
                 details = []
-                total_cost = int(initial_result.get("cost", 0) or 0)  # Include initial extraction cost
+                # Use fractional credits from cost_summary when available.
+                pipeline_cost = float(
+                    (initial_result.get("cost_summary") or {}).get("total_credits")
+                    or initial_result.get("cost")
+                    or 0.0
+                )
+                total_cost = fetch_cost + pipeline_cost
+                
+                # M113: Aggregate cost_summary from all claim runs
+                aggregated_cost_summary = {
+                    "total_credits": total_cost,
+                    "total_usd": total_cost * 0.01,  # 1 credit = $0.01
+                    "by_stage_credits": {},
+                    "by_provider_credits": {},
+                    "event_count": 0,
+                }
+                
+                # Keep global sources as union for export/debug, but do NOT feed them back into subsequent claims.
                 accumulated_sources: list[dict] = initial_result.get("sources", []) or []
                 all_verified_claims: list[str] = []
 
@@ -174,15 +212,32 @@ class SpectrueEngine:
                         lang=lang,
                         progress_callback=progress_callback,
                         content_lang=content_lang,
-                        preloaded_sources=accumulated_sources if accumulated_sources else None,
-                        max_cost=max_credits - total_cost if max_credits is not None else None,
+                        preloaded_sources=None,
+                        max_cost=max_credits - int(total_cost) if max_credits is not None else None,
+                        pipeline_profile="deep",  # M113: Use deep profile for deep mode
                     )
 
-                    claim_cost = int(claim_result.get("cost", 0) or 0)
+                    claim_cost = float(
+                        (claim_result.get("cost_summary") or {}).get("total_credits")
+                        or claim_result.get("cost")
+                        or 0.0
+                    )
                     total_cost += claim_cost
                     all_verified_claims.append(claim_text)
+                    
+                    # M113: Merge claim's cost_summary into aggregated
+                    claim_cs = claim_result.get("cost_summary") or {}
+                    aggregated_cost_summary["event_count"] += claim_cs.get("event_count", 0)
+                    for stage, credits in (claim_cs.get("by_stage_credits") or {}).items():
+                        aggregated_cost_summary["by_stage_credits"][stage] = (
+                            aggregated_cost_summary["by_stage_credits"].get(stage, 0.0) + float(credits)
+                        )
+                    for provider, credits in (claim_cs.get("by_provider_credits") or {}).items():
+                        aggregated_cost_summary["by_provider_credits"][provider] = (
+                            aggregated_cost_summary["by_provider_credits"].get(provider, 0.0) + float(credits)
+                        )
 
-                    # Accumulate new sources for subsequent claims
+                    # Accumulate new sources for overall export/debug only (not for feeding back).
                     new_sources = claim_result.get("sources", []) or []
                     seen_urls = {s.get("url") for s in accumulated_sources if s.get("url")}
                     for src in new_sources:
@@ -220,6 +275,10 @@ class SpectrueEngine:
                 ]
                 avg_verified = sum(verified_scores) / len(verified_scores) if verified_scores else 0.0
 
+                # M113: Finalize aggregated cost_summary with total
+                aggregated_cost_summary["total_credits"] = total_cost
+                aggregated_cost_summary["total_usd"] = total_cost * 0.01
+
                 final = {
                     "text": text,
                     "verified_score": avg_verified,
@@ -228,6 +287,7 @@ class SpectrueEngine:
                     "details": details,
                     "sources": accumulated_sources,
                     "cost": total_cost,
+                    "cost_summary": aggregated_cost_summary,  # M113: Include cost_summary for frontend
                     "claims": all_verified_claims,
                     "detected_lang": detected_lang,
                     "detected_lang_prob": detected_prob,
@@ -251,6 +311,7 @@ class SpectrueEngine:
                 progress_callback=progress_callback,
                 content_lang=content_lang,
                 max_cost=max_credits,
+                pipeline_profile="normal",  # M113: Use normal profile for general mode
             )
             result.pop("_internal", None)
             result["detected_lang"] = detected_lang
