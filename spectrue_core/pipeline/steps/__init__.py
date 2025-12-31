@@ -19,7 +19,17 @@ from spectrue_core.pipeline.steps.legacy import (
     LegacyScoringStep,
     LegacyClusteringStep,
 )
-
+from spectrue_core.pipeline.steps.decomposed import (
+    MeteringSetupStep,
+    PrepareInputStep,
+    ExtractClaimsStep,
+    ClaimGraphStep,
+    TargetSelectionStep,
+    SearchFlowStep,
+    EvidenceFlowStep,
+    OracleFlowStep,
+    ResultAssemblyStep,
+)
 
 __all__ = [
     # Invariant Steps
@@ -33,4 +43,14 @@ __all__ = [
     "LegacyPhaseRunnerStep",
     "LegacyScoringStep",
     "LegacyClusteringStep",
+    # Decomposed Steps (M115)
+    "MeteringSetupStep",
+    "PrepareInputStep",
+    "ExtractClaimsStep",
+    "ClaimGraphStep",
+    "TargetSelectionStep",
+    "SearchFlowStep",
+    "EvidenceFlowStep",
+    "OracleFlowStep",
+    "ResultAssemblyStep",
 ]
