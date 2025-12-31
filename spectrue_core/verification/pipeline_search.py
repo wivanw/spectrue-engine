@@ -90,11 +90,10 @@ async def run_search_flow(
     #
     # Future: After Phase 5 stabilizes, this will return early with error.
     # ─────────────────────────────────────────────────────────────────────────
+    mode_for_validation = inp.pipeline or ("deep" if inp.search_type == "deep" else "normal")
+
     try:
         from spectrue_core.pipeline import validate_claims_for_mode, PipelineViolation
-
-        # Map pipeline profile or search_type to mode name
-        mode_for_validation = inp.pipeline or ("deep" if inp.search_type == "deep" else "normal")
 
         await validate_claims_for_mode(mode_for_validation, inp.claims)
 
@@ -114,6 +113,68 @@ async def run_search_flow(
     except Exception as e:
         # Import or runtime failure — don't block on infra issues
         logger.debug("[M114] Preflight validation skipped: %s", e)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # M114 T012: Opt-in full Pipeline.run() execution
+    # ─────────────────────────────────────────────────────────────────────────
+    # When use_step_pipeline feature flag is True, the entire retrieval
+    # is handled by Pipeline.run() instead of PhaseRunner directly.
+    # This enables gradual migration to the Step-based architecture.
+    # ─────────────────────────────────────────────────────────────────────────
+    use_step_pipeline = getattr(features, "use_step_pipeline", False) is True
+
+    if use_step_pipeline and use_orchestration:
+        try:
+            from spectrue_core.pipeline import execute_pipeline, PipelineViolation
+
+            logger.debug("[M114] Using Step-based Pipeline for retrieval")
+
+            result = await execute_pipeline(
+                mode_name=mode_for_validation,
+                claims=inp.claims,
+                search_mgr=search_mgr,
+                agent=agent,
+                lang=inp.lang,
+                search_type=inp.search_type,
+                gpt_model=inp.gpt_model,
+                max_cost=inp.max_cost,
+                inline_sources=inp.inline_sources,
+                progress_callback=inp.progress_callback,
+            )
+
+            # Transfer results to state
+            for src in result.get("sources", []):
+                if "url" not in src:
+                    continue
+                if "domain" not in src:
+                    src["domain"] = get_registrable_domain(src.get("url", ""))
+                state.final_sources.append(src)
+                if src.get("content"):
+                    state.final_context += "\n" + src["content"]
+
+            state.execution_state = result.get("execution_state") or {}
+            state.used_orchestration = True
+
+            Trace.event(
+                "pipeline.step_based.completed",
+                {
+                    "mode": mode_for_validation,
+                    "sources_count": len(result.get("sources", [])),
+                },
+            )
+
+            return state
+
+        except PipelineViolation as pv:
+            logger.error("[M114] Pipeline violation in Step-based execution: %s", pv)
+            Trace.event("pipeline.step_based.violation", pv.to_trace_dict())
+            # Fall through to legacy execution
+            use_step_pipeline = False
+        except Exception as e:
+            logger.warning("[M114] Step-based pipeline failed, falling back: %s", e)
+            Trace.event("pipeline.step_based.error", {"error": str(e)[:500]})
+            # Fall through to legacy execution
+            use_step_pipeline = False
 
     policy = default_search_policy()
     profile_name = resolve_profile_name(inp.search_type)
