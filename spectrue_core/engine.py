@@ -196,6 +196,9 @@ class SpectrueEngine:
                 details = []
                 claim_verdicts = verification_result.get("claim_verdicts") or []
                 sources = verification_result.get("sources") or []
+                global_danger = verification_result.get("danger_score", 0.0) or 0.0
+                global_style = verification_result.get("style_score", 1.0) or 1.0
+                global_explain = verification_result.get("explainability_score", 1.0) or 1.0
                 
                 for claim_obj in extracted_claims:
                     claim_id = claim_obj.get("id")
@@ -209,19 +212,44 @@ class SpectrueEngine:
                         {}
                     )
                     
-                    # Get per-claim sources
-                    claim_sources = [
-                        s for s in sources 
-                        if s.get("claim_id") == claim_id or s.get("claim_id") is None
-                    ]
+                    # Get per-claim sources: prefer enriched sources from cv, else filter
+                    # cv["sources"] includes trust badges and is properly filtered
+                    cv_sources = cv.get("sources")
+                    if isinstance(cv_sources, list) and cv_sources:
+                        claim_sources = cv_sources
+                    else:
+                        # Fallback: include claim-specific + global (claim_id=None) sources
+                        claim_sources = [
+                            s for s in sources 
+                            if s.get("claim_id") == claim_id or s.get("claim_id") is None
+                        ]
+                    
+                    # Compute per-claim RGBA: [R=danger, G=verified, B=style, A=explainability]
+                    # If cv has rgba, use it; otherwise compute from verdict_score
+                    cv_rgba = cv.get("rgba")
+                    if isinstance(cv_rgba, list) and len(cv_rgba) >= 4:
+                        rgba = cv_rgba
+                    else:
+                        # Derive G from per-claim verdict_score
+                        g_score = cv.get("verdict_score")
+                        if not isinstance(g_score, (int, float)) or g_score < 0:
+                            g_score = verification_result.get("verified_score", 0.5) or 0.5
+                        rgba = [float(global_danger), float(g_score), float(global_style), float(global_explain)]
+                    
+                    # Rationale: prefer per-claim reason, fallback to verdict/state description
+                    rationale = cv.get("reason") or ""
+                    if not rationale:
+                        verdict_state = cv.get("verdict_state") or cv.get("verdict") or ""
+                        if verdict_state:
+                            rationale = f"Verdict: {verdict_state}"
                     
                     details.append({
                         "text": claim_text,
-                        "rgba": cv.get("rgba") or verification_result.get("rgba") or [0.0, 0.0, 0.0, 0.5],
-                        "rationale": cv.get("reason") or "",
+                        "rgba": rgba,
+                        "rationale": rationale,
                         "sources": claim_sources,
                         "verified_score": cv.get("verdict_score") or verification_result.get("verified_score"),
-                        "danger_score": verification_result.get("danger_score"),
+                        "danger_score": global_danger,
                     })
 
                 # Use verification result's aggregated scores

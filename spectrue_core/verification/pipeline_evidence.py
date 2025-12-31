@@ -838,13 +838,15 @@ async def run_evidence_flow(
                 continue
                 
             # Filter sources for this claim
+            # Include: sources matching this claim_id OR shared sources (claim_id=None)
             claim_sources = []
             seen_urls = set()
             for s in all_scored + all_context:
                 if not isinstance(s, dict):
                     continue
                 scid = _norm_id(s.get("claim_id"))
-                if scid == cid:
+                # Match claim-specific sources OR shared sources (no claim_id)
+                if scid == cid or scid is None or s.get("claim_id") is None:
                     url = s.get("url")
                     if url and url not in seen_urls:
                         claim_sources.append(s)

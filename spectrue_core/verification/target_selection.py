@@ -448,6 +448,10 @@ def propagate_deferred_verdicts(
                 "affinity": affinity,
                 "shrinkage": shrinkage,
             },
+            # Inherit sources, rgba, and reason from target for UI completeness
+            "sources": target_cv.get("sources", []),
+            "rgba": target_cv.get("rgba"),
+            "reason": f"(Derived from {target_id}) " + (target_cv.get("reason") or ""),
         }
         if claim_id in verdict_index:
             claim_verdicts[verdict_index[claim_id]] = payload
