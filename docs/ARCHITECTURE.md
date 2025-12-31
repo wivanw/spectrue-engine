@@ -146,6 +146,64 @@ A new composable pipeline architecture that decomposes `ValidationPipeline.execu
 
 **Migration**: Enable via `use_step_pipeline: true` feature flag.
 
+### Bayesian Claim Posterior Model (M116)
+
+Unified scoring model that replaces double-counting patterns in verdict calculation.
+
+**Problem Solved**: Previously, evidence was counted twice:
+1. `aggregate_claim_verdict()` computed score from evidence (0.85 for quotes)
+2. `_compute_article_g_from_anchor()` applied formula with already-inflated score
+
+**Solution**: Single log-odds formula in `scoring/claim_posterior.py`:
+
+```
+ℓ_post = ℓ_prior + α·ℓ_llm + β·ℓ_evidence
+p_post = σ(ℓ_post)
+```
+
+Where:
+- `ℓ_prior = logit(p_prior)` — from tier/domain quality
+- `ℓ_llm = logit(p_llm)` — from LLM verdict_score (noisy observation)
+- `ℓ_evidence = Σ w_j · s_j` — weighted sum of stance signals
+- `α, β` — calibration parameters from `SearchPolicyProfile`
+
+**Key Components:**
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| `compute_claim_posterior()` | Unified posterior calculation | `scoring/claim_posterior.py` |
+| `EvidenceItem` | Single evidence signal | `scoring/claim_posterior.py` |
+| `PosteriorParams` | Calibration parameters | `scoring/claim_posterior.py` |
+| `posterior_alpha`, `posterior_beta` | Policy weights | `verification/search_policy.py` |
+
+**Invariants:**
+- Weak/neutral evidence cannot inflate score to tier-prior level
+- Evidence counted exactly once
+- All signals in log-odds space (additive updates)
+
+### Deep Mode Efficiency (M116)
+
+Optimized deep mode from N+1 pipeline runs to 2:
+
+**Before (N+1 runs)**:
+```
+1. Initial pipeline (extract_claims_only=True) → N claims
+2. For each claim: verify_fact() → N pipeline runs
+Total: N+1 pipeline runs
+```
+
+**After (2 runs)**:
+```
+1. Initial pipeline (extract_claims_only=True) → N claims
+2. Single verify_fact() with preloaded_claims → 1 pipeline run
+Total: 2 pipeline runs
+```
+
+**Key Changes:**
+- `preloaded_claims` parameter in `verifier.verify_fact()`
+- `ExtractClaimsStep` skips extraction when claims pre-exist
+- ~50% cost reduction, ~40% latency reduction
+
 ### SpectrueEngine
 
 Entry point for external consumers. Provides simple `analyze_text()` API.
