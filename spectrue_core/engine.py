@@ -140,7 +140,7 @@ class SpectrueEngine:
                         fetch_cost = float(engine_ledger.total_credits)
                         web_tool._tavily._meter = prior_meter
 
-                # M116: Single-pipeline deep mode
+                # Single-pipeline deep mode: extract once, verify all claims together
                 # Step 1: Extract claims from the ENTIRE text once
                 initial_result = await self.verifier.verify_fact(
                     fact=working_text,
@@ -173,7 +173,7 @@ class SpectrueEngine:
                 if progress_callback:
                     await progress_callback("verifying_claims")
 
-                # M116: Step 2: Single pipeline run with all claims
+                # Step 2: Single pipeline run with all claims (avoids N+1 pipeline runs)
                 # This replaces the per-claim loop that caused N+1 pipeline runs
                 verification_result = await self.verifier.verify_fact(
                     fact=working_text,  # Full article text for context
@@ -184,7 +184,7 @@ class SpectrueEngine:
                     content_lang=content_lang,
                     max_cost=max_credits - int(extraction_cost) if max_credits is not None else None,
                     pipeline_profile="deep",
-                    preloaded_claims=extracted_claims,  # M116: Skip re-extraction
+                    preloaded_claims=extracted_claims,  # Skip re-extraction
                 )
 
                 verification_cost = float(

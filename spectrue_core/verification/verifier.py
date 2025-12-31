@@ -45,7 +45,7 @@ class FactVerifier:
         source_url: str | None = None,
         extract_claims_only: bool = False,  # M105: Deep mode - just extract claims
         pipeline_profile: str | None = None, # M113
-        preloaded_claims: list | None = None, # M116: Skip extraction if claims provided
+        preloaded_claims: list | None = None, # Skip extraction if claims provided
     ) -> dict:
         """
         Execute verification via ValidationPipeline.

@@ -191,7 +191,7 @@ class ValidationPipeline:
         source_url: str | None = None,  # Original URL for inline source exclusion
         extract_claims_only: bool = False,  # M105: Deep mode - just extract claims, skip verification
         pipeline_profile: str | None = None, # M113: Pipeline profile (normal/deep)
-        preloaded_claims: list | None = None, # M116: Skip extraction if claims provided
+        preloaded_claims: list | None = None, # Skip extraction if claims provided
     ) -> dict:
         Trace.event(
             "pipeline.run.start",
@@ -440,7 +440,7 @@ class ValidationPipeline:
                 budget_result=budget_result,
             )
 
-            # M116: Skip extraction if claims are preloaded (deep mode single-pipeline)
+            # Skip extraction if claims are preloaded (deep mode optimization)
             if preloaded_claims:
                 claims = preloaded_claims
                 should_check_oracle = False  # Oracle already checked in extraction phase

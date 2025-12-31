@@ -564,7 +564,7 @@ async def run_evidence_flow(
             pack_ref = cv_data["pack"]
             explainability = cv_data["explainability"]
             
-            # M116: Preserve LLM verdict_score for blending
+            # Preserve LLM verdict_score for blending with evidence score
             llm_score = cv.get("verdict_score")
             if not isinstance(llm_score, (int, float)):
                 llm_score = 0.5
@@ -588,7 +588,7 @@ async def run_evidence_flow(
                 )
                 evidence_score = agg.get("verdict_score", 0.5)
                 
-                # M116: Ambiguous zone detection (T013-T014)
+                # Ambiguous zone detection: preserve LLM uncertainty signal
                 # If LLM returned ambiguous (0.4-0.6), don't fully override with evidence score
                 is_llm_ambiguous = 0.4 <= llm_score <= 0.6
                 if is_llm_ambiguous:
