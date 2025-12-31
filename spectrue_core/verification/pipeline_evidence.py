@@ -564,6 +564,12 @@ async def run_evidence_flow(
             pack_ref = cv_data["pack"]
             explainability = cv_data["explainability"]
             
+            # M116: Preserve LLM verdict_score for blending
+            llm_score = cv.get("verdict_score")
+            if not isinstance(llm_score, (int, float)):
+                llm_score = 0.5
+            llm_score = float(llm_score)
+            
             agg = None
             if has_direct_evidence:
                 Trace.event(
@@ -580,7 +586,28 @@ async def run_evidence_flow(
                     claim_id=claim_id,
                     temporality=temporality if isinstance(temporality, dict) else None,
                 )
-                cv["verdict_score"] = agg.get("verdict_score", 0.5)
+                evidence_score = agg.get("verdict_score", 0.5)
+                
+                # M116: Ambiguous zone detection (T013-T014)
+                # If LLM returned ambiguous (0.4-0.6), don't fully override with evidence score
+                is_llm_ambiguous = 0.4 <= llm_score <= 0.6
+                if is_llm_ambiguous:
+                    # Blend: 60% evidence, 40% LLM to preserve ambiguity signal
+                    blended_score = 0.6 * evidence_score + 0.4 * llm_score
+                    cv["verdict_score"] = blended_score
+                    Trace.event(
+                        "verdict.ambiguous_preserved",
+                        {
+                            "claim_id": claim_id,
+                            "llm_score": llm_score,
+                            "evidence_score": evidence_score,
+                            "blended_score": blended_score,
+                        },
+                    )
+                else:
+                    # LLM was confident (outside 0.4-0.6), use evidence score
+                    cv["verdict_score"] = evidence_score
+                
                 cv["verdict"] = agg.get("verdict", "ambiguous")
                 cv["status"] = agg.get("verdict", "ambiguous")
                 cv["reasons_expert"] = agg.get("reasons_expert", {})
