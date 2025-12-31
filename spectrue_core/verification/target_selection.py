@@ -448,11 +448,19 @@ def propagate_deferred_verdicts(
                 "affinity": affinity,
                 "shrinkage": shrinkage,
             },
-            # Inherit sources, rgba, and reason from target for UI completeness
+            # Inherit sources and reason
             "sources": target_cv.get("sources", []),
-            "rgba": target_cv.get("rgba"),
             "reason": f"(Derived from {target_id}) " + (target_cv.get("reason") or ""),
         }
+        
+        # Inherit RGBA but update Green channel (verified score) with derived score
+        target_rgba = target_cv.get("rgba")
+        if target_rgba and len(target_rgba) >= 4:
+            # Copy [R, G, B, A], update G to derived_score
+            payload["rgba"] = [target_rgba[0], float(derived_score), target_rgba[2], target_rgba[3]]
+        else:
+            payload["rgba"] = None
+
         if claim_id in verdict_index:
             claim_verdicts[verdict_index[claim_id]] = payload
         else:
