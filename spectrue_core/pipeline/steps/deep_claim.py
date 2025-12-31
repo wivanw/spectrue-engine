@@ -223,7 +223,8 @@ class AssembleDeepResultStep(Step):
     Step that assembles final deep analysis result.
     
     Combines ClaimFrames with JudgeOutputs to produce ClaimResults.
-    Returns DeepAnalysisResult with no aggregate verdict.
+    Produces final_result with deep_analysis field directly included.
+    No aggregate verdict is computed - that's for standard mode only.
     """
     
     @property
@@ -267,11 +268,30 @@ class AssembleDeepResultStep(Step):
             
             deep_ctx.claim_results = claim_results
             
-            # Build final result
-            deep_result = DeepAnalysisResult(
+            # Build deep_analysis structure for direct inclusion in final_result
+            deep_analysis = DeepAnalysisResult(
                 analysis_mode="deep",
                 claim_results=tuple(claim_results),
             )
+            
+            # Serialize claim_results for API response
+            claim_results_serialized = [
+                self._serialize_claim_result(cr) for cr in claim_results
+            ]
+            
+            # Get existing final_result or create new one
+            existing_final = ctx.extras.get("final_result", {})
+            
+            # Add deep_analysis to final_result - no conditional logic needed
+            # The API layer will just pass this through
+            final_result = {
+                **existing_final,
+                "analysis_mode": "deep",
+                "deep_analysis": {
+                    "analysis_mode": "deep",
+                    "claim_results": claim_results_serialized,
+                },
+            }
             
             Trace.event("assemble_deep_result.complete", {
                 "result_count": len(claim_results),
@@ -279,11 +299,108 @@ class AssembleDeepResultStep(Step):
             
             return ctx.with_extras(
                 deep_claim_ctx=deep_ctx,
-                deep_analysis_result=deep_result,
+                deep_analysis_result=deep_analysis,
+                final_result=final_result,
             )
             
         finally:
             Trace.phase_end("assemble_deep_result")
+    
+    def _serialize_claim_result(self, cr: ClaimResult) -> dict:
+        """Serialize ClaimResult to dict for API response."""
+        frame = cr.claim_frame
+        judge = cr.judge_output
+        summary = cr.evidence_summary
+        
+        return {
+            "claim_frame": {
+                "claim_id": frame.claim_id,
+                "claim_text": frame.claim_text,
+                "claim_language": frame.claim_language,
+                "context_excerpt": {
+                    "text": frame.context_excerpt.text,
+                    "source_type": frame.context_excerpt.source_type,
+                    "span_start": frame.context_excerpt.span_start,
+                    "span_end": frame.context_excerpt.span_end,
+                },
+                "context_meta": {
+                    "document_id": frame.context_meta.document_id,
+                    "paragraph_index": frame.context_meta.paragraph_index,
+                    "sentence_index": frame.context_meta.sentence_index,
+                    "sentence_window": frame.context_meta.sentence_window,
+                },
+                "evidence_items": [
+                    {
+                        "evidence_id": ei.evidence_id,
+                        "claim_id": ei.claim_id,
+                        "url": ei.url,
+                        "title": ei.title,
+                        "source_tier": ei.source_tier,
+                        "source_type": ei.source_type,
+                        "stance": ei.stance,
+                        "quote": ei.quote,
+                        "snippet": ei.snippet,
+                        "relevance": ei.relevance,
+                    }
+                    for ei in frame.evidence_items
+                ],
+                "evidence_stats": {
+                    "total_sources": frame.evidence_stats.total_sources,
+                    "support_sources": frame.evidence_stats.support_sources,
+                    "refute_sources": frame.evidence_stats.refute_sources,
+                    "context_sources": frame.evidence_stats.context_sources,
+                    "high_trust_sources": frame.evidence_stats.high_trust_sources,
+                    "direct_quotes": frame.evidence_stats.direct_quotes,
+                    "conflicting_evidence": frame.evidence_stats.conflicting_evidence,
+                    "missing_sources": frame.evidence_stats.missing_sources,
+                    "missing_direct_quotes": frame.evidence_stats.missing_direct_quotes,
+                },
+                "retrieval_trace": {
+                    "phases_completed": list(frame.retrieval_trace.phases_completed),
+                    "hops": [
+                        {
+                            "hop_index": h.hop_index,
+                            "query": h.query,
+                            "decision": h.decision,
+                            "reason": h.reason,
+                            "phase_id": h.phase_id,
+                            "query_type": h.query_type,
+                            "results_count": h.results_count,
+                        }
+                        for h in frame.retrieval_trace.hops
+                    ],
+                    "stop_reason": frame.retrieval_trace.stop_reason,
+                    "sufficiency_reason": frame.retrieval_trace.sufficiency_reason,
+                },
+            },
+            "judge_output": {
+                "claim_id": judge.claim_id,
+                "rgba": judge.rgba.to_dict(),
+                "confidence": judge.confidence,
+                "verdict": judge.verdict,
+                "explanation": judge.explanation,
+                "sources_used": list(judge.sources_used),
+                "missing_evidence": list(judge.missing_evidence),
+            },
+            "evidence_summary": {
+                "supporting_evidence": [
+                    {"evidence_id": ref.evidence_id, "reason": ref.reason}
+                    for ref in (summary.supporting_evidence if summary else ())
+                ],
+                "refuting_evidence": [
+                    {"evidence_id": ref.evidence_id, "reason": ref.reason}
+                    for ref in (summary.refuting_evidence if summary else ())
+                ],
+                "contextual_evidence": [
+                    {"evidence_id": ref.evidence_id, "reason": ref.reason}
+                    for ref in (summary.contextual_evidence if summary else ())
+                ],
+                "evidence_gaps": list(summary.evidence_gaps if summary else ()),
+                "conflicts_present": summary.conflicts_present if summary else False,
+            } if summary else None,
+            "error": cr.error,
+        }
+
 
 
 def get_deep_claim_steps(llm_client: LLMClient) -> list[Step]:
