@@ -283,7 +283,7 @@ class PipelineFactory:
         ]
 
     def _build_deep_dag_nodes(self, config: Any, pipeline: Any) -> list:
-        """Build DAG nodes for deep mode."""
+        """Build DAG nodes for deep mode with per-claim judging."""
         from spectrue_core.pipeline.dag import StepNode
         from spectrue_core.pipeline.steps.decomposed import (
             MeteringSetupStep,
@@ -295,6 +295,15 @@ class PipelineFactory:
             EvidenceFlowStep,
             ResultAssemblyStep,
         )
+        from spectrue_core.pipeline.steps.deep_claim import (
+            BuildClaimFramesStep,
+            SummarizeEvidenceStep,
+            JudgeClaimsStep,
+            AssembleDeepResultStep,
+        )
+
+        # Get LLM client from agent
+        llm_client = getattr(self.agent, "_llm", None) or getattr(self.agent, "llm", None)
 
         return [
             # Infrastructure
@@ -340,15 +349,45 @@ class PipelineFactory:
                 depends_on=["target_selection"],
             ),
 
-            # Evidence scoring (batch)
+            # Evidence scoring (batch) - populates evidence_by_claim
             StepNode(
                 step=EvidenceFlowStep(agent=self.agent, search_mgr=self.search_mgr),
                 depends_on=["search_flow"],
             ),
 
-            # Final assembly
+            # --- Per-Claim Judging (Deep Mode Only) ---
+
+            # Build ClaimFrame for each claim
+            StepNode(
+                step=BuildClaimFramesStep(),
+                depends_on=["evidence_flow"],
+            ),
+
+            # Summarize evidence per claim
+            StepNode(
+                step=SummarizeEvidenceStep(llm_client=llm_client) if llm_client else SummarizeEvidenceStep.__new__(SummarizeEvidenceStep),
+                depends_on=["build_claim_frames"],
+                optional=llm_client is None,
+            ),
+
+            # Judge each claim independently
+            StepNode(
+                step=JudgeClaimsStep(llm_client=llm_client) if llm_client else JudgeClaimsStep.__new__(JudgeClaimsStep),
+                depends_on=["summarize_evidence"],
+                optional=llm_client is None,
+            ),
+
+            # Assemble deep result (per-claim, no aggregate)
+            StepNode(
+                step=AssembleDeepResultStep(),
+                depends_on=["judge_claims"],
+            ),
+
+            # Legacy result assembly (fallback if deep steps fail)
             StepNode(
                 step=ResultAssemblyStep(),
                 depends_on=["evidence_flow"],
+                optional=True,
             ),
         ]
+
