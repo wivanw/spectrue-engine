@@ -123,6 +123,9 @@ class SearchPolicyProfile:
     sufficiency_thresholds: SufficiencyThresholds = field(default_factory=SufficiencyThresholds)
     budget_policy: BudgetPolicy = field(default_factory=BudgetPolicy)
     safety_knobs: SafetyKnobs = field(default_factory=SafetyKnobs)
+    # Bayesian posterior calibration parameters
+    posterior_alpha: float = 1.0  # Weight for LLM signal in posterior
+    posterior_beta: float = 1.0   # Weight for evidence signal in posterior
 
     def __post_init__(self) -> None:
         if self.stop_conditions.max_hops is None:
@@ -153,6 +156,8 @@ class SearchPolicyProfile:
             "sufficiency_thresholds": self.sufficiency_thresholds.to_dict(),
             "budget_policy": self.budget_policy.to_dict(),
             "safety_knobs": self.safety_knobs.to_dict(),
+            "posterior_alpha": self.posterior_alpha,
+            "posterior_beta": self.posterior_beta,
         }
 
 
