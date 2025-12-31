@@ -20,6 +20,12 @@ from spectrue_core.scoring.belief import (
     apply_consensus_bound
 )
 from spectrue_core.scoring.consensus import calculate_consensus
+from spectrue_core.scoring.claim_posterior import (
+    compute_claim_posterior,
+    aggregate_article_posterior,
+    EvidenceItem,
+    PosteriorParams,
+)
 from spectrue_core.verification.temporal import (
     label_evidence_timeliness,
     normalize_time_window,
@@ -553,9 +559,15 @@ async def run_evidence_flow(
             importance_by_claim[cid_norm] = 1.0
     
     if isinstance(claim_verdicts, list):
+        # Helper to get tier rank
+        def _tier_rank(tier: str | None) -> int:
+            if not tier:
+                return 0
+            return {"D": 1, "C": 2, "B": 3, "A'": 3, "A": 4}.get(str(tier).strip().upper(), 0)
+        
         # Prepare data for parallel processing
         def _process_single_cv(cv_data: dict) -> dict:
-            """Process a single claim verdict - runs in thread pool."""
+            """Process a single claim verdict using unified Bayesian posterior."""
             cv = cv_data["cv"]
             claim_id = cv_data["claim_id"]
             claim_obj = cv_data["claim_obj"]
@@ -564,47 +576,79 @@ async def run_evidence_flow(
             pack_ref = cv_data["pack"]
             explainability = cv_data["explainability"]
             
-            if has_direct_evidence:
-                Trace.event(
-                    "verdict.override",
-                    {
-                        "claim_id": claim_id,
-                        "mode": "deterministic",
-                        "reason": "direct_quote_evidence",
-                    },
-                )
-                agg = aggregate_claim_verdict(
-                    pack_ref,
-                    policy=agg_policy,
+            # Get LLM verdict score (raw observation)
+            llm_score = cv.get("verdict_score")
+            if not isinstance(llm_score, (int, float)):
+                llm_score = 0.5
+            llm_score = float(llm_score)
+            
+            # Build evidence items from pack
+            evidence_items = []
+            items = pack_ref.get("items", []) if isinstance(pack_ref, dict) else []
+            best_tier = None
+            
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item_claim_id = item.get("claim_id")
+                if claim_id and item_claim_id not in (None, claim_id):
+                    continue
+                
+                stance = str(item.get("stance") or "").lower()
+                tier = item.get("tier")
+                relevance = item.get("relevance")
+                if not isinstance(relevance, (int, float)):
+                    relevance = 0.5
+                quote_present = bool(item.get("quote"))
+                
+                evidence_items.append(EvidenceItem(
+                    stance=stance,
+                    tier=tier,
+                    relevance=float(relevance),
+                    quote_present=quote_present,
                     claim_id=claim_id,
-                    temporality=temporality if isinstance(temporality, dict) else None,
-                )
-                cv["verdict_score"] = agg.get("verdict_score", 0.5)
-                cv["verdict"] = agg.get("verdict", "ambiguous")
-                cv["status"] = agg.get("verdict", "ambiguous")
-                cv["reasons_expert"] = agg.get("reasons_expert", {})
-                cv["reasons_short"] = cv.get("reasons_short", []) or []
+                ))
+                
+                # Track best tier
+                if tier and (best_tier is None or _tier_rank(tier) > _tier_rank(best_tier)):
+                    best_tier = tier
+            
+            # Compute unified posterior
+            posterior_result = compute_claim_posterior(
+                llm_verdict_score=llm_score,
+                best_tier=best_tier,
+                evidence_items=evidence_items,
+                claim_id=claim_id,
+            )
+            
+            # Update cv with posterior score
+            cv["verdict_score"] = posterior_result.p_posterior
+            cv["posterior_result"] = posterior_result.to_dict()
+            
+            # Derive verdict from posterior
+            if posterior_result.p_posterior > 0.65:
+                cv["verdict"] = "verified"
+                cv["status"] = "verified"
+            elif posterior_result.p_posterior < 0.35:
+                cv["verdict"] = "refuted"
+                cv["status"] = "refuted"
             else:
-                Trace.event(
-                    "verdict.override",
-                    {
-                        "claim_id": claim_id,
-                        "mode": "llm_only",
-                        "reason": "no_direct_quote_evidence",
-                    },
-                )
-                agg = aggregate_claim_verdict(
-                    pack_ref,
-                    policy=agg_policy,
-                    claim_id=claim_id,
-                    temporality=temporality if isinstance(temporality, dict) else None,
-                )
-                cv["reasons_short"] = cv.get("reasons_short", []) or []
+                cv["verdict"] = "ambiguous"
+                cv["status"] = "ambiguous"
+            
+            # Legacy reasons_expert for backward compatibility
+            cv["reasons_expert"] = {
+                "best_tier": best_tier,
+                "n_support": posterior_result.n_support,
+                "n_refute": posterior_result.n_refute,
+                "effective_support": posterior_result.effective_support,
+                "effective_refute": posterior_result.effective_refute,
+            }
+            cv["reasons_short"] = cv.get("reasons_short", []) or []
 
             # Explainability tier factor
             explainability_update = None
             if isinstance(explainability, (int, float)) and explainability >= 0:
-                best_tier = agg.get("best_tier") if isinstance(agg, dict) else None
                 pre_a = float(explainability)
                 factor, source, prior = _explainability_factor_for_tier(best_tier)
                 if math.isfinite(pre_a) and 0.0 < pre_a < 1.0:
@@ -651,11 +695,10 @@ async def run_evidence_flow(
                 "target": claim_obj.get("verification_target") if claim_obj else None,
                 "harm": claim_obj.get("harm_potential") if claim_obj else None,
                 "llm_verdict": cv.get("verdict"),
-                "llm_score": cv.get("verdict_score"),
-                "agg_verdict": agg.get("verdict") if isinstance(agg, dict) else cv.get("verdict"),
-                "agg_score": agg.get("verdict_score") if isinstance(agg, dict) else cv.get("verdict_score"),
+                "llm_score": llm_score,  # Original LLM score
+                "posterior_score": posterior_result.p_posterior,
                 "has_direct_evidence": has_direct_evidence,
-                "best_tier": agg.get("best_tier") if isinstance(agg, dict) else None,
+                "best_tier": best_tier,
             }
 
             # Respect verdict_state if already normalized by parser
@@ -663,21 +706,21 @@ async def run_evidence_flow(
             CANONICAL_STATES = {"supported", "refuted", "conflicted", "insufficient_evidence"}
             
             if existing_state in CANONICAL_STATES:
-                # Already normalized by clamp_score_evidence_result()
                 verdict_state = existing_state
             else:
-                # Fallback mapping (should rarely happen after parser normalization)
+                # Derive from posterior
                 verdict_state = "insufficient_evidence"
-                if cv["verdict"] == "verified":
+                if posterior_result.p_posterior > 0.65:
                     verdict_state = "supported"
-                elif cv["verdict"] == "refuted":
+                elif posterior_result.p_posterior < 0.35:
                     verdict_state = "refuted"
-                elif cv["verdict"] == "ambiguous":
+                elif posterior_result.n_support > 0 or posterior_result.n_refute > 0:
                     verdict_state = "conflicted"
 
             cv["verdict_state"] = verdict_state
             
-            has_conflict = bool((cv.get("reasons_expert") or {}).get("conflict"))
+            # Conflict detection from evidence balance
+            has_conflict = (posterior_result.n_support > 0 and posterior_result.n_refute > 0)
 
             return {
                 "claim_id": claim_id,
@@ -685,6 +728,7 @@ async def run_evidence_flow(
                 "veracity_entry": veracity_entry,
                 "explainability_update": explainability_update,
                 "has_conflict": has_conflict,
+                "posterior_score": posterior_result.p_posterior,
             }
         
         # Prepare all CV data
