@@ -713,21 +713,39 @@ class ValidationPipeline:
             # TARGET SELECTION GATE: Only top-K claims get actual Tavily searches
             # This prevents per-claim search explosion (6 claims × 2 searches = 12 Tavily calls)
             # Instead, we search for top 2 key claims and share evidence with others
-            budget_class_str = "minimal"  # Default to most cost-effective
-            if search_type == "smart":
-                budget_class_str = "standard"
-            elif search_type == "deep":
-                budget_class_str = "deep"
+            #
+            # M114: Derive budget_class from PipelineMode instead of scattered if-statements
+            try:
+                from spectrue_core.pipeline import get_mode
+                mode = get_mode(pipeline_profile or search_type)
+                # Map mode.search_depth to budget_class
+                budget_class_str = {
+                    "basic": "minimal",
+                    "advanced": "deep",
+                }.get(mode.search_depth, "standard")
+            except Exception:
+                # Fallback for backward compatibility
+                budget_class_str = "minimal"
+                if search_type == "smart":
+                    budget_class_str = "standard"
+                elif search_type == "deep":
+                    budget_class_str = "deep"
             
             graph_result_for_selection = None
             if graph_flow_result and graph_flow_result.graph_result:
                 graph_result_for_selection = graph_flow_result.graph_result
+            
+            # For normal profile, pass anchor_claim_id to guarantee it's in targets.
+            # This prevents normal_pipeline.violation when anchor would be deferred.
+            profile = (pipeline_profile or "normal")
+            anchor_for_selection = anchor_claim_id if profile == "normal" else None
             
             target_selection = select_verification_targets(
                 claims=eligible_claims,
                 max_targets=2,  # Core limit: max 2 claims trigger Tavily
                 graph_result=graph_result_for_selection,
                 budget_class=budget_class_str,
+                anchor_claim_id=anchor_for_selection,
             )
             
             # Only target claims go through retrieval
@@ -939,6 +957,7 @@ class ValidationPipeline:
             Trace.event(
                 "evidence_flow.claim_scope",
                 {
+                    "profile": (pipeline_profile or "normal"),
                     "claims_total": len(claims or []),
                     "retrieval_claims": len(retrieval_claims or []),
                     "deferred_claims": len(deferred_claims or []),
@@ -950,20 +969,47 @@ class ValidationPipeline:
             claims_for_scoring = retrieval_claims if retrieval_claims else claims
 
             # NORMAL pipeline must be SINGLE-CLAIM (execution unit invariant).
-            # If we score multiple claims in normal profile, LLM will leak c1/c2 references
-            # and can mix languages across claims.
-            if (pipeline_profile or "normal") == "normal":
+            profile = (pipeline_profile or "normal")
+            if profile == "normal":
+                # In normal mode, the UI/response must be anchored to the selected main claim.
+                # Target selection may choose a different retrieval claim set; do NOT silently drop the anchor.
                 if anchor_claim_id:
-                    claims_for_scoring = [
+                    filtered = [
                         c for c in (claims_for_scoring or [])
                         if str((c or {}).get("id")) == str(anchor_claim_id)
                     ]
+                    if filtered:
+                        claims_for_scoring = filtered
+                    else:
+                        # Anchor isn't in retrieval_claims (common when target-selection picks a different claim).
+                        # Score exactly the anchor claim to satisfy normal contract.
+                        if isinstance(anchor_claim, dict) and str(anchor_claim.get("id")) == str(anchor_claim_id):
+                            claims_for_scoring = [anchor_claim]
+                        else:
+                            # Last resort: search original claims for the anchor id.
+                            claims_for_scoring = [
+                                c for c in (claims or [])
+                                if isinstance(c, dict) and str(c.get("id")) == str(anchor_claim_id)
+                            ]
 
                 # Hard assert: normal pipeline must not score more than one claim
                 if len(claims_for_scoring or []) != 1:
+                    Trace.event(
+                        "normal_pipeline.violation",
+                        {
+                            "anchor_claim_id": str(anchor_claim_id or ""),
+                            "claims_for_scoring_ids": [str((c or {}).get("id")) for c in (claims_for_scoring or [])],
+                            "retrieval_ids": [str((c or {}).get("id")) for c in (retrieval_claims or [])],
+                        },
+                    )
                     raise RuntimeError(
                         f"Normal pipeline violation: expected 1 claim, got {len(claims_for_scoring or [])}"
                     )
+
+                Trace.event(
+                    "evidence_flow.single_claim.enforced",
+                    {"profile": "normal", "anchor_claim_id": str(anchor_claim_id or "")},
+                )
 
             result = await run_evidence_flow(
                 agent=self.agent,
@@ -1022,21 +1068,25 @@ class ValidationPipeline:
                             claim_text_by_id[str(c["id"])] = str(c.get("text") or c.get("claim_text") or "")
 
                     # Map url -> source object for stable UI rendering
+                    # Use result["sources"] which are already enriched with trust metadata
+                    enriched_sources = result.get("sources") or final_sources or []
                     src_by_url: dict[str, dict] = {}
-                    for s in (final_sources or []):
-                        if isinstance(s, dict) and s.get("url"):
-                            src_by_url[str(s["url"])] = s
+                    for s in enriched_sources:
+                        if isinstance(s, dict) and (s.get("url") or s.get("link")):
+                            key = str(s.get("url") or s.get("link"))
+                            src_by_url[key] = s
 
                     per_claim_details: list[dict] = []
                     per_claim_analysis: dict[str, str] = {}
                     per_claim_sources: dict[str, list[dict]] = {}
 
-                    # Use global R/A as baseline; compute per-claim G/B deterministically
-                    # G := verdict_score (already in [0,1] or -1)
-                    # B := min(1, evidence_count/3) (simple, deterministic proxy for "explainability coverage")
-                    # This is not a heuristic rule on text, it's a deterministic mapping from structured outputs.
+                    # Use global R/B/A from LLM scores; compute per-claim G from verdict_score
+                    # RGBA order: [R=danger, G=verified, B=style, A=explainability]
                     global_r = float(result.get("danger_score", 0.0) or 0.0)
-                    global_a = float(result.get("style_score", 0.0) or 0.0)
+                    global_b = float(result.get("style_score", -1.0) or -1.0)
+                    if global_b < 0:
+                        global_b = float(result.get("context_score", 0.0) or 0.0)
+                    global_a = float(result.get("explainability_score", 0.0) or 0.0)
 
                     for cv in raw_cvs:
                         if not isinstance(cv, dict):
@@ -1050,7 +1100,6 @@ class ValidationPipeline:
                             verdict_score = float(cv.get("verdict_score") or 0.0)
 
                         ev_count = int(cv.get("evidence_count", 0) or 0)
-                        b_proxy = min(1.0, ev_count / 3.0) if ev_count > 0 else 0.0
 
                         # Build sources for this claim from supporting_urls inside assertion_verdicts
                         urls: list[str] = []
@@ -1074,6 +1123,9 @@ class ValidationPipeline:
                             uniq_urls.append(u)
 
                         claim_sources = [src_by_url[u] for u in uniq_urls if u in src_by_url]
+                        # Fallback: if no sources from assertion_verdicts, use all enriched sources
+                        if not claim_sources and enriched_sources:
+                            claim_sources = enriched_sources
                         per_claim_sources[cid] = claim_sources
 
                         # Deterministic per-claim explanation from structured fields (no batch refs like c1/c2)
@@ -1083,12 +1135,18 @@ class ValidationPipeline:
                         if not isinstance(reasons_short, list):
                             reasons_short = []
                         reasons_str = "; ".join([str(r) for r in reasons_short if r])[:400]
-                        expl = (
-                            f"Claim {cid}: status={status}, confidence={confidence}, "
-                            f"evidence_count={ev_count}, verdict_score={verdict_score:.2f}."
-                        )
-                        if reasons_str:
-                            expl += f" Reasons: {reasons_str}"
+                        
+                        # Prefer per-claim reason, fallback to article-level rationale, then deterministic
+                        expl = str(cv.get("reason") or "").strip()
+                        if not expl:
+                            expl = str(result.get("rationale") or "").strip()
+                        if not expl:
+                            expl = (
+                                f"Claim {cid}: status={status}, confidence={confidence}, "
+                                f"evidence_count={ev_count}, verdict_score={verdict_score:.2f}."
+                            )
+                            if reasons_str:
+                                expl += f" Reasons: {reasons_str}"
                         per_claim_analysis[cid] = expl
 
                         per_claim_details.append({
@@ -1097,10 +1155,11 @@ class ValidationPipeline:
                             "rgba": [
                                 max(0.0, global_r),
                                 max(0.0, verdict_score),
-                                max(0.0, b_proxy),
+                                max(0.0, global_b),
                                 max(0.0, global_a),
                             ],
                             "analysis": expl,
+                            "rationale": expl,  # UI expects 'rationale' field
                             "sources": claim_sources,
                             "status": status,
                             "confidence": confidence,
@@ -1163,13 +1222,17 @@ class ValidationPipeline:
                 result["audit"] = audit
 
             # Construct RGBA for frontend
-            # [danger, verified, context/explainability, style]
+            # [danger, verified, style, explainability]
+            # R = danger_score (0-1, higher = more dangerous)
+            # G = verified_score (0-1, higher = more truthful)
+            # B = style_score (0-1, higher = more honest presentation)
+            # A = explainability_score (0-1, higher = better explained)
             r_score = float(result.get("danger_score", -1.0))
             g_score = float(result.get("verified_score", -1.0))
-            b_score = float(result.get("explainability_score", -1.0))
+            b_score = float(result.get("style_score", -1.0))
             if b_score < 0:
                 b_score = float(result.get("context_score", -1.0))
-            a_score = float(result.get("style_score", -1.0))
+            a_score = float(result.get("explainability_score", -1.0))
             
             # Normalize -1.0 to 0.0 for RGBA (visuals) or keep -1.0 if frontend handles it?
             # Standard RGBA usually expects 0.0-1.0. 
