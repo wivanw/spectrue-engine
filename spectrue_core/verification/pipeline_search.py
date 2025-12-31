@@ -1,3 +1,12 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -40,7 +49,7 @@ class SearchFlowInput:
     preloaded_context: str | None
     progress_callback: ProgressCallback | None
     inline_sources: list[dict] = field(default_factory=list)
-    # M113: Pipeline profile selection
+    # Pipeline profile selection
     pipeline: str | None = None
     """Pipeline profile name (e.g., 'normal', 'deep'). If None, uses search_type mapping."""
     pipeline_overrides: dict | None = None
@@ -82,7 +91,7 @@ async def run_search_flow(
     )
 
     # ─────────────────────────────────────────────────────────────────────────
-    # M114: Preflight invariant validation for Step-based pipeline
+    # Preflight invariant validation for Step-based pipeline
     # ─────────────────────────────────────────────────────────────────────────
     # Run invariant checks before expensive operations (search, LLM calls).
     # For "normal" mode, this validates single-claim and single-language.
@@ -103,19 +112,19 @@ async def run_search_flow(
         )
     except PipelineViolation as pv:
         # M114 Phase 5: Log warning but continue (non-blocking)
-        # TODO(M114-Phase6): Make this blocking after stabilization
+        # TODO(Phase6): Make this blocking after stabilization
         logger.warning(
-            "[M114] Preflight validation failed for mode '%s': %s. Continuing anyway.",
+            "Preflight validation failed for mode '%s': %s. Continuing anyway.",
             mode_for_validation,
             pv,
         )
         Trace.event("pipeline.preflight_validation.violation", pv.to_trace_dict())
     except Exception as e:
         # Import or runtime failure — don't block on infra issues
-        logger.debug("[M114] Preflight validation skipped: %s", e)
+        logger.debug("Preflight validation skipped: %s", e)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # M114 T012: Opt-in full Pipeline.run() execution
+    # Opt-in full Pipeline.run() execution
     # ─────────────────────────────────────────────────────────────────────────
     # When use_step_pipeline feature flag is True, the entire retrieval
     # is handled by Pipeline.run() instead of PhaseRunner directly.
@@ -127,7 +136,7 @@ async def run_search_flow(
         try:
             from spectrue_core.pipeline import execute_pipeline, PipelineViolation
 
-            logger.debug("[M114] Using Step-based Pipeline for retrieval")
+            logger.debug("Using Step-based Pipeline for retrieval")
 
             result = await execute_pipeline(
                 mode_name=mode_for_validation,
@@ -166,12 +175,12 @@ async def run_search_flow(
             return state
 
         except PipelineViolation as pv:
-            logger.error("[M114] Pipeline violation in Step-based execution: %s", pv)
+            logger.error("Pipeline violation in Step-based execution: %s", pv)
             Trace.event("pipeline.step_based.violation", pv.to_trace_dict())
             # Fall through to legacy execution
             use_step_pipeline = False
         except Exception as e:
-            logger.warning("[M114] Step-based pipeline failed, falling back: %s", e)
+            logger.warning("Step-based pipeline failed, falling back: %s", e)
             Trace.event("pipeline.step_based.error", {"error": str(e)[:500]})
             # Fall through to legacy execution
             use_step_pipeline = False
@@ -181,61 +190,17 @@ async def run_search_flow(
     profile = policy.get_profile(profile_name)
     search_mgr.set_policy_profile(profile)
 
-    # M113: Check if pipeline profile is specified
-    use_pipeline_builder = inp.pipeline is not None
-
     if use_orchestration:
-        logger.debug("[M81] Using PhaseRunner for progressive widening (orchestration enabled)")
+        logger.debug("Using PhaseRunner for progressive widening (orchestration enabled)")
 
         try:
-            # M113: Build execution plan from pipeline profile if specified
-            if use_pipeline_builder:
-                try:
-                    from spectrue_core.pipeline_builder import (
-                        PipelineBuilder,
-                        load_profile as load_pipeline_profile,
-                    )
-                    from spectrue_core.verification.stop_decision import ev_stop_params_from_pipeline_profile
-
-                    pipeline_profile = load_pipeline_profile(inp.pipeline)
-                    builder = PipelineBuilder(pipeline_profile, overrides=inp.pipeline_overrides)
-                    execution_plan = builder.build_plan(inp.claims, default_locale=inp.lang)
-
-                    ev_stop_params = ev_stop_params_from_pipeline_profile(pipeline_profile)
-
-                    # Emit trace for pipeline profile usage
-                    Trace.event(
-                        "pipeline.profile_loaded",
-                        {**builder.get_trace_metadata(), "ev_stop_enabled": ev_stop_params is not None},
-                    )
-
-                    logger.debug(
-                        "[M113] Built ExecutionPlan from pipeline profile: %s",
-                        inp.pipeline,
-                    )
-                except FileNotFoundError as e:
-                    logger.warning(
-                        "[M113] Pipeline profile '%s' not found, falling back to orchestrator: %s",
-                        inp.pipeline,
-                        e,
-                    )
-                    use_pipeline_builder = False
-                except Exception as e:
-                    logger.warning(
-                        "[M113] Error loading pipeline profile '%s', falling back to orchestrator: %s",
-                        inp.pipeline,
-                        e,
-                    )
-                    use_pipeline_builder = False
-
-            if not use_pipeline_builder:
-                ev_stop_params = None
-                # Fallback to ClaimOrchestrator if pipeline builder not used
-                orchestrator = ClaimOrchestrator()
-                budget_class = budget_class_for_profile(profile)
-                execution_plan = orchestrator.build_plan(inp.claims, budget_class=budget_class)
-                execution_plan = apply_search_policy_to_plan(execution_plan, profile=profile)
-                execution_plan = apply_claim_retrieval_policy(execution_plan, claims=inp.claims)
+            # PipelineBuilder removed, always use ClaimOrchestrator for legacy path
+            ev_stop_params = None
+            orchestrator = ClaimOrchestrator()
+            budget_class = budget_class_for_profile(profile)
+            execution_plan = orchestrator.build_plan(inp.claims, budget_class=budget_class)
+            execution_plan = apply_search_policy_to_plan(execution_plan, profile=profile)
+            execution_plan = apply_claim_retrieval_policy(execution_plan, claims=inp.claims)
 
             locale_config = getattr(getattr(config, "runtime", None), "locale", None)
             default_primary = getattr(locale_config, "default_primary_locale", inp.lang)
@@ -355,7 +320,7 @@ async def run_search_flow(
 
             state.execution_state = runner.execution_state.to_dict()
             logger.debug(
-                "[M81] PhaseRunner completed: %d sources from %d claims",
+                "PhaseRunner completed: %d sources from %d claims",
                 total_sources,
                 len(phase_evidence),
             )
@@ -364,13 +329,13 @@ async def run_search_flow(
             }
 
         except Exception as e:
-            logger.error("[M81] CRITICAL: Orchestrator crashed: %s", e, exc_info=True)
+            logger.error("CRITICAL: Orchestrator crashed: %s", e, exc_info=True)
             Trace.event("orchestrator.crash", {"error": str(e)[:500]})
 
             use_orchestration = False
 
             logger.warning(
-                "[M81] Safetynet: Orchestrator failed. Switching to SINGLE GENERAL SEARCH (Safety Mode)."
+                "Safetynet: Orchestrator failed. Switching to SINGLE GENERAL SEARCH (Safety Mode)."
             )
 
             primary_query = (
@@ -380,7 +345,7 @@ async def run_search_flow(
             )
 
             if primary_query:
-                logger.debug("[M81] SafetyNet Search: %s", primary_query[:50])
+                logger.debug("SafetyNet Search: %s", primary_query[:50])
                 try:
                     u_ctx, u_srcs = await search_mgr.search_unified(
                         primary_query,
@@ -424,7 +389,7 @@ async def run_search_flow(
 
             for attempt in range(2):
                 logger.debug(
-                    "[M65/M67] Unified Search (Attempt %d): %s (topic=%s)",
+                    "Unified Search (Attempt %d): %s (topic=%s)",
                     attempt + 1,
                     primary_query[:50],
                     current_topic,
@@ -472,7 +437,7 @@ async def run_search_flow(
                     break
 
                 logger.warning(
-                    "[M67] Semantic Router: REJECTED results (%s). Reason: %s",
+                    "Semantic Router: REJECTED results (%s). Reason: %s",
                     gate_status,
                     gate_result.get("reason"),
                 )
@@ -480,7 +445,7 @@ async def run_search_flow(
                 if attempt == 0:
                     new_topic = "general" if current_topic == "news" else "news"
                     logger.debug(
-                        "[M67] Refining Search: Switching topic %s -> %s",
+                        "Refining Search: Switching topic %s -> %s",
                         current_topic,
                         new_topic,
                     )
@@ -488,7 +453,7 @@ async def run_search_flow(
                     continue
 
                 logger.warning(
-                    "[M78] Semantic gating failed after 2 attempts. Retaining %d sources as CONTEXT.",
+                    "Semantic gating failed after 2 attempts. Retaining %d sources as CONTEXT.",
                     len(u_srcs),
                 )
                 for src in u_srcs:
