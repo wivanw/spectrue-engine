@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2024-2025 Spectrue Contributors
+#
+# Pipeline Profile: deep
+# Deep verification with maximum coverage and value-based stopping.
+#
+# Usage: Select this profile for high-stakes verification runs
+# where thoroughness is preferred over cost efficiency.
+
+name: deep
+description: "Deep verification with maximum coverage and value-based stopping"
+version: "1.0.0"
+
+# Budget configuration
+budget:
+  max_credits: 500          # Higher budget for deep analysis
+  budget_class: deep        # deep = All phases (A/B/C/D)
+
+# Search depth by step
+search:
+  depth: advanced           # advanced search for better results
+  max_results: 10           # More results per query
+  include_raw_content: true # Include raw content for analysis
+
+# Fulltext extraction
+fulltext:
+  enabled: true             # Enable fulltext for deep profile
+  topk: 5                   # Top 5 sources for fulltext extraction
+
+# Stop policy (value-based stopping)
+stop_policy:
+  enabled: true             # Enable value-based stopping
+  min_entropy: 0.10         # Lower threshold for deep analysis
+  marginal_cost: 0.20       # Lower marginal cost threshold
+  value_uncertainty: 1.5    # Higher value for uncertainty reduction
+
+# Phase configuration
+phases:
+  enabled:
+    - A
+    - B
+    - C
+    - D
+  max_depth: 4              # Maximum phase depth (all phases)
+
+# Channels configuration
+channels:
+  allowed:
+    - authoritative
+    - reputable_news
+    - local_media
+    - social
+    - low_reliability       # Allowed as leads in deep mode
+  blocked: []
+
+# Locale configuration (null = use claim signals)
+locale:
+  primary: null
+  fallback: null
+
