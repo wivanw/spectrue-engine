@@ -191,6 +191,7 @@ class ValidationPipeline:
         source_url: str | None = None,  # Original URL for inline source exclusion
         extract_claims_only: bool = False,  # M105: Deep mode - just extract claims, skip verification
         pipeline_profile: str | None = None, # M113: Pipeline profile (normal/deep)
+        preloaded_claims: list | None = None, # M116: Skip extraction if claims provided
     ) -> dict:
         Trace.event(
             "pipeline.run.start",
@@ -202,6 +203,7 @@ class ValidationPipeline:
                 "has_preloaded_sources": bool(preloaded_sources),
                 "extract_claims_only": extract_claims_only,
                 "pipeline_profile": pipeline_profile,
+                "has_preloaded_claims": bool(preloaded_claims),
             },
         )
 
@@ -438,11 +440,23 @@ class ValidationPipeline:
                 budget_result=budget_result,
             )
 
-            claims, should_check_oracle, article_intent, fast_query, stitched_claim_text = await self._extract_claims(
-                fact=fact,
-                lang=lang,
-                progress_callback=_progress,
-            )
+            # M116: Skip extraction if claims are preloaded (deep mode single-pipeline)
+            if preloaded_claims:
+                claims = preloaded_claims
+                should_check_oracle = False  # Oracle already checked in extraction phase
+                article_intent = "news"  # Default for deep mode
+                fast_query = None
+                stitched_claim_text = " ".join(c.get("text", "") for c in claims if isinstance(c, dict))
+                Trace.event("pipeline.using_preloaded_claims", {
+                    "claims_count": len(claims),
+                    "claim_ids": [c.get("id") for c in claims[:5] if isinstance(c, dict)],
+                })
+            else:
+                claims, should_check_oracle, article_intent, fast_query, stitched_claim_text = await self._extract_claims(
+                    fact=fact,
+                    lang=lang,
+                    progress_callback=_progress,
+                )
             _end_phase("extraction")
             self._claim_extraction_text = stitched_claim_text
             anchor_claim = None

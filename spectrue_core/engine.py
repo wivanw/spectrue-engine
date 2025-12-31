@@ -140,9 +140,8 @@ class SpectrueEngine:
                         fetch_cost = float(engine_ledger.total_credits)
                         web_tool._tavily._meter = prior_meter
 
-                # Deep analysis: Extract claims from the ENTIRE text once
-                # Then verify each claim with a full pipeline pass
-                # First, run one pipeline pass to extract claims
+                # M116: Single-pipeline deep mode
+                # Step 1: Extract claims from the ENTIRE text once
                 initial_result = await self.verifier.verify_fact(
                     fact=working_text,
                     search_type=search_type,
@@ -151,7 +150,7 @@ class SpectrueEngine:
                     progress_callback=progress_callback,
                     content_lang=content_lang,
                     max_cost=max_credits,
-                    extract_claims_only=True,  # New flag: just extract claims, don't verify
+                    extract_claims_only=True,  # Just extract claims, don't verify
                 )
                 
                 # Get extracted claims from the initial run
@@ -165,130 +164,82 @@ class SpectrueEngine:
                     "claims": [c.get("text", "")[:80] for c in extracted_claims[:5]]
                 })
 
-                details = []
-                # Use fractional credits from cost_summary when available.
-                pipeline_cost = float(
+                extraction_cost = float(
                     (initial_result.get("cost_summary") or {}).get("total_credits")
                     or initial_result.get("cost")
                     or 0.0
                 )
-                total_cost = fetch_cost + pipeline_cost
                 
-                # M113: Aggregate cost_summary from all claim runs
-                aggregated_cost_summary = {
-                    "total_credits": total_cost,
-                    "total_usd": total_cost * 0.01,  # 1 credit = $0.01
-                    "by_stage_credits": {},
-                    "by_provider_credits": {},
-                    "event_count": 0,
-                }
-                
-                # Keep global sources as union for export/debug, but do NOT feed them back into subsequent claims.
-                accumulated_sources: list[dict] = initial_result.get("sources", []) or []
-                all_verified_claims: list[str] = []
+                if progress_callback:
+                    await progress_callback("verifying_claims")
 
-                # Verify each extracted claim with full pipeline
-                for idx, claim_obj in enumerate(extracted_claims):
+                # M116: Step 2: Single pipeline run with all claims
+                # This replaces the per-claim loop that caused N+1 pipeline runs
+                verification_result = await self.verifier.verify_fact(
+                    fact=working_text,  # Full article text for context
+                    search_type=search_type,
+                    gpt_model=model,
+                    lang=lang,
+                    progress_callback=progress_callback,
+                    content_lang=content_lang,
+                    max_cost=max_credits - int(extraction_cost) if max_credits is not None else None,
+                    pipeline_profile="deep",
+                    preloaded_claims=extracted_claims,  # M116: Skip re-extraction
+                )
+
+                verification_cost = float(
+                    (verification_result.get("cost_summary") or {}).get("total_credits")
+                    or verification_result.get("cost")
+                    or 0.0
+                )
+                total_cost = fetch_cost + extraction_cost + verification_cost
+                
+                # Build details from claim_verdicts
+                details = []
+                claim_verdicts = verification_result.get("claim_verdicts") or []
+                sources = verification_result.get("sources") or []
+                
+                for claim_obj in extracted_claims:
+                    claim_id = claim_obj.get("id")
                     claim_text = claim_obj.get("text", "").strip()
                     if not claim_text:
                         continue
-                        
-                    # Budget check: stop if no credits remain
-                    if max_credits is not None:
-                        remaining = max_credits - total_cost
-                        if remaining < per_claim_model_cost:
-                            break
-
-                    # Emit per-claim progress status
-                    if progress_callback:
-                        await progress_callback(f"verifying_claim:{idx + 1}:{len(extracted_claims)}")
-
-                    # Each claim gets full verification (primary treatment)
-                    # Pass accumulated sources as preloaded, but pipeline will supplement if not relevant
-                    claim_result = await self.verifier.verify_fact(
-                        fact=claim_text,
-                        search_type=search_type,
-                        gpt_model=model,
-                        lang=lang,
-                        progress_callback=progress_callback,
-                        content_lang=content_lang,
-                        preloaded_sources=None,
-                        max_cost=max_credits - int(total_cost) if max_credits is not None else None,
-                        pipeline_profile="deep",  # M113: Use deep profile for deep mode
-                    )
-
-                    claim_cost = float(
-                        (claim_result.get("cost_summary") or {}).get("total_credits")
-                        or claim_result.get("cost")
-                        or 0.0
-                    )
-                    total_cost += claim_cost
-                    all_verified_claims.append(claim_text)
                     
-                    # M113: Merge claim's cost_summary into aggregated
-                    claim_cs = claim_result.get("cost_summary") or {}
-                    aggregated_cost_summary["event_count"] += claim_cs.get("event_count", 0)
-                    for stage, credits in (claim_cs.get("by_stage_credits") or {}).items():
-                        aggregated_cost_summary["by_stage_credits"][stage] = (
-                            aggregated_cost_summary["by_stage_credits"].get(stage, 0.0) + float(credits)
-                        )
-                    for provider, credits in (claim_cs.get("by_provider_credits") or {}).items():
-                        aggregated_cost_summary["by_provider_credits"][provider] = (
-                            aggregated_cost_summary["by_provider_credits"].get(provider, 0.0) + float(credits)
-                        )
-
-                    # Accumulate new sources for overall export/debug only (not for feeding back).
-                    new_sources = claim_result.get("sources", []) or []
-                    seen_urls = {s.get("url") for s in accumulated_sources if s.get("url")}
-                    for src in new_sources:
-                        if src.get("url") and src.get("url") not in seen_urls:
-                            accumulated_sources.append(src)
-                            seen_urls.add(src.get("url"))
-
-                    # Uniform detail entry for all claims
+                    # Find verdict for this claim
+                    cv = next(
+                        (v for v in claim_verdicts if v.get("claim_id") == claim_id),
+                        {}
+                    )
+                    
+                    # Get per-claim sources
+                    claim_sources = [
+                        s for s in sources 
+                        if s.get("claim_id") == claim_id or s.get("claim_id") is None
+                    ]
+                    
                     details.append({
                         "text": claim_text,
-                        "rgba": claim_result.get("rgba") or [0.0, 0.0, 0.0, 0.5],
-                        "rationale": claim_result.get("rationale", ""),
-                        "sources": new_sources,
-                        "verified_score": claim_result.get("verified_score"),
-                        "danger_score": claim_result.get("danger_score"),
+                        "rgba": cv.get("rgba") or verification_result.get("rgba") or [0.0, 0.0, 0.0, 0.5],
+                        "rationale": cv.get("reason") or "",
+                        "sources": claim_sources,
+                        "verified_score": cv.get("verdict_score") or verification_result.get("verified_score"),
+                        "danger_score": verification_result.get("danger_score"),
                     })
 
-                # Aggregate RGBA for overall score
-                rgba_list = [
-                    d.get("rgba") for d in details 
-                    if isinstance(d.get("rgba"), list) and len(d.get("rgba")) == 4
-                ]
-                if rgba_list:
-                    avg_rgba = [
-                        sum(v[i] for v in rgba_list) / len(rgba_list)
-                        for i in range(4)
-                    ]
-                else:
-                    avg_rgba = [0.0, 0.0, 0.0, 0.5]
-
-                # Aggregate verified_score (average of all claims)
-                verified_scores = [
-                    d.get("verified_score") for d in details 
-                    if isinstance(d.get("verified_score"), (int, float))
-                ]
-                avg_verified = sum(verified_scores) / len(verified_scores) if verified_scores else 0.0
-
-                # M113: Finalize aggregated cost_summary with total
-                aggregated_cost_summary["total_credits"] = total_cost
-                aggregated_cost_summary["total_usd"] = total_cost * 0.01
-
+                # Use verification result's aggregated scores
                 final = {
                     "text": text,
-                    "verified_score": avg_verified,
-                    "rgba": avg_rgba,
-                    "average_rgba": avg_rgba,
+                    "verified_score": verification_result.get("verified_score", 0.0),
+                    "rgba": verification_result.get("rgba") or [0.0, 0.0, 0.0, 0.5],
+                    "average_rgba": verification_result.get("rgba") or [0.0, 0.0, 0.0, 0.5],
                     "details": details,
-                    "sources": accumulated_sources,
+                    "sources": sources,
                     "cost": total_cost,
-                    "cost_summary": aggregated_cost_summary,  # M113: Include cost_summary for frontend
-                    "claims": all_verified_claims,
+                    "cost_summary": verification_result.get("cost_summary") or {
+                        "total_credits": total_cost,
+                        "total_usd": total_cost * 0.01,
+                    },
+                    "claims": [c.get("text", "") for c in extracted_claims],
                     "detected_lang": detected_lang,
                     "detected_lang_prob": detected_prob,
                     "search_lang": content_lang,
@@ -298,8 +249,14 @@ class SpectrueEngine:
                     final["budget"] = {
                         "max_credits": int(max_credits),
                         "spent": total_cost,
-                        "limited": len(all_verified_claims) < len(extracted_claims),
+                        "limited": False,  # Single pipeline handles budget internally
                     }
+                
+                Trace.event("engine.deep.single_pipeline_completed", {
+                    "claims_count": len(extracted_claims),
+                    "total_cost": total_cost,
+                    "verified_score": final["verified_score"],
+                })
                 return final
 
             # General mode: single pass
