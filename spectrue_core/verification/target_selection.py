@@ -149,13 +149,15 @@ def select_verification_targets(
     
     # Adjust max_targets based on budget_class
     if max_targets is None:
-        max_targets = 10  # Default if not specified
+        max_targets = 10
+    
     if budget_class == "minimal":
-        max_targets = min(max_targets, 2)
+        max_targets = 2
     elif budget_class == "standard":
-        max_targets = min(max_targets, 3)
-    elif budget_class == "deep":
-        max_targets = min(max_targets, 5)
+        max_targets = 3
+    elif budget_class in ("deep", "high", "max"):
+        # M117: Allow independent verification of all claims in deep mode
+        max_targets = 20
     
     # Assign semantic clusters using embeddings (if available)
     _assign_semantic_clusters(claims)
