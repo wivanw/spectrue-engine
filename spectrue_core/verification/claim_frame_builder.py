@@ -63,7 +63,10 @@ def build_context_excerpt(
     """
     Build context excerpt and metadata for a claim.
     
-    Uses sentence boundaries when available, falling back to paragraph boundaries.
+    Uses layered approach:
+    1. Sentence-window (claim sentence + neighbors)
+    2. Paragraph-level fallback
+    3. Character-based fallback
     
     Args:
         document_text: Full document text
@@ -74,59 +77,37 @@ def build_context_excerpt(
     Returns:
         Tuple of (ContextExcerpt, ContextMeta)
     """
-    if structure is None:
-        structure = extract_text_structure(document_text)
-    
-    # Find claim position
-    span_start, span_end, sentence_idx, paragraph_idx = find_claim_position(
-        document_text, claim_text, structure
+    from spectrue_core.utils.context_excerpt import (
+        build_context_excerpt as _build_excerpt,
     )
     
-    # Build excerpt text
-    excerpt_text = ""
-    excerpt_start = span_start
-    excerpt_end = span_end
-    sentence_window: tuple[int, int] | None = None
-    
-    if sentence_idx is not None and structure.sentences:
-        # Use sentence window
-        window = structure.get_sentence_window(sentence_idx, window_size)
-        if window:
-            excerpt_text = " ".join(seg.text for seg in window)
-            excerpt_start = window[0].start
-            excerpt_end = window[-1].end
-            sentence_window = (window[0].index, window[-1].index)
-    elif paragraph_idx is not None and structure.paragraphs:
-        # Fall back to paragraph
-        para = structure.paragraphs[paragraph_idx]
-        excerpt_text = para.text
-        excerpt_start = para.start
-        excerpt_end = para.end
-    else:
-        # Last resort: use raw claim with some context
-        context_chars = 100
-        excerpt_start = max(0, span_start - context_chars)
-        excerpt_end = min(len(document_text), span_end + context_chars)
-        excerpt_text = document_text[excerpt_start:excerpt_end].strip()
+    # Use the improved context excerpt builder
+    result = _build_excerpt(
+        document_text=document_text,
+        claim_text=claim_text,
+        window_size=window_size,
+        max_chars=500,
+    )
     
     # Generate document ID from content hash
     doc_id = hashlib.sha256(document_text[:1000].encode()).hexdigest()[:16]
     
     context_excerpt = ContextExcerpt(
-        text=excerpt_text,
+        text=result.text,
         source_type="user_text",
-        span_start=excerpt_start,
-        span_end=excerpt_end,
+        span_start=result.span_start,
+        span_end=result.span_end,
     )
     
     context_meta = ContextMeta(
         document_id=doc_id,
-        paragraph_index=paragraph_idx,
-        sentence_index=sentence_idx,
-        sentence_window=sentence_window,
+        paragraph_index=result.paragraph_index,
+        sentence_index=result.sentence_index,
+        sentence_window=result.sentence_window,
     )
     
     return context_excerpt, context_meta
+
 
 
 def convert_evidence_items(
