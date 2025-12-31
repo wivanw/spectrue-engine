@@ -43,6 +43,26 @@ class EdgeTypingSkill(BaseSkill):
     - unrelated: No meaningful relationship (EXPECTED TO BE COMMON)
     """
     
+    # Dynamic timeout constants (similar to claims.py)
+    BASE_TIMEOUT_SEC = 30.0      # Minimum timeout
+    TIMEOUT_PER_EDGE = 0.5       # Additional seconds per edge pair
+    MAX_TIMEOUT_SEC = 120.0      # Maximum timeout cap
+    
+    def _calculate_timeout(self, edge_count: int, prompt_chars: int = 0) -> float:
+        """
+        Calculate dynamic timeout based on edge count and prompt size.
+        
+        Large batches (e.g., 108 edges from 17 claims) need more time.
+        """
+        # Base + per-edge scaling
+        edge_time = edge_count * self.TIMEOUT_PER_EDGE
+        
+        # Add time for large prompts (1 sec per 5000 chars)
+        prompt_time = prompt_chars / 5000.0
+        
+        timeout = self.BASE_TIMEOUT_SEC + edge_time + prompt_time
+        return min(timeout, self.MAX_TIMEOUT_SEC)
+    
     async def type_edges_batch(
         self,
         edges: list[CandidateEdge],
@@ -67,6 +87,13 @@ class EdgeTypingSkill(BaseSkill):
         instructions = self._build_instructions()
         prompt = self._build_prompt(edges, node_map, max_claim_chars)
         
+        # Dynamic timeout based on edge count and prompt size
+        dynamic_timeout = self._calculate_timeout(len(edges), len(prompt))
+        logger.debug(
+            "[EdgeTyping] Batch: %d edges, %d prompt_chars, timeout: %.1f sec",
+            len(edges), len(prompt), dynamic_timeout
+        )
+        
         # T9: Retry Logic with Validation
         max_retries = 1
         
@@ -79,7 +106,7 @@ class EdgeTypingSkill(BaseSkill):
                     response_schema=EDGE_TYPING_SCHEMA,
                     reasoning_effort="low",
                     cache_key=f"edge_typing_{PROMPT_VERSION}_{attempt}" if attempt > 0 else f"edge_typing_{PROMPT_VERSION}",
-                    timeout=30.0,
+                    timeout=dynamic_timeout,
                     trace_kind="edge_typing",
                 )
                 
