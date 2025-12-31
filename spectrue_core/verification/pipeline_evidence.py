@@ -21,12 +21,15 @@ from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.schema.signals import TimeWindow
 from spectrue_core.schema.scoring import BeliefState
 from spectrue_core.graph.context import ClaimContextGraph
-from spectrue_core.graph.propagation import propagate_belief, propagation_routing_signals
+from spectrue_core.graph.propagation import (
+    propagate_belief,
+    propagation_routing_signals,
+)
 from spectrue_core.scoring.belief import (
-    calculate_evidence_impact, 
-    update_belief, 
+    calculate_evidence_impact,
+    update_belief,
     log_odds_to_prob,
-    apply_consensus_bound
+    apply_consensus_bound,
 )
 from spectrue_core.scoring.consensus import calculate_consensus
 from spectrue_core.scoring.claim_posterior import (
@@ -43,6 +46,7 @@ from spectrue_core.verification.source_utils import canonicalize_sources
 
 # Suppress deprecation warning - full migration to Bayesian scoring is future work
 import warnings
+
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=DeprecationWarning)
     from spectrue_core.verification.scoring_aggregation import aggregate_claim_verdict
@@ -61,18 +65,27 @@ from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
 
+
 def _norm_id(x: Any) -> str:
     return str(x or "").strip().lower()
 
+
 def _is_prob(x: Any) -> bool:
-    return isinstance(x, (int, float)) and math.isfinite(float(x)) and 0.0 <= float(x) <= 1.0
+    return (
+        isinstance(x, (int, float))
+        and math.isfinite(float(x))
+        and 0.0 <= float(x) <= 1.0
+    )
+
 
 def _logit(p: float) -> float:
     # Contract: p must be in (0,1). No clamping here.
     return math.log(p / (1.0 - p))
 
+
 def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
+
 
 def _claim_text(cv: dict) -> str:
     text = cv.get("claim_text") or cv.get("claim") or cv.get("text") or ""
@@ -80,7 +93,11 @@ def _claim_text(cv: dict) -> str:
 
 
 def _aggregation_policy(search_mgr) -> dict:
-    calibration = getattr(getattr(getattr(search_mgr, "config", None), "runtime", None), "calibration", None)
+    calibration = getattr(
+        getattr(getattr(search_mgr, "config", None), "runtime", None),
+        "calibration",
+        None,
+    )
     if not calibration:
         return {}
     return {
@@ -88,6 +105,7 @@ def _aggregation_policy(search_mgr) -> dict:
         "penalty_temporal_weight": float(calibration.penalty_temporal_weight),
         "penalty_diversity_weight": float(calibration.penalty_diversity_weight),
     }
+
 
 def _mark_anchor_duplicates_sync(
     *,
@@ -161,10 +179,10 @@ async def _mark_anchor_duplicates_async(
         return
     if not embed_service.is_available():
         return
-    
+
     import concurrent.futures
     from functools import partial
-    
+
     loop = asyncio.get_running_loop()
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         await loop.run_in_executor(
@@ -192,7 +210,7 @@ def _mark_anchor_duplicates(
       - anchor vs secondary only
       - embedding-based cosine similarity
       - no filtering, only marking
-    
+
     Note: This is a sync wrapper. Use _mark_anchor_duplicates_async in async context.
     """
     _mark_anchor_duplicates_sync(
@@ -201,6 +219,7 @@ def _mark_anchor_duplicates(
         embed_service=embed_service,
         tau=tau,
     )
+
 
 def _compute_article_g_from_anchor(
     *,
@@ -253,6 +272,7 @@ def _compute_article_g_from_anchor(
     L = _logit(float(prior_p)) + (k * _logit(p))
     return float(_sigmoid(L)), debug
 
+
 ProgressCallback = Callable[[str], Awaitable[None]]
 
 
@@ -273,7 +293,9 @@ def _explainability_factor_for_tier(tier: str | None) -> tuple[float, str, float
     if not tier:
         prior = _TIER_A_PRIOR_MEAN["UNKNOWN"]
         return prior / _TIER_A_BASELINE, "unknown_default", prior
-    prior = _TIER_A_PRIOR_MEAN.get(str(tier).strip().upper(), _TIER_A_PRIOR_MEAN["UNKNOWN"])
+    prior = _TIER_A_PRIOR_MEAN.get(
+        str(tier).strip().upper(), _TIER_A_PRIOR_MEAN["UNKNOWN"]
+    )
     return prior / _TIER_A_BASELINE, "best_tier", prior
 
 
@@ -468,20 +490,26 @@ async def run_evidence_flow(
     anchor_claim = None
     anchor_claim_id = None
     if claims:
-        anchor_claim = pick_ui_main_claim(
-            claims,
-            calibration_registry=calibration_registry,
-        ) or claims[0]
+        anchor_claim = (
+            pick_ui_main_claim(
+                claims,
+                calibration_registry=calibration_registry,
+            )
+            or claims[0]
+        )
         anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
     # NORMAL pipeline must be SINGLE-CLAIM (execution unit invariant).
     # This prevents multi-claim batch leakage (c1/c2 mentions) and cross-language mixing.
     # NOTE: pipeline profile is passed via inp.pipeline by ValidationPipeline.
-    pipeline_profile = (inp.pipeline or "normal")
-    
+    pipeline_profile = inp.pipeline or "normal"
+
     # Language consistency validation (Phase 4 invariant)
     if claims and inp.content_lang:
-        from spectrue_core.utils.language_validation import validate_claims_language_consistency
+        from spectrue_core.utils.language_validation import (
+            validate_claims_language_consistency,
+        )
+
         lang_valid, lang_mismatches = validate_claims_language_consistency(
             claims,
             inp.content_lang,
@@ -494,12 +522,14 @@ async def run_evidence_flow(
                 f"Language mismatch in normal pipeline: expected={inp.content_lang}, "
                 f"mismatches={lang_mismatches}"
             )
-    
+
     if pipeline_profile == "normal" and claims:
         if anchor_claim_id:
             claims = [
-                c for c in claims
-                if isinstance(c, dict) and str(c.get("id") or c.get("claim_id")) == str(anchor_claim_id)
+                c
+                for c in claims
+                if isinstance(c, dict)
+                and str(c.get("id") or c.get("claim_id")) == str(anchor_claim_id)
             ]
         if len(claims) != 1:
             raise RuntimeError(
@@ -507,7 +537,10 @@ async def run_evidence_flow(
             )
         Trace.event(
             "evidence_flow.single_claim.enforced",
-            {"profile": pipeline_profile, "anchor_claim_id": str(anchor_claim_id or "")},
+            {
+                "profile": pipeline_profile,
+                "anchor_claim_id": str(anchor_claim_id or ""),
+            },
         )
 
     # T7: Deterministic Ranking
@@ -583,14 +616,16 @@ async def run_evidence_flow(
             importance_by_claim[cid_norm] = float(claim.get("importance", 1.0) or 1.0)
         except Exception:
             importance_by_claim[cid_norm] = 1.0
-    
+
     if isinstance(claim_verdicts, list):
         # Helper to get tier rank
         def _tier_rank(tier: str | None) -> int:
             if not tier:
                 return 0
-            return {"D": 1, "C": 2, "B": 3, "A'": 3, "A": 4}.get(str(tier).strip().upper(), 0)
-        
+            return {"D": 1, "C": 2, "B": 3, "A'": 3, "A": 4}.get(
+                str(tier).strip().upper(), 0
+            )
+
         # Prepare data for parallel processing
         def _process_single_cv(cv_data: dict) -> dict:
             """Process a single claim verdict using unified Bayesian posterior."""
@@ -601,44 +636,48 @@ async def run_evidence_flow(
             has_direct_evidence = cv_data["has_direct_evidence"]
             pack_ref = cv_data["pack"]
             explainability = cv_data["explainability"]
-            
+
             # Get LLM verdict score (raw observation)
             llm_score = cv.get("verdict_score")
             if not isinstance(llm_score, (int, float)):
                 llm_score = 0.5
             llm_score = float(llm_score)
-            
+
             # Build evidence items from pack
             evidence_items = []
             items = pack_ref.get("items", []) if isinstance(pack_ref, dict) else []
             best_tier = None
-            
+
             for item in items:
                 if not isinstance(item, dict):
                     continue
                 item_claim_id = item.get("claim_id")
                 if claim_id and item_claim_id not in (None, claim_id):
                     continue
-                
+
                 stance = str(item.get("stance") or "").lower()
                 tier = item.get("tier")
                 relevance = item.get("relevance")
                 if not isinstance(relevance, (int, float)):
                     relevance = 0.5
                 quote_present = bool(item.get("quote"))
-                
-                evidence_items.append(EvidenceItem(
-                    stance=stance,
-                    tier=tier,
-                    relevance=float(relevance),
-                    quote_present=quote_present,
-                    claim_id=claim_id,
-                ))
-                
+
+                evidence_items.append(
+                    EvidenceItem(
+                        stance=stance,
+                        tier=tier,
+                        relevance=float(relevance),
+                        quote_present=quote_present,
+                        claim_id=claim_id,
+                    )
+                )
+
                 # Track best tier
-                if tier and (best_tier is None or _tier_rank(tier) > _tier_rank(best_tier)):
+                if tier and (
+                    best_tier is None or _tier_rank(tier) > _tier_rank(best_tier)
+                ):
                     best_tier = tier
-            
+
             # Compute unified posterior
             posterior_result = compute_claim_posterior(
                 llm_verdict_score=llm_score,
@@ -646,11 +685,11 @@ async def run_evidence_flow(
                 evidence_items=evidence_items,
                 claim_id=claim_id,
             )
-            
+
             # Update cv with posterior score
             cv["verdict_score"] = posterior_result.p_posterior
             cv["posterior_result"] = posterior_result.to_dict()
-            
+
             # Derive verdict from posterior
             if posterior_result.p_posterior > 0.65:
                 cv["verdict"] = "verified"
@@ -661,7 +700,7 @@ async def run_evidence_flow(
             else:
                 cv["verdict"] = "ambiguous"
                 cv["status"] = "ambiguous"
-            
+
             # Legacy reasons_expert for backward compatibility
             cv["reasons_expert"] = {
                 "best_tier": best_tier,
@@ -729,8 +768,13 @@ async def run_evidence_flow(
 
             # Respect verdict_state if already normalized by parser
             existing_state = str(cv.get("verdict_state") or "").lower().strip()
-            CANONICAL_STATES = {"supported", "refuted", "conflicted", "insufficient_evidence"}
-            
+            CANONICAL_STATES = {
+                "supported",
+                "refuted",
+                "conflicted",
+                "insufficient_evidence",
+            }
+
             if existing_state in CANONICAL_STATES:
                 verdict_state = existing_state
             else:
@@ -744,9 +788,11 @@ async def run_evidence_flow(
                     verdict_state = "conflicted"
 
             cv["verdict_state"] = verdict_state
-            
+
             # Conflict detection from evidence balance
-            has_conflict = (posterior_result.n_support > 0 and posterior_result.n_refute > 0)
+            has_conflict = (
+                posterior_result.n_support > 0 and posterior_result.n_refute > 0
+            )
 
             return {
                 "claim_id": claim_id,
@@ -756,12 +802,12 @@ async def run_evidence_flow(
                 "has_conflict": has_conflict,
                 "posterior_score": posterior_result.p_posterior,
             }
-        
+
         # Prepare all CV data
         cv_data_list = []
         items = pack.get("items", []) if isinstance(pack, dict) else []
         explainability = result.get("explainability_score", -1.0)
-        
+
         for cv in claim_verdicts:
             if not isinstance(cv, dict):
                 continue
@@ -775,7 +821,9 @@ async def run_evidence_flow(
                 if _norm_id(c.get("id") or c.get("claim_id")) == claim_id:
                     claim_obj = c
                     break
-            temporality = claim_obj.get("temporality") if isinstance(claim_obj, dict) else None
+            temporality = (
+                claim_obj.get("temporality") if isinstance(claim_obj, dict) else None
+            )
 
             has_direct_evidence = False
             if isinstance(items, list):
@@ -788,28 +836,32 @@ async def run_evidence_flow(
                     if stance in ("SUPPORT", "REFUTE") and item.get("quote"):
                         has_direct_evidence = True
                         break
-            
-            cv_data_list.append({
-                "cv": cv,
-                "claim_id": claim_id,
-                "claim_obj": claim_obj,
-                "temporality": temporality,
-                "has_direct_evidence": has_direct_evidence,
-                "pack": pack,
-                "explainability": explainability,
-            })
-        
+
+            cv_data_list.append(
+                {
+                    "cv": cv,
+                    "claim_id": claim_id,
+                    "claim_obj": claim_obj,
+                    "temporality": temporality,
+                    "has_direct_evidence": has_direct_evidence,
+                    "pack": pack,
+                    "explainability": explainability,
+                }
+            )
+
         # Process in parallel using thread pool
         import concurrent.futures
-        
+
         if len(cv_data_list) > 1:
             # Parallel execution for multiple claims
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(cv_data_list))) as executor:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(4, len(cv_data_list))
+            ) as executor:
                 results_list = list(executor.map(_process_single_cv, cv_data_list))
         else:
             # Sequential for single claim (avoid thread overhead)
             results_list = [_process_single_cv(d) for d in cv_data_list]
-        
+
         # Merge results
         for res in results_list:
             verdict_state_by_claim[res["claim_id"]] = res["verdict_state"]
@@ -825,27 +877,27 @@ async def run_evidence_flow(
         global_r = float(result.get("danger_score", -1.0))
         if global_r < 0:
             global_r = 0.0
-        
+
         global_b = float(result.get("style_score", -1.0))
         if global_b < 0:
             global_b = float(result.get("context_score", -1.0))
         if global_b < 0:
             global_b = 1.0  # Default B=1.0 if missing?
-        
+
         global_a = float(result.get("explainability_score", -1.0))
         if global_a < 0:
             global_a = 1.0  # Default A=1.0 if missing?
-        
+
         all_scored = pack.get("scored_sources") or []
         all_context = pack.get("context_sources") or []
-        
+
         for cv in claim_verdicts:
             if not isinstance(cv, dict):
                 continue
             cid = _norm_id(cv.get("claim_id"))
             if not cid:
                 continue
-                
+
             # Filter sources for this claim
             # Include: sources matching this claim_id OR shared sources (claim_id=None)
             claim_sources = []
@@ -860,14 +912,14 @@ async def run_evidence_flow(
                     if url and url not in seen_urls:
                         claim_sources.append(s)
                         seen_urls.add(url)
-            
+
             # Enrich per-claim sources
             cv["sources"] = enrich_sources_with_trust(claim_sources)
-            
+
             # Calculate per-claim RGBA
             # G is specific to claim
             g_score = float(cv.get("verdict_score", 0.5) or 0.5)
-            
+
             # R, B, A are global for now (unless claim has specific overrides later)
             cv["rgba"] = [global_r, g_score, global_b, global_a]
 
@@ -892,25 +944,29 @@ async def run_evidence_flow(
     # Bayesian Scoring
     if inp.prior_belief:
         current_belief = inp.prior_belief
-        
+
         # Consensus Calculation
         evidence_list = []
-        raw_evidence = getattr(pack, "evidence", []) if not isinstance(pack, dict) else pack.get("evidence", [])
-        
+        raw_evidence = (
+            getattr(pack, "evidence", [])
+            if not isinstance(pack, dict)
+            else pack.get("evidence", [])
+        )
+
         # Helper to wrap dicts if needed
         class MockEvidence:
             def __init__(self, d):
                 self.domain = d.get("domain")
                 self.stance = d.get("stance")
-                
+
         for e in raw_evidence:
             if isinstance(e, dict):
                 evidence_list.append(MockEvidence(e))
             else:
                 evidence_list.append(e)
-                
+
         consensus = calculate_consensus(evidence_list)
-        
+
         # Claim Graph Propagation
         if inp.context_graph and isinstance(claim_verdicts, list):
             for cv in claim_verdicts:
@@ -925,16 +981,18 @@ async def run_evidence_flow(
                         conf = 0.5
                     impact = calculate_evidence_impact(v, confidence=conf)
                     node.local_belief = BeliefState(log_odds=impact)
-            
+
             propagate_belief(inp.context_graph)
             result["graph_propagation"] = propagation_routing_signals(inp.context_graph)
-            
+
             # Update from Anchor
             if anchor_claim_id:
                 anchor_node = inp.context_graph.get_node(anchor_claim_id)
                 if anchor_node and anchor_node.propagated_belief:
-                    current_belief = update_belief(current_belief, anchor_node.propagated_belief.log_odds)
-        
+                    current_belief = update_belief(
+                        current_belief, anchor_node.propagated_belief.log_odds
+                    )
+
         elif isinstance(claim_verdicts, list):
             # Fallback: Sum updates (weighted by verdict strength + claim importance)
             for cv in claim_verdicts:
@@ -948,9 +1006,11 @@ async def run_evidence_flow(
                     strength = 0.5
                 strength = max(0.0, min(1.0, strength))
                 relevance = max(0.0, min(1.0, importance_by_claim.get(cid, 1.0)))
-                impact = calculate_evidence_impact(v, confidence=strength, relevance=relevance)
+                impact = calculate_evidence_impact(
+                    v, confidence=strength, relevance=relevance
+                )
                 current_belief = update_belief(current_belief, impact)
-                 
+
         # Apply Consensus
         current_belief = apply_consensus_bound(current_belief, consensus)
         belief_g = log_odds_to_prob(current_belief.log_odds)
@@ -993,7 +1053,7 @@ async def run_evidence_flow(
                 "rationale": raw_rationale,
             },
         )
-        
+
         # Trace
         result["bayesian_trace"] = {
             "prior_log_odds": inp.prior_belief.log_odds,
@@ -1015,7 +1075,6 @@ async def run_evidence_flow(
                 explainability_audit["conflict_penalty_applied"] = True
                 audit["explainability"] = explainability_audit
                 result["audit"] = audit
-
 
     if inp.progress_callback:
         await inp.progress_callback("finalizing")
@@ -1048,9 +1107,7 @@ async def run_evidence_flow(
         status = src.get("timeliness_status")
         url = src.get("url") or src.get("link")
         if status and url:
-            timeliness_labels.append(
-                {"source_url": url, "timeliness_status": status}
-            )
+            timeliness_labels.append({"source_url": url, "timeliness_status": status})
     if timeliness_labels:
         result["timeliness_labels"] = timeliness_labels
     if result.get("time_window") or timeliness_labels:

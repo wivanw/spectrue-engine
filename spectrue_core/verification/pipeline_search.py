@@ -99,7 +99,9 @@ async def run_search_flow(
     #
     # Future: After Phase 5 stabilizes, this will return early with error.
     # ─────────────────────────────────────────────────────────────────────────
-    mode_for_validation = inp.pipeline or ("deep" if inp.search_type == "deep" else "normal")
+    mode_for_validation = inp.pipeline or (
+        "deep" if inp.search_type == "deep" else "normal"
+    )
 
     try:
         from spectrue_core.pipeline import validate_claims_for_mode, PipelineViolation
@@ -191,20 +193,30 @@ async def run_search_flow(
     search_mgr.set_policy_profile(profile)
 
     if use_orchestration:
-        logger.debug("Using PhaseRunner for progressive widening (orchestration enabled)")
+        logger.debug(
+            "Using PhaseRunner for progressive widening (orchestration enabled)"
+        )
 
         try:
             # PipelineBuilder removed, always use ClaimOrchestrator for legacy path
             ev_stop_params = None
             orchestrator = ClaimOrchestrator()
             budget_class = budget_class_for_profile(profile)
-            execution_plan = orchestrator.build_plan(inp.claims, budget_class=budget_class)
-            execution_plan = apply_search_policy_to_plan(execution_plan, profile=profile)
-            execution_plan = apply_claim_retrieval_policy(execution_plan, claims=inp.claims)
+            execution_plan = orchestrator.build_plan(
+                inp.claims, budget_class=budget_class
+            )
+            execution_plan = apply_search_policy_to_plan(
+                execution_plan, profile=profile
+            )
+            execution_plan = apply_claim_retrieval_policy(
+                execution_plan, claims=inp.claims
+            )
 
             locale_config = getattr(getattr(config, "runtime", None), "locale", None)
             default_primary = getattr(locale_config, "default_primary_locale", inp.lang)
-            default_fallbacks = getattr(locale_config, "default_fallback_locales", ["en"])
+            default_fallbacks = getattr(
+                locale_config, "default_fallback_locales", ["en"]
+            )
             max_fallbacks = getattr(locale_config, "max_fallbacks", 0)
 
             locale_decisions = {}
@@ -215,7 +227,9 @@ async def run_search_flow(
                     profile,
                     default_primary_locale=default_primary,
                     default_fallback_locales=list(default_fallbacks or []),
-                    max_fallbacks=int(max_fallbacks) if max_fallbacks is not None else 0,
+                    max_fallbacks=int(max_fallbacks)
+                    if max_fallbacks is not None
+                    else 0,
                 )
                 locale_decisions[claim_id] = decision
                 Trace.event(
@@ -277,23 +291,39 @@ async def run_search_flow(
             for claim_id, sources in phase_evidence.items():
                 decision = locale_decisions.get(claim_id)
                 if decision:
-                    phases_completed = runner.execution_state.get_or_create(claim_id).phases_completed
+                    phases_completed = runner.execution_state.get_or_create(
+                        claim_id
+                    ).phases_completed
                     used_locales = []
                     for phase_id in phases_completed:
                         phase = next(
-                            (p for p in execution_plan.get_phases(claim_id) if p.phase_id == phase_id),
+                            (
+                                p
+                                for p in execution_plan.get_phases(claim_id)
+                                if p.phase_id == phase_id
+                            ),
                             None,
                         )
                         if phase and phase.locale and phase.locale not in used_locales:
                             used_locales.append(phase.locale)
-                    decision.used_locales = used_locales or decision.used_locales or [decision.primary_locale]
-                    fallback_used = any(loc in decision.fallback_locales for loc in used_locales)
+                    decision.used_locales = (
+                        used_locales
+                        or decision.used_locales
+                        or [decision.primary_locale]
+                    )
+                    fallback_used = any(
+                        loc in decision.fallback_locales for loc in used_locales
+                    )
                     decision.sufficiency_triggered = fallback_used
                     if fallback_used:
                         if "fallback_used" not in decision.reason_codes:
                             decision.reason_codes.append("fallback_used")
                     else:
-                        if decision.fallback_locales and "fallback_skipped_sufficient" not in decision.reason_codes:
+                        if (
+                            decision.fallback_locales
+                            and "fallback_skipped_sufficient"
+                            not in decision.reason_codes
+                        ):
                             decision.reason_codes.append("fallback_skipped_sufficient")
 
                 for src in canonicalize_sources(sources):
@@ -384,7 +414,9 @@ async def run_search_flow(
         primary_query = inp.search_queries[0] if inp.search_queries else ""
         has_results = False
 
-        if primary_query and can_add_search(inp.gpt_model, inp.search_type, inp.max_cost):
+        if primary_query and can_add_search(
+            inp.gpt_model, inp.search_type, inp.max_cost
+        ):
             current_topic = tavily_topic
 
             for attempt in range(2):

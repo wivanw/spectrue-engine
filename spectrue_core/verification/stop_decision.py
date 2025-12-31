@@ -11,8 +11,6 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-
-
 @dataclass(frozen=True)
 class EVStopParams:
     """
@@ -100,6 +98,7 @@ class StopDecisionResult:
 
     Used for structured trace output.
     """
+
     should_stop: bool
     reason: str
     entropy: float
@@ -165,4 +164,3 @@ def evaluate_stop_decision(
         budget_remaining=budget_remaining,
         quality_signal=quality_signal,
     )
-
