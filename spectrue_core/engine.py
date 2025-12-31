@@ -10,7 +10,6 @@ from datetime import datetime
 
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.verification.verifier import FactVerifier
-from spectrue_core.verification.costs import MODEL_COSTS
 from spectrue_core.utils.trace import Trace
 from spectrue_core.billing.cost_ledger import CostLedger
 from spectrue_core.billing.metering import TavilyMeter
@@ -94,7 +93,6 @@ class SpectrueEngine:
         
         try:
             model = gpt_model or self.config.openai_model
-            per_claim_model_cost = int(MODEL_COSTS.get(model, 20) or 0)
             
             # Detect content language
             detected_lang, detected_prob = detect_content_language(text, fallback=lang)

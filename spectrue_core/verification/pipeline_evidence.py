@@ -564,7 +564,6 @@ async def run_evidence_flow(
             pack_ref = cv_data["pack"]
             explainability = cv_data["explainability"]
             
-            agg = None
             if has_direct_evidence:
                 Trace.event(
                     "verdict.override",
