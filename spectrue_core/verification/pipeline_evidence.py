@@ -469,6 +469,23 @@ async def run_evidence_flow(
     # This prevents multi-claim batch leakage (c1/c2 mentions) and cross-language mixing.
     # NOTE: pipeline profile is passed via inp.pipeline by ValidationPipeline.
     pipeline_profile = (inp.pipeline or "normal")
+    
+    # Language consistency validation (Phase 4 invariant)
+    if claims and inp.content_lang:
+        from spectrue_core.utils.language_validation import validate_claims_language_consistency
+        lang_valid, lang_mismatches = validate_claims_language_consistency(
+            claims,
+            inp.content_lang,
+            pipeline_mode=pipeline_profile,
+            min_confidence=0.7,
+        )
+        if not lang_valid and pipeline_profile == "normal":
+            # In normal mode, language mismatch is a violation
+            raise RuntimeError(
+                f"Language mismatch in normal pipeline: expected={inp.content_lang}, "
+                f"mismatches={lang_mismatches}"
+            )
+    
     if pipeline_profile == "normal" and claims:
         if anchor_claim_id:
             claims = [
