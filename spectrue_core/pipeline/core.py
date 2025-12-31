@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from spectrue_core.pipeline.mode import PipelineMode
-from spectrue_core.pipeline.errors import PipelineExecutionError
+from spectrue_core.pipeline.errors import PipelineExecutionError, PipelineViolation
 from spectrue_core.utils.trace import Trace
 
 
@@ -221,8 +221,8 @@ class Pipeline:
                         error=str(e),
                         error_type=type(e).__name__,
                     )
-                # Re-raise PipelineViolation as-is
-                if isinstance(e, (PipelineExecutionError,)):
+                # Re-raise PipelineViolation and PipelineExecutionError as-is
+                if isinstance(e, (PipelineViolation, PipelineExecutionError)):
                     raise
                 # Wrap other exceptions
                 raise PipelineExecutionError(step_name, str(e), cause=e) from e
