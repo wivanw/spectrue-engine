@@ -11,6 +11,7 @@ from spectrue_core.verification.types import SearchResponse
 from spectrue_core.verification.search_policy import (
     build_context_from_sources,
     filter_search_results,
+    rerank_search_results,
     prefer_fallback_results,
     should_fallback_news_to_general,
     SearchPolicyProfile,
@@ -368,11 +369,21 @@ class SearchManager:
             return ""
 
     def _filter_search_results(self, results: list[dict], intent: str) -> list[dict]:
-        # Back-compat: older tests and callers reference this helper on SearchManager.
-        # `intent` is currently unused (policy is score + extension based).
-        min_relevance_score = 0.15
+        # Use reranking if policy_profile is available, otherwise fall back to filter
         if self.policy_profile:
-            min_relevance_score = self.policy_profile.quality_thresholds.min_relevance_score
+            rerank_lambda = self.policy_profile.quality_thresholds.rerank_lambda
+            # Rerank returns all results sorted by combined score
+            # Apply top_k based on max_results from profile
+            top_k = self.policy_profile.max_results or None
+            return rerank_search_results(
+                results,
+                rerank_lambda=rerank_lambda,
+                top_k=top_k,
+                skip_extensions=SKIP_EXTENSIONS,
+            )
+        
+        # Legacy fallback: hard filter by min_relevance
+        min_relevance_score = 0.15
         return filter_search_results(
             results,
             min_relevance_score=min_relevance_score,

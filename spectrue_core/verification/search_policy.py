@@ -17,12 +17,14 @@ class QualityThresholds:
     min_relevance_score: float = 0.15
     min_coverage: float = 0.5
     min_diversity: float = 0.0
+    rerank_lambda: float = 0.7  # Weight for provider_score in reranking (1-λ for similarity)
 
     def to_dict(self) -> dict[str, float]:
         return {
             "min_relevance_score": self.min_relevance_score,
             "min_coverage": self.min_coverage,
             "min_diversity": self.min_diversity,
+            "rerank_lambda": self.rerank_lambda,
         }
 
 
@@ -275,12 +277,92 @@ def resolve_stance_pass_mode(profile_name: str) -> str:
     return "two_pass" if normalized == "deep" else "single"
 
 
+def rerank_search_results(
+    results: list[dict],
+    *,
+    rerank_lambda: float = 0.7,
+    top_k: int | None = None,
+    skip_extensions: tuple[str, ...] = (".txt", ".xml", ".zip"),
+) -> list[dict]:
+    """
+    Rerank search results using combined score instead of hard filtering.
+    
+    Formula: score = λ · provider_score + (1-λ) · relevance_score
+    
+    This replaces hard threshold filtering which could discard valid results.
+    Results are sorted by combined score and optionally limited to top_k.
+    
+    Args:
+        results: List of search result dicts with 'score' and 'relevance_score'
+        rerank_lambda: Weight for provider score (default 0.7)
+        top_k: If set, return only top K results
+        skip_extensions: File extensions to always skip
+        
+    Returns:
+        Reranked list of results (no hard filtering, only sorting)
+    """
+    from spectrue_core.utils.trace import Trace
+    
+    scored: list[tuple[float, dict]] = []
+    
+    for r in (results or []):
+        # Skip problematic file types
+        url_str = r.get("link", "") or r.get("url", "")
+        if isinstance(url_str, str) and url_str.lower().endswith(skip_extensions):
+            continue
+        
+        # Get scores with defaults
+        provider_score = r.get("score")
+        if not isinstance(provider_score, (int, float)):
+            provider_score = 0.5
+        provider_score = max(0.0, min(1.0, float(provider_score)))
+        
+        relevance_score = r.get("relevance_score")
+        if not isinstance(relevance_score, (int, float)):
+            relevance_score = provider_score  # Fallback to provider score
+        relevance_score = max(0.0, min(1.0, float(relevance_score)))
+        
+        # Combined score: λ · provider + (1-λ) · relevance
+        combined = rerank_lambda * provider_score + (1 - rerank_lambda) * relevance_score
+        
+        # Store for sorting
+        r["_rerank_score"] = combined
+        scored.append((combined, r))
+    
+    # Sort by combined score descending
+    scored.sort(key=lambda x: x[0], reverse=True)
+    
+    # Apply top_k limit if set
+    if top_k is not None and top_k > 0:
+        scored = scored[:top_k]
+    
+    out = [r for _, r in scored]
+    
+    Trace.event(
+        "search.rerank",
+        {
+            "input_count": len(results or []),
+            "output_count": len(out),
+            "rerank_lambda": rerank_lambda,
+            "top_k": top_k,
+            "top_scores": [r.get("_rerank_score") for r in out[:3]] if out else [],
+        },
+    )
+    
+    return out
+
+
 def filter_search_results(
     results: list[dict],
     *,
     min_relevance_score: float = 0.15,
     skip_extensions: tuple[str, ...] = (".txt", ".xml", ".zip"),
 ) -> list[dict]:
+    """
+    Legacy filter function - kept for backward compatibility.
+    
+    For new code, prefer rerank_search_results() which doesn't discard results.
+    """
     out: list[dict] = []
     for r in (results or []):
         score = r.get("relevance_score")
