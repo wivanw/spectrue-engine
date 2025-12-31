@@ -18,15 +18,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
 
-if TYPE_CHECKING:
-    from spectrue_core.billing.cost_ledger import CostLedger
-    from spectrue_core.billing.metering import TavilyMeter, LLMMeter
 
 logger = logging.getLogger(__name__)
 

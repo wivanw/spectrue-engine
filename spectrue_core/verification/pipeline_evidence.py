@@ -754,15 +754,18 @@ async def run_evidence_flow(
         # This fixes the UI showing cumulative sources and identical RGBA for all claims
         # RGBA order: [R=danger, G=verified, B=style, A=explainability]
         global_r = float(result.get("danger_score", -1.0))
-        if global_r < 0: global_r = 0.0
+        if global_r < 0:
+            global_r = 0.0
         
         global_b = float(result.get("style_score", -1.0))
         if global_b < 0:
             global_b = float(result.get("context_score", -1.0))
-        if global_b < 0: global_b = 1.0 # Default B=1.0 if missing?
+        if global_b < 0:
+            global_b = 1.0  # Default B=1.0 if missing?
         
         global_a = float(result.get("explainability_score", -1.0))
-        if global_a < 0: global_a = 1.0 # Default A=1.0 if missing?
+        if global_a < 0:
+            global_a = 1.0  # Default A=1.0 if missing?
         
         all_scored = pack.get("scored_sources") or []
         all_context = pack.get("context_sources") or []
@@ -778,7 +781,8 @@ async def run_evidence_flow(
             claim_sources = []
             seen_urls = set()
             for s in all_scored + all_context:
-                if not isinstance(s, dict): continue
+                if not isinstance(s, dict):
+                    continue
                 scid = _norm_id(s.get("claim_id"))
                 if scid == cid:
                     url = s.get("url")

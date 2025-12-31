@@ -25,7 +25,6 @@ import logging
 from typing import Any
 
 from spectrue_core.pipeline import (
-    Pipeline,
     PipelineContext,
     PipelineFactory,
     PipelineViolation,

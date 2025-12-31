@@ -13,12 +13,10 @@ Tests:
 
 import pytest
 from spectrue_core.pipeline import (
-    PipelineMode,
     NORMAL_MODE,
     DEEP_MODE,
     get_mode,
     PipelineContext,
-    Pipeline,
     PipelineViolation,
 )
 from spectrue_core.pipeline.steps import (

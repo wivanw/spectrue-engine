@@ -32,7 +32,6 @@ from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext, Step
 from spectrue_core.pipeline.mode import PipelineMode
-from spectrue_core.pipeline.errors import PipelineExecutionError, PipelineViolation
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)

@@ -2,8 +2,6 @@
 Unit tests for Bayesian Stance Posterior Estimator.
 """
 
-import pytest
-
 from spectrue_core.verification.stance_posterior import (
     StanceFeatures,
     StancePosterior,
@@ -12,7 +10,6 @@ from spectrue_core.verification.stance_posterior import (
     source_prior_from_tier,
     STANCE_SUPPORT,
     STANCE_REFUTE,
-    STANCE_NEUTRAL,
 )
 
 

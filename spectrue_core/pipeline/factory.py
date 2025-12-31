@@ -18,10 +18,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline.dag import DAGPipeline
 
 from spectrue_core.pipeline.core import Pipeline, Step
-from spectrue_core.pipeline.mode import PipelineMode, NORMAL_MODE, DEEP_MODE, get_mode
+from spectrue_core.pipeline.mode import PipelineMode, get_mode
 from spectrue_core.pipeline.steps.invariants import (
     AssertNonEmptyClaimsStep,
     AssertSingleClaimStep,
@@ -176,18 +179,7 @@ class PipelineFactory:
         Returns:
             DAGPipeline configured with decomposed steps
         """
-        from spectrue_core.pipeline.dag import DAGPipeline, StepNode
-        from spectrue_core.pipeline.steps.decomposed import (
-            MeteringSetupStep,
-            PrepareInputStep,
-            ExtractClaimsStep,
-            ClaimGraphStep,
-            TargetSelectionStep,
-            SearchFlowStep,
-            EvidenceFlowStep,
-            OracleFlowStep,
-            ResultAssemblyStep,
-        )
+        from spectrue_core.pipeline.dag import DAGPipeline
 
         mode = get_mode(mode_name)
 

@@ -75,9 +75,6 @@ from spectrue_core.verification.target_selection import (
 from spectrue_core.verification.costs import summarize_reason_codes, map_stage_costs_to_phases
 import logging
 import asyncio
-import time
-import math
-from typing import Any
 from dataclasses import dataclass
 import hashlib
 

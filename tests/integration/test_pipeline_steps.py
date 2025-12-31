@@ -12,12 +12,10 @@ Tests the full pipeline flow including:
 import pytest
 from spectrue_core.pipeline import (
     validate_claims_for_mode,
-    execute_pipeline,
     PipelineViolation,
     PipelineFactory,
     PipelineContext,
     NORMAL_MODE,
-    DEEP_MODE,
 )
 
 

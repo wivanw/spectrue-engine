@@ -16,17 +16,14 @@ Migration Strategy:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 
 if TYPE_CHECKING:
-    from spectrue_core.verification.phase_runner import PhaseRunner
     from spectrue_core.verification.execution_plan import ExecutionPlan
-    from spectrue_core.verification.search_mgr import SearchManager
-    from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 
 
 logger = logging.getLogger(__name__)
@@ -60,7 +57,6 @@ class LegacyPhaseRunnerStep:
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Execute PhaseRunner and collect sources."""
         from spectrue_core.verification.phase_runner import PhaseRunner
-        from spectrue_core.verification.execution_plan import ExecutionPlan, Phase, BudgetClass
         from spectrue_core.utils.trace import Trace
 
         claims = ctx.claims
@@ -194,7 +190,6 @@ class LegacyScoringStep:
         """Execute scoring and compute verdict."""
         from spectrue_core.utils.trace import Trace
         from spectrue_core.verification.evidence import build_evidence_pack
-        from spectrue_core.verification.scoring_aggregation import aggregate_claim_verdict
 
         claims = ctx.claims
         sources = ctx.sources

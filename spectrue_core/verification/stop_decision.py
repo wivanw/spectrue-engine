@@ -1,5 +1,8 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline_builder.spec import PipelineProfile
 
 
 @dataclass(frozen=True)
@@ -99,9 +102,6 @@ def ev_stop_params_from_pipeline_profile(
     Returns:
         EVStopParams if stop policy is enabled, None otherwise
     """
-    from typing import TYPE_CHECKING
-    if TYPE_CHECKING:
-        from spectrue_core.pipeline_builder.spec import PipelineProfile
 
     stop_policy = getattr(profile, "stop_policy", None)
     if stop_policy is None or not getattr(stop_policy, "enabled", False):
