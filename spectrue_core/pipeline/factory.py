@@ -154,3 +154,209 @@ class PipelineFactory:
 
         mode_name = mode_mapping.get(profile_name.lower(), "normal")
         return self.build(mode_name)
+
+    def build_dag(
+        self,
+        mode_name: str,
+        *,
+        config: Any,
+        pipeline: Any,  # ValidationPipeline
+    ) -> "DAGPipeline":
+        """
+        Build a DAGPipeline with decomposed steps.
+
+        This is the M115 replacement for build() that uses native Steps
+        instead of legacy wrappers.
+
+        Args:
+            mode_name: "normal", "general", or "deep"
+            config: SpectrueConfig
+            pipeline: ValidationPipeline (for _prepare_input access)
+
+        Returns:
+            DAGPipeline configured with decomposed steps
+        """
+        from spectrue_core.pipeline.dag import DAGPipeline, StepNode
+        from spectrue_core.pipeline.steps.decomposed import (
+            MeteringSetupStep,
+            PrepareInputStep,
+            ExtractClaimsStep,
+            ClaimGraphStep,
+            TargetSelectionStep,
+            SearchFlowStep,
+            EvidenceFlowStep,
+            OracleFlowStep,
+            ResultAssemblyStep,
+        )
+
+        mode = get_mode(mode_name)
+
+        if mode.name == "normal":
+            nodes = self._build_normal_dag_nodes(config, pipeline)
+        else:
+            nodes = self._build_deep_dag_nodes(config, pipeline)
+
+        logger.debug(
+            "[PipelineFactory] Built DAG pipeline with %d nodes: %s",
+            len(nodes),
+            [n.name for n in nodes],
+        )
+
+        return DAGPipeline(mode=mode, nodes=nodes)
+
+    def _build_normal_dag_nodes(self, config: Any, pipeline: Any) -> list:
+        """Build DAG nodes for normal mode."""
+        from spectrue_core.pipeline.dag import StepNode
+        from spectrue_core.pipeline.steps.decomposed import (
+            MeteringSetupStep,
+            PrepareInputStep,
+            ExtractClaimsStep,
+            ClaimGraphStep,
+            TargetSelectionStep,
+            SearchFlowStep,
+            EvidenceFlowStep,
+            OracleFlowStep,
+            ResultAssemblyStep,
+        )
+
+        return [
+            # Infrastructure
+            StepNode(step=MeteringSetupStep(config=config)),
+
+            # Invariants
+            StepNode(
+                step=AssertNonEmptyClaimsStep(),
+                depends_on=["metering_setup"],
+            ),
+
+            # Input preparation
+            StepNode(
+                step=PrepareInputStep(pipeline=pipeline),
+                depends_on=["assert_non_empty_claims"],
+            ),
+
+            # Claim extraction
+            StepNode(
+                step=ExtractClaimsStep(agent=self.agent),
+                depends_on=["prepare_input"],
+            ),
+
+            # Normal mode: single claim check
+            StepNode(
+                step=AssertSingleClaimStep(),
+                depends_on=["extract_claims"],
+            ),
+
+            # Oracle fast path (optional)
+            StepNode(
+                step=OracleFlowStep(pipeline=pipeline),
+                depends_on=["assert_single_claim"],
+                optional=True,
+            ),
+
+            # Claim graph (optional, parallel with oracle)
+            StepNode(
+                step=ClaimGraphStep(config=config),
+                depends_on=["extract_claims"],
+                optional=True,
+            ),
+
+            # Target selection
+            StepNode(
+                step=TargetSelectionStep(),
+                depends_on=["claim_graph", "oracle_flow"],
+            ),
+
+            # Search retrieval
+            StepNode(
+                step=SearchFlowStep(
+                    config=config,
+                    search_mgr=self.search_mgr,
+                    agent=self.agent,
+                ),
+                depends_on=["target_selection"],
+            ),
+
+            # Evidence scoring
+            StepNode(
+                step=EvidenceFlowStep(agent=self.agent, search_mgr=self.search_mgr),
+                depends_on=["search_flow"],
+            ),
+
+            # Final assembly
+            StepNode(
+                step=ResultAssemblyStep(),
+                depends_on=["evidence_flow"],
+            ),
+        ]
+
+    def _build_deep_dag_nodes(self, config: Any, pipeline: Any) -> list:
+        """Build DAG nodes for deep mode."""
+        from spectrue_core.pipeline.dag import StepNode
+        from spectrue_core.pipeline.steps.decomposed import (
+            MeteringSetupStep,
+            PrepareInputStep,
+            ExtractClaimsStep,
+            ClaimGraphStep,
+            TargetSelectionStep,
+            SearchFlowStep,
+            EvidenceFlowStep,
+            ResultAssemblyStep,
+        )
+
+        return [
+            # Infrastructure
+            StepNode(step=MeteringSetupStep(config=config)),
+
+            # Minimal invariants
+            StepNode(
+                step=AssertNonEmptyClaimsStep(),
+                depends_on=["metering_setup"],
+            ),
+
+            # Input preparation
+            StepNode(
+                step=PrepareInputStep(pipeline=pipeline),
+                depends_on=["assert_non_empty_claims"],
+            ),
+
+            # Claim extraction
+            StepNode(
+                step=ExtractClaimsStep(agent=self.agent),
+                depends_on=["prepare_input"],
+            ),
+
+            # Claim graph (for clustering)
+            StepNode(
+                step=ClaimGraphStep(config=config),
+                depends_on=["extract_claims"],
+            ),
+
+            # Target selection (more targets for deep)
+            StepNode(
+                step=TargetSelectionStep(),
+                depends_on=["claim_graph"],
+            ),
+
+            # Search retrieval (advanced depth)
+            StepNode(
+                step=SearchFlowStep(
+                    config=config,
+                    search_mgr=self.search_mgr,
+                    agent=self.agent,
+                ),
+                depends_on=["target_selection"],
+            ),
+
+            # Evidence scoring (batch)
+            StepNode(
+                step=EvidenceFlowStep(agent=self.agent, search_mgr=self.search_mgr),
+                depends_on=["search_flow"],
+            ),
+
+            # Final assembly
+            StepNode(
+                step=ResultAssemblyStep(),
+                depends_on=["evidence_flow"],
+            ),
+        ]
