@@ -145,9 +145,10 @@ def _extract_search_query(claim) -> str:
             return first.get("text", "")[:100]
         return str(first)[:100]
     
-    # Fallback to claim text
-    if hasattr(claim, "normalized_text"):
-        return (claim.normalized_text or claim.text or "")[:100]
+    # Fallback to claim text (prefer original text over normalized)
+    # INVARIANT: search queries should use original language, not normalized
+    if hasattr(claim, "text"):
+        return (claim.text or "")[:100]
     if isinstance(claim, dict):
         return claim.get("text", "")[:100]
     return ""
