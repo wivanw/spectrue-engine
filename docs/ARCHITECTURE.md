@@ -30,7 +30,7 @@ Each claim is treated as an independent verification unit:
 - **Independent phases**: Each claim has its own execution plan
 - **Early exit**: Stop searching when evidence is sufficient
 
-### Terminology & Contracts (M80)
+### Terminology & Contracts
 
 Use these terms consistently in code, traces, and documentation:
 
@@ -101,11 +101,11 @@ See [Resource Accounting](./RESOURCE_ACCOUNTING.md) for detailed semantics.
           ▼                   ▼
 ┌─────────────────┐ ┌─────────────────┐
 │ ClaimOrchestrator│ │   PhaseRunner   │
-│ (M80)           │ │   (M80)         │
+│                 │ │                 │
 └─────────────────┘ └─────────────────┘
 ```
 
-### Step-Based Pipeline (M114-M115)
+### Step-Based Pipeline
 
 A new composable pipeline architecture that decomposes `ValidationPipeline.execute()` into discrete Steps with DAG execution:
 
@@ -146,7 +146,7 @@ A new composable pipeline architecture that decomposes `ValidationPipeline.execu
 
 **Migration**: Enable via `use_step_pipeline: true` feature flag.
 
-### Bayesian Claim Posterior Model (M116)
+### Bayesian Claim Posterior Model
 
 Unified scoring model that replaces double-counting patterns in verdict calculation.
 
@@ -181,7 +181,7 @@ Where:
 - Evidence counted exactly once
 - All signals in log-odds space (additive updates)
 
-### Deep Mode Efficiency (M116)
+### Deep Mode Efficiency
 
 Optimized deep mode from N+1 pipeline runs to 2:
 
@@ -228,7 +228,7 @@ focused submodules:
 - `spectrue_core/verification/pipeline_search.py`
 - `spectrue_core/verification/pipeline_evidence.py`
 
-### ClaimGraph (M72) — split modules (M88)
+### ClaimGraph
 
 The ClaimGraph module is intentionally split so the builder reads as a pipeline:
 - `spectrue_core/graph/candidates.py`: B-stage candidate generation (embeddings + adjacency).
@@ -236,7 +236,7 @@ The ClaimGraph module is intentionally split so the builder reads as a pipeline:
 - `spectrue_core/graph/ranking.py`: ranking (PageRank).
 - `spectrue_core/graph/claim_graph.py`: orchestrates the steps and owns caches.
 
-### ClaimOrchestrator (M80)
+### ClaimOrchestrator
 
 Builds `ExecutionPlan` for each claim based on:
 - `verification_target`: What to verify
@@ -247,7 +247,7 @@ Builds `ExecutionPlan` for each claim based on:
 
 **Location**: `spectrue_core/verification/orchestrator.py`
 
-### PhaseRunner (M80)
+### PhaseRunner
 
 Executes progressive widening:
 1. Run Phase A for all claims (parallel)
@@ -313,7 +313,7 @@ Clean Text → ClaimExtractionSkill (LLM)
              - ClaimMetadata
 ```
 
-### Phase 3: Orchestration (M80)
+### Phase 3: Orchestration
 
 ```
 Claims → ClaimOrchestrator
@@ -373,7 +373,7 @@ spectrue_core/
 │   ├── skills/
 │   │   ├── base_skill.py     # Skill base class
 │   │   ├── claims.py         # Claim extraction
-│   │   ├── claim_metadata_parser.py  # M80: Claim metadata parsing helpers
+│   │   ├── claim_metadata_parser.py  # Claim metadata parsing helpers
 │   │   ├── clustering.py     # Source-claim mapping
 │   │   ├── scoring.py        # RGBA scoring
 │   │   ├── relevance.py      # Semantic gating
@@ -382,14 +382,14 @@ spectrue_core/
 │   └── locales/              # Prompt templates
 │
 ├── schema/
-│   ├── claim_metadata.py     # M80: ClaimMetadata types
+│   ├── claim_metadata.py     # ClaimMetadata types
 │   ├── claims.py             # ClaimUnit, Assertion
 │   ├── evidence.py           # EvidenceItem
 │   ├── serialization.py      # Canonical schema serialization helpers
 │   ├── verdict.py            # StructuredVerdict
 │   └── verdict_contract.py   # Public verdict schema
 │
-├── pipeline/                  # M114-M115: Step-based architecture
+├── pipeline/                  # Step-based architecture
 │   ├── __init__.py           # Module exports
 │   ├── mode.py               # PipelineMode, NORMAL_MODE, DEEP_MODE
 │   ├── core.py               # Step Protocol, Pipeline, PipelineContext
@@ -411,19 +411,19 @@ spectrue_core/
 │   ├── pipeline_claim_graph.py # ClaimGraph gating + enrichment
 │   ├── pipeline_search.py    # Search orchestration
 │   ├── pipeline_evidence.py  # Evidence pack assembly + scoring glue
-│   ├── orchestrator.py       # M80: ClaimOrchestrator
-│   ├── execution_plan.py     # M80: Phase, ExecutionPlan
+│   ├── orchestrator.py       # ClaimOrchestrator
+│   ├── execution_plan.py     # Phase, ExecutionPlan
 │   ├── types.py              # Canonical types (SearchResponse, Source)
 │   ├── source_utils.py       # Source normalization helpers
-│   ├── phase_runner.py       # M80: PhaseRunner
-│   ├── sufficiency.py        # M80: Evidence sufficiency
-│   ├── rgba_aggregation.py   # M80: Weighted aggregation
+│   ├── phase_runner.py       # PhaseRunner
+│   ├── sufficiency.py        # Evidence sufficiency
+│   ├── rgba_aggregation.py   # Weighted aggregation
 │   ├── evidence.py           # EvidencePack builder
 │   ├── evidence_pack.py      # TypedDicts
 │   └── search_mgr.py         # Search orchestration
 │
 ├── graph/
-│   ├── claim_graph.py        # M72: ClaimGraph builder
+│   ├── claim_graph.py        # ClaimGraph builder
 │   ├── quality_gates.py      # Graph quality gates (extracted helpers)
 │   ├── embedding_util.py     # Embedding client
 │   └── types.py              # Graph data types
@@ -510,8 +510,8 @@ def my_aggregate(scores: list[ClaimScore]) -> dict:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `FEATURE_CLAIM_ORCHESTRATION` | `false` | Enable M80 orchestration |
-| `CLAIM_GRAPH_ENABLED` | `true` | Enable ClaimGraph (M72) |
+| `FEATURE_CLAIM_ORCHESTRATION` | `false` | Enable orchestration |
+| `CLAIM_GRAPH_ENABLED` | `true` | Enable ClaimGraph |
 | `TRACE_SAFE_PAYLOADS` | `true` | Sanitize trace logs |
 
 Configure via environment or `EngineRuntimeConfig`:

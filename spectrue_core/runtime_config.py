@@ -97,9 +97,9 @@ class EngineFeatureFlags:
     semantic_gating_v2: bool = False
     claim_sanitize: bool = True
     log_redaction: bool = False
-    # M75
+
     trace_safe_payloads: bool = True
-    # M76
+
     clean_md_output: bool = True
     # Claim-Centric Orchestration (progressive widening, metadata-driven routing)
     claim_orchestration: bool = True
@@ -118,7 +118,7 @@ class EngineFeatureFlags:
 class EngineDebugFlags:
     engine_debug: bool = False
     log_prompts: bool = False
-    # M75
+
     trace_max_head_chars: int = 120
     trace_max_inline_chars: int = 600
 
@@ -383,7 +383,7 @@ class ClaimGraphConfig:
     # Layer 3: Tension Signal
     tension_signal_enabled: bool = True
     
-    # M74
+
     topic_aware: bool = False
     tension_threshold: float = 0.5            # min in_contradict_weight for "high tension"
     tension_boost: float = 0.15               # importance boost for high-tension claims
@@ -441,9 +441,9 @@ class EngineRuntimeConfig:
             semantic_gating_v2=_parse_bool(os.getenv("FEATURE_SEMANTIC_GATING_V2"), default=False),
             claim_sanitize=_parse_bool(os.getenv("FEATURE_CLAIM_SANITIZE"), default=True),
             log_redaction=_parse_bool(os.getenv("FEATURE_LOG_REDACTION"), default=False),
-            # M75
+        
             trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=True),
-            # M76
+        
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
             # Claim Orchestration
             claim_orchestration=_parse_bool(os.getenv("FEATURE_CLAIM_ORCHESTRATION"), default=True),
@@ -699,7 +699,7 @@ class EngineRuntimeConfig:
                 "lambda_rank": float(self.claim_graph.lambda_rank),
                 "mu_redundancy": float(self.claim_graph.mu_redundancy),
                 "trace_top_k": int(self.claim_graph.trace_top_k),
-                # M73
+
                 "structural_prioritization_enabled": bool(self.claim_graph.structural_prioritization_enabled),
                 "tension_signal_enabled": bool(self.claim_graph.tension_signal_enabled),
                 "evidence_need_routing_enabled": bool(self.claim_graph.evidence_need_routing_enabled),

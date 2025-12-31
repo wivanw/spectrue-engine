@@ -41,7 +41,7 @@ class EvidenceStance(str, Enum):
     """Evidence is not related to this assertion."""
 
     CONTEXT = "CONTEXT"
-    """Additional context preserved for data retention (M77)."""
+    """Additional context preserved for data retention."""
 
 
 class TimelinessStatus(str, Enum):

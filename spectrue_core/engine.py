@@ -266,7 +266,7 @@ class SpectrueEngine:
                 progress_callback=progress_callback,
                 content_lang=content_lang,
                 max_cost=max_credits,
-                pipeline_profile="normal",  # M113: Use normal profile for general mode
+                pipeline_profile="normal",  # Use normal profile for general mode
             )
             result.pop("_internal", None)
             result["detected_lang"] = detected_lang

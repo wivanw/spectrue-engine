@@ -1,5 +1,5 @@
 """
-M104/FR-007: RGBA as Independent Probabilistic Belief Dimensions.
+RGBA as Independent Probabilistic Belief Dimensions.
 
 This module provides RGBABeliefState - a dataclass representing independent
 Bayesian beliefs for each RGBA dimension (Danger, Veracity, Honesty, Explainability).
