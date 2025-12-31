@@ -282,6 +282,19 @@ class ExecutionPlan:
     
     budget_class: BudgetClass = BudgetClass.STANDARD
     """Budget classification used to build this plan."""
+
+    # M113: Pipeline profile metadata
+    profile_name: str | None = None
+    """Name of the pipeline profile used to build this plan (M113)."""
+
+    profile_version: str | None = None
+    """Version of the pipeline profile (M113)."""
+
+    overrides: dict[str, Any] | None = None
+    """Per-run overrides applied to the profile (M113)."""
+
+    max_credits: int | None = None
+    """Maximum credits for this run (M113)."""
     
     def get_phases(self, claim_id: str) -> list[Phase]:
         """Get phases for a claim. Returns empty list if not found."""
@@ -321,7 +334,7 @@ class ExecutionPlan:
     
     def to_dict(self) -> dict[str, Any]:
         """Serialize for tracing/logging."""
-        return {
+        result = {
             "budget_class": self.budget_class.value,
             "total_phases": self.total_phases,
             "max_depth": self.max_depth,
@@ -330,10 +343,26 @@ class ExecutionPlan:
                 for claim_id, phases in self.claim_phases.items()
             },
         }
+        # M113: Include profile metadata if present
+        if self.profile_name:
+            result["profile_name"] = self.profile_name
+        if self.profile_version:
+            result["profile_version"] = self.profile_version
+        if self.overrides:
+            result["overrides"] = self.overrides
+        if self.max_credits is not None:
+            result["max_credits"] = self.max_credits
+        return result
     
     def summary(self) -> str:
         """Human-readable summary."""
-        lines = [f"ExecutionPlan (budget={self.budget_class.value}):"]
+        header = f"ExecutionPlan (budget={self.budget_class.value}"
+        if self.profile_name:
+            header += f", profile={self.profile_name}"
+        if self.max_credits is not None:
+            header += f", max_credits={self.max_credits}"
+        header += "):"
+        lines = [header]
         for claim_id, phases in self.claim_phases.items():
             phase_ids = [p.phase_id for p in phases]
             lines.append(f"  {claim_id}: {' → '.join(phase_ids)}")

@@ -19,6 +19,7 @@ from spectrue_core.utils.trace import Trace
 
 if TYPE_CHECKING:
     from openai import OpenAI
+    from spectrue_core.billing.metering import LLMMeter
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,8 @@ class EmbedService:
     _api_key: str | None = None
     _available: bool | None = None
     _cache: dict[str, list[float]] = {}
+    _meter: "LLMMeter | None" = None
+    _meter_stage: str = "embed"
 
     @classmethod
     def configure(
@@ -68,6 +71,8 @@ class EmbedService:
         *,
         openai_api_key: str | None = None,
         client: "OpenAI | None" = None,
+        meter: "LLMMeter | None" = None,
+        meter_stage: str | None = None,
     ) -> None:
         """Configure the OpenAI client and API key (optional)."""
         if openai_api_key is not None:
@@ -79,6 +84,9 @@ class EmbedService:
         if client is not None:
             cls._client = client
         cls._available = None
+        cls._meter = meter
+        if meter_stage is not None:
+            cls._meter_stage = str(meter_stage)
 
     @classmethod
     def _resolve_api_key(cls) -> str | None:
@@ -192,6 +200,31 @@ class EmbedService:
                         model=EMBEDDING_MODEL,
                         input=batch_texts,
                     )
+                    # Meter embeddings cost if available.
+                    try:
+                        usage = getattr(response, "usage", None)
+                        usage_dict = None
+                        if isinstance(usage, dict):
+                            usage_dict = usage
+                        elif usage is not None:
+                            usage_dict = {
+                                "total_tokens": getattr(usage, "total_tokens", None),
+                                "input_tokens": getattr(usage, "prompt_tokens", None),
+                            }
+                        if cls._meter is not None:
+                            cls._meter.record_embedding(
+                                model=EMBEDDING_MODEL,
+                                stage=cls._meter_stage,
+                                usage=usage_dict,
+                                input_texts=batch_texts,
+                                meta={
+                                    "batch_size": len(batch_texts),
+                                    "cached": False,
+                                },
+                            )
+                    except Exception as me:
+                        logger.debug("[Embeddings] metering skipped: %s", me)
+
                     for i, embedding_data in enumerate(response.data):
                         idx = batch_indices[i]
                         embedding = _normalize(list(embedding_data.embedding))

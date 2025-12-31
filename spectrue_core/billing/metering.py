@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from decimal import Decimal
 
 from spectrue_core.billing.cost_event import CostEvent
 from spectrue_core.billing.cost_ledger import CostLedger
@@ -188,3 +189,70 @@ class LLMMeter:
         )
         self._ledger.record_event(event)
         return event
+
+    def record_embedding(
+        self,
+        *,
+        model: str,
+        stage: str | None,
+        usage: dict[str, Any] | None,
+        input_texts: list[str],
+        meta: dict[str, Any] | None = None,
+    ) -> CostEvent:
+        """Record cost for an embeddings API call.
+
+        Embeddings are treated as input-only tokens. If token usage is missing,
+        we fall back to a rough text-length token estimate.
+
+        Fail-soft: if pricing for the embedding model is missing in the policy,
+        record a zero-cost event instead of raising.
+        """
+        try:
+            price = self._get_model_price(model)
+        except Exception as e:
+            event = CostEvent(
+                stage=stage or "embed",
+                provider=self._provider,
+                cost_usd=0.0,
+                cost_credits=Decimal("0"),
+                run_id=self._ledger.run_id,
+                meta={
+                    **(meta or {}),
+                    "model": model,
+                    "missing_price": True,
+                    "error": str(e)[:120],
+                },
+            )
+            self._ledger.record_event(event)
+            return event
+
+        tokens = None
+        if isinstance(usage, dict):
+            # OpenAI embeddings typically returns total_tokens
+            tokens = usage.get("total_tokens") or usage.get("input_tokens")
+
+        if tokens is None:
+            approx = 0
+            for t in input_texts or []:
+                approx += max(1, len(t or "") // 4)
+            tokens = approx
+
+        usd_cost = self._calculator.usd_cost(price=price, input_tokens=int(tokens), output_tokens=0)
+        credits_cost = self._calculator.credits_cost(price=price, input_tokens=int(tokens), output_tokens=0)
+
+        event = CostEvent(
+            stage=stage or "embed",
+            provider=self._provider,
+            cost_usd=usd_cost,
+            cost_credits=credits_cost,
+            run_id=self._ledger.run_id,
+            meta=meta
+            or {
+                "model": model,
+                "input_tokens": int(tokens),
+                "batch_size": len(input_texts or []),
+            },
+        )
+        self._ledger.record_event(event)
+        return event
+

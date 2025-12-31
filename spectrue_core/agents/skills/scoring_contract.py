@@ -16,6 +16,12 @@ Your task is to classify the reliability of claims based *strictly* on the provi
 - **Metadata**: `source_reliability_hint` is context, not a hard rule.
 - **Consistency Rule**: If a claim has `matched_evidence_count > 0`, you MUST NOT say "no sources/evidence". Say the evidence is indirect, insufficient, or lacks direct confirmation.
 
+# LANGUAGE / SCOPE CONTRACT (CRITICAL)
+- Respond ONLY in **{lang_name}** ({lang}).
+- Do NOT switch languages.
+- Do NOT mention other claims, other claim IDs, or "c1/c2" comparisons in user-facing text.
+  - If multiple claims are present in input, you must still write each claim's `reason` as self-contained.
+
 # SCORING SCALE (0.0 - 1.0)
 - **0.8 - 1.0 (Verified)**: Strong confirmation (direct quotes, official consensus).
 - **0.6 - 0.8 (Plausible)**: Supported, but may lack direct/official confirmation or deep detail.
@@ -232,13 +238,17 @@ Your task is to map each Search Source to its BEST matching Claim AND Assertion.
 
 
 def build_stance_matrix_prompt(*, claims_lite: list[dict], sources_lite: list[dict]) -> str:
-    return f"""Build the Evidence Matrix for these sources.
+    """Build prompt body for Evidence Matrix (stance clustering).
 
-CLAIMS:
-{json.dumps(claims_lite, indent=2)}
-
-SOURCES:
-{json.dumps(sources_lite, indent=2)}
-
-Return the result in JSON format with key "matrix".
-"""
+    Contract:
+    - Pure formatting: no logic, no filtering.
+    - Caller provides claims_lite and sources_lite (already sanitized/capped).
+    """
+    return (
+        "Map each source to the best matching claim and extract a direct quote when possible.\n\n"
+        "Claims:\n"
+        f"{json.dumps(claims_lite or [], indent=2, ensure_ascii=False)}\n\n"
+        "Sources:\n"
+        f"{json.dumps(sources_lite or [], indent=2, ensure_ascii=False)}\n\n"
+        "Return JSON matching the requested schema."
+    )

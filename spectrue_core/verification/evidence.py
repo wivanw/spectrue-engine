@@ -200,6 +200,33 @@ def extract_quote_candidates(content: str, max_quotes: int = 2) -> list[str]:
             break
     return quotes
 
+def evidence_view_for_claim(pack: EvidencePack, claim_id: str) -> dict[str, list[SearchResult]]:
+    """
+    Get a view of the EvidencePack filtered for a specific claim.
+    
+    Returns:
+        dict with 'scored_sources' and 'context_sources' lists containing only
+        items relevant to the given claim_id.
+    """
+    cid = str(claim_id or "").strip().lower()
+    view: dict[str, list[SearchResult]] = {"scored_sources": [], "context_sources": []}
+    
+    if not pack:
+        return view
+        
+    scored = pack.get("scored_sources") or []
+    context = pack.get("context_sources") or []
+    
+    for s in scored:
+        if str(s.get("claim_id") or "").strip().lower() == cid:
+            view["scored_sources"].append(s)
+            
+    for s in context:
+        if str(s.get("claim_id") or "").strip().lower() == cid:
+            view["context_sources"].append(s)
+            
+    return view
+
 def build_evidence_pack(
     *,
     fact: str,

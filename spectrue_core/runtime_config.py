@@ -90,7 +90,7 @@ class EngineFeatureFlags:
     trace_enabled: bool = True
     # Optional crawler behavior: default False to avoid server-side crawling / IP reputation issues.
     fulltext_fetch: bool = False
-    
+
     # Flags
     coverage_chunking: bool = False
     topic_aware_claim_graph: bool = False
@@ -103,6 +103,11 @@ class EngineFeatureFlags:
     clean_md_output: bool = True
     # Claim-Centric Orchestration (progressive widening, metadata-driven routing)
     claim_orchestration: bool = True
+    # When enabled, the engine may "salvage" a run with missing input text by
+    # extracting claims from retrieved web snippets/titles.
+    # Default MUST be False: salvage changes the task definition and can hide
+    # upstream input failures.
+    allow_salvage_mode: bool = False
     # Embeddings for semantic matching
     embeddings_verdict_ready: bool = True  # Use embeddings in verdict_ready_for_claim
     embeddings_clustering: bool = True     # Use embeddings for claim clustering
@@ -442,6 +447,8 @@ class EngineRuntimeConfig:
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
             # Claim Orchestration
             claim_orchestration=_parse_bool(os.getenv("FEATURE_CLAIM_ORCHESTRATION"), default=True),
+            # Explicitly gated degraded mode
+            allow_salvage_mode=_parse_bool(os.getenv("FEATURE_ALLOW_SALVAGE_MODE"), default=False),
             # Embeddings
             embeddings_verdict_ready=_parse_bool(os.getenv("FEATURE_EMBEDDINGS_VERDICT_READY"), default=True),
             embeddings_clustering=_parse_bool(os.getenv("FEATURE_EMBEDDINGS_CLUSTERING"), default=True),

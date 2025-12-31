@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from spectrue_core.constants import (
     DEFAULT_FALLBACK_LOCALES,
     DEFAULT_LOCALE_MAX_FALLBACKS,
     DEFAULT_PRIMARY_LOCALE,
 )
-from spectrue_core.schema.claim_metadata import SearchLocalePlan, UsePolicy
+from spectrue_core.schema.claim_metadata import EvidenceChannel, SearchLocalePlan, UsePolicy
 from spectrue_core.schema.signals import LocaleDecision
 from spectrue_core.verification.execution_plan import BudgetClass, ExecutionPlan, Phase
 from spectrue_core.verification.search_policy import LocalePolicy, SearchPolicyProfile
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline_builder.spec import PipelineProfile
 
 
 def _resolve_locale(phase_id: str, locale_policy: LocalePolicy, current: str) -> str:
@@ -187,3 +192,76 @@ def apply_claim_retrieval_policy(plan: ExecutionPlan, *, claims: list[dict]) -> 
                 }
 
     return plan
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M113: Pipeline Profile Adapter
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def apply_pipeline_profile_to_plan(
+    plan: ExecutionPlan,
+    *,
+    pipeline_profile: "PipelineProfile",
+) -> ExecutionPlan:
+    """
+    Apply pipeline profile settings to an execution plan.
+
+    This function adapts settings from a M113 PipelineProfile to an ExecutionPlan,
+    ensuring that profile constraints are respected.
+
+    Args:
+        plan: ExecutionPlan to modify
+        pipeline_profile: PipelineProfile with settings to apply
+
+    Returns:
+        Modified ExecutionPlan with profile settings applied
+    """
+    from spectrue_core.pipeline_builder.spec import PipelineProfile
+
+    if not isinstance(pipeline_profile, PipelineProfile):
+        return plan
+
+    # Apply search depth cap
+    search_depth = pipeline_profile.search.depth
+    max_results = pipeline_profile.search.max_results
+
+    # Get allowed channels from profile
+    allowed_channels_str = set(pipeline_profile.channels.allowed)
+    blocked_channels_str = set(pipeline_profile.channels.blocked)
+
+    # Convert to EvidenceChannel
+    channel_map = {
+        "authoritative": EvidenceChannel.AUTHORITATIVE,
+        "reputable_news": EvidenceChannel.REPUTABLE_NEWS,
+        "local_media": EvidenceChannel.LOCAL_MEDIA,
+        "social": EvidenceChannel.SOCIAL,
+        "low_reliability": EvidenceChannel.LOW_RELIABILITY,
+    }
+    allowed_channels = {channel_map.get(c) for c in allowed_channels_str if c in channel_map}
+    blocked_channels = {channel_map.get(c) for c in blocked_channels_str if c in channel_map}
+    allowed_channels.discard(None)
+    blocked_channels.discard(None)
+
+    # Apply to each phase
+    for claim_id, phases in plan.claim_phases.items():
+        for phase in phases:
+            # Apply search depth
+            phase.search_depth = search_depth
+            phase.max_results = min(phase.max_results, max_results)
+            phase.is_expensive = phase.search_depth == "advanced" or phase.max_results >= 5
+
+            # Filter channels
+            if allowed_channels:
+                phase.channels = [c for c in phase.channels if c in allowed_channels]
+            if blocked_channels:
+                phase.channels = [c for c in phase.channels if c not in blocked_channels]
+
+    # Apply max depth from profile
+    max_depth = pipeline_profile.phases.max_depth
+    if max_depth > 0:
+        for claim_id in plan.claim_phases:
+            plan.claim_phases[claim_id] = plan.claim_phases[claim_id][:max_depth]
+
+    return plan
+

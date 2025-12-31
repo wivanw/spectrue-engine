@@ -56,3 +56,10 @@ def test_fractional_credits_accumulation() -> None:
     # 1.5 + 2.37 = 3.87 (no rounding)
     assert summary.total_credits == Decimal("3.87")
     assert isinstance(summary.total_credits, Decimal)
+
+
+def test_cost_ledger_backward_compatible_total_credits_property() -> None:
+    ledger = CostLedger(run_id="run-compat")
+    assert ledger.total_credits == Decimal("0")
+    ledger.record_event(CostEvent(stage="search", provider="tavily", cost_usd=0.01, cost_credits=Decimal("1.25")))
+    assert ledger.total_credits == Decimal("1.25")

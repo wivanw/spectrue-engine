@@ -120,6 +120,7 @@ def select_verification_targets(
     max_targets: int = 2,
     graph_result: Any | None = None,
     budget_class: str = "minimal",
+    anchor_claim_id: str | None = None,
 ) -> TargetSelectionResult:
     """
     Select which claims get actual Tavily searches.
@@ -132,6 +133,7 @@ def select_verification_targets(
         max_targets: Maximum claims that can trigger searches (default=2)
         graph_result: Optional claim graph with is_key_claim, centrality, tension
         budget_class: Budget class (minimal/standard/deep)
+        anchor_claim_id: If provided (normal profile), this claim MUST be in targets
         
     Returns:
         TargetSelectionResult with targets and deferred lists
@@ -215,6 +217,38 @@ def select_verification_targets(
             ordered_claims.append(c)
             seen.add(cid)
 
+    # ANCHOR GUARANTEE: If anchor_claim_id is specified (normal profile),
+    # ensure the anchor is ALWAYS in targets, even if not in top-K by EV.
+    # This fixes the normal_pipeline.violation when anchor is deferred.
+    anchor_forced = False
+    if anchor_claim_id and str(anchor_claim_id) in claim_by_id:
+        anchor_in_top_k = any(
+            str(c.get("id") or c.get("claim_id")) == str(anchor_claim_id)
+            for c in ordered_claims[:max_targets]
+        )
+        if not anchor_in_top_k:
+            # Find original rank before reordering
+            original_rank = next(
+                (i for i, c in enumerate(ordered_claims)
+                 if str(c.get("id") or c.get("claim_id")) == str(anchor_claim_id)),
+                -1
+            )
+            # Move anchor to the front of ordered_claims
+            anchor_claim = claim_by_id[str(anchor_claim_id)]
+            ordered_claims = [anchor_claim] + [
+                c for c in ordered_claims
+                if str(c.get("id") or c.get("claim_id")) != str(anchor_claim_id)
+            ]
+            anchor_forced = True
+            Trace.event(
+                "target_selection.anchor_forced",
+                {
+                    "anchor_claim_id": str(anchor_claim_id),
+                    "reason": "anchor_not_in_top_k",
+                    "original_rank": original_rank,
+                },
+            )
+
     # Split into targets and deferred using deterministic ordered_claims
     result = TargetSelectionResult()
     cluster_map: dict[str, str] = {}  # cluster_id -> target_claim_id
@@ -272,6 +306,8 @@ def select_verification_targets(
             "evidence_sharing_count": len(result.evidence_sharing),
             "max_targets": max_targets,
             "budget_class": budget_class,
+            "anchor_claim_id": str(anchor_claim_id) if anchor_claim_id else None,
+            "anchor_forced": anchor_forced,
             "target_ids": [
                 str(cid)
                 for cid in (

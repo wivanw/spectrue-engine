@@ -44,6 +44,7 @@ class FactVerifier:
         needs_cleaning: bool = False,
         source_url: str | None = None,
         extract_claims_only: bool = False,  # M105: Deep mode - just extract claims
+        pipeline_profile: str | None = None, # M113
     ) -> dict:
         """
         Execute verification via ValidationPipeline.
@@ -61,6 +62,7 @@ class FactVerifier:
             needs_cleaning=needs_cleaning,
             source_url=source_url,
             extract_claims_only=extract_claims_only,
+            pipeline_profile=pipeline_profile,
         )
         if "audit" not in result:
             result["audit"] = {}

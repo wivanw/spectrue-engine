@@ -42,6 +42,7 @@ from spectrue_core.verification.trusted_sources import get_trusted_domains_by_la
 from spectrue_core.schema.claim_metadata import EvidenceChannel
 from spectrue_core.verification.source_utils import canonicalize_sources, extract_domain
 from spectrue_core.verification.retrieval_eval import evaluate_retrieval_confidence
+from spectrue_core.verification.stop_decision import EVStopParams, evaluate_stop_decision
 
 if TYPE_CHECKING:
     from spectrue_core.verification.search_mgr import SearchManager
@@ -115,6 +116,7 @@ class PhaseRunner:
         max_cost: int | None = None,
         inline_sources: list[dict] | None = None,
         agent: Any | None = None,
+        ev_stop_params: EVStopParams | None = None,
     ) -> None:
         """
         Initialize PhaseRunner.
@@ -138,6 +140,8 @@ class PhaseRunner:
         self.search_type = search_type
         self.max_cost = max_cost
         self.inline_sources = inline_sources or []
+        self.ev_stop_params = ev_stop_params
+        """Optional value-based stop parameters (M113)."""
         if self.inline_sources:
             import logging
             logging.getLogger(__name__).debug(
@@ -547,6 +551,41 @@ class PhaseRunner:
                 runtime_config=getattr(getattr(self.search_mgr, "config", None), "runtime", None),
                 expected_cost=expected_cost,
             )
+
+            # M113: Value-based stop decision (EV) if enabled.
+            if self.ev_stop_params is not None:
+                try:
+                    stop_result = evaluate_stop_decision(
+                        posterior_true=float(evaluation.get("retrieval_confidence", 0.0)),
+                        expected_delta_p=float(evaluation.get("expected_gain", 0.0)),
+                        params=self.ev_stop_params,
+                        budget_remaining=None,
+                        quality_signal=evaluation,
+                    )
+                    Trace.event(
+                        "retrieval.stop_decision",
+                        {
+                            "claim_id": claim_id,
+                            "hop": hop_index,
+                            "phase_id": phase_id,
+                            **stop_result.to_dict(),
+                        },
+                    )
+                    if stop_result.should_stop:
+                        decision = SufficiencyDecision.STOP
+                        reason = f"ev_stop:{stop_result.reason}"
+                        break
+                except Exception as e:
+                    Trace.event(
+                        "retrieval.stop_decision.error",
+                        {
+                            "claim_id": claim_id,
+                            "hop": hop_index,
+                            "phase_id": phase_id,
+                            "error": str(e)[:200],
+                        },
+                    )
+
             action_result = None
             decide_fn = getattr(self.search_mgr, "decide_retrieval_action", None)
             if callable(decide_fn):

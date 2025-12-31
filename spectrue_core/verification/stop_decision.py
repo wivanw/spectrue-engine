@@ -80,3 +80,110 @@ def should_stop_by_ev(
         "entropy": entropy,
         "expected_gain": expected_gain,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# M113: Pipeline Profile Integration
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def ev_stop_params_from_pipeline_profile(
+    profile: "PipelineProfile",
+) -> EVStopParams | None:
+    """
+    Create EVStopParams from a pipeline profile's stop_policy configuration.
+
+    Args:
+        profile: Pipeline profile with stop_policy settings
+
+    Returns:
+        EVStopParams if stop policy is enabled, None otherwise
+    """
+    from typing import TYPE_CHECKING
+    if TYPE_CHECKING:
+        from spectrue_core.pipeline_builder.spec import PipelineProfile
+
+    stop_policy = getattr(profile, "stop_policy", None)
+    if stop_policy is None or not getattr(stop_policy, "enabled", False):
+        return None
+
+    return EVStopParams(
+        value_uncertainty=getattr(stop_policy, "value_uncertainty", 1.0),
+        marginal_cost=getattr(stop_policy, "marginal_cost", 0.25),
+        min_entropy=getattr(stop_policy, "min_entropy", 0.15),
+    )
+
+
+@dataclass
+class StopDecisionResult:
+    """
+    Result of a stop decision evaluation.
+
+    Used for structured trace output.
+    """
+    should_stop: bool
+    reason: str
+    entropy: float
+    expected_gain: float | None = None
+    marginal_cost: float | None = None
+    budget_remaining: float | None = None
+    quality_signal: dict | None = None
+
+    def to_dict(self) -> dict:
+        """Serialize for trace output."""
+        result = {
+            "should_stop": self.should_stop,
+            "reason": self.reason,
+            "entropy": self.entropy,
+        }
+        if self.expected_gain is not None:
+            result["expected_gain"] = self.expected_gain
+        if self.marginal_cost is not None:
+            result["marginal_cost"] = self.marginal_cost
+        if self.budget_remaining is not None:
+            result["budget_remaining"] = self.budget_remaining
+        if self.quality_signal:
+            result["quality_signal"] = self.quality_signal
+        return result
+
+
+def evaluate_stop_decision(
+    *,
+    posterior_true: float,
+    expected_delta_p: Optional[float],
+    params: EVStopParams | None = None,
+    budget_remaining: float | None = None,
+    quality_signal: dict | None = None,
+) -> StopDecisionResult:
+    """
+    Evaluate stop decision with full trace output.
+
+    This is the M113 version of should_stop_by_ev with structured output
+    suitable for trace recording.
+
+    Args:
+        posterior_true: Current posterior probability
+        expected_delta_p: Expected change in posterior from another hop
+        params: Stop parameters (from profile or defaults)
+        budget_remaining: Remaining budget credits
+        quality_signal: Quality metrics from retrieval evaluation
+
+    Returns:
+        StopDecisionResult with full decision details
+    """
+    should_stop, details = should_stop_by_ev(
+        posterior_true=posterior_true,
+        expected_delta_p=expected_delta_p,
+        params=params,
+    )
+
+    return StopDecisionResult(
+        should_stop=should_stop,
+        reason=details.get("stop_reason", "unknown"),
+        entropy=details.get("entropy", 0.0),
+        expected_gain=details.get("expected_gain"),
+        marginal_cost=details.get("marginal_cost"),
+        budget_remaining=budget_remaining,
+        quality_signal=quality_signal,
+    )
+
