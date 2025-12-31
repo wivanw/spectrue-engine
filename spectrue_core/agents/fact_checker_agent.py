@@ -10,6 +10,9 @@ from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
 from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
 from spectrue_core.agents.skills.relevance import RelevanceSkill
 from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
+# Per-claim judging skills (deep analysis mode)
+from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
+from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
 import logging
 
 logger = logging.getLogger(__name__)
@@ -29,6 +32,9 @@ class FactCheckerAgent:
             max_retries=3,
         )
         
+        # Expose LLM client for pipeline steps
+        self._llm = self.llm_client
+        
         self.claims_skill = ClaimExtractionSkill(self.config, self.llm_client)
         self.clustering_skill = ClusteringSkill(self.config, self.llm_client)
         self.scoring_skill = ScoringSkill(self.config, self.llm_client)
@@ -40,6 +46,10 @@ class FactCheckerAgent:
         self.relevance_skill = RelevanceSkill(self.config, self.llm_client)
         # Edge Typing for ClaimGraph C-stage
         self.edge_typing_skill = EdgeTypingSkill(self.config, self.llm_client)
+        # Per-claim judging skills (deep analysis mode)
+        self.evidence_summarizer_skill = EvidenceSummarizerSkill(self.llm_client)
+        self.claim_judge_skill = ClaimJudgeSkill(self.llm_client)
+
 
     async def extract_claims(
         self, text: str, *, lang: str = "en", max_claims: int = 7
