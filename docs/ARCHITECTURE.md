@@ -105,6 +105,47 @@ See [Resource Accounting](./RESOURCE_ACCOUNTING.md) for detailed semantics.
 └─────────────────┘ └─────────────────┘
 ```
 
+### Step-Based Pipeline (M114-M115)
+
+A new composable pipeline architecture that decomposes `ValidationPipeline.execute()` into discrete Steps with DAG execution:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       DAGPipeline                                │
+│  Executes StepNodes with dependency resolution + parallel exec  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+  ┌───────────────┬───────────┼───────────┬──────────────┐
+  ▼               ▼           ▼           ▼              ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+│Metering  │ │Prepare   │ │Extract   │ │Search    │ │Evidence  │
+│SetupStep │ │InputStep │ │ClaimsStep│ │FlowStep  │ │FlowStep  │
+└──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
+```
+
+**Key Components:**
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| `PipelineMode` | Mode invariants (normal/deep) | `pipeline/mode.py` |
+| `Step` Protocol | Composable unit of work | `pipeline/core.py` |
+| `PipelineContext` | Immutable threading context | `pipeline/core.py` |
+| `DAGPipeline` | Dependency-aware executor | `pipeline/dag.py` |
+| `StepNode` | Step with depends_on/optional | `pipeline/dag.py` |
+| `PipelineFactory` | Builds pipelines for modes | `pipeline/factory.py` |
+
+**Invariant Steps**: Gate checks that fail fast on invalid input
+- `AssertSingleClaimStep` (normal mode)
+- `AssertSingleLanguageStep` (normal mode)
+- `AssertNonEmptyClaimsStep` (all modes)
+
+**Decomposed Steps**: Native implementations replacing legacy
+- `MeteringSetupStep`, `PrepareInputStep`, `ExtractClaimsStep`
+- `ClaimGraphStep`, `TargetSelectionStep`, `SearchFlowStep`
+- `EvidenceFlowStep`, `OracleFlowStep`, `ResultAssemblyStep`
+
+**Migration**: Enable via `use_step_pipeline: true` feature flag.
+
 ### SpectrueEngine
 
 Entry point for external consumers. Provides simple `analyze_text()` API.
@@ -289,6 +330,20 @@ spectrue_core/
 │   ├── serialization.py      # Canonical schema serialization helpers
 │   ├── verdict.py            # StructuredVerdict
 │   └── verdict_contract.py   # Public verdict schema
+│
+├── pipeline/                  # M114-M115: Step-based architecture
+│   ├── __init__.py           # Module exports
+│   ├── mode.py               # PipelineMode, NORMAL_MODE, DEEP_MODE
+│   ├── core.py               # Step Protocol, Pipeline, PipelineContext
+│   ├── dag.py                # DAGPipeline, StepNode, topological sort
+│   ├── errors.py             # PipelineViolation, PipelineExecutionError
+│   ├── factory.py            # PipelineFactory (mode → steps mapping)
+│   ├── executor.py           # execute_pipeline, validate_claims_for_mode
+│   └── steps/
+│       ├── __init__.py       # Step exports
+│       ├── invariants.py     # AssertSingleClaimStep, etc.
+│       ├── legacy.py         # LegacyPhaseRunnerStep wrappers
+│       └── decomposed.py     # Native Steps (MeteringSetup, etc.)
 │
 ├── verification/
 │   ├── pipeline.py           # Main orchestrator
