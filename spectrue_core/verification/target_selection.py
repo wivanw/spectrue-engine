@@ -123,7 +123,7 @@ class TargetSelectionResult:
 def select_verification_targets(
     claims: list[dict],
     *,
-    max_targets: int = 2,
+    max_targets: int | None = None,
     graph_result: Any | None = None,
     budget_class: str = "minimal",
     anchor_claim_id: str | None = None,
@@ -136,7 +136,7 @@ def select_verification_targets(
     
     Args:
         claims: All eligible claims
-        max_targets: Maximum claims that can trigger searches (default=2)
+        max_targets: Maximum claims that can trigger searches (default derives from budget)
         graph_result: Optional claim graph with is_key_claim, centrality, tension
         budget_class: Budget class (minimal/standard/deep)
         anchor_claim_id: If provided (normal profile), this claim MUST be in targets
@@ -147,17 +147,22 @@ def select_verification_targets(
     if not claims:
         return TargetSelectionResult()
     
-    # Adjust max_targets based on budget_class
-    if max_targets is None:
-        max_targets = 10
+    # Define limits per budget class
+    # M117: Deep mode needs independent verification of all claims (high limit)
+    budget_limits = {
+        "minimal": 2,
+        "standard": 3,
+        "deep": 20,
+        "high": 20,
+        "max": 50,
+    }
     
-    if budget_class == "minimal":
-        max_targets = 2
-    elif budget_class == "standard":
-        max_targets = 3
-    elif budget_class in ("deep", "high", "max"):
-        # M117: Allow independent verification of all claims in deep mode
-        max_targets = 20
+    limit = budget_limits.get(budget_class, 5)  # Default limit 5 if unknown budget
+    
+    if max_targets is None:
+        max_targets = limit
+    else:
+        max_targets = min(max_targets, limit)
     
     # Assign semantic clusters using embeddings (if available)
     _assign_semantic_clusters(claims)
