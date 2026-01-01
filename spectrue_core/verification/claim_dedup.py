@@ -165,13 +165,13 @@ async def dedup_claims_post_extraction_async(
 
     loop = asyncio.get_running_loop()
     executor = _get_executor()
-    
+
     # Run sync dedup in thread pool
     result = await loop.run_in_executor(
         executor,
         partial(_dedup_sync, claims, tau),
     )
-    
+
     return result
 
 

@@ -24,7 +24,7 @@ from spectrue_core.schema.signals import EvidenceSignals, LocaleDecision, TimeWi
 
 class VerdictStatus(str, Enum):
     """Claim assessment outcome - DERIVED from scores + policy."""
-    
+
     VERIFIED = "verified"
     REFUTED = "refuted"
     AMBIGUOUS = "ambiguous"
@@ -42,12 +42,12 @@ class VerdictState(str, Enum):
 
 class VerdictHighlight(SchemaModel):
     """Minimal structured explanation for one assertion."""
-    
+
     assertion_id: str
     stance: Literal["SUPPORTS", "REFUTES", "MIXED", "NO_EVIDENCE"]
     top_evidence_ids: list[str] = Field(default_factory=list)
     note: str = Field(default="")
-    
+
 
 class Verdict(SchemaModel):
     """
@@ -55,30 +55,30 @@ class Verdict(SchemaModel):
     
     Key: confidence_score = 0.0 by default (Blind until proven seeing).
     """
-    
+
     # Core Scores
     veracity_score: float = Field(default=0.5, ge=0.0, le=1.0)
     # Critical Fix: Default confidence is 0.0 (Blind until proven seeing)
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
     verdict_state: VerdictState | None = None
-    
+
     error_state: ErrorState = Field(default=ErrorState.OK)
     decision_path: DecisionPath = Field(default=DecisionPath.WEB)
     signals: EvidenceSignals = Field(default_factory=EvidenceSignals)
 
     time_window: TimeWindow | None = None
     locale_decision: LocaleDecision | None = None
-    
+
     summary: str = Field(default="")
     rationale: str = Field(default="")
     highlights: list[VerdictHighlight] = Field(default_factory=list)
-    
+
     # Backward compat (optional RGBA)
     danger_score: float | None = None
     style_score: float | None = None
     explainability_score: float | None = None
-    
+
     def status(self, policy: VerdictPolicy | None = None) -> VerdictStatus:
         """
         Derive status from scores + policy.
@@ -88,11 +88,11 @@ class Verdict(SchemaModel):
         """
         if policy is None:
             policy = DEFAULT_POLICY
-            
+
         # Check for pipeline errors first
         if self.error_state in policy.unknown_if_error_states:
             return VerdictStatus.UNKNOWN
-            
+
         # Safety Check: If confident but no quotes (and policy forbids it), force Ambiguous
         if (
             policy.max_confidence_without_quotes is not None 
@@ -106,28 +106,28 @@ class Verdict(SchemaModel):
             if self.confidence_score >= policy.min_confidence_for_verified:
                 return VerdictStatus.VERIFIED
             return VerdictStatus.AMBIGUOUS
-            
+
         # Refuted path
         if self.veracity_score <= policy.refuted_veracity_threshold:
             if self.confidence_score >= policy.min_confidence_for_refuted:
                 return VerdictStatus.REFUTED
             return VerdictStatus.AMBIGUOUS
-            
+
         return VerdictStatus.AMBIGUOUS
-    
+
     @property
     def status_default(self) -> VerdictStatus:
         """Shortcut for status(DEFAULT_POLICY)."""
         return self.status(DEFAULT_POLICY)
-    
+
     def is_error(self) -> bool:
         """Check if pipeline encountered an error."""
         return self.error_state != ErrorState.OK
-    
+
     def has_evidence(self) -> bool:
         """Check if any evidence was retrieved."""
         return self.signals.has_readable_sources
-    
+
     def to_summary_dict(self) -> dict[str, Any]:
         """Export as summary dict with derived status."""
         return {

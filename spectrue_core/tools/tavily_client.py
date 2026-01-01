@@ -61,7 +61,7 @@ class TavilyClient:
         Uses jitter to prevent thundering herd on concurrent retries.
         """
         last_error: Exception | None = None
-        
+
         for attempt in range(TAVILY_MAX_RETRIES + 1):
             try:
                 Trace.event(f"{trace_event_prefix}.request", {"url": url, "payload": payload})
@@ -69,17 +69,17 @@ class TavilyClient:
                 r.raise_for_status()
                 Trace.event(f"{trace_event_prefix}.response", {"status_code": r.status_code, "text": r.text})
                 return r
-                
+
             except httpx.HTTPStatusError as e:
                 status_code = e.response.status_code if e.response is not None else 0
                 is_retryable = status_code in TAVILY_RETRYABLE_STATUS_CODES
-                
+
                 if is_retryable and attempt < TAVILY_MAX_RETRIES:
                     # Calculate delay with exponential backoff + jitter
                     delay = TAVILY_RETRY_BASE_DELAY_S * (TAVILY_RETRY_BACKOFF_FACTOR ** attempt)
                     jitter = random.uniform(0, delay * 0.3)  # Add up to 30% jitter
                     total_delay = delay + jitter
-                    
+
                     Trace.event(f"{trace_event_prefix}.retry", {
                         "attempt": attempt + 1,
                         "status_code": status_code,
@@ -93,18 +93,18 @@ class TavilyClient:
                     await asyncio.sleep(total_delay)
                     last_error = e
                     continue
-                
+
                 # Non-retryable or max retries exceeded
                 last_error = e
                 break
-                
+
             except (httpx.TimeoutException, httpx.ConnectError) as e:
                 # Network errors are retryable
                 if attempt < TAVILY_MAX_RETRIES:
                     delay = TAVILY_RETRY_BASE_DELAY_S * (TAVILY_RETRY_BACKOFF_FACTOR ** attempt)
                     jitter = random.uniform(0, delay * 0.3)
                     total_delay = delay + jitter
-                    
+
                     Trace.event(f"{trace_event_prefix}.retry", {
                         "attempt": attempt + 1,
                         "error_type": type(e).__name__,
@@ -118,10 +118,10 @@ class TavilyClient:
                     await asyncio.sleep(total_delay)
                     last_error = e
                     continue
-                    
+
                 last_error = e
                 break
-        
+
         # All retries exhausted or non-retryable error
         if last_error is not None:
             raise last_error
@@ -179,7 +179,7 @@ class TavilyClient:
                     trace_event_prefix="tavily",
                 )
                 result = r.json()
-                
+
             except httpx.HTTPStatusError as e:
                 # Special handling for 400 Bad Request: retry with minimal payload
                 if e.response is not None and e.response.status_code == 400:
@@ -223,7 +223,7 @@ class TavilyClient:
         original_error: httpx.HTTPStatusError,
     ) -> dict:
         """Handle 400 Bad Request by retrying with minimal payload."""
-        
+
         def _safe_payload_for_log(p: dict) -> dict:
             out = dict(p or {})
             qv = out.get("query")
@@ -245,7 +245,7 @@ class TavilyClient:
             "[Tavily] 400 Bad Request. Retrying with minimal payload. Response: %s",
             (original_error.response.text or "")[:500],
         )
-        
+
         minimal: dict = {
             "query": query,
             "search_depth": depth,

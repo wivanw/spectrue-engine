@@ -69,17 +69,24 @@ class ClusteringSkill(BaseSkill):
             ],
         })
 
+        # M117: Log claims passed to clustering for debugging
+        Trace.event("stance_clustering.claims_input", {
+            "claim_count": len(claims_lite),
+            "claim_ids": [c.get("id") for c in claims_lite],
+            "claim_texts": [c.get("text", "")[:50] for c in claims_lite],
+        })
+
         num_sources = len(sources_lite)
-        
+
         # Batching to prevent context overflow
         STANCE_BATCH_SIZE = 10
-        
+
         cluster_timeout = float(getattr(self.runtime.llm, "cluster_timeout_sec", 35.0) or 35.0)
         cluster_timeout = max(35.0, cluster_timeout)
-        
+
         async def run_pass(pass_type: str, trace_suffix: str) -> list[SearchResult]:
             all_matrix_rows = []
-            
+
             # Process in batches
             for i in range(0, num_sources, STANCE_BATCH_SIZE):
                 raw_batch = sources_lite[i : i + STANCE_BATCH_SIZE]
@@ -88,15 +95,15 @@ class ClusteringSkill(BaseSkill):
                     for local_idx, src in enumerate(raw_batch)
                 ]
                 batch_suffix = f"{trace_suffix}_b{i // STANCE_BATCH_SIZE}"
-                
+
                 prompt = build_stance_matrix_prompt(claims_lite=claims_lite, sources_lite=batch_sources)
                 batch_cache_key = build_ev_mat_cache_key(claims_lite=claims_lite, sources_lite=batch_sources)
-                
+
                 instructions = build_stance_matrix_instructions(
                     num_sources=len(batch_sources),
                     pass_type=pass_type,
                 )
-                
+
                 try:
                     result = await self.llm_client.call_json(
                         model="gpt-5-nano",
@@ -117,6 +124,18 @@ class ClusteringSkill(BaseSkill):
                 except Exception as e:
                     logger.warning("[Clustering] Batch %d failed: %s", i, e)
                     # Proceed with partial results
+
+            # M117: Log LLM output for debugging claim assignment
+            Trace.event("stance_clustering.matrix_output", {
+                "total_rows": len(all_matrix_rows),
+                "claim_ids_assigned": list(set(
+                    r.get("claim_id") for r in all_matrix_rows if isinstance(r, dict)
+                )),
+                "rows_sample": [
+                    {"source_index": r.get("source_index"), "claim_id": r.get("claim_id"), "stance": r.get("stance")}
+                    for r in all_matrix_rows[:5] if isinstance(r, dict)
+                ],
+            })
 
             clustered_results, _stats = postprocess_evidence_matrix(
                 search_results=search_results,
@@ -145,7 +164,7 @@ class ClusteringSkill(BaseSkill):
                 )
 
             single_results = await run_pass(STANCE_PASS_SINGLE, "single")
-            
+
             # FIX: Restore pre-verified stances (e.g. from PhaseRunner shortcuts)
             # If Clustering LLM degraded them to CONTEXT, force restore them.
             if single_results and len(single_results) == len(search_results):
@@ -155,7 +174,7 @@ class ClusteringSkill(BaseSkill):
                      original = search_results[i]
                      pre_stance = (original.get("stance") or "").upper()
                      curr_stance = (res.get("stance") or "").upper()
-                     
+
                      # Only restore if it was explicit SUPPORT/REFUTE and Clustering dropped it
                      if pre_stance in ("SUPPORT", "REFUTE") and curr_stance not in ("SUPPORT", "REFUTE"):
                          final_stance = pre_stance.lower()
@@ -170,13 +189,13 @@ class ClusteringSkill(BaseSkill):
                               elif final_stance == "refute":
                                   res["contradiction_span"] = res["quote"]
                          count_restored += 1
-                    
+
                      # FIX: Always propagate is_primary flag if present (even if stance wasn't restored)
                      # The Scoring layer needs this to trigger the "[PRIMARY SOURCE]" prompt injection.
                      if original.get("is_primary"):
                          res["is_primary"] = True
                          res["source_type"] = "primary"
-                
+
                 if count_restored > 0:
                      logger.info("[Clustering] Restored %d pre-verified stances (overwrote LLM context)", count_restored)
 

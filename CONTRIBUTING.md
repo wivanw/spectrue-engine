@@ -105,3 +105,18 @@ Please use the [Bug Report Template](.github/ISSUE_TEMPLATE/bug_report.md) to re
 ## 5. License
 
 By contributing, you agree that your contributions will be licensed under the **GNU Affero General Public License v3 (AGPLv3)**.
+
+## 6. License Headers
+
+All source files must contain the following copyright header:
+
+```python
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+```

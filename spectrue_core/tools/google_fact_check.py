@@ -38,7 +38,7 @@ class GoogleFactCheckTool:
             or (config.google_search_api_key if config else None)
             or os.getenv("GOOGLE_FACT_CHECK_KEY")
         )
-        
+
         self.client = httpx.AsyncClient(
             timeout=10.0,
             follow_redirects=True,
@@ -76,15 +76,15 @@ class GoogleFactCheckTool:
         try:
             params = {"query": q, "key": self.api_key, "pageSize": 5}
             Trace.event("google_fact_check.request", {"url": self.BASE_URL, "query": q[:300]})
-            
+
             response = await self.client.get(self.BASE_URL, params=params)
-            
+
             # Log Response Trace for Debugging
             Trace.event("google_fact_check.response", {
                 "status_code": response.status_code,
                 "text": (response.text or "")[:500],
             })
-            
+
             if response.is_error:
                 logger.warning(f"[Google FC] HTTP Error {response.status_code}: {response.text[:200]}")
                 return None, {"code": response.status_code, "msg": response.text[:200]}
@@ -99,7 +99,7 @@ class GoogleFactCheckTool:
                 claim_text = claim.get("text", "")
                 review = claim.get("claimReview", [])[0] if claim.get("claimReview") else {}
                 publisher_name = review.get("publisher", {}).get("name", "Unknown")
-                
+
                 candidates.append({
                     "index": idx,
                     "claim_text": claim_text,
@@ -109,7 +109,7 @@ class GoogleFactCheckTool:
                     "rating": review.get("textualRating", "Unknown"),
                     "source_provider": f"{publisher_name} via Google Fact Check",
                 })
-            
+
             return candidates, None
 
         except Exception as e:
@@ -124,40 +124,40 @@ class GoogleFactCheckTool:
             "relevance_score": 0.0, "is_jackpot": False,
             "publisher": None, "rating": None, "source_provider": None
         }
-        
+
         candidates, error_info = await self._fetch_all_candidates(user_claim)
-        
+
         if candidates is None:
             err_res = empty_result.copy()
             err_res["status"] = "ERROR"
             err_res["error_status_code"] = error_info.get("code")
             err_res["error_detail"] = error_info.get("msg")
             return err_res
-            
+
         if not candidates:
             return empty_result
-        
+
         # If no validator configured - explicit disabled mode
         if not self._oracle_validator:
             logger.warning("[Google FC] ⚠️ No LLM validator configured. Oracle disabled.")
             disabled_res = empty_result.copy()
             disabled_res["status"] = "DISABLED"
             return disabled_res
-        
+
         # Named arguments for validator call
         validation = await self._oracle_validator.validate_batch(
             user_claim=user_claim, 
             candidates=candidates
         )
-        
+
         # Strict Bounds Check
         best_idx = int(validation.get("best_index", -1))
         if best_idx < 0 or best_idx >= len(candidates):
             # Valid logic: LLM looked but found nothing relevant
             return empty_result
-            
+
         winner = candidates[best_idx]
-        
+
         return {
             "status": validation.get("status", "MIXED"),
             "url": winner["url"],

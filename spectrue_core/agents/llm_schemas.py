@@ -65,7 +65,7 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["claim_id", "verdict_score", "verdict", "reason"],
+                "required": ["claim_id", "verdict_score", "verdict", "reason", "rgba"],
                 "properties": {
                     "claim_id": {"type": "string"},
                     "verdict": {
@@ -80,6 +80,13 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
                     },
                     "verdict_score": {"type": "number", "minimum": 0, "maximum": 1},
                     "reason": {"type": "string"},
+                    "rgba": {
+                        "type": "array",
+                        "items": {"type": "number", "minimum": 0, "maximum": 1},
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "description": "Per-claim [R=danger, G=veracity, B=style, A=explainability]",
+                    },
                 },
             },
         },
@@ -88,6 +95,42 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
         "danger_score": {"type": "number", "minimum": 0, "maximum": 1},
         "style_score": {"type": "number", "minimum": 0, "maximum": 1},
         "rationale": {"type": "string"},
+    },
+}
+
+
+# Schema for scoring a SINGLE claim (used in parallel scoring)
+SINGLE_CLAIM_SCORING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "claim_id",
+        "verdict_score",
+        "verdict",
+        "reason",
+        "rgba",
+    ],
+    "properties": {
+        "claim_id": {"type": "string"},
+        "verdict": {
+            "type": "string",
+            "enum": [
+                "verified",
+                "refuted",
+                "ambiguous",
+                "unverified",
+                "partially_verified",
+            ],
+        },
+        "verdict_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "reason": {"type": "string"},
+        "rgba": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0, "maximum": 1},
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[R=danger, G=veracity, B=style, A=explainability]",
+        },
     },
 }
 
@@ -360,6 +403,126 @@ EDGE_TYPING_SCHEMA: dict[str, Any] = {
     },
 }
 
+
+# Per-Claim Judging schemas (deep analysis mode)
+
+EVIDENCE_STANCE_VALUES = ["SUPPORT", "REFUTE", "CONTEXT", "IRRELEVANT"]
+
+
+EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "supporting_evidence",
+        "refuting_evidence",
+        "contextual_evidence",
+        "evidence_gaps",
+        "conflicts_present",
+    ],
+    "properties": {
+        "supporting_evidence": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["evidence_id", "reason"],
+                "properties": {
+                    "evidence_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+            },
+        },
+        "refuting_evidence": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["evidence_id", "reason"],
+                "properties": {
+                    "evidence_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+            },
+        },
+        "contextual_evidence": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["evidence_id", "reason"],
+                "properties": {
+                    "evidence_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+            },
+        },
+        "evidence_gaps": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "What evidence is missing to reach a confident verdict",
+        },
+        "conflicts_present": {
+            "type": "boolean",
+            "description": "True if evidence contains contradictions",
+        },
+    },
+}
+
+
+CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "claim_id",
+        "rgba",
+        "confidence",
+        "verdict",
+        "explanation",
+        "sources_used",
+        "missing_evidence",
+    ],
+    "properties": {
+        "claim_id": {"type": "string"},
+        "rgba": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["R", "G", "B", "A"],
+            "properties": {
+                "R": {"type": "number", "minimum": 0, "maximum": 1, "description": "Danger (harm if believed)"},
+                "G": {"type": "number", "minimum": 0, "maximum": 1, "description": "Veracity (factual accuracy)"},
+                "B": {"type": "number", "minimum": 0, "maximum": 1, "description": "Honesty (good faith presentation)"},
+                "A": {"type": "number", "minimum": 0, "maximum": 1, "description": "Explainability (traceability)"},
+            },
+        },
+        "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Overall confidence in the verdict",
+        },
+        "verdict": {
+            "type": "string",
+            "enum": ["Supported", "Refuted", "NEI", "Mixed", "Unverifiable"],
+            "description": "Final verdict label",
+        },
+        "explanation": {
+            "type": "string",
+            "description": "Human-readable explanation of the verdict",
+        },
+        "sources_used": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "URLs from evidence_items that informed the verdict",
+        },
+        "missing_evidence": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Types of evidence that would strengthen the verdict",
+        },
+    },
+}
+
+
 SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "score_evidence": SCORING_RESPONSE_SCHEMA,
     "score_evidence_structured": SCORE_EVIDENCE_STRUCTURED_SCHEMA,
@@ -367,8 +530,11 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "query_generation": QUERY_GENERATION_SCHEMA,
     "claim_extraction": CLAIM_EXTRACTION_SCHEMA,
     "edge_typing": EDGE_TYPING_SCHEMA,
+    "evidence_summarizer": EVIDENCE_SUMMARIZER_SCHEMA,
+    "claim_judge": CLAIM_JUDGE_SCHEMA,
 }
 
 
 def get_schema(name: str) -> dict[str, Any]:
     return SCHEMA_REGISTRY[name]
+

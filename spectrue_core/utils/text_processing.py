@@ -6,7 +6,7 @@ def clean_search_query(query: str) -> str:
     Removes meta-phrases, fixes broken quotes, and normalizes grammar.
     """
     q = (query or "").strip()
-    
+
     # 1. Quote normalization (safe structural fix)
     # Replace smart quotes
     q = q.replace('“', '"').replace('”', '"').replace("‘", "'").replace("’", "'")
@@ -16,7 +16,7 @@ def clean_search_query(query: str) -> str:
 
     # 2. Basic whitespace cleanup
     q = re.sub(r'\s+', ' ', q).strip()
-    
+
     return q
 
 def normalize_search_query(query: str) -> str:
@@ -39,7 +39,7 @@ def clean_article_text(text: str) -> str:
     """
     if not text:
         return ""
-    
+
     # Common boilerplate patterns to remove
     boilerplate_patterns = [
         r"Read more\s*\.{0,3}",
@@ -58,13 +58,13 @@ def clean_article_text(text: str) -> str:
         r"\[.*?\]",  # Remove markdown links
         r"#{1,6}\s*$",  # Empty headings
     ]
-    
+
     result = text
     for pattern in boilerplate_patterns:
         result = re.sub(pattern, "", result, flags=re.IGNORECASE)
-    
+
     # Collapse multiple newlines/spaces
     result = re.sub(r"\n{3,}", "\n\n", result)
     result = re.sub(r" {2,}", " ", result)
-    
+
     return result.strip()

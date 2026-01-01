@@ -290,26 +290,62 @@ Trace event:
 
 - `verdict.explainability_tier_factor` logs `pre_A`, `prior`, `baseline`, `factor`, `post_A`, `best_tier`, `claim_id`, and `source`.
 
-## Verification Target Selection (Current)
+## Verification Target Selection (Bayesian EVOI Model)
 
-When a run contains many claims, the engine selects up to `max_targets` claims to run retrieval against.
-Non-target claims are **deferred** and can inherit verdicts via evidence sharing.
+When a run contains many claims, the engine selects the optimal number of claims to run retrieval against using a **Bayesian Expected Value of Information (EVOI)** model. Non-target claims are **deferred** and inherit verdicts via evidence sharing.
 
-Current selection score (high-level):
+### EVOI-Based Target Count
 
-- `check_worthiness` (0..1) and `importance` (0..1) from `ClaimMetadata`
-- optional graph signals (key-claim membership, structural importance, tension)
-- claim role/type boost (`thesis/core` is prioritized)
+Instead of hard-coded limits per budget class, the engine computes:
+
+```
+k* = argmax_k [ Σ(i=1..k) EVOI_i × decay^i − cost × k ]
+```
+
+Where:
+- `EVOI_i = value_uncertainty × entropy(prior) × worthiness_i × harm_i × conf_factor_i`
+- `entropy(prior)` = Shannon entropy of Bernoulli(prior), max at p=0.5 (maximum uncertainty)
+- `decay` = diminishing returns factor (0.85 by default), models that later targets have less marginal value
+- `cost` = marginal cost per target (normalized Tavily search cost)
+
+### Claim-Level EVOI Signals
+
+Each claim's Expected Value of Information depends on:
+
+| Signal | Effect |
+|--------|--------|
+| `check_worthiness` | Higher worthiness → higher EVOI |
+| `harm_potential` | Higher harm → higher EVOI (prioritize verifying dangerous claims) |
+| `metadata_confidence` | Lower confidence → higher EVOI (uncertain claims benefit more from search) |
+| Prior uncertainty | Max EVOI at p=0.5, decreases as certainty increases |
+
+### Budget Class Constraints
+
+Budget classes provide **safety bounds** (floors and ceilings) on top of the Bayesian computation.
+These map to the `BudgetClass` enum in `execution_plan.py`:
+
+| Budget Class | Floor | Ceiling | Use Case |
+|--------------|-------|---------|----------|
+| `minimal`    | 1     | 3       | Low-priority claims, fastest |
+| `standard`   | 2     | 5       | Balanced cost/coverage (default) |
+| `deep`       | 3     | 30      | High-priority claims, max coverage |
+
+The model stops adding targets when:
+1. Marginal EVOI falls below minimum threshold (0.05)
+2. Marginal EVOI < marginal cost
+3. Ceiling reached
+
+### Trace Events
+
+- `target_selection.bayesian_budget`: logs optimal_k, marginal analysis, params
+- `target_selection.completed`: logs chosen targets, deferred claims, and reason codes
+- `target_selection.anchor_forced`: logs when anchor claim is force-promoted to targets
+
+### Design Rationale
 
 This is **resource-driven orchestration**, not a truth heuristic: selection only decides *where to spend retrieval budget*.
-All selected claims still require evidence to score high.
+All selected claims still require evidence to score high. The Bayesian approach naturally:
+- Selects more targets for high-harm/high-uncertainty claims
+- Selects fewer targets when marginal value drops below cost
+- Respects budget constraints as safety nets
 
-Trace event:
-
-- `target_selection.completed` logs chosen targets, deferred claims, and reason codes.
-
-## Roadmap Note
-
-The target selection logic is expected to evolve toward a **Bayesian value-of-information ranking** under a fixed budget:
-maximize expected uncertainty reduction per cost. This will replace hard boosts over time, while keeping determinism and
-traceability.

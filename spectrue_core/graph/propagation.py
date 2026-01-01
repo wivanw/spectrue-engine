@@ -59,42 +59,42 @@ def propagate_belief(graph: ClaimContextGraph) -> List[ScoringTraceStep]:
     """
     trace = []
     step_id = 0
-    
+
     # Topological sort ensures DAG property: parents processed before children
     # If graph has cycles (circular reasoning), fallback to arbitrary order
     sorted_ids = graph.topological_sort()
-    
+
     for claim_id in sorted_ids:
         node = graph.get_node(claim_id)
         if not node:
             continue
-            
+
         # Local belief: Evidence directly about THIS claim
         # Neutral (log_odds=0.0) means P(true)=0.5 (no direct evidence)
         current_belief = node.local_belief or BeliefState(log_odds=0.0)
-        
+
         # Collect messages from parent nodes (claims that influence this one)
         incoming_edges = graph.get_incoming_edges(claim_id)
-        
+
         total_message_log_odds = 0.0
-        
+
         for edge in incoming_edges:
             source_node = graph.get_node(edge.source_id)
-            
+
             # Skip if source hasn't been processed (shouldn't happen in topo sort)
             # or has no propagated belief yet
             if not source_node or not source_node.propagated_belief:
                 continue
-                
+
             source_log_odds = source_node.propagated_belief.log_odds
-            
+
             # Determine influence direction based on semantic relationship
             # CONTRADICTS: If source is TRUE, target is more likely FALSE
             # SUPPORTS/ENTAILS: If source is TRUE, target is more likely TRUE
             sign = 1.0
             if edge.relation == RelationType.CONTRADICTS:
                 sign = -1.0
-                
+
             # Message formula:
             # m = source_belief × edge_weight × sign
             #
@@ -104,9 +104,9 @@ def propagate_belief(graph: ClaimContextGraph) -> List[ScoringTraceStep]:
             # - High weight → strong coupling
             # - CONTRADICTS → inverts the influence
             message = source_log_odds * edge.weight * sign
-            
+
             total_message_log_odds += message
-            
+
             # Record for explainability trace
             step_id += 1
             trace.append(ScoringTraceStep(
@@ -115,16 +115,16 @@ def propagate_belief(graph: ClaimContextGraph) -> List[ScoringTraceStep]:
                 delta=message,
                 new_belief=current_belief.log_odds + total_message_log_odds
             ))
-            
+
         # Final belief = Local evidence + Sum of incoming messages
         # This is the core BP update rule for log-odds representation
         final_log_odds = current_belief.log_odds + total_message_log_odds
-        
+
         node.propagated_belief = BeliefState(
             log_odds=final_log_odds, 
             confidence=current_belief.confidence
         )
-        
+
     return trace
 
 

@@ -116,10 +116,10 @@ def _redact_medical(s: str) -> str:
     """
     if not s:
         return s
-    
+
     for pattern in _MEDICAL_PATTERNS:
         s = re.sub(pattern, "[REDACTED_MEDICAL]", s, flags=re.IGNORECASE)
-    
+
     return s
 
 
@@ -143,7 +143,7 @@ def _sanitize(
         return obj
     if isinstance(obj, str):
         s = _redact_text(obj)
-        
+
         # Safe Payloads Logic
         safe_mode = _trace_safe_payloads_var.get()
         if safe_mode:
@@ -154,10 +154,10 @@ def _sanitize(
                 # Broad match for sensitive keys
                 if any(x in k for x in ("input_text", "response_text", "article", "content", "text", "prompt", "raw_html", "snippet")):
                     is_sensitive = True
-            
+
             # Determine limit
             limit = _trace_max_head_var.get() if is_sensitive else _trace_max_inline_var.get()
-            
+
             if len(s) > limit:
                 # Safe mode:
                 # - Sensitive keys (prompt/content/text/etc): head-only + sha256 (no tail)
@@ -171,7 +171,7 @@ def _sanitize(
                     out["tail"] = s[-limit:] if limit else ""
                 return out
             return s
-            
+
         # Legacy/Unsafe Mode (keep existing behavior for backward compat if flag is off)
         if len(s) <= max_str:
             return s
@@ -275,7 +275,7 @@ class Trace:
                         pass
             except Exception:
                 pass
-            
+
             payload = {
                 "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             }

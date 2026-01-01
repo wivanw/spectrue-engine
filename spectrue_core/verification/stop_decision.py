@@ -1,8 +1,14 @@
-from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
 
-if TYPE_CHECKING:
-    from spectrue_core.pipeline_builder.spec import PipelineProfile
+from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -85,35 +91,6 @@ def should_stop_by_ev(
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# M113: Pipeline Profile Integration
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def ev_stop_params_from_pipeline_profile(
-    profile: "PipelineProfile",
-) -> EVStopParams | None:
-    """
-    Create EVStopParams from a pipeline profile's stop_policy configuration.
-
-    Args:
-        profile: Pipeline profile with stop_policy settings
-
-    Returns:
-        EVStopParams if stop policy is enabled, None otherwise
-    """
-
-    stop_policy = getattr(profile, "stop_policy", None)
-    if stop_policy is None or not getattr(stop_policy, "enabled", False):
-        return None
-
-    return EVStopParams(
-        value_uncertainty=getattr(stop_policy, "value_uncertainty", 1.0),
-        marginal_cost=getattr(stop_policy, "marginal_cost", 0.25),
-        min_entropy=getattr(stop_policy, "min_entropy", 0.15),
-    )
-
-
 @dataclass
 class StopDecisionResult:
     """
@@ -121,6 +98,7 @@ class StopDecisionResult:
 
     Used for structured trace output.
     """
+
     should_stop: bool
     reason: str
     entropy: float
@@ -158,7 +136,7 @@ def evaluate_stop_decision(
     """
     Evaluate stop decision with full trace output.
 
-    This is the M113 version of should_stop_by_ev with structured output
+    This is the version of should_stop_by_ev with structured output
     suitable for trace recording.
 
     Args:
@@ -186,4 +164,3 @@ def evaluate_stop_decision(
         budget_remaining=budget_remaining,
         quality_signal=quality_signal,
     )
-

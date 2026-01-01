@@ -53,7 +53,7 @@ class DailyBonusCalculator:
         if prev_b > Decimal("0.0"):
             max_up = prev_b * (Decimal("1.0") + self.config.max_bonus_up_ratio)
             max_down = prev_b * (Decimal("1.0") - self.config.max_bonus_down_ratio)
-            
+
             if b_raw > max_up:
                 b_raw = max_up
             elif b_raw < max_down:
@@ -61,7 +61,7 @@ class DailyBonusCalculator:
 
         # 6. Clamping
         b_final = max(self.config.b_min_sc, min(b_raw, self.config.b_max_sc))
-        
+
         # 7. Solvency Check
         # Total cost = b_final * active_users
         total_cost = b_final * active_users
@@ -71,5 +71,5 @@ class DailyBonusCalculator:
                 b_final = pool_available / active_users
             else:
                 b_final = Decimal("0.0")
-        
+
         return B_new, b_final

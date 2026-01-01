@@ -17,7 +17,7 @@ class CostLedger:
     All credit values are accumulated as Decimal for fractional SC precision.
     No intermediate rounding - ceiling is applied only at final charge.
     """
-    
+
     run_id: str | None = None
     events: list[CostEvent] = field(default_factory=list)
     phase_usage: list[dict] = field(default_factory=list)

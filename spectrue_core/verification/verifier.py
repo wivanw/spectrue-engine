@@ -19,7 +19,7 @@ class FactVerifier:
     
     Uses composition with ValidationPipeline for clean architecture.
     """
-    
+
     def __init__(self, config: SpectrueConfig = None, translation_service=None):
         self.config = config
         self.agent = FactCheckerAgent(config)
@@ -43,8 +43,8 @@ class FactVerifier:
         progress_callback=None,
         needs_cleaning: bool = False,
         source_url: str | None = None,
-        extract_claims_only: bool = False,  # M105: Deep mode - just extract claims
-        pipeline_profile: str | None = None, # M113
+        extract_claims_only: bool = False,  # Deep mode - just extract claims
+        pipeline_profile: str | None = None,
         preloaded_claims: list | None = None, # Skip extraction if claims provided
     ) -> dict:
         """

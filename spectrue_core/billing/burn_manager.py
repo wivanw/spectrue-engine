@@ -28,37 +28,37 @@ def burn_inactive_users(db, days_threshold: int = 365) -> int:
     now = datetime.utcnow()
     cutoff = now - timedelta(days=days_threshold)
     users_ref = db.collection("users")
-    
+
     # Query: last_seen_at < cutoff AND balance_sc > 0
     # We filter active plans in code (Firestore doesn't support OR well)
     query = users_ref.where("last_seen_at", "<", cutoff).where("balance_sc", ">", 0)
-    
+
     batch = db.batch()
     count = 0
     burned_count = 0
-    
+
     for doc in query.stream():
         data = doc.to_dict()
-        
+
         # --- SKIP: Users with active paid plans ---
         plan_expires_at = data.get("plan_expires_at")
         if plan_expires_at:
             # Convert to datetime if needed
             if hasattr(plan_expires_at, 'timestamp'):
                 plan_expires_at = plan_expires_at
-            
+
             # If plan is still active, NEVER burn
             if plan_expires_at > now:
                 continue
-            
+
             # Plan expired - check if threshold passed since expiry
             burn_cutoff_for_expired = plan_expires_at + timedelta(days=days_threshold)
             if now < burn_cutoff_for_expired:
                 continue  # Not enough time passed since plan expiry
-        
+
         # --- BURN: Free user or plan expired + threshold passed ---
         balance = data.get("balance_sc", 0)
-        
+
         # Burn
         batch.update(doc.reference, {
             "balance_sc": 0,
@@ -66,15 +66,15 @@ def burn_inactive_users(db, days_threshold: int = 365) -> int:
             "burned_amount": balance,
             "burned_at": firestore.SERVER_TIMESTAMP
         })
-        
+
         count += 1
         burned_count += 1
-        
+
         if count % 400 == 0:
             batch.commit()
             batch = db.batch()
-            
+
     if count % 400 != 0:
         batch.commit()
-        
+
     return burned_count

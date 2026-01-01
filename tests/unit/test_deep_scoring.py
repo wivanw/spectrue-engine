@@ -11,6 +11,7 @@ class TestDeepScoringPipeline:
         agent = MagicMock()
         agent.extract_claims = AsyncMock()
         agent.score_evidence = AsyncMock()
+        agent.score_evidence_parallel = AsyncMock()
         # Mock other required methods to avoid failures
         agent.cluster_evidence = AsyncMock(return_value=[])
         agent.verify_search_relevance = AsyncMock(return_value={"is_relevant": True})
@@ -72,15 +73,21 @@ class TestDeepScoringPipeline:
         ]
         mock_agent.extract_claims.return_value = (claims, False, "news", "", "")
         
-        # Setup scoring to return dummy result
-        mock_agent.score_evidence.return_value = {
+        # Setup parallel scoring to return dummy result (deep mode uses this)
+        mock_agent.score_evidence_parallel.return_value = {
             "verified_score": 0.8,
-            "claim_verdicts": [{"claim_id": "c1", "verdict": "verified"}],
-            "rationale": "Test rationale"
+            "claim_verdicts": [
+                {"claim_id": "c1", "verdict": "verified", "verdict_score": 0.9, "rgba": [0.1, 0.9, 0.8, 0.8]},
+                {"claim_id": "c2", "verdict": "verified", "verdict_score": 0.8, "rgba": [0.1, 0.8, 0.8, 0.7]},
+                {"claim_id": "c3", "verdict": "verified", "verdict_score": 0.7, "rgba": [0.2, 0.7, 0.8, 0.6]},
+            ],
+            "rationale": "Test rationale",
+            "danger_score": 0.1,
+            "style_score": 0.8,
+            "explainability_score": 0.7,
         }
 
-        # Execute in DEEP mode via pipeline (pipeline itself doesn't do per-claim)
-        # Deep per-claim scoring happens at engine level, not pipeline level
+        # Execute in DEEP mode via pipeline
         await pipeline.execute(
             fact="Test Fact",
             search_type="deep",
@@ -88,13 +95,13 @@ class TestDeepScoringPipeline:
             lang="en"
         )
 
-        # Pipeline.execute() does single pass scoring regardless of search_type
-        # Per-claim verification happens at SpectrueEngine level for deep mode
-        assert mock_agent.score_evidence.call_count == 1
+        # Deep mode uses score_evidence_parallel, not score_evidence
+        assert mock_agent.score_evidence_parallel.call_count == 1
+        assert mock_agent.score_evidence.call_count == 0
 
     @pytest.mark.asyncio
     async def test_smart_mode_uses_batch_scoring(self, pipeline, mock_agent, mock_search_mgr):
-        """Verify that search_type='smart' uses single batch scoring."""
+        """Verify that search_type='smart' uses standard batch scoring (not parallel)."""
         # Setup: 3 claims
         claims = [
             {"id": "c1", "text": "Claim 1", "search_queries": ["q1"]},
@@ -103,13 +110,19 @@ class TestDeepScoringPipeline:
         ]
         mock_agent.extract_claims.return_value = (claims, False, "news", "", "")
         
+        # smart mode uses "normal" profile which uses standard score_evidence
         mock_agent.score_evidence.return_value = {
             "verified_score": 0.8, 
-            "claim_verdicts": [],
-            "rationale": "Batch rationale"
+            "claim_verdicts": [
+                {"claim_id": "c1", "verdict": "verified", "verdict_score": 0.8, "rgba": [0.1, 0.8, 0.8, 0.8]},
+            ],
+            "rationale": "Batch rationale",
+            "danger_score": 0.1,
+            "style_score": 0.8,
+            "explainability_score": 0.8,
         }
 
-        # Execute in SMART mode
+        # Execute in SMART mode (maps to "normal" profile)
         await pipeline.execute(
             fact="Test Fact",
             search_type="smart",
@@ -117,5 +130,6 @@ class TestDeepScoringPipeline:
             lang="en"
         )
 
-        # Assert score_evidence was called EXACTLY ONCE
+        # Smart mode uses "normal" profile = standard score_evidence
         assert mock_agent.score_evidence.call_count == 1
+        assert mock_agent.score_evidence_parallel.call_count == 0

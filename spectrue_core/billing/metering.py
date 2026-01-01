@@ -24,7 +24,7 @@ def _extract_tavily_credits(response: dict[str, Any] | None) -> float:
     Returns FALLBACK_CREDITS_PER_CALL (1.0) if credits not found.
     """
     FALLBACK_CREDITS_PER_CALL = 1.0  # Tavily charges 1 credit per search/extract
-    
+
     if not response:
         return FALLBACK_CREDITS_PER_CALL  # Assume 1 credit was used
     for key in ("credits", "credits_used", "creditsUsed", "total_credits"):

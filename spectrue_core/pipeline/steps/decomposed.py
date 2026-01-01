@@ -346,27 +346,48 @@ class TargetSelectionStep:
             # For normal mode, anchor must be in targets
             anchor_for_selection = anchor_claim_id if ctx.mode.name == "normal" else None
 
-            result = select_verification_targets(
-                claims=eligible_claims,
-                max_targets=2,
-                graph_result=graph_result,
-                budget_class=budget_class,
-                anchor_claim_id=anchor_for_selection,
-            )
+            # DEEP MODE: Verify ALL claims (no target selection limits)
+            if ctx.mode.name == "deep":
+                # All claims are targets in deep mode
+                target_claims = list(eligible_claims)
+                deferred_claims = []
+                evidence_sharing = {}
+                target_reasons = {c.get("id"): "deep_mode_all_verified" for c in target_claims}
 
-            Trace.event(
-                "target_selection.step_completed",
-                {
-                    "targets_count": len(result.targets),
-                    "deferred_count": len(result.deferred),
-                },
-            )
+                Trace.event(
+                    "target_selection.deep_mode_all_claims",
+                    {
+                        "mode": ctx.mode.name,
+                        "claims_count": len(target_claims),
+                        "claim_ids": [c.get("id") for c in target_claims],
+                    },
+                )
+            else:
+                result = select_verification_targets(
+                    claims=eligible_claims,
+                    # max_targets removed: let Bayesian EVOI model compute
+                    graph_result=graph_result,
+                    budget_class=budget_class,
+                    anchor_claim_id=anchor_for_selection,
+                )
+                target_claims = result.targets
+                deferred_claims = result.deferred
+                evidence_sharing = result.evidence_sharing
+                target_reasons = result.reasons
+
+                Trace.event(
+                    "target_selection.step_completed",
+                    {
+                        "targets_count": len(target_claims),
+                        "deferred_count": len(deferred_claims),
+                    },
+                )
 
             return (
-                ctx.set_extra("target_claims", result.targets)
-                .set_extra("deferred_claims", result.deferred)
-                .set_extra("evidence_sharing", result.evidence_sharing)
-                .set_extra("target_reasons", result.reasons)
+                ctx.set_extra("target_claims", target_claims)
+                .set_extra("deferred_claims", deferred_claims)
+                .set_extra("evidence_sharing", evidence_sharing)
+                .set_extra("target_reasons", target_reasons)
             )
 
         except Exception as e:
@@ -480,10 +501,15 @@ class EvidenceFlowStep:
 
     Orchestrates stance clustering, evidence scoring, and
     RGBA computation for all claims.
+    
+    Args:
+        enable_global_scoring: If False, skip the global LLM scoring call.
+            Deep mode sets this to False because it uses per-claim JudgeClaimsStep.
     """
 
     agent: Any  # FactCheckerAgent
     search_mgr: Any  # SearchManager
+    enable_global_scoring: bool = True  # Standard mode: True, Deep mode: False
     name: str = "evidence_flow"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
@@ -499,6 +525,44 @@ class EvidenceFlowStep:
             sources = ctx.sources
             progress_callback = ctx.get_extra("progress_callback")
 
+            # Deep mode: skip global scoring, only collect evidence
+            if not self.enable_global_scoring:
+                Trace.event(
+                    "evidence_flow.skip_global_scoring",
+                    {"reason": "deep_mode_uses_per_claim_judging", "claims_count": len(claims)},
+                )
+                # Build evidence pack without LLM scoring
+                pack = build_evidence_pack(sources)
+
+                # Prepare evidence_by_claim for BuildClaimFramesStep
+                evidence_by_claim: dict = {}
+                for src in sources:
+                    if not isinstance(src, dict):
+                        continue
+                    cid = src.get("claim_id")
+                    if cid:
+                        if cid not in evidence_by_claim:
+                            evidence_by_claim[cid] = []
+                        evidence_by_claim[cid].append(src)
+
+                # Create minimal result for deep mode (no global scores)
+                result = {
+                    "judge_mode": "deep",
+                    "evidence_pack": pack,
+                    "evidence_by_claim": evidence_by_claim,
+                    "claim_verdicts": [],  # Will be filled by JudgeClaimsStep
+                    "sources": sources,
+                    "claims": claims,
+                }
+
+                Trace.event(
+                    "evidence_flow.collect_only_completed",
+                    {"claims_with_evidence": len(evidence_by_claim)},
+                )
+
+                return ctx.with_update(verdict=result).set_extra("evidence_by_claim", evidence_by_claim)
+
+            # Standard mode: full evidence flow with global LLM scoring
             def _build_pack(**kwargs):
                 return build_evidence_pack(kwargs.get("sources", []))
 

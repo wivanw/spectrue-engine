@@ -41,7 +41,7 @@ class EvidenceStance(str, Enum):
     """Evidence is not related to this assertion."""
 
     CONTEXT = "CONTEXT"
-    """Additional context preserved for data retention (M77)."""
+    """Additional context preserved for data retention."""
 
 
 class TimelinessStatus(str, Enum):
@@ -61,22 +61,22 @@ class EvidenceNeedType(str, Enum):
     """
     EMPIRICAL_STUDY = "empirical_study"
     """Requires scientific research, clinical trials, peer-reviewed studies."""
-    
+
     GUIDELINE = "guideline"
     """Requires official guidelines, consensus statements, policy documents."""
-    
+
     OFFICIAL_STATS = "official_stats"
     """Requires government statistics, census data, official reports."""
-    
+
     EXPERT_OPINION = "expert_opinion"
     """Requires expert quotes, professional assessments."""
-    
+
     ANECDOTAL = "anecdotal"
     """Personal testimonies, case studies only."""
-    
+
     NEWS_REPORT = "news_report"
     """Requires journalistic coverage of events."""
-    
+
     UNKNOWN = "unknown"
     """Cannot determine what evidence is needed."""
 

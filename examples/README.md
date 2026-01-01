@@ -19,7 +19,7 @@ python examples/basic_usage.py
 
 ### 2. Claim Orchestration (`claim_orchestration.py`)
 
-Advanced example demonstrating M80 claim-centric orchestration:
+Advanced example demonstrating claim-centric orchestration:
 - Building execution plans based on claim metadata
 - Progressive widening with phase runner
 - Evidence sufficiency checking
@@ -27,6 +27,14 @@ Advanced example demonstrating M80 claim-centric orchestration:
 
 ```bash
 python examples/claim_orchestration.py
+```
+
+### 3. Posterior Calibration (`calibrate_claim_posterior.py`)
+
+Fit alpha/beta for the claim posterior model using labeled data (MAP estimation).
+
+```bash
+python examples/calibrate_claim_posterior.py --input path/to/claims.jsonl
 ```
 
 ## Running Examples
@@ -56,7 +64,7 @@ Use these examples as templates. Key imports:
 from spectrue_core.engine import SpectrueEngine
 from spectrue_core.config import SpectrueConfig
 
-# M80 Orchestration
+# Orchestration
 from spectrue_core.verification.orchestrator import ClaimOrchestrator
 from spectrue_core.verification.phase_runner import PhaseRunner
 from spectrue_core.verification.execution_plan import BudgetClass

@@ -40,17 +40,17 @@ class ClaimScore:
     danger_score: float    # 0-1
     style_score: float     # 0-1
     explainability_score: float  # 0-1
-    
+
     # Weighting factors
     role_weight: float = 1.0  # From ClaimMetadata.role_weight
     check_worthiness: float = 0.5  # From ClaimMetadata
     evidence_quality: float = 1.0  # From sufficiency check
-    
+
     @property
     def total_weight(self) -> float:
         """Calculate total weight for this claim."""
         return self.role_weight * self.check_worthiness * self.evidence_quality
-    
+
     @property
     def is_excluded(self) -> bool:
         """Check if claim should be excluded from aggregate (weight=0)."""
@@ -64,13 +64,13 @@ class AggregatedRGBA:
     danger: float = 0.5
     style: float = 0.5
     explainability: float = 0.5
-    
+
     # Metadata
     total_claims: int = 0
     included_claims: int = 0  # Claims with weight > 0
     excluded_claims: int = 0  # Claims with weight = 0
     total_weight: float = 0.0
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for API response."""
         return {
@@ -109,36 +109,36 @@ def aggregate_weighted(claim_scores: list[ClaimScore]) -> AggregatedRGBA:
         AggregatedRGBA with weighted scores
     """
     result = AggregatedRGBA()
-    
+
     if not claim_scores:
         return result
-    
+
     result.total_claims = len(claim_scores)
-    
+
     # Accumulators
     weighted_verified = 0.0
     weighted_danger = 0.0
     weighted_style = 0.0
     weighted_explainability = 0.0
     total_weight = 0.0
-    
+
     for cs in claim_scores:
         weight = cs.total_weight
-        
+
         if cs.is_excluded:
             result.excluded_claims += 1
             continue
-        
+
         result.included_claims += 1
         total_weight += weight
-        
+
         weighted_verified += cs.verified_score * weight
         weighted_danger += cs.danger_score * weight
         weighted_style += cs.style_score * weight
         weighted_explainability += cs.explainability_score * weight
-    
+
     result.total_weight = total_weight
-    
+
     # Calculate weighted averages
     if total_weight > 0:
         result.verified = weighted_verified / total_weight
@@ -155,7 +155,7 @@ def aggregate_weighted(claim_scores: list[ClaimScore]) -> AggregatedRGBA:
             "[M80] No verifiable claims (all weights=0). "
             "Returning neutral RGBA scores."
         )
-    
+
     return result
 
 
@@ -183,7 +183,7 @@ def claim_to_score(
         ClaimScore with proper weighting
     """
     claim_id = claim.get("id", "unknown")
-    
+
     # Get metadata
     metadata = claim.get("metadata")
     if metadata and isinstance(metadata, ClaimMetadata):
@@ -193,7 +193,7 @@ def claim_to_score(
         # Default: full weight for backward compat
         role_weight = 1.0
         check_worthiness = 0.5
-    
+
     return ClaimScore(
         claim_id=claim_id,
         verified_score=verified_score,

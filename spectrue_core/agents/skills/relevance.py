@@ -6,7 +6,7 @@ class RelevanceSkill(BaseSkill):
     Semantic Gating for Search Results.
     Filters out irrelevant search results using lightweight LLM checks before expensive processing.
     """
-    
+
     async def verify_search_relevance(
         self, 
         claims: list[Claim], 
@@ -24,20 +24,20 @@ class RelevanceSkill(BaseSkill):
         """
         if not claims or not search_results:
             return {"is_relevant": False, "reason": "No input data"}
-            
+
         # Prepare context for LLM
         # Use top 3 claims
         claims_text = "\n".join([
             f"- {c.get('normalized_text') or c.get('text', '')}"
             for c in claims[:3]
         ])
-        
+
         # Use top 3 search snippets
         snippets_text = "\n".join([
             f"Source: {res.get('title', 'Unknown')}\nSnippet: {res.get('snippet', '')}\n---" 
             for res in search_results[:3]
         ])
-        
+
         prompt = f"""You are a semantic relevance router for a fact-checking system.
         
 Input Claims:
@@ -58,7 +58,7 @@ Return JSON:
   "reason": "Short explanation"
 }}
 """
-        
+
         try:
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
@@ -68,24 +68,24 @@ Return JSON:
                 timeout=15.0,
                 trace_kind="semantic_gating"
             )
-            
+
             match_type = result.get("match_type", "TOPIC")
             reason = result.get("reason", "No reason provided")
-            
+
             # Two-Level Gating
             # Accept both EXACT and TOPIC as "RELEVANT" to prevent coverage loss
             is_relevant = match_type in ("EXACT", "TOPIC")
             status = "RELEVANT" if is_relevant else "OFF_TOPIC"
-            
+
             logger.debug("[M74] Semantic Router: match_type=%s → Status=%s. Reason: %s", match_type, status, reason)
-                
+
             return {
                 "status": status,
                 "match_type": match_type,
                 "is_relevant": is_relevant,
                 "reason": reason
             }
-            
+
         except Exception as e:
             logger.warning("[M66] Semantic Gating failed: %s. Assuming relevant.", e)
             return {"status": "RELEVANT", "is_relevant": True, "reason": "Error in check, fail open"}

@@ -43,10 +43,10 @@ class BudgetClass(str, Enum):
     """
     MINIMAL = "minimal"
     """Only Phase A. Fastest, cheapest. For low-priority claims."""
-    
+
     STANDARD = "standard"
     """Phases A + B. Balanced cost/coverage. Default."""
-    
+
     DEEP = "deep"
     """All phases (A/B/C/D). Maximum coverage. For high-priority claims."""
 
@@ -84,10 +84,10 @@ class Phase:
     """
     phase_id: str
     """Phase identifier: 'A', 'B', 'C', 'D', 'A-light', 'A-origin'."""
-    
+
     locale: str
     """Search locale/language. E.g., 'en', 'uk', 'de'."""
-    
+
     channels: list[EvidenceChannel]
     """Which source channels to search."""
 
@@ -98,19 +98,19 @@ class Phase:
     This mirrors `RetrievalPolicy.use_policy_by_channel` but is scoped to the
     channels present in this phase.
     """
-    
+
     search_depth: str = "basic"
     """Search depth: 'basic' or 'advanced'. Maps to Tavily depth."""
-    
+
     max_results: int = 3
     """Maximum results to retrieve (k parameter)."""
-    
+
     is_expensive: bool = False
     """Cost flag. True for advanced depth or large k."""
-    
+
     description: str = ""
     """Human-readable description for tracing."""
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for tracing/logging."""
         return {
@@ -279,7 +279,7 @@ class ExecutionPlan:
     """
     claim_phases: dict[str, list[Phase]] = field(default_factory=dict)
     """Mapping of claim_id to list of phases."""
-    
+
     budget_class: BudgetClass = BudgetClass.STANDARD
     """Budget classification used to build this plan."""
 
@@ -295,15 +295,15 @@ class ExecutionPlan:
 
     max_credits: int | None = None
     """Maximum credits for this run (M113)."""
-    
+
     def get_phases(self, claim_id: str) -> list[Phase]:
         """Get phases for a claim. Returns empty list if not found."""
         return self.claim_phases.get(claim_id, [])
-    
+
     def add_claim(self, claim_id: str, phases: list[Phase]) -> None:
         """Add phases for a claim."""
         self.claim_phases[claim_id] = phases
-    
+
     def get_all_phase_ids(self) -> set[str]:
         """Get all unique phase IDs in the plan."""
         phase_ids: set[str] = set()
@@ -311,7 +311,7 @@ class ExecutionPlan:
             for phase in phases:
                 phase_ids.add(phase.phase_id)
         return phase_ids
-    
+
     def get_claims_needing_phase(self, phase_id: str) -> list[str]:
         """Get list of claim IDs that need a specific phase."""
         return [
@@ -319,19 +319,19 @@ class ExecutionPlan:
             for claim_id, phases in self.claim_phases.items()
             if any(p.phase_id == phase_id for p in phases)
         ]
-    
+
     @property
     def total_phases(self) -> int:
         """Total number of phase executions across all claims."""
         return sum(len(phases) for phases in self.claim_phases.values())
-    
+
     @property
     def max_depth(self) -> int:
         """Maximum number of phases for any single claim."""
         if not self.claim_phases:
             return 0
         return max(len(phases) for phases in self.claim_phases.values())
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for tracing/logging."""
         result = {
@@ -353,7 +353,7 @@ class ExecutionPlan:
         if self.max_credits is not None:
             result["max_credits"] = self.max_credits
         return result
-    
+
     def summary(self) -> str:
         """Human-readable summary."""
         header = f"ExecutionPlan (budget={self.budget_class.value}"
@@ -410,7 +410,7 @@ class ClaimExecutionState:
     """
     claim_id: str
     """The claim being executed."""
-    
+
     phases_completed: list[str] = field(default_factory=list)
     """Phase IDs that have completed."""
 
@@ -428,22 +428,22 @@ class ClaimExecutionState:
 
     phases_skipped: list[str] = field(default_factory=list)
     """Phase IDs skipped due to sufficiency."""
-    
+
     error: str | None = None
     """Error message if execution failed."""
-    
+
     def mark_completed(self, phase_id: str) -> None:
         """Mark a phase as completed."""
         if phase_id not in self.phases_completed:
             self.phases_completed.append(phase_id)
-    
+
     def mark_sufficient(self, reason: str, remaining_phases: list[str]) -> None:
         """Mark as sufficient and record skipped phases."""
         self.is_sufficient = True
         self.sufficiency_reason = reason
         self.stop_reason = "sufficiency_met"
         self.phases_skipped = remaining_phases
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for tracing."""
         return {
@@ -467,19 +467,19 @@ class ExecutionState:
     """
     claim_states: dict[str, ClaimExecutionState] = field(default_factory=dict)
     """State per claim_id."""
-    
+
     def get_or_create(self, claim_id: str) -> ClaimExecutionState:
         """Get or create state for a claim."""
         if claim_id not in self.claim_states:
             self.claim_states[claim_id] = ClaimExecutionState(claim_id=claim_id)
         return self.claim_states[claim_id]
-    
+
     def all_sufficient(self) -> bool:
         """Check if all claims have sufficient evidence."""
         if not self.claim_states:
             return False
         return all(s.is_sufficient for s in self.claim_states.values())
-    
+
     def claims_needing_more(self) -> list[str]:
         """Get claim IDs that still need more phases."""
         return [
@@ -487,7 +487,7 @@ class ExecutionState:
             for claim_id, state in self.claim_states.items()
             if not state.is_sufficient and state.error is None
         ]
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for tracing."""
         return {

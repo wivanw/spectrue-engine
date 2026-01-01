@@ -41,14 +41,14 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     """
     if len(a) != len(b) or len(a) == 0:
         return 0.0
-    
+
     dot_product = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
-    
+
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    
+
     return dot_product / (norm_a * norm_b)
 
 
@@ -60,15 +60,15 @@ class EmbeddingClient:
     Caches embeddings by (text_hash, model) to avoid redundant calls.
     Falls back to EmbedService when no client is provided.
     """
-    
+
     def __init__(self, openai_client: "AsyncOpenAI | None" = None):
         self.client = openai_client
         self._cache: dict[str, list[float]] = {}
-    
+
     def _cache_key(self, text: str) -> str:
         """Generate cache key for text."""
         return f"{EMBEDDING_MODEL}:{_text_hash(text)}"
-    
+
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """
         Generate embeddings for a list of texts.
@@ -109,53 +109,53 @@ class EmbeddingClient:
                 },
             )
             return [[0.0] * EMBEDDING_DIMENSIONS for _ in texts]
-        
+
         # Check cache and identify texts that need embedding
         results: list[list[float] | None] = [None] * len(texts)
         texts_to_embed: list[tuple[int, str]] = []  # (index, text)
-        
+
         for i, text in enumerate(texts):
             if not text or not text.strip():
                 # Empty text gets zero vector
                 results[i] = [0.0] * EMBEDDING_DIMENSIONS
                 empty_texts += 1
                 continue
-            
+
             cache_key = self._cache_key(text)
             if cache_key in self._cache:
                 results[i] = self._cache[cache_key]
             else:
                 texts_to_embed.append((i, text.strip()))
-        
+
         if not texts_to_embed:
             return [r for r in results if r is not None]
-        
+
         logger.debug("[M72] Embedding %d texts (%d from cache)", 
                      len(texts_to_embed), len(texts) - len(texts_to_embed))
-        
+
         # Batch texts for API call
         batches = self._create_batches(texts_to_embed)
-        
+
         for batch in batches:
             batch_indices = [idx for idx, _ in batch]
             batch_texts = [txt for _, txt in batch]
-            
+
             try:
                 response = await self.client.embeddings.create(
                     model=EMBEDDING_MODEL,
                     input=batch_texts,
                 )
-                
+
                 for i, embedding_data in enumerate(response.data):
                     idx = batch_indices[i]
                     embedding = embedding_data.embedding
-                    
+
                     # Cache the result
                     cache_key = self._cache_key(batch_texts[i])
                     self._cache[cache_key] = embedding
-                    
+
                     results[idx] = embedding
-                    
+
             except Exception as e:
                 logger.warning("[M72] Embedding API error: %s", e)
                 # Fill with zero vectors on error
@@ -164,7 +164,7 @@ class EmbeddingClient:
                 for idx in batch_indices:
                     if results[idx] is None:
                         results[idx] = [0.0] * EMBEDDING_DIMENSIONS
-        
+
         # Fill any remaining None with zero vectors
         final_results: list[list[float]] = []
         for r in results:
@@ -195,7 +195,7 @@ class EmbeddingClient:
             )
 
         return final_results
-    
+
     def _create_batches(
         self, 
         texts_with_indices: list[tuple[int, str]]
@@ -208,24 +208,24 @@ class EmbeddingClient:
         batches: list[list[tuple[int, str]]] = []
         current_batch: list[tuple[int, str]] = []
         current_tokens = 0
-        
+
         for idx, text in texts_with_indices:
             # Estimate tokens (conservative)
             text_tokens = len(text) // APPROX_CHARS_PER_TOKEN + 1
-            
+
             if current_tokens + text_tokens > MAX_TOKENS_PER_BATCH and current_batch:
                 batches.append(current_batch)
                 current_batch = []
                 current_tokens = 0
-            
+
             current_batch.append((idx, text))
             current_tokens += text_tokens
-        
+
         if current_batch:
             batches.append(current_batch)
-        
+
         return batches
-    
+
     def build_similarity_matrix(
         self, 
         embeddings: list[list[float]]
@@ -239,18 +239,18 @@ class EmbeddingClient:
         n = len(embeddings)
         if n == 0:
             return []
-        
+
         matrix: list[list[float]] = [[0.0] * n for _ in range(n)]
-        
+
         for i in range(n):
             matrix[i][i] = 1.0  # Self-similarity
             for j in range(i + 1, n):
                 sim = cosine_similarity(embeddings[i], embeddings[j])
                 matrix[i][j] = sim
                 matrix[j][i] = sim  # Symmetric
-        
+
         return matrix
-    
+
     def get_top_k_similar(
         self,
         target_idx: int,
@@ -272,21 +272,21 @@ class EmbeddingClient:
         """
         if not similarity_matrix or target_idx >= len(similarity_matrix):
             return []
-        
+
         exclude = exclude_indices or set()
         exclude.add(target_idx)  # Always exclude self
-        
+
         similarities = [
             (i, sim) 
             for i, sim in enumerate(similarity_matrix[target_idx])
             if i not in exclude
         ]
-        
+
         # Sort by similarity descending
         similarities.sort(key=lambda x: x[1], reverse=True)
-        
+
         return similarities[:k]
-    
+
     def clear_cache(self) -> None:
         """Clear the embedding cache."""
         self._cache.clear()

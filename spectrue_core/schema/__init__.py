@@ -83,6 +83,23 @@ from spectrue_core.schema.claim_metadata import (
     default_claim_metadata,
 )
 
+# Per-Claim Judging (Deep Analysis)
+from spectrue_core.schema.claim_frame import (
+    ContextExcerpt,
+    ContextMeta,
+    EvidenceItemFrame,
+    EvidenceStats,
+    RetrievalHop,
+    RetrievalTrace,
+    ClaimFrame,
+    EvidenceReference,
+    EvidenceSummary,
+    RGBAScore,
+    JudgeOutput,
+    ClaimResult,
+    DeepAnalysisResult,
+)
+
 
 __all__ = [
     # Claims
@@ -108,4 +125,9 @@ __all__ = [
     "ClaimRole", "VerificationTarget", "EvidenceChannel", "UsePolicy",
     "MetadataConfidence", "SearchLocalePlan", "RetrievalPolicy",
     "ClaimMetadata", "default_claim_metadata",
+    # Per-Claim Judging (Deep Analysis)
+    "ContextExcerpt", "ContextMeta", "EvidenceItemFrame", "EvidenceStats",
+    "RetrievalHop", "RetrievalTrace", "ClaimFrame",
+    "EvidenceReference", "EvidenceSummary", "RGBAScore",
+    "JudgeOutput", "ClaimResult", "DeepAnalysisResult",
 ]

@@ -1,5 +1,5 @@
 """
-M104/FR-007: RGBA as Independent Probabilistic Belief Dimensions.
+RGBA as Independent Probabilistic Belief Dimensions.
 
 This module provides RGBABeliefState - a dataclass representing independent
 Bayesian beliefs for each RGBA dimension (Danger, Veracity, Honesty, Explainability).
@@ -31,12 +31,12 @@ class RGBABeliefState:
     - B (Blue/Honesty): Probability that content is presented in good faith
     - A (Alpha/Explainability): Probability that we can explain why we believe G
     """
-    
+
     danger: BeliefState = field(default_factory=lambda: BeliefState(log_odds=0.0, confidence=0.5))
     veracity: BeliefState = field(default_factory=lambda: BeliefState(log_odds=0.0, confidence=0.5))
     honesty: BeliefState = field(default_factory=lambda: BeliefState(log_odds=0.0, confidence=0.5))
     explainability: BeliefState = field(default_factory=lambda: BeliefState(log_odds=0.0, confidence=0.5))
-    
+
     @classmethod
     def from_priors(
         cls,
@@ -61,31 +61,31 @@ class RGBABeliefState:
             honesty=BeliefState(log_odds=prob_to_log_odds(honesty_prior), confidence=0.5),
             explainability=BeliefState(log_odds=prob_to_log_odds(explainability_prior), confidence=0.5),
         )
-    
+
     def update_veracity(self, evidence_log_odds: float, confidence_delta: float = 0.0) -> None:
         """Update veracity belief with new evidence (in-place)."""
         new_log_odds = self.veracity.log_odds + evidence_log_odds
         new_confidence = min(1.0, self.veracity.confidence + confidence_delta)
         self.veracity = BeliefState(log_odds=new_log_odds, confidence=new_confidence)
-    
+
     def update_danger(self, evidence_log_odds: float, confidence_delta: float = 0.0) -> None:
         """Update danger belief with new evidence (in-place)."""
         new_log_odds = self.danger.log_odds + evidence_log_odds
         new_confidence = min(1.0, self.danger.confidence + confidence_delta)
         self.danger = BeliefState(log_odds=new_log_odds, confidence=new_confidence)
-    
+
     def update_honesty(self, evidence_log_odds: float, confidence_delta: float = 0.0) -> None:
         """Update honesty belief with new evidence (in-place)."""
         new_log_odds = self.honesty.log_odds + evidence_log_odds
         new_confidence = min(1.0, self.honesty.confidence + confidence_delta)
         self.honesty = BeliefState(log_odds=new_log_odds, confidence=new_confidence)
-    
+
     def update_explainability(self, evidence_log_odds: float, confidence_delta: float = 0.0) -> None:
         """Update explainability belief with new evidence (in-place)."""
         new_log_odds = self.explainability.log_odds + evidence_log_odds
         new_confidence = min(1.0, self.explainability.confidence + confidence_delta)
         self.explainability = BeliefState(log_odds=new_log_odds, confidence=new_confidence)
-    
+
     def to_probabilities(self) -> tuple[float, float, float, float]:
         """
         Convert beliefs to probability array [R, G, B, A].
@@ -97,7 +97,7 @@ class RGBABeliefState:
             self.honesty.probability,
             self.explainability.probability,
         )
-    
+
     def to_dict(self) -> dict:
         """Serialize for API response."""
         r, g, b, a = self.to_probabilities()
@@ -135,7 +135,7 @@ def create_rgba_belief_from_tier(tier: str) -> RGBABeliefState:
     explainability_prior = _TIER_EXPLAINABILITY_PRIORS.get(
         str(tier).strip().upper(), _TIER_EXPLAINABILITY_PRIORS["UNKNOWN"]
     )
-    
+
     return RGBABeliefState.from_priors(
         danger_prior=0.5,
         veracity_prior=0.5,
