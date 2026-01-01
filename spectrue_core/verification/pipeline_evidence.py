@@ -63,15 +63,25 @@ from spectrue_core.verification.evidence_scoring import (
     is_prob as _is_prob,
     logit as _logit,
     sigmoid as _sigmoid,
-    claim_text as _claim_text,
-    TIER_A_PRIOR_MEAN as _TIER_A_PRIOR_MEAN,
     TIER_A_BASELINE as _TIER_A_BASELINE,
-    explainability_factor_for_tier as _explainability_factor_for_tier,
-    tier_rank as _tier_rank,
     compute_article_g_from_anchor as _compute_article_g_from_anchor,
     select_anchor_for_article_g as _select_anchor_for_article_g,
-    mark_anchor_duplicates_sync as _mark_anchor_duplicates_sync,
     mark_anchor_duplicates_async as _mark_anchor_duplicates_async,
+)
+
+# M119: Explainability and stance processing
+from spectrue_core.verification.evidence_explainability import (
+    get_tier_rank,
+    compute_explainability_tier_adjustment,
+    find_best_tier_for_claim,
+)
+from spectrue_core.verification.evidence_stance import (
+    CANONICAL_VERDICT_STATES,
+    count_stance_evidence,
+    derive_verdict_state_from_llm_score,
+    derive_verdict_from_score,
+    detect_evidence_conflict,
+    check_has_direct_evidence,
 )
 
 
@@ -368,13 +378,6 @@ async def run_evidence_flow(
             importance_by_claim[cid_norm] = 1.0
 
     if isinstance(claim_verdicts, list):
-        # Helper to get tier rank
-        def _tier_rank(tier: str | None) -> int:
-            if not tier:
-                return 0
-            return {"D": 1, "C": 2, "B": 3, "A'": 3, "A": 4}.get(
-                str(tier).strip().upper(), 0
-            )
 
         # Prepare data for parallel processing
         def _process_single_cv(cv_data: dict) -> dict:
@@ -393,47 +396,17 @@ async def run_evidence_flow(
                 llm_score = 0.5
             llm_score = float(llm_score)
 
-            # Build evidence items from pack for stats only
+            # Count stance evidence using extracted function
             items = pack_ref.get("items", []) if isinstance(pack_ref, dict) else []
-            best_tier = None
-            n_support = 0
-            n_refute = 0
-
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                item_claim_id = item.get("claim_id")
-                if claim_id and item_claim_id not in (None, claim_id):
-                    continue
-
-                stance = str(item.get("stance") or "").lower()
-                tier = item.get("tier")
-
-                if stance in ("support", "sup", "supported"):
-                    n_support += 1
-                elif stance in ("refute", "ref", "refuted"):
-                    n_refute += 1
-
-                # Track best tier
-                if tier and (
-                    best_tier is None or _tier_rank(tier) > _tier_rank(best_tier)
-                ):
-                    best_tier = tier
+            n_support, n_refute, best_tier = count_stance_evidence(claim_id, items)
 
             # M117: Use raw LLM score directly (no posterior boost)
             # Posterior was causing all scores to drift toward 0.98+
             cv["verdict_score"] = llm_score
 
-            # Derive verdict from LLM score
-            if llm_score > 0.65:
-                cv["verdict"] = "verified"
-                cv["status"] = "verified"
-            elif llm_score < 0.35:
-                cv["verdict"] = "refuted"
-                cv["status"] = "refuted"
-            else:
-                cv["verdict"] = "ambiguous"
-                cv["status"] = "ambiguous"
+            # Derive verdict from LLM score using extracted function
+            cv["verdict"] = derive_verdict_from_score(llm_score)
+            cv["status"] = cv["verdict"]
 
             # Legacy reasons_expert for backward compatibility
             cv["reasons_expert"] = {
@@ -443,48 +416,10 @@ async def run_evidence_flow(
             }
             cv["reasons_short"] = cv.get("reasons_short", []) or []
 
-            # Explainability tier factor
-            explainability_update = None
-            if isinstance(explainability, (int, float)) and explainability >= 0:
-                pre_a = float(explainability)
-                factor, source, prior = _explainability_factor_for_tier(best_tier)
-                if math.isfinite(pre_a) and 0.0 < pre_a < 1.0:
-                    if factor <= 0 or not math.isfinite(factor):
-                        Trace.event(
-                            "verdict.explainability_bad_factor",
-                            {
-                                "claim_id": claim_id,
-                                "best_tier": best_tier,
-                                "pre_A": pre_a,
-                                "prior": prior,
-                                "baseline": _TIER_A_BASELINE,
-                                "factor": factor,
-                                "source": source,
-                            },
-                        )
-                        post_a = pre_a
-                    else:
-                        post_a = _sigmoid(_logit(pre_a) + math.log(factor))
-                    if abs(post_a - pre_a) > 1e-9:
-                        explainability_update = post_a
-                    Trace.event(
-                        "verdict.explainability_tier_factor",
-                        {
-                            "claim_id": claim_id,
-                            "best_tier": best_tier,
-                            "pre_A": pre_a,
-                            "prior": prior,
-                            "baseline": _TIER_A_BASELINE,
-                            "factor": factor,
-                            "post_A": post_a if explainability_update else pre_a,
-                            "source": source,
-                        },
-                    )
-                else:
-                    Trace.event(
-                        "verdict.explainability_missing",
-                        {"claim_id": claim_id, "best_tier": best_tier, "pre_A": pre_a},
-                    )
+            # Explainability tier adjustment using extracted function
+            explainability_update = compute_explainability_tier_adjustment(
+                explainability, best_tier, claim_id
+            )
 
             veracity_entry = {
                 "claim_id": claim_id,
@@ -497,31 +432,20 @@ async def run_evidence_flow(
                 "best_tier": best_tier,
             }
 
-            # Respect verdict_state if already normalized by parser
+            # Verdict state derivation using extracted function
             existing_state = str(cv.get("verdict_state") or "").lower().strip()
-            CANONICAL_STATES = {
-                "supported",
-                "refuted",
-                "conflicted",
-                "insufficient_evidence",
-            }
 
-            if existing_state in CANONICAL_STATES:
+            if existing_state in CANONICAL_VERDICT_STATES:
                 verdict_state = existing_state
             else:
-                # Derive from LLM score
-                verdict_state = "insufficient_evidence"
-                if llm_score > 0.65:
-                    verdict_state = "supported"
-                elif llm_score < 0.35:
-                    verdict_state = "refuted"
-                elif n_support > 0 or n_refute > 0:
-                    verdict_state = "conflicted"
+                verdict_state = derive_verdict_state_from_llm_score(
+                    llm_score, n_support, n_refute
+                )
 
             cv["verdict_state"] = verdict_state
 
-            # Conflict detection from evidence balance
-            has_conflict = n_support > 0 and n_refute > 0
+            # Conflict detection using extracted function
+            has_conflict = detect_evidence_conflict(n_support, n_refute)
 
             return {
                 "claim_id": claim_id,
@@ -554,17 +478,8 @@ async def run_evidence_flow(
                 claim_obj.get("temporality") if isinstance(claim_obj, dict) else None
             )
 
-            has_direct_evidence = False
-            if isinstance(items, list):
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    if claim_id and item.get("claim_id") not in (None, claim_id):
-                        continue
-                    stance = str(item.get("stance") or "").upper()
-                    if stance in ("SUPPORT", "REFUTE") and item.get("quote"):
-                        has_direct_evidence = True
-                        break
+            # Check for direct evidence using extracted function
+            has_direct_evidence = check_has_direct_evidence(claim_id, items)
 
             cv_data_list.append(
                 {
