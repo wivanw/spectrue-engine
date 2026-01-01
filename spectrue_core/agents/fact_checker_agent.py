@@ -1,3 +1,12 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 from spectrue_core.verification.evidence_pack import Claim, EvidencePack, ArticleIntent
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
@@ -100,6 +109,18 @@ class FactCheckerAgent:
     async def verify_search_relevance(self, claims: list[Claim], search_results: list[dict]) -> dict:
         """Verify if search results are semantically relevant to claims."""
         return await self.relevance_skill.verify_search_relevance(claims, search_results)
+
+    async def evaluate_semantic_gating(self, claims: list) -> bool:
+        """
+        Evaluate semantic gating policy (e.g. reject unverifiable content).
+        Returns True if allowed, False if rejected.
+        """
+        # Delegate to relevance skill or scoring skill if available. 
+        # For now, default to True (allow) unless filtering logic is restored/implemented.
+        # Tests will mock this to return False.
+        if hasattr(self.relevance_skill, "evaluate_semantic_gating"):
+             return await self.relevance_skill.evaluate_semantic_gating(claims)
+        return True
 
 
     async def verify_oracle_relevance(self, user_fact: str, oracle_claim: str, oracle_rating: str) -> bool:

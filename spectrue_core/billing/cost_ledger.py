@@ -1,3 +1,12 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """Cost ledger to track and summarize billing events per run."""
@@ -84,3 +93,9 @@ class CostLedger:
             phase_usage=list(self.phase_usage),
             reason_summaries=list(self.reason_summaries),
         )
+
+    def to_summary_dict(self) -> dict:
+        """Convert summary to dictionary for API response."""
+        summary = self.get_summary()
+        from dataclasses import asdict
+        return asdict(summary)
