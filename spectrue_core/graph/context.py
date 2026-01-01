@@ -20,12 +20,12 @@ class ClaimContextGraph:
             relation=edge.relation, 
             weight=edge.weight
         )
-        
+
     def get_node(self, claim_id: str) -> Optional[ClaimNode]:
         if self.graph.has_node(claim_id):
             return self.graph.nodes[claim_id]["data"]
         return None
-        
+
     def get_incoming_edges(self, target_id: str) -> List[ClaimEdge]:
         """
         Returns list of edges pointing to target_id (sources that influence this node).
@@ -53,7 +53,7 @@ class ClaimContextGraph:
             # Fallback to standard iteration order or break cycles.
             # For robustness, we return nodes in arbitrary order.
             return list(self.graph.nodes)
-            
+
     @property
     def nodes(self) -> List[ClaimNode]:
         return [self.graph.nodes[n]["data"] for n in self.graph.nodes]

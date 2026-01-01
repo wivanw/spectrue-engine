@@ -7,7 +7,7 @@ def get_active_users(db, days_threshold: int = 7) -> Iterator[User]:
     users_ref = db.collection("users")
     # Note: Requires composite index on last_seen_at
     query = users_ref.where("last_seen_at", ">=", cutoff)
-    
+
     for doc in query.stream():
         yield User.from_dict(doc.to_dict())
 

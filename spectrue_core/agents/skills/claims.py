@@ -18,6 +18,11 @@ from .claims_parsing import (
     normalize_claim_category,
     normalize_topic_group,
 )
+from .schema_logger import (
+    validate_claim_response,
+    log_claim_field_defaults,
+    log_schema_mismatch,
+)
 
 # Import schema module for structured claims
 from spectrue_core.schema import (
@@ -39,7 +44,7 @@ from spectrue_core.runtime_config import ContentBudgetConfig
 from spectrue_core.agents.llm_schemas import CLAIM_EXTRACTION_SCHEMA
 
 class ClaimExtractionSkill(BaseSkill):
-    
+
     # M73.5: Dynamic timeout constants
     BASE_TIMEOUT_SEC = 35.0     # Minimum timeout
     TIMEOUT_PER_1K_CHARS = 2.0  # Additional seconds per 1000 chars
@@ -77,8 +82,8 @@ class ClaimExtractionSkill(BaseSkill):
         chunks = self._coverage_sampler.chunk(stripped, max_chunk_chars=self._claim_excerpt_budget)
         stitched = self._coverage_sampler.merge([c.text for c in chunks])
         return chunks, stitched
-    
-    
+
+
     async def extract_claims(
         self,
         text: str,
@@ -158,6 +163,25 @@ class ClaimExtractionSkill(BaseSkill):
             for idx, rc in enumerate(raw_claims):
                 if not isinstance(rc, dict) or not rc.get("text"):
                     continue
+
+                # Validate and log schema mismatches
+                claim_id = f"c{idx_offset+idx+1}"
+                defaults_used, invalid_fields = validate_claim_response(rc, claim_id)
+
+                if defaults_used or invalid_fields:
+                    log_claim_field_defaults(
+                        claim_id=claim_id,
+                        defaults_used=defaults_used,
+                        claim_text=rc.get("text"),
+                    )
+                    if invalid_fields:
+                        log_schema_mismatch(
+                            skill_name="claim_extraction",
+                            item_id=claim_id,
+                            missing_fields=[],
+                            invalid_fields=invalid_fields,
+                            received_keys=list(rc.keys()),
+                        )
 
                 req_raw = rc.get("evidence_req", {})
                 req = EvidenceRequirement(
@@ -349,7 +373,7 @@ class ClaimExtractionSkill(BaseSkill):
         """
         if not claims:
             return
-        
+
         claims_data = []
         for c in claims[:7]:  # Max 7 claims
             metadata = c.get("metadata")
@@ -361,7 +385,7 @@ class ClaimExtractionSkill(BaseSkill):
                 "check_worthiness": c.get("check_worthiness", 0),
                 "metadata_confidence": metadata.metadata_confidence.value if metadata else "?",
             })
-        
+
         Trace.event("claim_extraction.claims_extracted", {
             "count": len(claims),
             "claims": claims_data,
@@ -378,32 +402,32 @@ class ClaimExtractionSkill(BaseSkill):
         """
         if not claims:
             return
-        
+
         # Count verification_target distribution
         target_dist: dict[str, int] = {"reality": 0, "attribution": 0, "existence": 0, "none": 0}
         role_dist: dict[str, int] = {}
         confidence_dist: dict[str, int] = {"low": 0, "medium": 0, "high": 0}
         skip_search_count = 0
-        
+
         for claim in claims:
             metadata = claim.get("metadata")
             if metadata:
                 # Target distribution
                 target = metadata.verification_target.value
                 target_dist[target] = target_dist.get(target, 0) + 1
-                
+
                 # Role distribution
                 role = metadata.claim_role.value
                 role_dist[role] = role_dist.get(role, 0) + 1
-                
+
                 # Confidence distribution
                 confidence = metadata.metadata_confidence.value
                 confidence_dist[confidence] = confidence_dist.get(confidence, 0) + 1
-                
+
                 # Skip search count
                 if metadata.should_skip_search:
                     skip_search_count += 1
-        
+
         # Emit trace event
         Trace.event("claim_extraction.metadata_distribution", {
             "total_claims": len(claims),
@@ -412,7 +436,7 @@ class ClaimExtractionSkill(BaseSkill):
             "metadata_confidence": confidence_dist,
             "skip_search_count": skip_search_count,
         })
-        
+
         # Also log summary
         logger.debug(
             "[M80] Metadata: targets=%s, roles=%s, confidence=%s, skip_search=%d",

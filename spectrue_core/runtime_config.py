@@ -342,7 +342,7 @@ class ClaimGraphConfig:
     """
     # Feature flag
     enabled: bool = True
-    
+
     # B-Stage parameters
     k_sim: int = 10              # Top-K by embedding similarity
     max_nodes_for_full_pairwise: int = 50  # When to allow full pairwise MST
@@ -374,20 +374,20 @@ class ClaimGraphConfig:
     topic_aware: bool = False
     beta_prior_alpha: float = 1.0
     beta_prior_beta: float = 1.0
-    
+
     # Layer 2: Structural Claim Prioritization
     structural_prioritization_enabled: bool = True
     structural_weight_threshold: float = 0.5  # min weight for priority boost
     structural_boost: float = 0.1             # importance boost for high structural weight
-    
+
     # Layer 3: Tension Signal
     tension_signal_enabled: bool = True
-    
+
 
     topic_aware: bool = False
     tension_threshold: float = 0.5            # min in_contradict_weight for "high tension"
     tension_boost: float = 0.15               # importance boost for high-tension claims
-    
+
     # Layer 4: Evidence-Need Routing
     evidence_need_routing_enabled: bool = True
 
@@ -441,9 +441,9 @@ class EngineRuntimeConfig:
             semantic_gating_v2=_parse_bool(os.getenv("FEATURE_SEMANTIC_GATING_V2"), default=False),
             claim_sanitize=_parse_bool(os.getenv("FEATURE_CLAIM_SANITIZE"), default=True),
             log_redaction=_parse_bool(os.getenv("FEATURE_LOG_REDACTION"), default=False),
-        
+
             trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=True),
-        
+
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
             # Claim Orchestration
             claim_orchestration=_parse_bool(os.getenv("FEATURE_CLAIM_ORCHESTRATION"), default=True),

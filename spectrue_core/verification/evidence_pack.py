@@ -392,14 +392,14 @@ class SearchResult(TypedDict, total=False):
     contradiction_span: str | None  # Quote aligned to REFUTE
     evidence_refs: list[str]        # Source URLs or references
     stance_confidence: str | None   # "low" for low-tier SUPPORT
-    
+
     # Assertion-level mapping
     assertion_key: str | None       # Which assertion this evidence maps to (e.g., "event.location.city")
-    
+
     # Content availability status
     content_status: Literal["available", "unavailable", "blocked", "error"]
     unavailable_reason: str | None  # Why content couldn't be retrieved
-    
+
     # Bayesian stance posterior (M113+)
     # Soft probabilities instead of hard stance labels
     p_support: float                # P(S* = SUPPORT | features)

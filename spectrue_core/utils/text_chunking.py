@@ -63,17 +63,17 @@ class CoverageSampler:
         current_text = ""
         current_start = 0
         current_section: list[str] = ["root"]
-        
+
         # Iterate over paragraphs (blocks)
         # We define a block as text ending with \n\n or end of string
         cursor = 0
-        
+
         # Generator yielding (block_text, start_offset, end_offset)
         for block, start, end in self._iter_blocks(text):
             # Check for heading
             # Ideally we'd update current_section here, but simple logic for now
             # is just to append block.
-            
+
             # If adding this block exceeds max, flush current
             if len(current_text) + len(block) > max_chunk_chars:
                 if current_text:
@@ -87,21 +87,21 @@ class CoverageSampler:
                     # Reset
                     current_text = ""
                     current_start = start # Start of new chunk is start of this block
-                
+
                 # If single block is huge, we must force split it
                 if len(block) > max_chunk_chars:
                     # Force split huge block
                     chunks.extend(self._force_split(block, start, max_chunk_chars))
                     cursor = end
                     continue
-            
+
             # Append block
             if not current_text:
                 current_start = start
-            
+
             current_text += block
             cursor = end
-        
+
         # Flush remainder
         if current_text:
             chunks.append(TextChunk(
@@ -114,7 +114,7 @@ class CoverageSampler:
 
         # Correction: ensure last chunk covers up to len(text) if gaps
         # But our iteration covers all chars if `_iter_blocks` is correct
-        
+
         return chunks
 
     def merge(self, cleaned_chunks: list[str]) -> str:
@@ -131,12 +131,12 @@ class CoverageSampler:
             _, end = match.span()
             # Include the separator in the block
             full_block_text = text[prev_end:end]
-            
+
             if full_block_text:
                 yield full_block_text, prev_end, end
-            
+
             prev_end = end
-            
+
         # Last segment
         if prev_end < len(text):
             yield text[prev_end:], prev_end, len(text)

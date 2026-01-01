@@ -71,38 +71,38 @@ def build_sentence_window_excerpt(
     """
     if not document_text or not claim_text:
         return None
-    
+
     structure = extract_text_structure(document_text)
     span_start, span_end, sentence_index, paragraph_index = find_claim_position(
         document_text, claim_text, structure
     )
-    
+
     if sentence_index is None:
         return None
-    
+
     # Get sentence window
     window = structure.get_sentence_window(sentence_index, window_size)
     if not window:
         return None
-    
+
     # Build excerpt text from window
     excerpt_parts = [seg.text for seg in window]
     excerpt_text = " ".join(excerpt_parts)
-    
+
     # Truncate if too long
     if len(excerpt_text) > max_chars:
         # Prioritize sentences closest to claim
         center_idx = sentence_index
         start_offset = sentence_index - window[0].index
-        
+
         # Keep claim sentence always
         result_parts = [window[start_offset].text]
         remaining = max_chars - len(result_parts[0])
-        
+
         # Add neighbors alternating left/right
         left_idx = start_offset - 1
         right_idx = start_offset + 1
-        
+
         while remaining > 50 and (left_idx >= 0 or right_idx < len(window)):
             if right_idx < len(window):
                 part = window[right_idx].text
@@ -110,22 +110,22 @@ def build_sentence_window_excerpt(
                     result_parts.append(part)
                     remaining -= len(part) + 1
                 right_idx += 1
-            
+
             if left_idx >= 0:
                 part = window[left_idx].text
                 if len(part) < remaining:
                     result_parts.insert(0, part)
                     remaining -= len(part) + 1
                 left_idx -= 1
-        
+
         excerpt_text = " ".join(result_parts)
-    
+
     # Calculate actual span in document
     excerpt_start = window[0].start
     excerpt_end = window[-1].end
-    
+
     window_range = (window[0].index, window[-1].index)
-    
+
     return ExcerptResult(
         text=excerpt_text,
         span_start=excerpt_start,
@@ -157,50 +157,50 @@ def build_paragraph_excerpt(
     """
     if not document_text or not claim_text:
         return None
-    
+
     structure = extract_text_structure(document_text)
     span_start, span_end, sentence_index, paragraph_index = find_claim_position(
         document_text, claim_text, structure
     )
-    
+
     if paragraph_index is None:
         return None
-    
+
     if paragraph_index >= len(structure.paragraphs):
         return None
-    
+
     paragraph = structure.paragraphs[paragraph_index]
     excerpt_text = paragraph.text
-    
+
     # Truncate from both ends if needed
     if len(excerpt_text) > max_chars:
         # Find claim position within paragraph
         claim_pos = excerpt_text.find(claim_text)
         if claim_pos == -1:
             claim_pos = len(excerpt_text) // 2
-        
+
         # Center the window around claim
         half_window = max_chars // 2
         start = max(0, claim_pos - half_window)
         end = min(len(excerpt_text), claim_pos + len(claim_text) + half_window)
-        
+
         # Adjust to not cut words
         if start > 0:
             space_pos = excerpt_text.find(" ", start)
             if space_pos != -1 and space_pos < start + 20:
                 start = space_pos + 1
-        
+
         if end < len(excerpt_text):
             space_pos = excerpt_text.rfind(" ", 0, end)
             if space_pos != -1 and space_pos > end - 20:
                 end = space_pos
-        
+
         excerpt_text = excerpt_text[start:end].strip()
         if start > 0:
             excerpt_text = "..." + excerpt_text
         if end < len(paragraph.text):
             excerpt_text = excerpt_text + "..."
-    
+
     return ExcerptResult(
         text=excerpt_text,
         span_start=paragraph.start,
@@ -240,7 +240,7 @@ def build_fallback_excerpt(
             sentence_window=None,
             method="fallback",
         )
-    
+
     # Find claim position
     span_start = document_text.find(claim_text)
     if span_start == -1:
@@ -248,13 +248,13 @@ def build_fallback_excerpt(
         span_end = min(len(claim_text), len(document_text))
     else:
         span_end = span_start + len(claim_text)
-    
+
     # Extract with context
     excerpt_start = max(0, span_start - context_chars)
     excerpt_end = min(len(document_text), span_end + context_chars)
-    
+
     excerpt_text = document_text[excerpt_start:excerpt_end].strip()
-    
+
     # Add ellipsis if truncated
     if excerpt_start > 0:
         # Find first space to not cut words
@@ -262,13 +262,13 @@ def build_fallback_excerpt(
         if first_space != -1 and first_space < 20:
             excerpt_text = excerpt_text[first_space + 1:]
         excerpt_text = "..." + excerpt_text
-    
+
     if excerpt_end < len(document_text):
         last_space = excerpt_text.rfind(" ")
         if last_space != -1 and last_space > len(excerpt_text) - 20:
             excerpt_text = excerpt_text[:last_space]
         excerpt_text = excerpt_text + "..."
-    
+
     return ExcerptResult(
         text=excerpt_text,
         span_start=excerpt_start,
@@ -309,11 +309,11 @@ def build_context_excerpt(
     )
     if result is not None:
         return result
-    
+
     # Try paragraph-level
     result = build_paragraph_excerpt(document_text, claim_text, max_chars)
     if result is not None:
         return result
-    
+
     # Fallback to character-based
     return build_fallback_excerpt(document_text, claim_text)

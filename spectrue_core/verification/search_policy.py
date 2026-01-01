@@ -302,42 +302,42 @@ def rerank_search_results(
         Reranked list of results (no hard filtering, only sorting)
     """
     from spectrue_core.utils.trace import Trace
-    
+
     scored: list[tuple[float, dict]] = []
-    
+
     for r in (results or []):
         # Skip problematic file types
         url_str = r.get("link", "") or r.get("url", "")
         if isinstance(url_str, str) and url_str.lower().endswith(skip_extensions):
             continue
-        
+
         # Get scores with defaults
         provider_score = r.get("score")
         if not isinstance(provider_score, (int, float)):
             provider_score = 0.5
         provider_score = max(0.0, min(1.0, float(provider_score)))
-        
+
         relevance_score = r.get("relevance_score")
         if not isinstance(relevance_score, (int, float)):
             relevance_score = provider_score  # Fallback to provider score
         relevance_score = max(0.0, min(1.0, float(relevance_score)))
-        
+
         # Combined score: λ · provider + (1-λ) · relevance
         combined = rerank_lambda * provider_score + (1 - rerank_lambda) * relevance_score
-        
+
         # Store for sorting
         r["_rerank_score"] = combined
         scored.append((combined, r))
-    
+
     # Sort by combined score descending
     scored.sort(key=lambda x: x[0], reverse=True)
-    
+
     # Apply top_k limit if set
     if top_k is not None and top_k > 0:
         scored = scored[:top_k]
-    
+
     out = [r for _, r in scored]
-    
+
     Trace.event(
         "search.rerank",
         {
@@ -348,7 +348,7 @@ def rerank_search_results(
             "top_scores": [r.get("_rerank_score") for r in out[:3]] if out else [],
         },
     )
-    
+
     return out
 
 

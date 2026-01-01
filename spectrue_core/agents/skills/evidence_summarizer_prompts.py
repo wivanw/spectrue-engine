@@ -31,26 +31,26 @@ def _format_evidence_item(item: EvidenceItemFrame, index: int) -> str:
     """Format a single evidence item for the prompt."""
     lines = [f"[{item.evidence_id}] Source {index + 1}:"]
     lines.append(f"  URL: {item.url}")
-    
+
     if item.title:
         lines.append(f"  Title: {item.title}")
-    
+
     if item.source_tier:
         lines.append(f"  Trust Tier: {item.source_tier}")
-    
+
     if item.quote:
         quote_preview = item.quote[:300] + "..." if len(item.quote) > 300 else item.quote
         lines.append(f"  Quote: \"{quote_preview}\"")
     elif item.snippet:
         snippet_preview = item.snippet[:300] + "..." if len(item.snippet) > 300 else item.snippet
         lines.append(f"  Snippet: {snippet_preview}")
-    
+
     if item.stance:
         lines.append(f"  Initial Stance: {item.stance}")
-    
+
     if item.relevance is not None:
         lines.append(f"  Relevance: {item.relevance:.2f}")
-    
+
     return "\n".join(lines)
 
 
@@ -73,7 +73,7 @@ def build_evidence_summarizer_prompt(frame: ClaimFrame) -> str:
         evidence_section = "\n\n".join(items)
     else:
         evidence_section = "No evidence items available."
-    
+
     prompt = f"""You are an evidence analyst. Your task is to categorize the provided evidence for a specific claim.
 
 ## CLAIM TO ANALYZE

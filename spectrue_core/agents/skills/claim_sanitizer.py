@@ -66,10 +66,10 @@ class ClaimSanitizerSkill(BaseSkill):
         content_hash = hashlib.sha256(
             f"{text}|{kind}|{topic_key}|v1".encode()
         ).hexdigest()
-        
+
         instructions = self._get_instructions()
         prompt = self._build_prompt(text, kind, topic_key)
-        
+
         try:
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
@@ -80,9 +80,9 @@ class ClaimSanitizerSkill(BaseSkill):
                 cache_key=f"sanitize_v1_{content_hash}",
                 trace_kind="claim_sanitizer",
             )
-            
+
             return self._parse_result(result, text)
-            
+
         except Exception as e:
             logger.warning("[M74] Claim sanitization failed: %s. Fail-closed.", e)
             return self._fail_closed_result(text)
@@ -131,14 +131,14 @@ Return JSON with keys: text_safe, is_actionable_medical, danger_tags, redacted_s
     def _parse_result(self, result: dict, original_text: str) -> SanitizedClaimResult:
         try:
             text_safe = str(result.get("text_safe", ""))
-            
+
             # Integrity check: text_safe should not be empty if original wasn't
             if not text_safe and original_text:
                 return self._fail_closed_result(original_text)
-                
+
             is_med = bool(result.get("is_actionable_medical", False))
             tags = [str(t) for t in result.get("danger_tags", [])]
-            
+
             # Parse spans if provided, else empty
             spans = []
             raw_spans = result.get("redacted_spans", [])
@@ -146,17 +146,17 @@ Return JSON with keys: text_safe, is_actionable_medical, danger_tags, redacted_s
                 for s in raw_spans:
                     if isinstance(s, dict) and "start" in s and "end" in s:
                         spans.append(s)
-            
+
             if "medical_instruction" in tags:
                 is_med = True
-                
+
             return {
                 "text_safe": text_safe,
                 "is_actionable_medical": is_med,
                 "danger_tags": tags,
                 "redacted_spans": spans,
             }
-            
+
         except Exception:
             return self._fail_closed_result(original_text)
 

@@ -80,7 +80,7 @@ def build_context_excerpt(
     from spectrue_core.utils.context_excerpt import (
         build_context_excerpt as _build_excerpt,
     )
-    
+
     # Use the improved context excerpt builder
     result = _build_excerpt(
         document_text=document_text,
@@ -88,24 +88,24 @@ def build_context_excerpt(
         window_size=window_size,
         max_chars=500,
     )
-    
+
     # Generate document ID from content hash
     doc_id = hashlib.sha256(document_text[:1000].encode()).hexdigest()[:16]
-    
+
     context_excerpt = ContextExcerpt(
         text=result.text,
         source_type="user_text",
         span_start=result.span_start,
         span_end=result.span_end,
     )
-    
+
     context_meta = ContextMeta(
         document_id=doc_id,
         paragraph_index=result.paragraph_index,
         sentence_index=result.sentence_index,
         sentence_window=result.sentence_window,
     )
-    
+
     return context_excerpt, context_meta
 
 
@@ -125,14 +125,14 @@ def convert_evidence_items(
         Tuple of EvidenceItemFrame objects
     """
     items: list[EvidenceItemFrame] = []
-    
+
     for idx, ev in enumerate(raw_evidence):
         evidence_id = _generate_evidence_id(
             claim_id, 
             ev.get("url", f"unknown_{idx}"),
             idx
         )
-        
+
         item = EvidenceItemFrame(
             evidence_id=evidence_id,
             claim_id=claim_id,
@@ -146,7 +146,7 @@ def convert_evidence_items(
             relevance=ev.get("relevance") or ev.get("score"),
         )
         items.append(item)
-    
+
     return tuple(items)
 
 
@@ -183,19 +183,19 @@ def build_claim_frame(
         structure=structure,
         window_size=window_size,
     )
-    
+
     # Convert evidence items
     evidence_items = convert_evidence_items(claim_id, raw_evidence)
-    
+
     # Build evidence stats
     evidence_stats = build_evidence_stats(evidence_items)
-    
+
     # Build retrieval trace
     if execution_state is not None:
         retrieval_trace = format_retrieval_trace(execution_state)
     else:
         retrieval_trace = create_empty_retrieval_trace()
-    
+
     return ClaimFrame(
         claim_id=claim_id,
         claim_text=claim_text,
@@ -228,17 +228,17 @@ def build_claim_frames_from_pipeline(
     """
     # Pre-compute structure once
     structure = extract_text_structure(document_text)
-    
+
     frames: list[ClaimFrame] = []
-    
+
     for claim in claims:
         claim_id = claim.get("claim_id") or claim.get("id") or str(len(frames))
         claim_text = claim.get("text") or claim.get("normalized_text") or ""
         claim_lang = claim.get("language") or claim.get("claim_language") or "en"
-        
+
         raw_evidence = evidence_by_claim.get(claim_id, [])
         exec_state = execution_states.get(claim_id) if execution_states else None
-        
+
         frame = build_claim_frame(
             claim_id=claim_id,
             claim_text=claim_text,
@@ -249,5 +249,5 @@ def build_claim_frames_from_pipeline(
             structure=structure,
         )
         frames.append(frame)
-    
+
     return frames

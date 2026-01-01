@@ -40,7 +40,7 @@ class ContextExcerpt:
     source_type: str = "user_text"  # user_text, cleaned_article, etc.
     span_start: int = 0  # char index in document
     span_end: int = 0    # char index in document
-    
+
     def __post_init__(self) -> None:
         if self.span_end < self.span_start:
             object.__setattr__(self, "span_end", self.span_start + len(self.text))
@@ -92,7 +92,7 @@ class EvidenceStats:
     conflicting_evidence: bool = False
     missing_sources: bool = True
     missing_direct_quotes: bool = True
-    
+
     def __post_init__(self) -> None:
         # Derive missing_sources from total_sources if not explicitly set
         if self.total_sources > 0:
@@ -176,10 +176,10 @@ class RGBAScore:
     g: float  # Veracity (0..1)
     b: float  # Honesty (0..1)
     a: float  # Explainability (0..1)
-    
+
     def to_dict(self) -> dict[str, float]:
         return {"R": self.r, "G": self.g, "B": self.b, "A": self.a}
-    
+
     def to_list(self) -> list[float]:
         return [self.r, self.g, self.b, self.a]
 

@@ -101,7 +101,7 @@ class PhaseRunner:
         runner = PhaseRunner(search_mgr)
         evidence = await runner.run_all_claims(claims, execution_plan)
     """
-    
+
     def __init__(
         self,
         search_mgr: SearchManager,
@@ -147,7 +147,7 @@ class PhaseRunner:
             logging.getLogger(__name__).debug(
                 "[M109] PhaseRunner received %d inline sources", len(self.inline_sources)
             )
-    
+
     async def run_all_claims(
         self,
         claims: list[Claim],
@@ -183,7 +183,7 @@ class PhaseRunner:
 
         # Determine phase order (collect all unique phases in order)
         phase_order = ["A-light", "A", "A-origin", "B", "C", "D"]
-        
+
         for phase_id in phase_order:
             for layer in dependency_layers:
                 # Get claims that need this phase (and aren't already sufficient)
@@ -192,15 +192,15 @@ class PhaseRunner:
                     execution_plan=execution_plan,
                     phase_id=phase_id,
                 )
-                
+
                 if not claims_for_phase:
                     continue
-                
+
                 logger.debug(
                     "[M80] Running Phase %s for %d claim(s)",
                     phase_id, len(claims_for_phase)
                 )
-                
+
                 # Emit progress: searching_phase_X
                 if self.progress_callback:
                     status_key = f"searching_phase_{phase_id.lower().replace('-', '_')}"
@@ -208,19 +208,19 @@ class PhaseRunner:
                         await self.progress_callback(status_key)
                     except Exception as e:
                         logger.warning("[M80] Progress callback failed: %s", e)
-                
+
                 # Execute phase in parallel for all eligible claims
                 phase_results = await self._run_phase_parallel(
                     claims=claims_for_phase,
                     execution_plan=execution_plan,
                     phase_id=phase_id,
                 )
-                
+
                 # Process results and check sufficiency
                 for result in phase_results:
                     claim_id = result.claim_id
                     claim_state = self.execution_state.get_or_create(claim_id)
-                    
+
                     if result.error:
                         claim_state.error = result.error
                         Trace.event("phase.error", {
@@ -229,11 +229,11 @@ class PhaseRunner:
                             "error": result.error,
                         })
                         continue
-                    
+
                     # Accumulate sources
                     evidence[claim_id].extend(result.sources)
                     claim_state.mark_completed(result.phase_id)
-                    
+
                     # T20: Trace phase completion
                     Trace.event("phase.completed", {
                         "claim_id": claim_id,
@@ -241,7 +241,7 @@ class PhaseRunner:
                         "results_count": len(result.sources),
                         "total_sources": len(evidence[claim_id]),
                     })
-                    
+
                     # Check sufficiency
                     claim = claim_map.get(claim_id)
                     if claim and isinstance(claim, dict):
@@ -249,7 +249,7 @@ class PhaseRunner:
                             claim=claim,
                             sources=evidence[claim_id],
                         )
-                        
+
                         if sufficiency.status == SufficiencyStatus.SUFFICIENT:
                             # Determine remaining phases for this claim
                             claim_phases = execution_plan.get_phases(claim_id)
@@ -258,12 +258,12 @@ class PhaseRunner:
                                 -1
                             )
                             remaining = [p.phase_id for p in claim_phases[current_idx + 1:]]
-                            
+
                             claim_state.mark_sufficient(
                                 reason=sufficiency.reason,
                                 remaining_phases=remaining,
                             )
-                            
+
                             # T20: Trace early exit
                             Trace.event("phase.stopped", {
                                 "claim_id": claim_id,
@@ -272,7 +272,7 @@ class PhaseRunner:
                                 "rule": sufficiency.rule_matched,
                                 "skipped_phases": remaining,
                             })
-                            
+
                             logger.debug(
                                 "[M80] Claim %s sufficient after Phase %s (rule=%s), skipping %s",
                                 claim_id, result.phase_id, sufficiency.rule_matched, remaining
@@ -306,7 +306,7 @@ class PhaseRunner:
                                 "phase_id": result.phase_id,
                                 "reason": sufficiency.reason,
                             })
-        
+
         return evidence
 
     async def _run_claims_with_loop(
@@ -462,7 +462,7 @@ class PhaseRunner:
         # CRITICAL SHORTCUT: Check inline sources first (M109)
         if self.inline_sources:
             logger.debug("[M109] Checking inline sources shortcut for claim %s", claim_id)
-            
+
             # Enrich inline sources if agent is available
             if self.agent and hasattr(self.agent, "verify_inline_source_relevance"):
                 for src in self.inline_sources:
@@ -480,7 +480,7 @@ class PhaseRunner:
             for src in self.inline_sources:
                 if isinstance(src, dict) and not src.get("claim_id"):
                     src["claim_id"] = claim_id
-            
+
             sufficient, stats = verdict_ready_for_claim(
                 self.inline_sources,
                 claim_id=claim_id,
@@ -631,7 +631,7 @@ class PhaseRunner:
             reason = judge.reason
 
             claim_sources = [s for s in all_sources if isinstance(s, dict) and s.get("claim_id") == claim_id]
-            
+
             # Include inline sources in potential evidence
             # They may not have claim_id set yet; verdict_ready uses strict claim_id matching
             potential_evidence = claim_sources + self.inline_sources
@@ -643,7 +643,7 @@ class PhaseRunner:
                 potential_evidence,
                 claim_id=str(claim_id),
             )
-            
+
             if ready:
                 logger.info(
                     "[M109] Initial sufficiency check passed for claim %s (stats=%s)",
@@ -662,7 +662,7 @@ class PhaseRunner:
                 for src in self.inline_sources:
                     if src.get("url") not in seen_urls:
                         combined.append(src)
-                
+
                 return combined, hops, SufficiencyDecision.ENOUGH, "inline_sufficient"
 
             # ─────────────────────────────────────────────────────────────────────────────
@@ -739,7 +739,7 @@ class PhaseRunner:
         if not self.gpt_model or not self.search_type:
             return True
         return bool(self.can_add_search(self.gpt_model, self.search_type, self.max_cost))
-    
+
     def _get_claims_needing_phase(
         self,
         claims: list[Claim],
@@ -753,25 +753,25 @@ class PhaseRunner:
         3. Haven't errored out
         """
         result = []
-        
+
         for claim in claims:
             claim_id = claim.get("id")
-            
+
             # Check if claim has this phase
             claim_phases = execution_plan.get_phases(claim_id)
             has_phase = any(p.phase_id == phase_id for p in claim_phases)
             if not has_phase:
                 continue
-            
+
             # Check if already sufficient or errored
             state = self.execution_state.get_or_create(claim_id)
             if state.is_sufficient or state.error:
                 continue
-            
+
             result.append(claim)
-        
+
         return result
-    
+
     async def _run_phase_parallel(
         self,
         claims: list[Claim],
@@ -782,21 +782,21 @@ class PhaseRunner:
         Run a phase for multiple claims in parallel (with semaphore).
         """
         tasks = []
-        
+
         for claim in claims:
             claim_id = claim.get("id")
             claim_phases = execution_plan.get_phases(claim_id)
             phase = next((p for p in claim_phases if p.phase_id == phase_id), None)
-            
+
             if phase:
                 task = self._run_phase_for_claim(claim, phase)
                 tasks.append(task)
-        
+
         if not tasks:
             return []
-        
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Handle exceptions
         processed: list[PhaseSearchResult] = []
         for i, r in enumerate(results):
@@ -810,9 +810,9 @@ class PhaseRunner:
                 ))
             elif isinstance(r, PhaseSearchResult):
                 processed.append(r)
-        
+
         return processed
-    
+
     async def _run_phase_for_claim(
         self,
         claim: Claim,
@@ -824,7 +824,7 @@ class PhaseRunner:
         Maps Phase configuration to search parameters.
         """
         claim_id = claim.get("id", "unknown")
-        
+
         # T20: Trace phase start
         Trace.event("phase.started", {
             "claim_id": claim_id,
@@ -833,17 +833,17 @@ class PhaseRunner:
             "channels": [c.value for c in phase.channels],
             "max_results": phase.max_results,
         })
-        
+
         async with self.semaphore:
             try:
                 sources = await self._search_by_phase(claim, phase)
-                
+
                 return PhaseSearchResult(
                     claim_id=claim_id,
                     phase_id=phase.phase_id,
                     sources=sources,
                 )
-                
+
             except Exception as e:
                 # T27: Fail-soft - log warning and return empty results
                 logger.warning(
@@ -873,7 +873,7 @@ class PhaseRunner:
         if not queries:
             queries = [claim.get("normalized_text", "") or claim.get("text", "")]
         return queries[0] if queries else ""
-    
+
     async def _search_by_phase(
         self,
         claim: Claim,
@@ -893,7 +893,7 @@ class PhaseRunner:
         query = query_override if query_override is not None else self._select_claim_query(claim)
         if not query:
             return []
-        
+
         # Determine topic (news vs general) from claim's search_method when available.
         # Fall back to a conservative default mapping for backward compatibility.
         topic = "general"
@@ -939,7 +939,7 @@ class PhaseRunner:
                 topic=topic,
                 intent=phase.search_depth,
             )
-        
+
         sources: list[dict]
         if (
             isinstance(raw_result, tuple)
@@ -956,7 +956,7 @@ class PhaseRunner:
                 cid, phase.phase_id, type(raw_result).__name__
             )
             return []
-        
+
         normalized = canonicalize_sources(sources)
 
         # Apply channel filtering (best-effort).
@@ -968,7 +968,7 @@ class PhaseRunner:
                     allowed.add(str(x.value))
                 else:
                     allowed.add(str(x))
-            
+
             filtered: list[dict] = []
             for src in normalized:
                 url = src.get("url", "")
@@ -978,7 +978,7 @@ class PhaseRunner:
                 chan = get_domain_tier(domain)  # EvidenceChannel enum
                 # Normalize to string key for comparison
                 chan_key = chan.value if hasattr(chan, "value") else str(chan)
-                
+
                 passed = chan_key in allowed
                 Trace.event("search.channel_filter.item", {
                     "domain": domain,
@@ -986,11 +986,11 @@ class PhaseRunner:
                     "allowed": list(allowed),
                     "passed": passed,
                 })
-                
+
                 if passed:
                     filtered.append(src)
             normalized = filtered
-        
+
         # Limit results to phase.max_results
         if phase and len(normalized) > phase.max_results:
             normalized = normalized[:phase.max_results]
@@ -1006,9 +1006,9 @@ class PhaseRunner:
                 "max_results": phase.max_results if phase else None,
             },
         )
-        
+
         return normalized
-    
+
     async def run_claim_phases(
         self,
         claim: Claim,
@@ -1030,28 +1030,28 @@ class PhaseRunner:
         """
         claim_id = claim.get("id", "unknown")
         sources = list(existing_sources) if existing_sources else []
-        
+
         for phase in phases:
             # T20: Trace phase start
             Trace.event("phase.started", {
                 "claim_id": claim_id,
                 "phase_id": phase.phase_id,
             })
-            
+
             try:
                 phase_sources = await self._search_by_phase(claim, phase)
                 sources.extend(phase_sources)
-                
+
                 # T20: Trace completion
                 Trace.event("phase.completed", {
                     "claim_id": claim_id,
                     "phase_id": phase.phase_id,
                     "results_count": len(phase_sources),
                 })
-                
+
                 # Check sufficiency
                 sufficiency = check_sufficiency_for_claim(claim, sources)
-                
+
                 if sufficiency.status == SufficiencyStatus.SUFFICIENT:
                     # T20: Trace stop
                     remaining = [p.phase_id for p in phases if phases.index(p) > phases.index(phase)]
@@ -1080,7 +1080,7 @@ class PhaseRunner:
                         "phase_id": phase.phase_id,
                         "reason": sufficiency.reason,
                     })
-                    
+
             except Exception as e:
                 logger.warning("[M80] Phase %s failed: %s", phase.phase_id, e)
                 Trace.event("phase.error", {
@@ -1090,5 +1090,5 @@ class PhaseRunner:
                 })
                 # Fail-soft: continue to next phase
                 continue
-        
+
         return sources

@@ -66,10 +66,10 @@ def apply_consensus_bound(belief: BeliefState, consensus: ConsensusState) -> Bel
     """
     if consensus.source_count < 2:
         return belief
-        
+
     limit_log_odds = prob_to_log_odds(consensus.score)
     new_log_odds = min(belief.log_odds, limit_log_odds)
-    
+
     return BeliefState(log_odds=new_log_odds, confidence=belief.confidence)
 
 
@@ -87,7 +87,7 @@ def calculate_evidence_impact(verdict: str, confidence: float = 1.0, relevance: 
         direction = 0.0
     else:
         direction = 0.0
-        
+
     return sigmoid_impact(strength=confidence, relevance=relevance, direction=direction)
 
 
@@ -129,6 +129,6 @@ def sigmoid_impact(
         sigmoid_val = 1.0 / (1.0 + math.exp(-k * (strength - x0)))
     except OverflowError:
         sigmoid_val = 0.0 if (strength - x0) < 0 else 1.0
-    
+
     impact = relevance * l_max * sigmoid_val
     return direction * impact

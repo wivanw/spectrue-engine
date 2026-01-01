@@ -43,7 +43,7 @@ class SearchManager:
         # Pass validator to GoogleFactCheckTool for hybrid mode
         self.oracle_tool = GoogleFactCheckTool(config, oracle_validator=oracle_validator)
         self.cse_tool = GoogleCSESearchTool(config)
-        
+
         # Metrics state for current run
         self.tavily_calls = 0
         self.google_cse_calls = 0
@@ -51,7 +51,7 @@ class SearchManager:
         self.oracle_calls = 0  # Track Oracle API calls
         self.global_extracts_used = 0  # Global EAL limit
         self.policy_profile: SearchPolicyProfile | None = None
-        
+
     def reset_metrics(self):
         self.tavily_calls = 0
         self.google_cse_calls = 0
@@ -175,7 +175,7 @@ class SearchManager:
         cse_cost = int(getattr(self.config.runtime.search, "google_cse_cost", 0) or 0)
         # Cap CSE cost to avoiding surpassing search cost
         cse_cost = max(0, min(cse_cost, per_search_cost))
-        
+
         return (
             model_cost + 
             (per_search_cost * self.tavily_calls) + 
@@ -221,17 +221,17 @@ class SearchManager:
         )
 
         processed_urls = set()
-        
+
         # Phase 1: Fetch content for sources that need it
         sources_for_quote_extraction: list[tuple[int, dict]] = []  # (index, source)
-        
+
         for idx, src in enumerate(candidates):
             if src.get("quote"):
                 continue
 
             current_content = src.get("content") or src.get("snippet") or ""
             should_fetch = False
-            
+
             if fetch_count < max_fetches:
                 # Check global limit (across all claims)
                 if self.global_extracts_used >= 4:
@@ -246,34 +246,34 @@ class SearchManager:
                 # If content is very short (likely snippet) or missing, fetch
                 elif len(current_content) < 2000:
                     should_fetch = True
-            
+
             if should_fetch:
                 url = src.get("url") or src.get("link")
                 if url:
                     # Deduplication to avoid wasted fetches
                     if url in processed_urls:
                         continue
-                    
+
                     fetched = await self.fetch_url_content(url)
                     processed_urls.add(url)
-                    
+
                     if fetched:
                         src["content"] = fetched
                         src["fulltext"] = True
                         current_content = fetched
                         fetch_count += 1
                         self.global_extracts_used += 1  # Track globally
-            
+
             # Collect sources that need quote extraction
             if current_content and len(current_content) >= 50:
                 claim_text = src.get("claim_text") or ""
                 if claim_text:
                     sources_for_quote_extraction.append((idx, src))
-        
+
         # Phase 2: Batch quote extraction (single embedding call for all sources)
         quoted_count = 0
         enriched_count = 0
-        
+
         if sources_for_quote_extraction:
             try:
                 from spectrue_core.utils.embedding_service import (
@@ -286,14 +286,14 @@ class SearchManager:
                         (src.get("claim_text", ""), src.get("content") or src.get("snippet") or "")
                         for _, src in sources_for_quote_extraction
                     ]
-                    
+
                     # Single async batch call
                     quotes = await extract_best_quotes_batch_async(batch_items)
-                    
+
                     # Assign quotes to sources
                     for i, (_, src) in enumerate(sources_for_quote_extraction):
                         best_quote = quotes[i] if i < len(quotes) else None
-                        
+
                         if best_quote:
                             src["quote"] = best_quote
                             src["quote_method"] = "semantic_batch"
@@ -381,7 +381,7 @@ class SearchManager:
                 top_k=top_k,
                 skip_extensions=SKIP_EXTENSIONS,
             )
-        
+
         # Legacy fallback: hard filter by min_relevance
         min_relevance_score = 0.15
         return filter_search_results(
@@ -421,13 +421,13 @@ class SearchManager:
             depth="advanced",
             topic=topic
         )
-        
+
         filtered = self._filter_search_results(results, intent)
         should_fallback, fallback_reason, max_score = should_fallback_news_to_general(topic, filtered)
 
         if should_fallback:
             logger.debug(f"[SearchMgr] Fallback triggered: {fallback_reason}. Retrying with topic='general'.")
-            
+
             # Retry with "general"
             self.tavily_calls += 1
             fb_context, fb_results = await self.web_tool.search(
@@ -508,7 +508,7 @@ class SearchManager:
             exclude_domains=exclude_domains,
             topic=topic
         )
-    
+
     async def search_google_cse(self, query: str, lang: str) -> list[dict]:
         """Perform Google CSE search."""
         self.google_cse_calls += 1

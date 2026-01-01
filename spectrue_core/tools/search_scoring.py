@@ -343,7 +343,7 @@ def rank_and_filter(
         scored.append(item)
 
     scored.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)
-    
+
     # Log input stats for debugging
     if scored:
         tavily_scores = [r.get("score", 0) or 0 for r in scored]
@@ -374,7 +374,7 @@ def rank_and_filter(
         # Last resort fallback to avoid empty result if we had candidates
         logger.debug("[Search] All results below 0.15, keeping top 2 borderline results as fallback")
         kept = scored[:2]
-    
+
     # Log output stats
     logger.debug("[Search] Output: %d kept, %d discarded", len(kept), len(discarded_reasons))
 

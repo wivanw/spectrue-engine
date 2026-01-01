@@ -65,7 +65,7 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["claim_id", "verdict_score", "verdict", "reason"],
+                "required": ["claim_id", "verdict_score", "verdict", "reason", "rgba"],
                 "properties": {
                     "claim_id": {"type": "string"},
                     "verdict": {
@@ -80,6 +80,13 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
                     },
                     "verdict_score": {"type": "number", "minimum": 0, "maximum": 1},
                     "reason": {"type": "string"},
+                    "rgba": {
+                        "type": "array",
+                        "items": {"type": "number", "minimum": 0, "maximum": 1},
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "description": "Per-claim [R=danger, G=veracity, B=style, A=explainability]",
+                    },
                 },
             },
         },
@@ -88,6 +95,42 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
         "danger_score": {"type": "number", "minimum": 0, "maximum": 1},
         "style_score": {"type": "number", "minimum": 0, "maximum": 1},
         "rationale": {"type": "string"},
+    },
+}
+
+
+# Schema for scoring a SINGLE claim (used in parallel scoring)
+SINGLE_CLAIM_SCORING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "claim_id",
+        "verdict_score",
+        "verdict",
+        "reason",
+        "rgba",
+    ],
+    "properties": {
+        "claim_id": {"type": "string"},
+        "verdict": {
+            "type": "string",
+            "enum": [
+                "verified",
+                "refuted",
+                "ambiguous",
+                "unverified",
+                "partially_verified",
+            ],
+        },
+        "verdict_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "reason": {"type": "string"},
+        "rgba": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0, "maximum": 1},
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[R=danger, G=veracity, B=style, A=explainability]",
+        },
     },
 }
 

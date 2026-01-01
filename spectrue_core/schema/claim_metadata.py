@@ -38,22 +38,22 @@ class ClaimRole(str, Enum):
     """
     CORE = "core"
     """Central claim of the article. Highest verification priority."""
-    
+
     SUPPORT = "support"
     """Supporting evidence for a core claim."""
-    
+
     CONTEXT = "context"
     """Background information. Not a fact to verify."""
-    
+
     META = "meta"
     """Information about the article/source itself."""
-    
+
     ATTRIBUTION = "attribution"
     """Quote attribution: who said what."""
-    
+
     AGGREGATED = "aggregated"
     """Summary derived from multiple sources."""
-    
+
     SUBCLAIM = "subclaim"
     """Subordinate detail within a larger claim."""
 
@@ -86,13 +86,13 @@ class VerificationTarget(str, Enum):
     """
     REALITY = "reality"
     """Verify factual accuracy against reality. Standard path."""
-    
+
     ATTRIBUTION = "attribution"
     """Verify that person X said/did thing Y."""
-    
+
     EXISTENCE = "existence"
     """Verify that a source/document/entity exists."""
-    
+
     NONE = "none"
     """Not verifiable. Predictions, opinions, horoscopes, subjective."""
 
@@ -106,16 +106,16 @@ class EvidenceChannel(str, Enum):
     """
     AUTHORITATIVE = "authoritative"
     """Official sources: .gov, .edu, WHO, CDC, peer-reviewed journals."""
-    
+
     REPUTABLE_NEWS = "reputable_news"
     """Major news outlets: Reuters, AP, BBC, NYT, etc."""
-    
+
     LOCAL_MEDIA = "local_media"
     """Regional/local news sources. Good for local events."""
-    
+
     SOCIAL = "social"
     """Social media: Twitter, Reddit, Facebook. Lead-only by default."""
-    
+
     LOW_RELIABILITY = "low_reliability_web"
     """Blogs, forums, unknown sites. Lead-only by default, capped weight."""
 
@@ -129,7 +129,7 @@ class UsePolicy(str, Enum):
     """
     SUPPORT_OK = "support_ok"
     """Channel can provide evidence that supports/refutes claims."""
-    
+
     LEAD_ONLY = "lead_only"
     """Channel can only provide leads, not definitive evidence."""
 
@@ -145,10 +145,10 @@ class MetadataConfidence(str, Enum):
     """
     LOW = "low"
     """Low confidence. Trigger fail-open: always do Phase A-light."""
-    
+
     MEDIUM = "medium"
     """Medium confidence. Normal processing."""
-    
+
     HIGH = "high"
     """High confidence. Trust metadata for full routing."""
 
@@ -171,10 +171,10 @@ class SearchLocalePlan:
     """
     primary: str = "en"
     """Primary search locale. Used in Phase A/B."""
-    
+
     fallback: list[str] = field(default_factory=lambda: ["en"])
     """Fallback locales. Used in Phase C/D if primary yields insufficient evidence."""
-    
+
     def __post_init__(self) -> None:
         # Ensure fallback is a list
         if not isinstance(self.fallback, list):
@@ -202,7 +202,7 @@ class RetrievalPolicy:
         ]
     )
     """Which channels can be searched."""
-    
+
     use_policy: dict[str, UsePolicy] = field(
         default_factory=lambda: {
             EvidenceChannel.AUTHORITATIVE.value: UsePolicy.SUPPORT_OK,
@@ -218,13 +218,13 @@ class RetrievalPolicy:
     def use_policy_by_channel(self) -> dict[str, UsePolicy]:
         """Canonical alias for spec terminology."""
         return self.use_policy
-    
+
     def get_use_policy(self, channel: EvidenceChannel) -> UsePolicy:
         """Get usage policy for a channel. Defaults to LEAD_ONLY."""
         return UsePolicy(
             self.use_policy.get(channel.value, UsePolicy.LEAD_ONLY.value)
         )
-    
+
     def can_support(self, channel: EvidenceChannel) -> bool:
         """Check if channel can provide supporting evidence."""
         return self.get_use_policy(channel) == UsePolicy.SUPPORT_OK
@@ -260,13 +260,13 @@ class ClaimMetadata:
     """
     verification_target: VerificationTarget = VerificationTarget.REALITY
     """What to verify: reality/attribution/existence/none."""
-    
+
     claim_role: ClaimRole = ClaimRole.CORE
     """Role in document: core/support/context/meta/attribution/aggregated/subclaim."""
-    
+
     check_worthiness: float = 0.5
     """Priority for verification budget. 0=skip, 1=must verify."""
-    
+
     search_locale_plan: SearchLocalePlan = field(default_factory=SearchLocalePlan)
     """Language strategy for search queries."""
 
@@ -278,20 +278,20 @@ class ClaimMetadata:
 
     time_sensitive: bool = False
     """True when claim includes explicit temporal anchors or recency signals."""
-    
+
     retrieval_policy: RetrievalPolicy = field(default_factory=RetrievalPolicy)
     """Allowed channels and usage modes."""
-    
+
     metadata_confidence: MetadataConfidence = MetadataConfidence.MEDIUM
     """Confidence in this metadata. LOW triggers fail-open."""
 
     is_key_claim: bool = False
     """True when graph ranking marks the claim as key."""
-    
+
     def __post_init__(self) -> None:
         # Clamp check_worthiness to [0, 1]
         self.check_worthiness = max(0.0, min(1.0, self.check_worthiness))
-        
+
         # Ensure nested objects are proper types
         if isinstance(self.search_locale_plan, dict):
             self.search_locale_plan = SearchLocalePlan(**self.search_locale_plan)
@@ -306,7 +306,7 @@ class ClaimMetadata:
             self.time_signals = []
         if self.locale_signals is None:
             self.locale_signals = []
-    
+
     @property
     def should_skip_search(self) -> bool:
         """Check if search should be skipped for this claim."""
@@ -314,12 +314,12 @@ class ClaimMetadata:
             self.verification_target == VerificationTarget.NONE and
             self.metadata_confidence != MetadataConfidence.LOW  # Fail-open overrides
         )
-    
+
     @property
     def is_explain_only(self) -> bool:
         """Check if claim is explain-only (doesn't affect RGBA)."""
         return self.claim_role in {ClaimRole.CONTEXT, ClaimRole.META, ClaimRole.BACKGROUND}
-    
+
     @property
     def role_weight(self) -> float:
         """Get RGBA aggregation weight based on role."""
@@ -341,7 +341,7 @@ class ClaimMetadata:
         if self.verification_target == VerificationTarget.NONE:
             return 0.0
         return weights.get(self.claim_role, 0.5)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for JSON/trace output."""
         return {
@@ -365,27 +365,27 @@ class ClaimMetadata:
             },
             "metadata_confidence": self.metadata_confidence.value,
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ClaimMetadata":
         """Deserialize from dict."""
         if not data:
             return cls()
-        
+
         # Parse verification_target
         vt_raw = data.get("verification_target", "reality")
         try:
             verification_target = VerificationTarget(vt_raw)
         except ValueError:
             verification_target = VerificationTarget.REALITY
-        
+
         # Parse claim_role
         cr_raw = data.get("claim_role", "core")
         try:
             claim_role = ClaimRole(cr_raw)
         except ValueError:
             claim_role = ClaimRole.CORE
-        
+
         # Parse search_locale_plan
         slp_raw = data.get("search_locale_plan", {})
         if isinstance(slp_raw, dict):
@@ -395,7 +395,7 @@ class ClaimMetadata:
             )
         else:
             search_locale_plan = SearchLocalePlan()
-        
+
         # Parse retrieval_policy
         rp_raw = data.get("retrieval_policy", {})
         if isinstance(rp_raw, dict):
@@ -423,7 +423,7 @@ class ClaimMetadata:
             )
         else:
             retrieval_policy = RetrievalPolicy()
-        
+
         # Parse metadata_confidence
         mc_raw = data.get("metadata_confidence", "medium")
         try:

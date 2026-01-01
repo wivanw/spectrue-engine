@@ -35,12 +35,12 @@ def sanitize_input(text: str) -> str:
         return ""
     # Remove control chars (0-31) except tab (9), newline (10), carriage return (13)
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
-    
+
     # Neutralize XML closing tags if used in prompts
     # Assuming we use <statement>, <context> tags
     text = text.replace("</statement>", "< /statement>")
     text = text.replace("</context>", "< /context>")
-    
+
     return text.strip()
 
 
@@ -50,12 +50,12 @@ def redact_log_data(data: dict) -> dict:
     """
     if not isinstance(data, dict):
         return data
-        
+
     safe_data = data.copy()
     sensitive_keys = {"email", "phone", "token", "authorization", "password", "secret", "key"}
-    
+
     for key in list(safe_data.keys()):
         if str(key).lower() in sensitive_keys:
             safe_data[key] = "[REDACTED]"
-            
+
     return safe_data

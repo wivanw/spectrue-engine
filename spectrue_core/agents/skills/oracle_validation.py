@@ -30,7 +30,7 @@ class OracleValidationSkill(BaseSkill):
     - EVIDENCE (0.5-0.9): Related, add to pack
     - MISS (<0.5): Not relevant, ignore
     """
-    
+
     async def validate(
         self, 
         user_claim: str, 
@@ -57,9 +57,9 @@ class OracleValidationSkill(BaseSkill):
         """
         if not user_claim or not oracle_claim:
             return self._empty_result("Missing claim text")
-        
+
         prompt = self._build_prompt(user_claim, oracle_claim, oracle_rating, oracle_summary)
-        
+
         try:
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
@@ -69,21 +69,21 @@ class OracleValidationSkill(BaseSkill):
                 timeout=15.0,
                 trace_kind="oracle_validation"
             )
-            
+
             relevance_score = float(result.get("relevance_score", 0.0))
             relevance_score = max(0.0, min(1.0, relevance_score))  # Clamp to 0-1
-            
+
             status = self._map_status(result.get("status", ""))
             is_jackpot = relevance_score > JACKPOT_THRESHOLD
-            
+
             # Extract LLM-determined scores (no heuristics!)
             verified_score = float(result.get("verified_score", -1.0))
             danger_score = float(result.get("danger_score", -1.0))
-            
+
             # Warning only - no fallback! If -1, it's a bug and should be visible.
             if verified_score < 0 or danger_score < 0:
                 logger.warning("[OracleValidation] ⚠️ LLM did not return verified_score/danger_score. BUG!")
-            
+
             validated_result = {
                 "relevance_score": relevance_score,
                 "status": status,
@@ -92,7 +92,7 @@ class OracleValidationSkill(BaseSkill):
                 "reasoning": result.get("reasoning", ""),
                 "is_jackpot": is_jackpot
             }
-            
+
             Trace.event("oracle.validation", {
                 "user_claim": user_claim[:80],
                 "oracle_claim": oracle_claim[:80],
@@ -102,15 +102,15 @@ class OracleValidationSkill(BaseSkill):
                 "status": status,
                 "is_jackpot": is_jackpot
             })
-            
+
             log_level = logging.INFO if is_jackpot else logging.DEBUG
             logger.log(log_level, 
                 "[OracleValidation] score=%.2f, v=%.2f, status=%s, jackpot=%s", 
                 relevance_score, verified_score, status, is_jackpot
             )
-            
+
             return validated_result
-            
+
         except Exception as e:
             logger.warning("[OracleValidation] LLM call failed: %s. Returning MISS.", e)
             return self._empty_result(f"LLM error: {e}")
@@ -142,9 +142,9 @@ class OracleValidationSkill(BaseSkill):
         """
         if not user_claim or not candidates:
             return self._empty_batch_result("Missing claim or candidates")
-        
+
         prompt = self._build_batch_prompt(user_claim, candidates)
-        
+
         try:
             result = await self.llm_client.call_json(
                 model="gpt-5-nano",
@@ -154,27 +154,27 @@ class OracleValidationSkill(BaseSkill):
                 timeout=20.0,  # Slightly longer for batch
                 trace_kind="oracle_batch_validation"
             )
-            
+
             best_index = int(result.get("best_index", -1))
             relevance_score = float(result.get("relevance_score", 0.0))
             relevance_score = max(0.0, min(1.0, relevance_score))
-            
+
             # Validate index
             if best_index < 0 or best_index >= len(candidates):
                 # No good match found
                 return self._empty_batch_result("No suitable match")
-            
+
             status = self._map_status(result.get("status", ""))
             is_jackpot = relevance_score > JACKPOT_THRESHOLD
-            
+
             # Extract LLM-determined scores (no more heuristics!)
             verified_score = float(result.get("verified_score", -1.0))
             danger_score = float(result.get("danger_score", -1.0))
-            
+
             # Warning only - no fallback! If -1, it's a bug and should be visible.
             if verified_score < 0 or danger_score < 0:
                 logger.warning("[OracleBatch] ⚠️ LLM did not return verified_score/danger_score. BUG!")
-            
+
             validated_result = {
                 "best_index": best_index,
                 "relevance_score": relevance_score,
@@ -184,7 +184,7 @@ class OracleValidationSkill(BaseSkill):
                 "reasoning": result.get("reasoning", ""),
                 "is_jackpot": is_jackpot
             }
-            
+
             Trace.event("oracle.batch_validation", {
                 "user_claim": user_claim[:80],
                 "num_candidates": len(candidates),
@@ -195,15 +195,15 @@ class OracleValidationSkill(BaseSkill):
                 "status": status,
                 "is_jackpot": is_jackpot
             })
-            
+
             log_level = logging.INFO if is_jackpot else logging.DEBUG
             logger.log(log_level,
                 "[OracleBatch] %d candidates -> best=%d, score=%.2f, v=%.2f, status=%s, jackpot=%s",
                 len(candidates), best_index, relevance_score, verified_score, status, is_jackpot
             )
-            
+
             return validated_result
-            
+
         except Exception as e:
             logger.warning("[OracleBatch] LLM call failed: %s. Returning MISS.", e)
             return self._empty_batch_result(f"LLM error: {e}")
@@ -219,7 +219,7 @@ class OracleValidationSkill(BaseSkill):
     Publisher: {c.get('publisher', 'Unknown')}
     Summary: {c.get('title', '')[:200]}
 """
-        
+
         return f"""Analyze these fact-check candidates against the User's Claim.
 
 ## User's Claim
@@ -287,7 +287,7 @@ Compare candidates AGAINST EACH OTHER to pick the most relevant one."""
             "reasoning": reason,
             "is_jackpot": False
         }
-    
+
     def _build_prompt(
         self, 
         user_claim: str, 
@@ -297,7 +297,7 @@ Compare candidates AGAINST EACH OTHER to pick the most relevant one."""
     ) -> str:
         """Build the validation prompt with strict semantic matching requirements."""
         summary_section = f'\nFact-Check Summary: "{oracle_summary[:500]}"' if oracle_summary else ""
-        
+
         return f"""Compare the User's Claim with the Fact-Check Result.
 
 ## User's Claim
@@ -358,14 +358,14 @@ A score of 0.5-0.7 means "related but not the same claim" - this is useful conte
     def _map_status(self, llm_status: str) -> OracleStatus:
         """Map LLM status to OracleStatus. No heuristics - LLM must provide valid status."""
         status_upper = (llm_status or "").upper()
-        
+
         if status_upper in ("CONFIRMED", "REFUTED", "MIXED"):
             return status_upper  # type: ignore
-        
+
         # No fallback! If LLM didn't return valid status, it's a bug.
         logger.warning("[OracleValidation] ⚠️ LLM returned invalid status '%s'. BUG!", llm_status)
         return "MIXED"  # Return MIXED but log the bug
-    
+
     def _empty_result(self, reason: str) -> dict:
         """Return a MISS result for empty/error cases."""
         return {

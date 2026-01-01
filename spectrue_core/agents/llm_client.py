@@ -211,7 +211,7 @@ class LLMClient:
             cache_key="claim_analysis_v1",
         )
     """
-    
+
     def __init__(
         self,
         *,
@@ -237,7 +237,7 @@ class LLMClient:
         self.cache_retention = cache_retention
         self._sem = asyncio.Semaphore(8)  # Concurrency limit
         self._meter = meter
-    
+
     async def call(
         self,
         *,
@@ -280,7 +280,7 @@ class LLMClient:
             ValueError: If response is empty after all retries
         """
         effective_timeout = timeout or self.default_timeout
-        
+
         json_output_requested = json_output or response_schema is not None
 
         # Build API params
@@ -289,13 +289,13 @@ class LLMClient:
             "input": input,
             "timeout": effective_timeout,
         }
-        
+
         if instructions:
             params["instructions"] = instructions
 
         if max_output_tokens:
             params["max_output_tokens"] = max_output_tokens
-        
+
         # JSON output configuration
         if json_output_requested:
             if response_schema:
@@ -312,18 +312,18 @@ class LLMClient:
                 }
             else:
                 params["text"] = {"format": {"type": "json_object"}}
-        
+
         # Reasoning control for GPT-5 and O-series models
         if "gpt-5" in model or model.startswith("o"):
             params["reasoning"] = {"effort": reasoning_effort}
-        
+
         # Prompt caching
         if cache_key:
             params["prompt_cache_key"] = cache_key
             # Fix retention literal (in_memory vs in-memory)
             # CAUTION: gpt-5-nano throws 400 "invalid_parameter" for this.
             # params["prompt_cache_retention"] = self.cache_retention
-        
+
         # Calculate payload hash for debug correlation (M55)
         # Hash includes input + instructions to match exactly what went into the prompt
         import hashlib
@@ -349,9 +349,9 @@ class LLMClient:
             "input_text": input[:10000], # Truncate to 10k chars
             "instructions_text": (instructions or "")[:5000],
         })
-        
+
         last_error: Exception | None = None
-        
+
         for attempt in range(self.max_retries):
             start_time = time.time()
             try:
@@ -359,14 +359,14 @@ class LLMClient:
                     if attempt > 0:
                         await asyncio.sleep(0.5 * attempt)
                         logger.debug("[LLMClient] Retry %d/%d for %s", attempt + 1, self.max_retries, model)
-                    
+
                     response = await self.client.responses.create(**params)
-                
+
                 latency_ms = int((time.time() - start_time) * 1000)
 
                 # Extract text content
                 content = response.output_text
-                
+
                 if not content or not content.strip():
                     # Check for error
                     if response.error:
@@ -375,7 +375,7 @@ class LLMClient:
                         details = response.incomplete_details
                         raise ValueError(f"Incomplete response: {details}")
                     raise ValueError("Empty response from LLM")
-                
+
                 # Parse JSON if requested
                 parsed = None
                 if json_output_requested:
@@ -383,26 +383,63 @@ class LLMClient:
                         parsed = json.loads(content)
                     except json.JSONDecodeError as e:
                         logger.warning("[LLMClient] JSON parse failed: %s", e)
+                        # Log detailed parse error with context
+                        error_context = content[max(0, e.pos - 50):e.pos + 50] if e.pos else content[:200]
+                        Trace.event(
+                            f"{trace_kind}.json_parse_error",
+                            {
+                                "model": model,
+                                "error": str(e),
+                                "error_position": e.pos,
+                                "error_context": error_context,
+                                "content_length": len(content),
+                                "content_head": content[:500],
+                                "payload_hash": payload_hash,
+                            },
+                        )
                         # Try to extract JSON from markdown code block
                         if "```json" in content:
                             try:
                                 json_block = content.split("```json")[1].split("```")[0]
                                 parsed = json.loads(json_block.strip())
-                            except (IndexError, json.JSONDecodeError):
-                                pass
+                                Trace.event(
+                                    f"{trace_kind}.json_recovered_from_markdown",
+                                    {"model": model, "payload_hash": payload_hash},
+                                )
+                            except (IndexError, json.JSONDecodeError) as md_e:
+                                Trace.event(
+                                    f"{trace_kind}.json_markdown_recovery_failed",
+                                    {"model": model, "error": str(md_e), "payload_hash": payload_hash},
+                                )
                         if parsed is None:
                             raise ValueError(f"LLM JSON parse failed: {e}") from e
 
                     if response_schema:
                         schema_errors = _validate_schema(parsed, response_schema)
                         if schema_errors:
+                            # Log detailed schema validation error
+                            logger.warning(
+                                "[LLMClient] Schema validation failed: %s errors",
+                                len(schema_errors),
+                            )
+                            Trace.event(
+                                f"{trace_kind}.schema_validation_error",
+                                {
+                                    "model": model,
+                                    "errors": schema_errors[:10],  # Limit to 10 errors
+                                    "error_count": len(schema_errors),
+                                    "parsed_keys": list(parsed.keys()) if isinstance(parsed, dict) else None,
+                                    "content_head": content[:1000],
+                                    "payload_hash": payload_hash,
+                                },
+                            )
                             raise ValueError(f"LLM schema validation failed: {schema_errors[0]}")
-                
+
                 # Extract usage info
                 usage = None
                 cache_status = "NONE" # Default if no cache_key
                 request_id = getattr(response, "id", "unknown")
-                
+
                 if response.usage:
                     # Extract detailed cache hits via prompt_tokens_details
                     cached_tokens = 0
@@ -413,7 +450,7 @@ class LLMClient:
                             cached_tokens = ptd.get("cached_tokens", 0)
                         else:
                             cached_tokens = getattr(ptd, "cached_tokens", 0)
-                    
+
                     usage = {
                         "input_tokens": response.usage.input_tokens,
                         "output_tokens": response.usage.output_tokens,
@@ -439,7 +476,7 @@ class LLMClient:
                      # Fallback if usage absent
                      cache_status = "KEY_PROVIDED" if cache_key else "NONE"
                      usage = {"latency_ms": latency_ms, "request_id": request_id}
-                
+
                 result = {
                     "content": content,
                     "parsed": parsed,
@@ -467,7 +504,7 @@ class LLMClient:
                         Trace.event("llm.metering.failed", {"error": str(exc)[:200]})
                 else:
                     Trace.event("llm.metering.skipped", {"reason": "no_meter"})
-                
+
                 Trace.event(f"{trace_kind}.response", {
                     "model": response.model,
                     "content_chars": len(content),
@@ -477,9 +514,9 @@ class LLMClient:
                     # Log full response for debugging
                     "response_text": content[:15000], # Truncate to 15k chars
                 })
-                
+
                 return result
-                
+
             except Exception as e:
                 last_error = e
                 logger.warning("[LLMClient] Attempt %d failed: %s", attempt + 1, e)
@@ -489,10 +526,10 @@ class LLMClient:
                     "error": str(e)[:200],
                     "payload_hash": payload_hash
                 })
-        
+
         # All retries exhausted
         raise ValueError(f"LLM call failed after {self.max_retries} attempts: {last_error}")
-    
+
     async def call_json(
         self,
         *,
@@ -524,7 +561,7 @@ class LLMClient:
             trace_kind=trace_kind,
         )
         return result["parsed"]
-    
+
     async def close(self) -> None:
         """Clean up resources."""
         if self.client:

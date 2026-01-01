@@ -22,18 +22,18 @@ class FreePoolAllocator:
 
         locked_amount = amount * lock_ratio
         available_amount = amount - locked_amount
-        
+
         # Add to available
         pool.available_balance_sc += available_amount
-        
+
         if locked_amount > 0:
             # Determine release date (e.g. now + 90 days)
             release_date = timestamp + timedelta(days=FreePoolAllocator.LOCK_PERIOD_DAYS)
             release_key = release_date.strftime("%Y-%m-%d")
-            
+
             current_locked = pool.locked_buckets.get(release_key, Decimal("0.0"))
             pool.locked_buckets[release_key] = current_locked + locked_amount
-        
+
         pool.last_updated = timestamp
 
     @staticmethod
@@ -44,7 +44,7 @@ class FreePoolAllocator:
         """
         total_released = Decimal("0.0")
         keys_to_remove: List[str] = []
-        
+
         for date_str, amount in pool.locked_buckets.items():
             try:
                 bucket_date = datetime.strptime(date_str, "%Y-%m-%d")
@@ -55,10 +55,10 @@ class FreePoolAllocator:
             except ValueError:
                 # Handle or log invalid date format if necessary
                 continue
-        
+
         for k in keys_to_remove:
             del pool.locked_buckets[k]
-            
+
         pool.available_balance_sc += total_released
         # We don't necessarily update last_updated here as it might be part of a larger transaction
         # but usually consistent with the operation time.

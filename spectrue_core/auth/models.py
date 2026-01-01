@@ -12,7 +12,7 @@ class User:
     last_daily_bonus_date: Optional[str] = None # YYYY-MM-DD
     last_share_bonus_date: Optional[str] = None # YYYY-MM-DD
     plan_tier: str = "free"
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "User":
         return cls(

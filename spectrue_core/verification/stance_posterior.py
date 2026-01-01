@@ -34,16 +34,16 @@ STANCE_CLASSES = [STANCE_SUPPORT, STANCE_REFUTE, STANCE_NEUTRAL, STANCE_CONTEXT,
 @dataclass
 class StanceFeatures:
     """Structural features for stance posterior calculation."""
-    
+
     # LLM observations (noisy)
     llm_stance: str  # Raw LLM prediction
     llm_relevance: Optional[float]  # 0-1 or None if missing
-    
+
     # Structural signals (deterministic)
     quote_present: bool
     has_evidence_chunk: bool
     source_prior: float  # 0-1, derived from tier/domain quality
-    
+
     # Optional: retrieval signals
     retrieval_rank: int = 0  # Position in search results (0 = first)
     retrieval_score: Optional[float] = None  # Search API score if available
@@ -52,18 +52,18 @@ class StanceFeatures:
 @dataclass 
 class StancePosterior:
     """Posterior probability distribution over stance classes."""
-    
+
     p_support: float
     p_refute: float
     p_neutral: float
     p_context: float
     p_irrelevant: float
-    
+
     # Derived metrics
     p_evidence: float  # P(S ∈ {SUPPORT, REFUTE})
     argmax_stance: str  # Most likely stance
     entropy: float  # Uncertainty measure
-    
+
     def to_dict(self) -> dict:
         return {
             "p_support": round(self.p_support, 4),
@@ -92,7 +92,7 @@ class StancePosterior:
 WEIGHTS = {
     # Feature weights per stance class
     # Format: {stance: {feature: weight}}
-    
+
     STANCE_SUPPORT: {
         "llm_said_support": 2.5,    # Strong signal but not deterministic
         "llm_said_refute": -1.5,    # Unlikely if LLM said refute
@@ -102,7 +102,7 @@ WEIGHTS = {
         "source_prior": 0.5,        # Tier quality mild boost
         "bias": -2.5,               # Prior against SUPPORT without evidence
     },
-    
+
     STANCE_REFUTE: {
         "llm_said_support": -1.5,
         "llm_said_refute": 2.5,
@@ -112,7 +112,7 @@ WEIGHTS = {
         "source_prior": 0.5,
         "bias": -3.0,               # Slightly stronger prior against REFUTE
     },
-    
+
     STANCE_NEUTRAL: {
         "llm_said_support": 0.3,    # Weak positive (LLM might be right)
         "llm_said_refute": 0.3,
@@ -122,7 +122,7 @@ WEIGHTS = {
         "source_prior": 0.2,
         "bias": -0.5,               # Mild prior below context
     },
-    
+
     STANCE_CONTEXT: {
         "llm_said_support": -0.3,
         "llm_said_refute": -0.3,
@@ -132,7 +132,7 @@ WEIGHTS = {
         "source_prior": 0.1,
         "bias": 0.0,                # Baseline stance
     },
-    
+
     STANCE_IRRELEVANT: {
         "llm_said_support": -1.0,
         "llm_said_refute": -1.0,
@@ -164,10 +164,10 @@ def compute_stance_posterior(features: StanceFeatures) -> StancePosterior:
     
     This is the core Bayesian inference step that replaces hard rule-based logic.
     """
-    
+
     # Normalize LLM stance
     llm_stance_lower = (features.llm_stance or "").lower()
-    
+
     # Build feature vector
     feature_values = {
         "llm_said_support": 1.0 if llm_stance_lower in ("support", "sup") else 0.0,
@@ -177,7 +177,7 @@ def compute_stance_posterior(features: StanceFeatures) -> StancePosterior:
         "relevance": features.llm_relevance if features.llm_relevance is not None else 0.5,  # Default 0.5 if missing
         "source_prior": features.source_prior,
     }
-    
+
     # Compute logits for each stance
     logits = []
     for stance in STANCE_CLASSES:
@@ -186,23 +186,23 @@ def compute_stance_posterior(features: StanceFeatures) -> StancePosterior:
         for feat_name, feat_val in feature_values.items():
             logit += weights.get(feat_name, 0.0) * feat_val
         logits.append(logit)
-    
+
     # Softmax to get probabilities
     probs = _softmax(logits)
-    
+
     # Build result
     p_support = probs[0]
     p_refute = probs[1]
     p_neutral = probs[2]
     p_context = probs[3]
     p_irrelevant = probs[4]
-    
+
     p_evidence = p_support + p_refute
-    
+
     # Argmax
     max_idx = probs.index(max(probs))
     argmax_stance = STANCE_CLASSES[max_idx]
-    
+
     return StancePosterior(
         p_support=p_support,
         p_refute=p_refute,
@@ -225,7 +225,7 @@ def compute_effective_evidence_count(posteriors: list[StancePosterior]) -> dict:
     effective_refute = sum(p.p_refute for p in posteriors)
     effective_neutral = sum(p.p_neutral for p in posteriors)
     effective_evidence = sum(p.p_evidence for p in posteriors)
-    
+
     return {
         "effective_support": round(effective_support, 3),
         "effective_refute": round(effective_refute, 3),
@@ -267,12 +267,12 @@ def explain_posterior(features: StanceFeatures, posterior: StancePosterior) -> d
     Useful for debugging and audit trails.
     """
     llm_stance_lower = (features.llm_stance or "").lower()
-    
+
     contributions = {}
     for stance in STANCE_CLASSES:
         weights = WEIGHTS[stance]
         contrib = {"bias": weights["bias"]}
-        
+
         feature_values = {
             "llm_said_support": 1.0 if llm_stance_lower in ("support", "sup") else 0.0,
             "llm_said_refute": 1.0 if llm_stance_lower in ("refute", "ref") else 0.0,
@@ -281,14 +281,14 @@ def explain_posterior(features: StanceFeatures, posterior: StancePosterior) -> d
             "relevance": features.llm_relevance if features.llm_relevance is not None else 0.5,
             "source_prior": features.source_prior,
         }
-        
+
         for feat_name, feat_val in feature_values.items():
             weight = weights.get(feat_name, 0.0)
             contrib[feat_name] = round(weight * feat_val, 3)
-        
+
         contrib["total_logit"] = sum(contrib.values())
         contributions[stance] = contrib
-    
+
     return {
         "features": {
             "llm_stance": features.llm_stance,

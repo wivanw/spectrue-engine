@@ -24,27 +24,27 @@ def detect_claim_language(text: str, fallback: str = "en") -> Tuple[str, float]:
     """
     from langdetect import detect_langs, LangDetectException
     import re
-    
+
     # Clean URLs and mentions
     clean_text = re.sub(r'http\S+|@\w+|#\w+', '', text)
     clean_text = clean_text.strip()
-    
+
     if len(clean_text) < 20:
         return fallback, 0.0
-    
+
     try:
         langs = detect_langs(clean_text)
         if not langs:
             return fallback, 0.0
         detected_lang = langs[0].lang
         confidence = float(getattr(langs[0], "prob", 0.0) or 0.0)
-        
+
         supported = ["en", "uk", "ru", "de", "es", "fr", "ja", "zh"]
         if detected_lang in supported:
             return detected_lang, confidence
-        
+
         return fallback, confidence
-        
+
     except LangDetectException:
         return fallback, 0.0
 
@@ -73,16 +73,16 @@ def validate_claim_language(
     text = claim.get("text") or ""
     if not text or len(text) < 20:
         return True, None  # Too short to validate
-    
+
     detected_lang, confidence = detect_claim_language(text)
-    
+
     # If detection is uncertain, allow it
     if confidence < min_confidence:
         return True, detected_lang
-    
+
     # Check for mismatch
     is_match = detected_lang == expected_lang
-    
+
     if not is_match:
         Trace.event(
             "pipeline.language_mismatch",
@@ -101,7 +101,7 @@ def validate_claim_language(
             detected_lang,
             confidence,
         )
-    
+
     return is_match, detected_lang
 
 
@@ -130,7 +130,7 @@ def validate_claims_language_consistency(
         - mismatches: List of mismatch details
     """
     mismatches = []
-    
+
     for claim in claims:
         claim_id = claim.get("id") or claim.get("claim_id")
         is_valid, detected_lang = validate_claim_language(
@@ -139,14 +139,14 @@ def validate_claims_language_consistency(
             min_confidence=min_confidence,
             claim_id=claim_id,
         )
-        
+
         if not is_valid:
             mismatches.append({
                 "claim_id": claim_id,
                 "expected_lang": expected_lang,
                 "detected_lang": detected_lang,
             })
-    
+
     # In normal mode, any mismatch is critical
     if pipeline_mode == "normal" and mismatches:
         Trace.event(
@@ -159,6 +159,6 @@ def validate_claims_language_consistency(
             },
         )
         return False, mismatches
-    
+
     return True, mismatches
 

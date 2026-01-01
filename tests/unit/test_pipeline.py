@@ -50,6 +50,7 @@ class TestValidationPipeline:
         agent.clean_article = AsyncMock()
         agent.cluster_evidence = AsyncMock()
         agent.score_evidence = AsyncMock()
+        agent.score_evidence_parallel = AsyncMock()
         agent.verify_oracle_relevance = AsyncMock()
         agent.verify_inline_source_relevance = AsyncMock()  # T7
         agent.verify_search_relevance = AsyncMock(return_value={"is_relevant": True, "reason": "Test ok"}) # M66
@@ -179,7 +180,15 @@ class TestValidationPipeline:
     async def test_smart_mode_waterfall(self, pipeline, mock_agent, mock_search_mgr):
         """T9/Verify Smart Mode uses Unified Search."""
         mock_agent.extract_claims.return_value = ([{"search_queries": ["q1"]}], False, "news", "")
-        mock_agent.score_evidence.return_value = {}
+        # smart/advanced maps to deep profile which uses parallel scoring
+        mock_agent.score_evidence_parallel.return_value = {
+            "verified_score": 0.8,
+            "claim_verdicts": [],
+            "rationale": "Test",
+            "danger_score": 0.1,
+            "style_score": 0.8,
+            "explainability_score": 0.8,
+        }
         
         # Setup Unified to return GOOD results
         mock_search_mgr.search_unified.return_value = (

@@ -340,8 +340,8 @@ def get_domains_by_topics(topics: list[str]) -> list[str]:
         seen.add(d)
         out.append(d)
     return out
-    
-    
+
+
 # Tier A Definition Constants
 TIER_A_TLDS = {".gov", ".mil", ".int", ".edu"}
 TIER_A_SUFFIXES = {".europa.eu", ".ac.uk", ".gov.uk", ".gov.ua", ".gov.pl", ".bund.de", ".gc.ca"}
@@ -365,20 +365,20 @@ def get_tier_ceiling_for_domain(domain: str) -> float:
     """
     if not domain: 
         return 0.55 # Default to Tier C
-        
+
     d = domain.lower().strip()
-    
+
     # 1. Tier A Checks (Institutional)
     # Check TLDs
     for tld in TIER_A_TLDS:
         if d.endswith(tld):
             return 0.90
-            
+
     # Check Suffixes (Sub-TLDs)
     for suffix in TIER_A_SUFFIXES:
         if d.endswith(suffix):
             return 0.90
-            
+
     # Check Explicit Lists
     if d in TRUSTED_SOURCES.get("international_public_bodies", []):
         return 0.90
@@ -386,16 +386,16 @@ def get_tier_ceiling_for_domain(domain: str) -> float:
         return 0.90
     if d in TRUSTED_SOURCES.get("astronomy_tier_a", []):
         return 0.90
-        
+
     # 2. Tier B Checks (Trusted Media)
     if d in ALL_TRUSTED_DOMAINS:
         return 0.90  # TierPrior B
-        
+
     # 3. Default (Tier C / D)
     # Check social for Tier D
     if is_social_platform(d):
         return 0.80 # TierPrior D
-        
+
     # Default Tier C (General Web / Local)
     return 0.85 # TierPrior C
 
@@ -406,13 +406,13 @@ def is_social_platform(domain: str) -> bool:
     """
     if not domain:
         return False
-        
+
     d = domain.lower().strip()
-    
+
     # Direct match or suffix match (e.g. m.facebook.com)
     for p in SOCIAL_PLATFORMS:
         if d == p or d.endswith("." + p):
             return True
-            
+
     return False
 

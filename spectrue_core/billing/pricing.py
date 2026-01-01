@@ -61,7 +61,7 @@ def llm_usage_to_credits(
 
 class TavilyPriceCalculator:
     """Calculate Tavily costs in USD and SC (Decimal)."""
-    
+
     def __init__(self, policy: CreditPricingPolicy) -> None:
         self._policy = policy
 
@@ -79,7 +79,7 @@ class TavilyPriceCalculator:
 
 class LLMPriceCalculator:
     """Calculate LLM costs in USD and SC (Decimal)."""
-    
+
     def __init__(self, policy: CreditPricingPolicy) -> None:
         self._policy = policy
 

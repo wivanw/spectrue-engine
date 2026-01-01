@@ -23,12 +23,12 @@ def calculate_consensus(evidence_list: List[EvidenceItem]) -> ConsensusState:
     # 1. Source Independence
     domains = set(e.domain for e in evidence_list if e.domain)
     source_count = len(domains)
-    
+
     # 2. Agreement
     supports = 0
     refutes = 0
     valid_evidence_count = 0
-    
+
     for e in evidence_list:
         if e.stance == EvidenceStance.SUPPORT:
             supports += 1
@@ -36,7 +36,7 @@ def calculate_consensus(evidence_list: List[EvidenceItem]) -> ConsensusState:
         elif e.stance == EvidenceStance.REFUTE:
             refutes += 1
             valid_evidence_count += 1
-            
+
     if valid_evidence_count == 0:
         agreement_score = 0.5 # Neutral / No consensus signal
     else:

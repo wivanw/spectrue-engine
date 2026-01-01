@@ -32,12 +32,7 @@ from spectrue_core.scoring.belief import (
     apply_consensus_bound,
 )
 from spectrue_core.scoring.consensus import calculate_consensus
-from spectrue_core.scoring.claim_posterior import (
-    compute_claim_posterior,
-    aggregate_article_posterior,
-    EvidenceItem,
-    PosteriorParams,
-)
+# M117: Removed claim_posterior imports - using raw LLM scores now
 from spectrue_core.verification.temporal import (
     label_evidence_timeliness,
     normalize_time_window,
@@ -560,10 +555,28 @@ async def run_evidence_flow(
     if inp.progress_callback:
         await inp.progress_callback("score_evidence")
 
-    # LLM call.
-    # - Language is explicitly fixed by inp.lang.
-    # - In 'normal' profile, `claims` is enforced to exactly one claim.
-    result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
+    # LLM scoring call
+    # - In 'deep' profile, we use per-claim scoring (either via JudgeClaimsStep in DAG
+    #   or score_evidence_parallel for legacy flow)
+    # - In 'normal' profile, use standard single-call scoring
+    is_deep_mode = pipeline_profile == "deep"
+
+    if is_deep_mode:
+        # Deep mode: use parallel per-claim scoring
+        # Each claim gets its own LLM call with individual RGBA
+        # This avoids timeout on large prompts and gives true per-claim scores
+        result = await agent.score_evidence_parallel(
+            pack, model=inp.gpt_model, lang=inp.lang, max_concurrency=5
+        )
+    else:
+        # Standard mode: single LLM call for batch scoring
+        result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
+
+    # Track judge mode for downstream logic:
+    # - "standard" (normal pipeline): single article-level LLM judge, global RGBA
+    # - "deep": per-claim LLM judges, each claim has its own RGBA
+    result["judge_mode"] = "deep" if is_deep_mode else "standard"
+
     if str(result.get("status", "")).lower() == "error":
         result["status"] = "error"
         Trace.event(
@@ -643,10 +656,11 @@ async def run_evidence_flow(
                 llm_score = 0.5
             llm_score = float(llm_score)
 
-            # Build evidence items from pack
-            evidence_items = []
+            # Build evidence items from pack for stats only
             items = pack_ref.get("items", []) if isinstance(pack_ref, dict) else []
             best_tier = None
+            n_support = 0
+            n_refute = 0
 
             for item in items:
                 if not isinstance(item, dict):
@@ -657,20 +671,11 @@ async def run_evidence_flow(
 
                 stance = str(item.get("stance") or "").lower()
                 tier = item.get("tier")
-                relevance = item.get("relevance")
-                if not isinstance(relevance, (int, float)):
-                    relevance = 0.5
-                quote_present = bool(item.get("quote"))
 
-                evidence_items.append(
-                    EvidenceItem(
-                        stance=stance,
-                        tier=tier,
-                        relevance=float(relevance),
-                        quote_present=quote_present,
-                        claim_id=claim_id,
-                    )
-                )
+                if stance in ("support", "sup", "supported"):
+                    n_support += 1
+                elif stance in ("refute", "ref", "refuted"):
+                    n_refute += 1
 
                 # Track best tier
                 if tier and (
@@ -678,23 +683,15 @@ async def run_evidence_flow(
                 ):
                     best_tier = tier
 
-            # Compute unified posterior
-            posterior_result = compute_claim_posterior(
-                llm_verdict_score=llm_score,
-                best_tier=best_tier,
-                evidence_items=evidence_items,
-                claim_id=claim_id,
-            )
+            # M117: Use raw LLM score directly (no posterior boost)
+            # Posterior was causing all scores to drift toward 0.98+
+            cv["verdict_score"] = llm_score
 
-            # Update cv with posterior score
-            cv["verdict_score"] = posterior_result.p_posterior
-            cv["posterior_result"] = posterior_result.to_dict()
-
-            # Derive verdict from posterior
-            if posterior_result.p_posterior > 0.65:
+            # Derive verdict from LLM score
+            if llm_score > 0.65:
                 cv["verdict"] = "verified"
                 cv["status"] = "verified"
-            elif posterior_result.p_posterior < 0.35:
+            elif llm_score < 0.35:
                 cv["verdict"] = "refuted"
                 cv["status"] = "refuted"
             else:
@@ -704,10 +701,8 @@ async def run_evidence_flow(
             # Legacy reasons_expert for backward compatibility
             cv["reasons_expert"] = {
                 "best_tier": best_tier,
-                "n_support": posterior_result.n_support,
-                "n_refute": posterior_result.n_refute,
-                "effective_support": posterior_result.effective_support,
-                "effective_refute": posterior_result.effective_refute,
+                "n_support": n_support,
+                "n_refute": n_refute,
             }
             cv["reasons_short"] = cv.get("reasons_short", []) or []
 
@@ -760,8 +755,7 @@ async def run_evidence_flow(
                 "target": claim_obj.get("verification_target") if claim_obj else None,
                 "harm": claim_obj.get("harm_potential") if claim_obj else None,
                 "llm_verdict": cv.get("verdict"),
-                "llm_score": llm_score,  # Original LLM score
-                "posterior_score": posterior_result.p_posterior,
+                "llm_score": llm_score,
                 "has_direct_evidence": has_direct_evidence,
                 "best_tier": best_tier,
             }
@@ -778,21 +772,19 @@ async def run_evidence_flow(
             if existing_state in CANONICAL_STATES:
                 verdict_state = existing_state
             else:
-                # Derive from posterior
+                # Derive from LLM score
                 verdict_state = "insufficient_evidence"
-                if posterior_result.p_posterior > 0.65:
+                if llm_score > 0.65:
                     verdict_state = "supported"
-                elif posterior_result.p_posterior < 0.35:
+                elif llm_score < 0.35:
                     verdict_state = "refuted"
-                elif posterior_result.n_support > 0 or posterior_result.n_refute > 0:
+                elif n_support > 0 or n_refute > 0:
                     verdict_state = "conflicted"
 
             cv["verdict_state"] = verdict_state
 
             # Conflict detection from evidence balance
-            has_conflict = (
-                posterior_result.n_support > 0 and posterior_result.n_refute > 0
-            )
+            has_conflict = n_support > 0 and n_refute > 0
 
             return {
                 "claim_id": claim_id,
@@ -800,7 +792,7 @@ async def run_evidence_flow(
                 "veracity_entry": veracity_entry,
                 "explainability_update": explainability_update,
                 "has_conflict": has_conflict,
-                "posterior_score": posterior_result.p_posterior,
+                "llm_score": llm_score,
             }
 
         # Prepare all CV data
@@ -872,8 +864,12 @@ async def run_evidence_flow(
                 conflict_detected = True
 
         # Enrich verdicts with per-claim sources and RGBA
-        # This fixes the UI showing cumulative sources and identical RGBA for all claims
+        # This fixes the UI showing cumulative sources and identical        # Enrich with per-claim verdicts and RGBA
         # RGBA order: [R=danger, G=verified, B=style, A=explainability]
+        #
+        # IMPORTANT: These global_* values are ONLY used as fallback for standard mode.
+        # In deep mode, each claim_verdict MUST have its own RGBA from claim-judge.
+        # See the cv["rgba"] assignment below - it respects existing RGBA from LLM.
         global_r = float(result.get("danger_score", -1.0))
         if global_r < 0:
             global_r = 0.0
@@ -882,11 +878,11 @@ async def run_evidence_flow(
         if global_b < 0:
             global_b = float(result.get("context_score", -1.0))
         if global_b < 0:
-            global_b = 1.0  # Default B=1.0 if missing?
+            global_b = 1.0  # Default B=1.0 if missing
 
         global_a = float(result.get("explainability_score", -1.0))
         if global_a < 0:
-            global_a = 1.0  # Default A=1.0 if missing?
+            global_a = 1.0  # Default A=1.0 if missing
 
         all_scored = pack.get("scored_sources") or []
         all_context = pack.get("context_sources") or []
@@ -916,12 +912,84 @@ async def run_evidence_flow(
             # Enrich per-claim sources
             cv["sources"] = enrich_sources_with_trust(claim_sources)
 
-            # Calculate per-claim RGBA
-            # G is specific to claim
+            # Per-claim RGBA handling
+            # Deep mode: LLM claim-judge provides cv["rgba"] - DO NOT overwrite
+            # Standard mode: compute from global values (fallback)
             g_score = float(cv.get("verdict_score", 0.5) or 0.5)
+            existing_rgba = cv.get("rgba")
+            has_valid_rgba = (
+                isinstance(existing_rgba, list)
+                and len(existing_rgba) == 4
+                and all(isinstance(x, (int, float)) for x in existing_rgba)
+            )
 
-            # R, B, A are global for now (unless claim has specific overrides later)
-            cv["rgba"] = [global_r, g_score, global_b, global_a]
+            Trace.event(
+                "cv.before_rgba_fill",
+                {
+                    "claim_id": cid,
+                    "judge_mode": result.get("judge_mode", "standard"),
+                    "has_rgba": has_valid_rgba,
+                    "existing_rgba": existing_rgba,
+                    "verdict_score": cv.get("verdict_score"),
+                    "global_r": global_r,
+                    "global_b": global_b,
+                    "global_a": global_a,
+                },
+            )
+
+            if has_valid_rgba:
+                # Deep claim-judge already provided RGBA - keep LLM output 1:1
+                # Contract: LLM output is final for deep mode
+                Trace.event(
+                    "cv.rgba_preserved",
+                    {
+                        "claim_id": cid,
+                        "judge_mode": result.get("judge_mode", "standard"),
+                        "rgba": existing_rgba,
+                    },
+                )
+            elif result.get("judge_mode") == "deep":
+                # Deep mode but no RGBA from LLM - this is an error!
+                # Check if this is an error claim from scoring
+                if cv.get("status") == "error":
+                    # Expected: error claim has no RGBA, leave as-is
+                    Trace.event(
+                        "cv.rgba_deep_error_claim",
+                        {
+                            "claim_id": cid,
+                            "judge_mode": "deep",
+                            "error_type": cv.get("error_type"),
+                            "note": "Error claim - no RGBA expected",
+                        },
+                    )
+                else:
+                    # Unexpected: valid claim missing RGBA - mark as error
+                    cv["rgba"] = None  # Do NOT use fallback
+                    cv["rgba_error"] = "missing_from_llm"
+                    Trace.event(
+                        "cv.rgba_deep_missing",
+                        {
+                            "claim_id": cid,
+                            "judge_mode": "deep",
+                            "verdict_score": cv.get("verdict_score"),
+                            "error": "Deep mode claim missing RGBA from judge - NOT using fallback",
+                        },
+                    )
+                    logger.warning(
+                        "[DeepMode] Claim %s missing RGBA from judge - marked as error",
+                        cid,
+                    )
+            else:
+                # Standard mode fallback: compute from global values
+                cv["rgba"] = [global_r, g_score, global_b, global_a]
+                Trace.event(
+                    "cv.rgba_fallback",
+                    {
+                        "claim_id": cid,
+                        "judge_mode": result.get("judge_mode", "standard"),
+                        "rgba": cv["rgba"],
+                    },
+                )
 
         changed = apply_dependency_penalties(claim_verdicts, claims)
         # Do NOT recompute article-level G as an average across claims.

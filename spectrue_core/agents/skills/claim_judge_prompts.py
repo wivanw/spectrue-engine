@@ -35,30 +35,30 @@ def _format_evidence_for_judge(items: tuple[EvidenceItemFrame, ...]) -> str:
     """Format evidence items for judge prompt."""
     if not items:
         return "No evidence available."
-    
+
     lines: list[str] = []
     for i, item in enumerate(items):
         entry = [f"[{item.evidence_id}] Source {i + 1}:"]
         entry.append(f"  URL: {item.url}")
-        
+
         if item.title:
             entry.append(f"  Title: {item.title}")
-        
+
         if item.source_tier:
             entry.append(f"  Trust Tier: {item.source_tier}")
-        
+
         if item.stance:
             entry.append(f"  Stance: {item.stance}")
-        
+
         if item.quote:
             quote_preview = item.quote[:400] + "..." if len(item.quote) > 400 else item.quote
             entry.append(f"  Quote: \"{quote_preview}\"")
         elif item.snippet:
             snippet_preview = item.snippet[:400] + "..." if len(item.snippet) > 400 else item.snippet
             entry.append(f"  Content: {snippet_preview}")
-        
+
         lines.append("\n".join(entry))
-    
+
     return "\n\n".join(lines)
 
 
@@ -66,30 +66,30 @@ def _format_evidence_summary(summary: EvidenceSummary | None) -> str:
     """Format evidence summary for judge prompt."""
     if summary is None:
         return "No pre-analyzed summary available."
-    
+
     lines: list[str] = []
-    
+
     if summary.supporting_evidence:
         lines.append("Supporting evidence:")
         for ref in summary.supporting_evidence:
             lines.append(f"  - [{ref.evidence_id}]: {ref.reason}")
-    
+
     if summary.refuting_evidence:
         lines.append("Refuting evidence:")
         for ref in summary.refuting_evidence:
             lines.append(f"  - [{ref.evidence_id}]: {ref.reason}")
-    
+
     if summary.contextual_evidence:
         lines.append("Contextual evidence:")
         for ref in summary.contextual_evidence:
             lines.append(f"  - [{ref.evidence_id}]: {ref.reason}")
-    
+
     if summary.evidence_gaps:
         lines.append(f"Evidence gaps: {', '.join(summary.evidence_gaps)}")
-    
+
     if summary.conflicts_present:
         lines.append("⚠️ Conflicting evidence detected")
-    
+
     return "\n".join(lines) if lines else "Summary is empty."
 
 
@@ -104,15 +104,15 @@ def _format_stats_section(frame: ClaimFrame) -> str:
         f"High-trust sources: {stats.high_trust_sources}",
         f"Direct quotes: {stats.direct_quotes}",
     ]
-    
+
     if stats.conflicting_evidence:
         lines.append("⚠️ Evidence contains contradictions")
-    
+
     if stats.missing_sources:
         lines.append("⚠️ No sources found")
     elif stats.missing_direct_quotes:
         lines.append("ℹ️ No direct quotes available")
-    
+
     return "\n".join(lines)
 
 
@@ -136,11 +136,11 @@ def build_claim_judge_prompt(
     evidence_section = _format_evidence_for_judge(frame.evidence_items)
     summary_section = _format_evidence_summary(evidence_summary)
     stats_section = _format_stats_section(frame)
-    
+
     # Get URLs for sources_used constraint
     available_urls = [item.url for item in frame.evidence_items]
     urls_list = "\n".join(f"  - {url}" for url in available_urls) if available_urls else "  (none)"
-    
+
     prompt = f"""You are a fact-checking judge. Evaluate the following claim based on the provided evidence and produce a verdict.
 
 ## CLAIM TO JUDGE

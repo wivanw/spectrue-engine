@@ -19,7 +19,7 @@ class FactVerifier:
     
     Uses composition with ValidationPipeline for clean architecture.
     """
-    
+
     def __init__(self, config: SpectrueConfig = None, translation_service=None):
         self.config = config
         self.agent = FactCheckerAgent(config)

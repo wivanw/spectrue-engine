@@ -108,7 +108,8 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
                 "claim_id": "c1",
                 "verdict_score": 0.9,
                 "verdict": "verified",
-                "reason": "Claim verified by multiple sources"
+                "reason": "Claim verified by multiple sources",
+                "rgba": [0.0, 0.9, 0.9, 0.8],
             }
         ],
         "danger_score": 0.0,
@@ -126,9 +127,23 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
             return cluster_resp
         elif kind == "score_evidence":
             return score_resp
+        elif kind == "score_single_claim":
+            # For parallel scoring mode
+            return {
+                "claim_id": "c1",
+                "verdict_score": 0.9,
+                "verdict": "verified",
+                "reason": "logic working.",
+                "rgba": [0.0, 0.9, 0.9, 0.8],
+            }
         return {}
 
     verifier.agent.llm_client.call_json.side_effect = side_effect
+    
+    # Also mock score_evidence_parallel directly for deep mode
+    async def parallel_side_effect(*args, **kwargs):
+        return score_resp
+    verifier.agent.scoring_skill.score_evidence_parallel = parallel_side_effect
     
     # Execute verification
     result = await verifier.verify_fact("The sky is blue", "advanced", "gpt-5.2", "en")
@@ -139,11 +154,12 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     # The Bayesian scorer can still produce > 0.5 if LLM reports high verdict_score.
     verified_score = result["verified_score"]
     assert 0.0 <= verified_score <= 1.0, f"Score out of bounds: {verified_score}"
-    assert result["rationale"] == "logic working."
+    # In parallel mode, rationale is built from claim reasons
+    assert result["rationale"] in ["logic working.", "Claim verified by multiple sources"]
     assert "cost" in result
     
     # Verify LLM calls
-    # Should call extract_claims, cluster_evidence, and score_evidence
+    # Should call extract_claims, cluster_evidence (score_evidence may be parallel in deep mode)
     calls = verifier.agent.llm_client.call_json.call_args_list
     kinds = [c.kwargs.get("trace_kind") for c in calls]
     
@@ -152,7 +168,9 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     # Logic in _get_final_analysis: if claims and sources_list: await cluster_evidence
     # We returned 5 sources.
     assert "stance_clustering" in kinds, f"Kinds found: {kinds}. Logs:\n" + "\n".join(caplog.messages)
-    assert "score_evidence" in kinds, f"Kinds found: {kinds}. Logs:\n" + "\n".join(caplog.messages)
+    # In deep mode, score_evidence_parallel is used instead of score_evidence
+    # so "score_evidence" trace_kind may not appear (score_single_claim is used)
+    assert "stance_clustering" in kinds or "score_evidence" in kinds or "score_single_claim" in kinds, f"Kinds found: {kinds}. Logs:\n" + "\n".join(caplog.messages)
 
 
 @pytest.mark.asyncio

@@ -49,10 +49,10 @@ class SufficiencyStatus(str, Enum):
     """Result of sufficiency check."""
     SUFFICIENT = "sufficient"
     """Enough evidence to proceed with scoring."""
-    
+
     INSUFFICIENT = "insufficient"
     """Need more evidence, continue widening."""
-    
+
     SKIP = "skip"
     """No search needed (verification_target=none)."""
 
@@ -73,35 +73,35 @@ class SufficiencyResult:
     """
     claim_id: str
     """Claim being evaluated."""
-    
+
     status: SufficiencyStatus = SufficiencyStatus.INSUFFICIENT
     """Whether evidence is sufficient."""
-    
+
     reason: str = ""
     """Human-readable explanation for tracing."""
-    
+
     rule_matched: str = ""
     """Which sufficiency rule was satisfied (Rule1, Rule2, Rule3, etc.)."""
-    
+
     # Evidence metrics
     authoritative_count: int = 0
     """Count of authoritative (Tier A) sources."""
-    
+
     reputable_count: int = 0
     """Count of reputable news (Tier B) sources."""
-    
+
     independent_domains: int = 0
     """Count of unique domains with SUPPORT/REFUTE stance."""
-    
+
     has_quotes: bool = False
     """Whether any source has a relevant quote."""
-    
+
     support_refute_count: int = 0
     """Count of sources with SUPPORT or REFUTE stance."""
-    
+
     context_only_count: int = 0
     """Count of sources with only CONTEXT stance."""
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for tracing."""
         return {
@@ -175,19 +175,19 @@ def is_authoritative(domain: str) -> bool:
     """
     if not domain:
         return False
-    
+
     d = domain.lower().strip()
-    
+
     # Check TLDs
     for tld in TIER_A_TLDS:
         if d.endswith(tld):
             return True
-    
+
     # Check sub-TLDs
     for suffix in TIER_A_SUFFIXES:
         if d.endswith(suffix):
             return True
-    
+
     # Check explicit lists
     if d in TRUSTED_SOURCES.get("international_public_bodies", []):
         return True
@@ -199,7 +199,7 @@ def is_authoritative(domain: str) -> bool:
         return True
     if d in TRUSTED_SOURCES.get("fact_checking_ifcn", []):
         return True
-    
+
     return False
 
 
@@ -220,13 +220,13 @@ def is_reputable_news(domain: str) -> bool:
     """
     if not domain:
         return False
-    
+
     d = domain.lower().strip()
-    
+
     # Check against all trusted domains
     if d in ALL_TRUSTED_DOMAINS:
         return True
-    
+
     # Check specific categories
     tier_b_categories = [
         "general_news_western",
@@ -238,11 +238,11 @@ def is_reputable_news(domain: str) -> bool:
         "astronomy_tier_b",
         "russia_independent_exiled",
     ]
-    
+
     for category in tier_b_categories:
         if d in TRUSTED_SOURCES.get(category, []):
             return True
-    
+
     return False
 
 
@@ -254,21 +254,21 @@ def is_local_media(domain: str) -> bool:
     """
     if not domain:
         return False
-    
+
     d = domain.lower().strip()
-    
+
     # Not social and not authoritative/reputable
     if is_social_platform(d):
         return False
     if is_authoritative(d) or is_reputable_news(d):
         return False
-    
+
     # Assume local media if it has news-like TLD patterns
     news_patterns = [".news", ".media", ".tv", ".radio", ".times", ".post", ".herald"]
     for pattern in news_patterns:
         if pattern in d:
             return True
-    
+
     return False
 
 
@@ -284,19 +284,19 @@ def get_domain_tier(domain: str) -> EvidenceChannel:
     """
     if not domain:
         return EvidenceChannel.LOW_RELIABILITY
-    
+
     if is_authoritative(domain):
         return EvidenceChannel.AUTHORITATIVE
-    
+
     if is_reputable_news(domain):
         return EvidenceChannel.REPUTABLE_NEWS
-    
+
     if is_social_platform(domain):
         return EvidenceChannel.SOCIAL
-    
+
     if is_local_media(domain):
         return EvidenceChannel.LOCAL_MEDIA
-    
+
     return EvidenceChannel.LOW_RELIABILITY
 
 
@@ -322,26 +322,26 @@ def is_origin_source(source: Any, claim_text: str) -> bool:
 
     url = source.get("url", "") or source.get("link", "")
     domain = _extract_domain(url)
-    
+
     if not domain:
         return False
-    
+
     # Priority 1: Accept explicit origin signals from structured metadata.
     source_type = str(source.get("source_type") or "").lower()
     if source_type in {"primary", "official", "fact_check"}:
         return True
     if source.get("is_primary") or source.get("is_origin"):
         return True
-    
+
     # Priority 2: Authoritative domains (official sources are often origins)
     if is_authoritative(domain):
         return True
-    
+
     # Priority 3: Title-based heuristics for official statements
     title = (source.get("title", "") or "").lower()
     if "official" in title or "statement" in title or "announcement" in title:
         return True
-    
+
     return False
 
 
@@ -378,18 +378,18 @@ def evidence_sufficiency(
         SufficiencyResult with status and metrics
     """
     result = SufficiencyResult(claim_id=claim_id)
-    
+
     # Skip check for non-verifiable claims
     if verification_target == VerificationTarget.NONE:
         result.status = SufficiencyStatus.SKIP
         result.reason = "verification_target=none, no search needed"
         return result
-    
+
     if not sources:
         result.status = SufficiencyStatus.INSUFFICIENT
         result.reason = "No sources available"
         return result
-    
+
     # Analyze sources
     authoritative_sources: list[dict] = []
     reputable_sources: list[dict] = []
@@ -397,7 +397,7 @@ def evidence_sufficiency(
     support_refute_domains: set[str] = set()
     has_quotes = False
     context_only = True
-    
+
     # Normalize use_policy_by_channel values to UsePolicy.
     policy_map: dict[str, UsePolicy] = {}
     if isinstance(use_policy_by_channel, dict):
@@ -424,16 +424,16 @@ def evidence_sufficiency(
             has_quote = bool(source.get("quote"))
             # T003: has_text_content is used for evidence candidacy (can potentially be scored)
             has_text_content = bool(source.get("quote") or source.get("snippet") or source.get("content"))
-        
+
         if not url:
             continue
-            
+
         domain = _extract_domain(url)
-        
+
         # Track quotes (strict: only real quote field)
         if has_quote:
             has_quotes = True
-        
+
         # Track candidate evidence (T003: replaces support_refute_count during retrieval)
         # Sources with any text content are candidates for support/refutation.
         if has_text_content:
@@ -443,7 +443,7 @@ def evidence_sufficiency(
                 support_refute_domains.add(domain)
         else:
             result.context_only_count += 1
-        
+
         # Categorize by tier
         tier = get_domain_tier(domain)
 
@@ -454,30 +454,30 @@ def evidence_sufficiency(
                 lead_only_count += 1
                 # Do not count toward sufficiency rules; keep tracking for diagnostics.
                 continue
-        
+
         if tier == EvidenceChannel.AUTHORITATIVE:
             result.authoritative_count += 1
             if has_quote:
                 authoritative_sources.append(source)
-        
+
         elif tier in (EvidenceChannel.REPUTABLE_NEWS, EvidenceChannel.LOCAL_MEDIA):
             result.reputable_count += 1
             if has_quote:
                 reputable_sources.append(source)
-        
+
         # Check for origin source (attribution/existence claims).
         # Origin requires a real evidence chunk (quote/snippet/content), not just a bare link.
         if verification_target in (VerificationTarget.ATTRIBUTION, VerificationTarget.EXISTENCE):
             if has_evidence_chunk(source) and is_origin_source(source, claim_text):
                 origin_sources.append(source)
-    
+
     result.independent_domains = len(support_refute_domains)
     result.has_quotes = has_quotes
-    
+
     # ─────────────────────────────────────────────────────────────────────────
     # Apply Sufficiency Rules
     # ─────────────────────────────────────────────────────────────────────────
-    
+
     # Rule 3: For attribution/existence, 1 origin source is enough
     if verification_target in (VerificationTarget.ATTRIBUTION, VerificationTarget.EXISTENCE):
         if len(origin_sources) >= 1:
@@ -485,14 +485,14 @@ def evidence_sufficiency(
             result.rule_matched = "Rule3"
             result.reason = f"Found {len(origin_sources)} origin source(s) for {verification_target.value} claim"
             return result
-    
+
     # Rule 1: 1 authoritative source with quote
     if len(authoritative_sources) >= 1:
         result.status = SufficiencyStatus.SUFFICIENT
         result.rule_matched = "Rule1"
         result.reason = f"Found {len(authoritative_sources)} authoritative source(s) with quotes"
         return result
-    
+
     # Rule 2: 2 independent strong sources with quotes (authoritative or reputable)
     strong_domains: set[str] = set()
     for source in authoritative_sources + reputable_sources:
@@ -506,13 +506,13 @@ def evidence_sufficiency(
         result.rule_matched = "Rule2"
         result.reason = f"Found {len(strong_domains)} independent strong sources with quotes"
         return result
-    
+
     # ─────────────────────────────────────────────────────────────────────────
     # Not Sufficient - Determine Reason
     # ─────────────────────────────────────────────────────────────────────────
-    
+
     result.status = SufficiencyStatus.INSUFFICIENT
-    
+
     if lead_only_count > 0 and (lead_only_count == len(sources)):
         result.reason = "All sources are lead-only (social/low_reliability_web); no usable evidence chunks"
     elif context_only:
@@ -523,7 +523,7 @@ def evidence_sufficiency(
         result.reason = "Sources lack quotes/content"
     else:
         result.reason = f"Insufficient quality: {result.independent_domains} independent domains"
-    
+
     return result
 
 
@@ -601,7 +601,7 @@ def check_sufficiency_for_claim(
     """
     claim_id = claim.get("id", "unknown")
     claim_text = claim.get("normalized_text", "") or claim.get("text", "")
-    
+
     metadata = claim.get("metadata")
     if metadata:
         verification_target = metadata.verification_target
@@ -609,7 +609,7 @@ def check_sufficiency_for_claim(
     else:
         verification_target = VerificationTarget.REALITY
         use_policy_by_channel = {}
-    
+
     return evidence_sufficiency(
         claim_id=claim_id,
         sources=sources,

@@ -67,7 +67,7 @@ def format_retrieval_trace(state: ClaimExecutionState) -> RetrievalTrace:
         RetrievalTrace for ClaimFrame
     """
     hops = tuple(format_retrieval_hop(hop) for hop in state.hops)
-    
+
     return RetrievalTrace(
         phases_completed=tuple(state.phases_completed),
         hops=hops,

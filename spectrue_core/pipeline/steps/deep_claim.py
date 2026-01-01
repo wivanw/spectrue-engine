@@ -67,25 +67,25 @@ class BuildClaimFramesStep(Step):
     Converts pipeline state (claims, evidence, execution state) into
     per-claim ClaimFrame bundles.
     """
-    
+
     @property
     def name(self) -> str:
         return "build_claim_frames"
-    
+
     async def execute(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("build_claim_frames")
-        
+
         try:
             # Get required data from context
             claims = ctx.extras.get("claims", [])
             document_text = ctx.extras.get("clean_text", "") or ctx.extras.get("input_text", "")
             evidence_by_claim = ctx.extras.get("evidence_by_claim", {})
             execution_states = ctx.extras.get("execution_states", {})
-            
+
             if not claims:
                 Trace.event("build_claim_frames.skip", {"reason": "no_claims"})
                 return ctx.with_extras(deep_claim_ctx=DeepClaimContext())
-            
+
             # Build frames
             frames = build_claim_frames_from_pipeline(
                 claims=claims,
@@ -93,16 +93,16 @@ class BuildClaimFramesStep(Step):
                 evidence_by_claim=evidence_by_claim,
                 execution_states=execution_states,
             )
-            
+
             deep_ctx = DeepClaimContext(claim_frames=frames)
-            
+
             Trace.event("build_claim_frames.complete", {
                 "frame_count": len(frames),
                 "claim_ids": [f.claim_id for f in frames],
             })
-            
+
             return ctx.with_extras(deep_claim_ctx=deep_ctx)
-            
+
         finally:
             Trace.phase_end("build_claim_frames")
 
@@ -113,34 +113,34 @@ class SummarizeEvidenceStep(Step):
     
     Uses EvidenceSummarizerSkill to categorize evidence by stance.
     """
-    
+
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
-    
+
     @property
     def name(self) -> str:
         return "summarize_evidence"
-    
+
     async def execute(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("summarize_evidence")
-        
+
         try:
             deep_ctx: DeepClaimContext = ctx.extras.get("deep_claim_ctx", DeepClaimContext())
-            
+
             if not deep_ctx.claim_frames:
                 Trace.event("summarize_evidence.skip", {"reason": "no_frames"})
                 return ctx
-            
+
             skill = EvidenceSummarizerSkill(self._llm)
-            
+
             # Process all claims in parallel
             async def summarize_one(frame: ClaimFrame) -> tuple[str, EvidenceSummary]:
                 summary = await skill.summarize(frame)
                 return frame.claim_id, summary
-            
+
             tasks = [summarize_one(frame) for frame in deep_ctx.claim_frames]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             summaries: dict[str, EvidenceSummary] = {}
             for result in results:
                 if isinstance(result, Exception):
@@ -148,15 +148,15 @@ class SummarizeEvidenceStep(Step):
                     continue
                 claim_id, summary = result
                 summaries[claim_id] = summary
-            
+
             deep_ctx.evidence_summaries = summaries
-            
+
             Trace.event("summarize_evidence.complete", {
                 "summary_count": len(summaries),
             })
-            
+
             return ctx.with_extras(deep_claim_ctx=deep_ctx)
-            
+
         finally:
             Trace.phase_end("summarize_evidence")
 
@@ -168,35 +168,35 @@ class JudgeClaimsStep(Step):
     Uses ClaimJudgeSkill to generate RGBA scores and verdicts.
     Output is returned unchanged to the frontend.
     """
-    
+
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
-    
+
     @property
     def name(self) -> str:
         return "judge_claims"
-    
+
     async def execute(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("judge_claims")
-        
+
         try:
             deep_ctx: DeepClaimContext = ctx.extras.get("deep_claim_ctx", DeepClaimContext())
-            
+
             if not deep_ctx.claim_frames:
                 Trace.event("judge_claims.skip", {"reason": "no_frames"})
                 return ctx
-            
+
             skill = ClaimJudgeSkill(self._llm)
-            
+
             # Process all claims in parallel
             async def judge_one(frame: ClaimFrame) -> tuple[str, JudgeOutput]:
                 summary = deep_ctx.evidence_summaries.get(frame.claim_id)
                 output = await skill.judge(frame, summary)
                 return frame.claim_id, output
-            
+
             tasks = [judge_one(frame) for frame in deep_ctx.claim_frames]
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             outputs: dict[str, JudgeOutput] = {}
             for result in results:
                 if isinstance(result, Exception):
@@ -204,16 +204,16 @@ class JudgeClaimsStep(Step):
                     continue
                 claim_id, output = result
                 outputs[claim_id] = output
-            
+
             deep_ctx.judge_outputs = outputs
-            
+
             Trace.event("judge_claims.complete", {
                 "output_count": len(outputs),
                 "verdicts": {cid: out.verdict for cid, out in outputs.items()},
             })
-            
+
             return ctx.with_extras(deep_claim_ctx=deep_ctx)
-            
+
         finally:
             Trace.phase_end("judge_claims")
 
@@ -226,24 +226,24 @@ class AssembleDeepResultStep(Step):
     Produces final_result with deep_analysis field directly included.
     No aggregate verdict is computed - that's for standard mode only.
     """
-    
+
     @property
     def name(self) -> str:
         return "assemble_deep_result"
-    
+
     async def execute(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("assemble_deep_result")
-        
+
         try:
             deep_ctx: DeepClaimContext = ctx.extras.get("deep_claim_ctx", DeepClaimContext())
-            
+
             claim_results: list[ClaimResult] = []
-            
+
             for frame in deep_ctx.claim_frames:
                 judge_output = deep_ctx.judge_outputs.get(frame.claim_id)
                 evidence_summary = deep_ctx.evidence_summaries.get(frame.claim_id)
                 error = deep_ctx.errors.get(frame.claim_id)
-                
+
                 if judge_output is None:
                     # Create error result if no judge output
                     from spectrue_core.schema.claim_frame import RGBAScore
@@ -257,7 +257,7 @@ class AssembleDeepResultStep(Step):
                         missing_evidence=(),
                     )
                     error = error or {"message": "Judge output missing"}
-                
+
                 claim_result = ClaimResult(
                     claim_frame=frame,
                     judge_output=judge_output,
@@ -265,53 +265,102 @@ class AssembleDeepResultStep(Step):
                     error=error,
                 )
                 claim_results.append(claim_result)
-            
+
             deep_ctx.claim_results = claim_results
-            
+
             # Build deep_analysis structure for direct inclusion in final_result
             deep_analysis = DeepAnalysisResult(
                 analysis_mode="deep",
                 claim_results=tuple(claim_results),
             )
-            
+
             # Serialize claim_results for API response
             claim_results_serialized = [
                 self._serialize_claim_result(cr) for cr in claim_results
             ]
-            
+
             # Get existing final_result or create new one
             existing_final = ctx.extras.get("final_result", {})
-            
+
+            # CRITICAL: Update claim_verdicts in verdict with RGBA from judge_outputs
+            # This ensures pipeline_evidence doesn't overwrite per-claim RGBA with globals
+            verdict = ctx.verdict or {}
+            claim_verdicts = verdict.get("claim_verdicts", [])
+            if isinstance(claim_verdicts, list):
+                for cv in claim_verdicts:
+                    if not isinstance(cv, dict):
+                        continue
+                    cid = cv.get("claim_id")
+                    if cid and cid in deep_ctx.judge_outputs:
+                        judge_out = deep_ctx.judge_outputs[cid]
+                        # Copy RGBA from judge_output to claim_verdict
+                        # This is the canonical RGBA for deep mode
+                        cv["rgba"] = [
+                            judge_out.rgba.r,
+                            judge_out.rgba.g,
+                            judge_out.rgba.b,
+                            judge_out.rgba.a,
+                        ]
+                        cv["verdict"] = judge_out.verdict
+                        cv["confidence"] = judge_out.confidence
+                        cv["explanation"] = judge_out.explanation
+                        Trace.event(
+                            "deep.claim_verdict_rgba_updated",
+                            {
+                                "claim_id": cid,
+                                "rgba": cv["rgba"],
+                                "verdict": cv["verdict"],
+                            },
+                        )
+                verdict["claim_verdicts"] = claim_verdicts
+
             # Add deep_analysis to final_result - no conditional logic needed
             # The API layer will just pass this through
+            # 
+            # IMPORTANT: Deep mode does NOT populate global scores (danger_score, style_score, etc.)
+            # These are computed per-claim and stored in claim_results[].judge_output.rgba
+            # The UI MUST read from deep_analysis.claim_results, not from global fields
             final_result = {
                 **existing_final,
                 "analysis_mode": "deep",
+                "judge_mode": "deep",  # Explicit marker for UI
                 "deep_analysis": {
                     "analysis_mode": "deep",
                     "claim_results": claim_results_serialized,
                 },
+                # NOTE: We intentionally do NOT set these global fields in deep mode:
+                # - danger_score
+                # - style_score  
+                # - explainability_score
+                # - verified_score (as global)
+                # These are ONLY valid in standard mode.
+                # Deep mode has per-claim RGBA in deep_analysis.claim_results[].judge_output.rgba
             }
-            
+
             Trace.event("assemble_deep_result.complete", {
                 "result_count": len(claim_results),
             })
-            
-            return ctx.with_extras(
-                deep_claim_ctx=deep_ctx,
-                deep_analysis_result=deep_analysis,
-                final_result=final_result,
+
+            # Return updated context with:
+            # - verdict containing claim_verdicts with per-claim RGBA from judge
+            # - final_result containing deep_analysis
+            return ctx.with_update(verdict=verdict).set_extra(
+                "deep_claim_ctx", deep_ctx
+            ).set_extra(
+                "deep_analysis_result", deep_analysis
+            ).set_extra(
+                "final_result", final_result
             )
-            
+
         finally:
             Trace.phase_end("assemble_deep_result")
-    
+
     def _serialize_claim_result(self, cr: ClaimResult) -> dict:
         """Serialize ClaimResult to dict for API response."""
         frame = cr.claim_frame
         judge = cr.judge_output
         summary = cr.evidence_summary
-        
+
         return {
             "claim_frame": {
                 "claim_id": frame.claim_id,

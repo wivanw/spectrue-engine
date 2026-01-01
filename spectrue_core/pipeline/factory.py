@@ -293,7 +293,6 @@ class PipelineFactory:
             TargetSelectionStep,
             SearchFlowStep,
             EvidenceFlowStep,
-            ResultAssemblyStep,
         )
         from spectrue_core.pipeline.steps.deep_claim import (
             BuildClaimFramesStep,
@@ -349,9 +348,14 @@ class PipelineFactory:
                 depends_on=["target_selection"],
             ),
 
-            # Evidence scoring (batch) - populates evidence_by_claim
+            # Evidence collection ONLY (NO global scoring for deep mode!)
+            # Deep mode uses per-claim JudgeClaimsStep instead of batch scoring
             StepNode(
-                step=EvidenceFlowStep(agent=self.agent, search_mgr=self.search_mgr),
+                step=EvidenceFlowStep(
+                    agent=self.agent,
+                    search_mgr=self.search_mgr,
+                    enable_global_scoring=False,  # <-- KEY: No batch LLM call
+                ),
                 depends_on=["search_flow"],
             ),
 
@@ -370,24 +374,21 @@ class PipelineFactory:
                 optional=llm_client is None,
             ),
 
-            # Judge each claim independently
+            # Judge each claim independently (per-claim RGBA)
             StepNode(
                 step=JudgeClaimsStep(llm_client=llm_client) if llm_client else JudgeClaimsStep.__new__(JudgeClaimsStep),
                 depends_on=["summarize_evidence"],
                 optional=llm_client is None,
             ),
 
-            # Assemble deep result (per-claim, no aggregate)
+            # Assemble deep result (per-claim verdicts, NO global RGBA)
             StepNode(
                 step=AssembleDeepResultStep(),
                 depends_on=["judge_claims"],
             ),
 
-            # Legacy result assembly (fallback if deep steps fail)
-            StepNode(
-                step=ResultAssemblyStep(),
-                depends_on=["evidence_flow"],
-                optional=True,
-            ),
+            # NOTE: No ResultAssemblyStep fallback in deep mode!
+            # Deep mode MUST return per-claim results from AssembleDeepResultStep.
+            # Legacy global fields (danger_score, style_score, etc.) are NOT populated.
         ]
 

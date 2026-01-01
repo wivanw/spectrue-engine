@@ -79,18 +79,18 @@ class ClaimNode:
     importance: float       # 0.0-1.0
     topic_key: str          # Topic grouping key
     harm_potential: int = 1 # Harm Potential (1-5)
-    
+
     # For deduplication
     text_hash: str = ""     # Hash of normalized text for caching
-    
+
     @classmethod
     def from_claim_dict(cls, claim: dict, index: int = 0) -> "ClaimNode":
         """Create ClaimNode from legacy claim dict."""
         import hashlib
-        
+
         text = claim.get("normalized_text") or claim.get("text") or ""
         text_hash = hashlib.sha256(text.lower().encode()).hexdigest()[:16]
-        
+
         return cls(
             claim_id=claim.get("id") or f"c{index + 1}",
             text=text,
@@ -133,7 +133,7 @@ class TypedEdge:
     rationale_short: str    # 10-25 words, logs only
     evidence_spans: str     # Key text supporting classification, ≤25 words
     cross_topic: bool = False  # Preserved from CandidateEdge
-    
+
     def to_trace_dict(self) -> dict:
         """Convert to dict for tracing."""
         return {
@@ -154,7 +154,7 @@ class RankedClaim:
     in_structural_weight: float     # Sum of incoming supports + depends_on
     in_contradict_weight: float     # Sum of incoming contradicts
     is_key_claim: bool              # Selected as top-K
-    
+
     def to_trace_dict(self) -> dict:
         """Convert to dict for tracing."""
         return {
@@ -185,7 +185,7 @@ class GraphResult:
     key_claims: list[RankedClaim] = field(default_factory=list)
     all_ranked: list[RankedClaim] = field(default_factory=list)
     typed_edges: list[TypedEdge] = field(default_factory=list)
-    
+
     # Metrics
     claims_count_raw: int = 0
     claims_count_dedup: int = 0
@@ -196,13 +196,13 @@ class GraphResult:
     within_topic_edges_count: int = 0
     cross_topic_edges_count: int = 0
     kept_ratio_within_topic: float = 0.0
-    
+
     typed_edges_by_relation: dict[str, int] = field(default_factory=dict)
-    
+
     # Budget tracking
     latency_ms: int = 0
     cost_usd: float = 0.0
-    
+
     # Disable state
     disabled: bool = False
     disabled_reason: str | None = None  # "budget_exceeded_preflight" | "quality_gate_failed"
@@ -216,19 +216,19 @@ class GraphResult:
     sim_edges: list[tuple[str, str, float]] = field(default_factory=list)
     mst_edges: list[tuple[str, str, float]] = field(default_factory=list)
     selection_trace: list[dict[str, float]] = field(default_factory=list)
-    
+
     @property
     def key_claim_ids(self) -> list[str]:
         """Get list of key claim IDs."""
         return [c.claim_id for c in self.key_claims]
-    
+
     def get_ranked_by_id(self, claim_id: str) -> RankedClaim | None:
         """Get RankedClaim by claim_id (Layer 2)."""
         for c in self.all_ranked:
             if c.claim_id == claim_id:
                 return c
         return None
-    
+
     @property
     def high_tension_claims(self) -> list[RankedClaim]:
         """
@@ -242,12 +242,12 @@ class GraphResult:
             key=lambda c: c.in_contradict_weight,
             reverse=True
         )[:5]
-    
+
     def get_tension_score(self, claim_id: str) -> float:
         """Get tension score (in_contradict_weight) for a claim (Layer 3)."""
         ranked = self.get_ranked_by_id(claim_id)
         return ranked.in_contradict_weight if ranked else 0.0
-    
+
     def to_trace_dict(self) -> dict:
         """Convert to dict for tracing."""
         return {

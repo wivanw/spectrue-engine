@@ -407,19 +407,19 @@ async def extract_best_quote_async(
     import asyncio
     import concurrent.futures
     from functools import partial
-    
+
     if not EmbedService.is_available():
         return None
-    
+
     loop = asyncio.get_running_loop()
-    
+
     # Use shared thread pool
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         result = await loop.run_in_executor(
             executor,
             partial(extract_best_quote, claim_text, content, max_len=max_len, min_similarity=min_similarity),
         )
-    
+
     return result
 
 
@@ -445,7 +445,7 @@ def extract_best_quotes_batch(
     """
     if not items:
         return []
-    
+
     if not EmbedService.is_available():
         Trace.event("embeddings.caller", {
             "caller": "extract_best_quotes_batch",
@@ -453,77 +453,77 @@ def extract_best_quotes_batch(
             "reason": "embed_service_unavailable",
         })
         return [None] * len(items)
-    
+
     Trace.event("embeddings.caller", {
         "caller": "extract_best_quotes_batch",
         "action": "start",
         "items_count": len(items),
     })
-    
+
     # Pre-process: split sentences for each content
     all_sentences: list[list[str]] = []
     claim_texts: list[str] = []
-    
+
     for claim_text, content in items:
         sentences = split_sentences(content) if content else []
         all_sentences.append(sentences)
         claim_texts.append(claim_text)
-    
+
     # Flatten all texts for single batch embedding
     # Structure: [claim1, sent1_1, sent1_2, ..., claim2, sent2_1, ...]
     flat_texts: list[str] = []
     offsets: list[tuple[int, int, int]] = []  # (claim_idx, sentence_start, sentence_count)
-    
+
     for i, (claim_text, sentences) in enumerate(zip(claim_texts, all_sentences)):
         claim_idx = len(flat_texts)
         flat_texts.append(claim_text)
         sent_start = len(flat_texts)
         flat_texts.extend(sentences)
         offsets.append((claim_idx, sent_start, len(sentences)))
-    
+
     if not flat_texts:
         return [None] * len(items)
-    
+
     # Single batch embedding call
     embeddings = EmbedService.embed(flat_texts)
-    
+
     if not embeddings:
         return [None] * len(items)
-    
+
     # Compute similarities and find best quotes
     results: list[str | None] = []
-    
+
     for i, (claim_idx, sent_start, sent_count) in enumerate(offsets):
         if sent_count == 0:
             # No sentences - return truncated content or None
             content = items[i][1]
             results.append(content[:max_len] if content else None)
             continue
-        
+
         claim_vec = embeddings[claim_idx]
         best_score = -1.0
         best_sent_idx = -1
-        
+
         for j in range(sent_count):
             sent_vec = embeddings[sent_start + j]
             score = float(_dot(claim_vec, sent_vec))
             if score > best_score:
                 best_score = score
                 best_sent_idx = j
-        
+
         if best_sent_idx < 0 or best_score < min_similarity:
             results.append(None)
         else:
             quote = all_sentences[i][best_sent_idx]
             results.append(quote[:max_len] if len(quote) > max_len else quote)
-    
+
     non_null = sum(1 for r in results if r is not None)
     Trace.event("embeddings.caller.result", {
         "caller": "extract_best_quotes_batch",
         "total": len(results),
         "non_null": non_null,
     })
-    
+
     return results
 
 
@@ -541,20 +541,20 @@ async def extract_best_quotes_batch_async(
     import asyncio
     import concurrent.futures
     from functools import partial
-    
+
     if not items:
         return []
-    
+
     if not EmbedService.is_available():
         return [None] * len(items)
-    
+
     loop = asyncio.get_running_loop()
-    
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         result = await loop.run_in_executor(
             executor,
             partial(extract_best_quotes_batch, items, max_len=max_len, min_similarity=min_similarity),
         )
-    
+
     return result
 

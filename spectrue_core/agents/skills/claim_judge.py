@@ -48,7 +48,7 @@ class ClaimJudgeSkill:
     The output of this skill is returned to the frontend without
     any modification (no postprocessing).
     """
-    
+
     def __init__(self, llm_client: LLMClient):
         """
         Initialize skill with LLM client.
@@ -57,7 +57,7 @@ class ClaimJudgeSkill:
             llm_client: Configured LLM client for API calls
         """
         self.llm = llm_client
-    
+
     async def judge(
         self,
         frame: ClaimFrame,
@@ -76,13 +76,13 @@ class ClaimJudgeSkill:
         # Build prompt
         user_prompt = build_claim_judge_prompt(frame, evidence_summary)
         system_prompt = build_claim_judge_system_prompt()
-        
+
         Trace.event("claim_judge.start", {
             "claim_id": frame.claim_id,
             "evidence_count": len(frame.evidence_items),
             "has_summary": evidence_summary is not None,
         })
-        
+
         try:
             # Call LLM with structured output
             response = await self.llm.call_structured(
@@ -91,38 +91,38 @@ class ClaimJudgeSkill:
                 schema=CLAIM_JUDGE_SCHEMA,
                 schema_name="claim_judge",
             )
-            
+
             # Parse response into JudgeOutput (no modifications)
             judge_output = self._parse_response(response, frame)
-            
+
             # Validate sources_used constraint
             judge_output = self._validate_sources_used(judge_output, frame)
-            
+
             Trace.event("claim_judge.complete", {
                 "claim_id": frame.claim_id,
                 "verdict": judge_output.verdict,
                 "confidence": judge_output.confidence,
                 "rgba": judge_output.rgba.to_dict(),
             })
-            
+
             return judge_output
-            
+
         except Exception as e:
             Trace.event("claim_judge.error", {
                 "claim_id": frame.claim_id,
                 "error": str(e),
             })
-            
+
             # Return degraded output on error
             return self._fallback_output(frame, str(e))
-    
+
     def _parse_response(
         self,
         response: dict[str, Any],
         frame: ClaimFrame,
     ) -> JudgeOutput:
         """Parse LLM response into JudgeOutput without modification."""
-        
+
         # Extract RGBA scores
         rgba_dict = response.get("rgba", {})
         rgba = RGBAScore(
@@ -131,16 +131,16 @@ class ClaimJudgeSkill:
             b=float(rgba_dict.get("B", 0.5)),
             a=float(rgba_dict.get("A", 0.3)),
         )
-        
+
         # Extract other fields
         confidence = float(response.get("confidence", 0.3))
         verdict = str(response.get("verdict", "NEI"))
         explanation = str(response.get("explanation", ""))
-        
+
         # Extract sources_used and missing_evidence
         sources_used = tuple(str(s) for s in response.get("sources_used", []))
         missing_evidence = tuple(str(m) for m in response.get("missing_evidence", []))
-        
+
         return JudgeOutput(
             claim_id=frame.claim_id,
             rgba=rgba,
@@ -150,7 +150,7 @@ class ClaimJudgeSkill:
             sources_used=sources_used,
             missing_evidence=missing_evidence,
         )
-    
+
     def _validate_sources_used(
         self,
         output: JudgeOutput,
@@ -163,19 +163,19 @@ class ClaimJudgeSkill:
         The validation is required by FR-009.
         """
         available_urls = frozenset(item.url for item in frame.evidence_items)
-        
+
         valid_sources = tuple(
             url for url in output.sources_used
             if url in available_urls
         )
-        
+
         if len(valid_sources) != len(output.sources_used):
             Trace.event("claim_judge.invalid_sources_filtered", {
                 "claim_id": frame.claim_id,
                 "original_count": len(output.sources_used),
                 "valid_count": len(valid_sources),
             })
-        
+
         # Only update if different
         if valid_sources != output.sources_used:
             return JudgeOutput(
@@ -187,9 +187,9 @@ class ClaimJudgeSkill:
                 sources_used=valid_sources,
                 missing_evidence=output.missing_evidence,
             )
-        
+
         return output
-    
+
     def _fallback_output(self, frame: ClaimFrame, error: str) -> JudgeOutput:
         """
         Create fallback output when LLM fails.

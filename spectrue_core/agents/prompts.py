@@ -38,10 +38,10 @@ def load_prompts(locales_dir: Path = None):
                      Defaults to 'locales' next to this file.
     """
     global _PROMPTS, LOCALES_PATH
-    
+
     if locales_dir:
         LOCALES_PATH = Path(locales_dir)
-        
+
     if not LOCALES_PATH.is_dir():
         # Only print error if it's the default path. If custom path fails, user should handle it.
         if locales_dir is None:
@@ -63,11 +63,11 @@ def load_prompts(locales_dir: Path = None):
 
 def get_prompt(lang: str, key: str) -> str:
     """Безопасно получает промпт по ключу, с фолбэком на английский."""
-    
+
     # Auto-load if empty (lazy loading)
     if not _PROMPTS:
         load_prompts()
-    
+
     key_parts = key.split('.')
 
     # Сначала пытаемся найти на нужном языке

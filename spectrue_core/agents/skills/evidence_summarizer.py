@@ -48,7 +48,7 @@ class EvidenceSummarizerSkill:
     Uses LLM to analyze evidence items and group them by stance
     (supporting, refuting, contextual) while identifying gaps.
     """
-    
+
     def __init__(self, llm_client: LLMClient):
         """
         Initialize skill with LLM client.
@@ -57,7 +57,7 @@ class EvidenceSummarizerSkill:
             llm_client: Configured LLM client for API calls
         """
         self.llm = llm_client
-    
+
     async def summarize(self, frame: ClaimFrame) -> EvidenceSummary:
         """
         Summarize evidence for a claim.
@@ -78,16 +78,16 @@ class EvidenceSummarizerSkill:
                 evidence_gaps=("No sources found for this claim",),
                 conflicts_present=False,
             )
-        
+
         # Build prompt
         user_prompt = build_evidence_summarizer_prompt(frame)
         system_prompt = build_evidence_summarizer_system_prompt()
-        
+
         Trace.event("evidence_summarizer.start", {
             "claim_id": frame.claim_id,
             "evidence_count": len(frame.evidence_items),
         })
-        
+
         try:
             # Call LLM with structured output
             response = await self.llm.call_structured(
@@ -96,10 +96,10 @@ class EvidenceSummarizerSkill:
                 schema=EVIDENCE_SUMMARIZER_SCHEMA,
                 schema_name="evidence_summarizer",
             )
-            
+
             # Parse response
             summary = self._parse_response(response, frame.claim_id)
-            
+
             Trace.event("evidence_summarizer.complete", {
                 "claim_id": frame.claim_id,
                 "supporting": len(summary.supporting_evidence),
@@ -107,25 +107,25 @@ class EvidenceSummarizerSkill:
                 "contextual": len(summary.contextual_evidence),
                 "conflicts": summary.conflicts_present,
             })
-            
+
             return summary
-            
+
         except Exception as e:
             Trace.event("evidence_summarizer.error", {
                 "claim_id": frame.claim_id,
                 "error": str(e),
             })
-            
+
             # Return degraded summary on error
             return self._fallback_summary(frame)
-    
+
     def _parse_response(
         self, 
         response: dict[str, Any], 
         claim_id: str
     ) -> EvidenceSummary:
         """Parse LLM response into EvidenceSummary."""
-        
+
         def parse_refs(items: list[dict]) -> tuple[EvidenceReference, ...]:
             refs: list[EvidenceReference] = []
             for item in items:
@@ -135,14 +135,14 @@ class EvidenceSummarizerSkill:
                         reason=str(item.get("reason", "")),
                     ))
             return tuple(refs)
-        
+
         supporting = parse_refs(response.get("supporting_evidence", []))
         refuting = parse_refs(response.get("refuting_evidence", []))
         contextual = parse_refs(response.get("contextual_evidence", []))
-        
+
         gaps = tuple(str(g) for g in response.get("evidence_gaps", []))
         conflicts = bool(response.get("conflicts_present", False))
-        
+
         return EvidenceSummary(
             supporting_evidence=supporting,
             refuting_evidence=refuting,
@@ -150,7 +150,7 @@ class EvidenceSummarizerSkill:
             evidence_gaps=gaps,
             conflicts_present=conflicts,
         )
-    
+
     def _fallback_summary(self, frame: ClaimFrame) -> EvidenceSummary:
         """
         Create fallback summary when LLM fails.
@@ -160,13 +160,13 @@ class EvidenceSummarizerSkill:
         supporting: list[EvidenceReference] = []
         refuting: list[EvidenceReference] = []
         contextual: list[EvidenceReference] = []
-        
+
         for item in frame.evidence_items:
             ref = EvidenceReference(
                 evidence_id=item.evidence_id,
                 reason="Categorized from initial stance",
             )
-            
+
             stance = (item.stance or "").upper()
             if stance == "SUPPORT":
                 supporting.append(ref)
@@ -174,7 +174,7 @@ class EvidenceSummarizerSkill:
                 refuting.append(ref)
             else:
                 contextual.append(ref)
-        
+
         return EvidenceSummary(
             supporting_evidence=tuple(supporting),
             refuting_evidence=tuple(refuting),

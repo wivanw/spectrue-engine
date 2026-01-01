@@ -117,15 +117,15 @@ class QuerySkill(BaseSkill):
             fallback_lang_code = fallback_locales[0]
         elif isinstance(fallback_locales, str):
             fallback_lang_code = fallback_locales
-        
+
         # Determine language name for prompt
         target_lang_name = SUPPORTED_LANGUAGES.get(target_lang_code, "English")
         fallback_lang_name = SUPPORTED_LANGUAGES.get(fallback_lang_code, None) if fallback_lang_code else None
-        
+
         # Prepare content
         full_statement = fact if isinstance(fact, str) else str(fact)
         full_context = context if isinstance(context, str) and context else "None"
-        
+
         # Input safety check (URL fallback)
         if (full_statement.startswith("http://") or full_statement.startswith("https://")) and len(full_statement.split()) < 3:
              # Logic from original agent to handle URLs directly
@@ -133,7 +133,7 @@ class QuerySkill(BaseSkill):
              return [full_statement, full_statement] # Simplified for now
 
         topics_list_str = ", ".join(AVAILABLE_TOPICS)
-        
+
         recency_hint = ""
         if time_sensitive:
             recency_hint = "- If the claim is time-sensitive, bias queries toward recency (e.g., add year or \"latest\").\n"
@@ -160,7 +160,7 @@ You MUST respond in valid JSON.
 
 {UNIVERSAL_METHODOLOGY_APPENDIX}
 """
-        
+
         prompt = f"""Generate web search queries for fact-checking.
 
 TARGET_CLAIM:
@@ -169,7 +169,7 @@ TARGET_CLAIM:
 CONTEXT:
 {full_context}
 """
-        
+
         # Fix for OpenAI 400 "Response input messages must contain the word 'json'"
         # REQUIRED: The word "JSON" must appear in the INPUT message, not just system instructions.
         prompt += "\n\nReturn the result in JSON format."
@@ -185,13 +185,13 @@ CONTEXT:
                 timeout=float(self.runtime.llm.nano_timeout_sec),
                 trace_kind="query_generation",
             )
-            
+
             raw_queries = result.get("queries", [])
             if not raw_queries:
                  raise ValueError("Empty queries")
-            
+
             # Validation (word count, etc.) can be added here
-            
+
             return raw_queries[:2]
 
         except Exception as e:

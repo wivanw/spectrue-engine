@@ -72,7 +72,7 @@ class TextAnalyzer:
     Uses trafilatura for HTML parsing and regex for sentence segmentation.
     No external NLP dependencies (spacy removed).
     """
-    
+
     def __init__(self, verifier=None, config=None):
         """Initialize TextAnalyzer."""
         self.verifier = verifier
@@ -84,7 +84,7 @@ class TextAnalyzer:
         if isinstance(cfg, ContentBudgetConfig):
             return cfg
         return ContentBudgetConfig()
-    
+
     def _segment_sentences_regex(self, text: str) -> List[SentenceSegment]:
         """
         Regex-based sentence segmentation (no spacy dependency).
@@ -92,34 +92,34 @@ class TextAnalyzer:
         Uses simple punctuation rules. Not perfect but lightweight and fast.
         """
         import re
-        
+
         if not text or not text.strip():
             return []
-        
+
         # Split on sentence-ending punctuation followed by whitespace
         # Handles abbreviations like "Dr.", "Mr.", "e.g." reasonably well
         sentence_pattern = re.compile(
             r'(?<=[.!?。！？])\s+(?=[A-ZА-ЯЇЄІҐ\u4e00-\u9fff])',
             re.UNICODE
         )
-        
+
         parts = sentence_pattern.split(text.strip())
-        
+
         segments = []
         current_pos = 0
-        
+
         for idx, part in enumerate(parts):
             part_stripped = part.strip()
             if not part_stripped or len(part_stripped) < 10:
                 # Skip very short fragments
                 current_pos += len(part)
                 continue
-            
+
             start = text.find(part_stripped, current_pos)
             if start == -1:
                 start = current_pos
             end = start + len(part_stripped)
-            
+
             segments.append(SentenceSegment(
                 text=part_stripped,
                 start_char=start,
@@ -127,9 +127,9 @@ class TextAnalyzer:
                 index=len(segments)
             ))
             current_pos = end
-        
+
         return segments
-    
+
     def _preserve_links_in_html(self, html_content: str) -> str:
         """
         Preserve URLs by appending them to anchor text before parsing.
@@ -140,20 +140,20 @@ class TextAnalyzer:
         This helps the LLM see source citations during fact-checking.
         """
         import re
-        
+
         def replace_link(match):
             full_tag = match.group(0)
             href_match = re.search(r'href=["\']([^"\']+)["\']', full_tag, re.IGNORECASE)
-            
+
             # Extract the text content between <a> and </a>
             text_match = re.search(r'>([^<]*)</a>', full_tag, re.IGNORECASE)
-            
+
             if not href_match or not text_match:
                 return full_tag
-            
+
             href = href_match.group(1).strip()
             text = text_match.group(1).strip()
-            
+
             # Only preserve valid http/https links, skip internal anchors, javascript, mailto
             if not href or not text:
                 return full_tag
@@ -162,14 +162,14 @@ class TextAnalyzer:
             # Skip if href is already in the text (no duplication needed)
             if href in text:
                 return full_tag
-            
+
             # Return text with URL appended
             return f'{text} ({href})'
-        
+
         # Match <a ...>text</a> patterns
         pattern = r'<a\s+[^>]*href=[^>]+>[^<]*</a>'
         return re.sub(pattern, replace_link, html_content, flags=re.IGNORECASE)
-    
+
     def parse_html(self, html_content: str, language: Optional[str] = None) -> ParsedText:
         """
         Parse HTML content into clean text using trafilatura.
@@ -185,10 +185,10 @@ class TextAnalyzer:
         """
         if not html_content or not html_content.strip():
             raise ValueError("HTML content cannot be empty")
-        
+
         # Preserve links before parsing
         html_with_links = self._preserve_links_in_html(html_content)
-        
+
         budget_cfg = self._get_budget_config()
         budget_result: Optional[TrimResult] = None
 
@@ -202,10 +202,10 @@ class TextAnalyzer:
                 include_images=False,
                 no_fallback=False
             )
-            
+
             # Extract metadata separately
             metadata = trafilatura.extract_metadata(html_with_links)
-            
+
             if not text or not text.strip():
                 raise ValueError("Parsed text is empty")
 
@@ -253,11 +253,11 @@ class TextAnalyzer:
                     "budget_applied": bool(budget_result),
                 },
             )
-            
+
             title = None
             authors = None
             publish_date = None
-            
+
             if metadata:
                 title = getattr(metadata, 'title', None)
                 author = getattr(metadata, 'author', None)
@@ -269,7 +269,7 @@ class TextAnalyzer:
                         publish_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                     except (ValueError, TypeError):
                         pass
-            
+
             return ParsedText(
                 text=cleaned_text,
                 title=title,
@@ -304,13 +304,13 @@ class TextAnalyzer:
         """
         if not url:
             raise ValueError("URL cannot be empty")
-        
+
         try:
             # Fetch using trafilatura
             downloaded = trafilatura.fetch_url(url)
             if not downloaded:
                 raise ValueError(f"Failed to download URL: {url}")
-            
+
             # Parse the downloaded content
             return self.parse_html(downloaded)
         except ValueError:
@@ -334,10 +334,10 @@ class TextAnalyzer:
         """
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
-        
+
         # Use regex-based segmentation (no spacy dependency)
         return self._segment_sentences_regex(text)
-    
+
     def parse_and_segment(self, html_content: str, language: str = "en") -> tuple[ParsedText, List[SentenceSegment]]:
         """
         Convenience method to parse HTML and segment sentences in one call.
@@ -382,18 +382,18 @@ class TextAnalyzer:
         """
         if not self.verifier:
             raise ValueError("Verifier not configured for TextAnalyzer")
-            
-        
+
+
         total = len(sentences)
-        
+
         async def process_sentence(idx, sent):
             # Pass progress_callback for first sentence (General Mode has 1 sentence)
             callback = progress_callback if idx == 0 else None
-            
+
             # Context: previous sentence (if exists) to help with coreference resolution
             # e.g. "It is red." -> "The car is red."
             context_text = sentences[idx-1] if idx > 0 else ""
-            
+
             # Pass content_lang to verify_fact
             res = await self.verifier.verify_fact(
                 sent, search_type, gpt_model, lang, analysis_mode, callback, 
@@ -405,10 +405,10 @@ class TextAnalyzer:
             return idx, res
 
         tasks = [process_sentence(i, s) for i, s in enumerate(sentences)]
-        
+
         results_with_index = []
         completed = 0
-        
+
         if tasks:
             for future in asyncio.as_completed(tasks):
                 idx, res = await future
@@ -416,14 +416,14 @@ class TextAnalyzer:
                 completed += 1
                 if progress_callback:
                     await progress_callback("analyzing", completed, total)
-        
+
         # Restore original order
         results_with_index.sort(key=lambda x: x[0])
         results = [r for _, r in results_with_index]
-        
+
         # Calculate total cost from individual results
         total_cost = sum(r.get("cost", 0) for r in results)
-        
+
         # Aggregate sources from all results (for frontend display)
         all_sources = []
         seen_urls = set()
@@ -435,10 +435,10 @@ class TextAnalyzer:
                 if url and url not in seen_urls:
                     seen_urls.add(url)
                     all_sources.append(source)
-        
+
         # Check if any result used search cache
         search_cache_hit = any(r.get("search_cache_hit", False) for r in results)
-            
+
         return {
             "details": results, 
             "total_cost": total_cost,

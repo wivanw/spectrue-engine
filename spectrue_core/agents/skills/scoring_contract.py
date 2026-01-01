@@ -6,6 +6,44 @@ STANCE_PASS_SINGLE = "SINGLE_PASS"
 STANCE_PASS_TYPES = {STANCE_PASS_SUPPORT_ONLY, STANCE_PASS_REFUTE_ONLY, STANCE_PASS_SINGLE}
 
 
+# ==============================================================================
+# SHARED SCORING CONSTANTS (Single Source of Truth)
+# ==============================================================================
+
+SCORING_SCALE = """# SCORING SCALE (0.0 - 1.0)
+- **0.8 - 1.0 (Verified)**: Strong confirmation (direct quotes, official consensus).
+- **0.6 - 0.8 (Plausible)**: Supported, but may lack direct confirmation.
+- **0.4 - 0.6 (Ambiguous)**: Insufficient or conflicting evidence. Absence of evidence is not False.
+- **0.2 - 0.4 (Unlikely)**: Evidence suggests the claim is doubtful.
+- **0.0 - 0.2 (Refuted)**: Evidence contradicts the claim."""
+
+RGBA_EXPLANATION = """# RGBA SCORING
+Return `rgba`: [R, G, B, A] where:
+- R = danger (0=harmless, 1=dangerous misinformation)
+- G = verdict_score (same as verdict_score)
+- B = style (0=biased, 1=neutral)
+- A = explainability (0=no evidence, 1=strong direct quotes)"""
+
+VERDICT_VALUES = ["verified", "refuted", "ambiguous", "unverified", "partially_verified"]
+
+
+def _language_contract(lang_name: str, lang: str) -> str:
+    """Shared language/localization instructions."""
+    return f"""# LANGUAGE CONTRACT
+- Respond ONLY in **{lang_name}** ({lang}).
+- Do NOT switch languages.
+- Write `reason` and `rationale` ENTIRELY in **{lang_name}**."""
+
+
+def _claim_verdict_example() -> str:
+    """Shared JSON example for claim verdict with RGBA."""
+    return """{{"claim_id": "c1", "verdict_score": 0.9, "verdict": "verified", "reason": "...", "rgba": [0.1, 0.9, 0.85, 0.8]}}"""
+
+
+# ==============================================================================
+# BATCH SCORING (Multiple Claims)
+# ==============================================================================
+
 def build_score_evidence_instructions(*, lang_name: str, lang: str) -> str:
     return f"""You are the Spectrue Verdict Engine.
 Your task is to classify the reliability of claims based *strictly* on the provided Evidence.
@@ -16,35 +54,25 @@ Your task is to classify the reliability of claims based *strictly* on the provi
 - **Metadata**: `source_reliability_hint` is context, not a hard rule.
 - **Consistency Rule**: If a claim has `matched_evidence_count > 0`, you MUST NOT say "no sources/evidence". Say the evidence is indirect, insufficient, or lacks direct confirmation.
 
-# LANGUAGE / SCOPE CONTRACT (CRITICAL)
-- Respond ONLY in **{lang_name}** ({lang}).
-- Do NOT switch languages.
+{_language_contract(lang_name, lang)}
 - Do NOT mention other claims, other claim IDs, or "c1/c2" comparisons in user-facing text.
-  - If multiple claims are present in input, you must still write each claim's `reason` as self-contained.
 
-# SCORING SCALE (0.0 - 1.0)
-- **0.8 - 1.0 (Verified)**: Strong confirmation (direct quotes, official consensus).
-- **0.6 - 0.8 (Plausible)**: Supported, but may lack direct/official confirmation or deep detail.
-- **0.4 - 0.6 (Ambiguous)**: Insufficient, irrelevant, or conflicting evidence. DO NOT GUESS. Absence of evidence is not False.
-- **0.2 - 0.4 (Unlikely)**: Evidence suggests the claim is doubtful.
-- **0.0 - 0.2 (Refuted)**: Evidence contradicts the claim.
+{SCORING_SCALE}
 
 # AGGREGATION LOGIC (Global Score)
 Do NOT compute a global `verified_score`. The engine computes it deterministically in code.
 Set `verified_score` to **0.5** as a placeholder.
 
 # WRITING GUIDELINES (User-Facing Text Only)
-- Write `rationale` and `reason` ENTIRELY in **{lang_name}** ({lang}).
 - **Tone**: Natural, journalistic style.
-- **FORBIDDEN TERMS (in text/rationale)**: Do not use technical words like "JSON", "dataset", "primary source", "relevance score", "cap" in the readable text. 
-  - *Allowed in JSON keys/values, but forbidden in human explanations.*
+- **FORBIDDEN TERMS**: Do not use "JSON", "dataset", "primary source", "relevance score", "cap" in readable text.
   - Instead of "lack of primary source", say "no official confirmation found".
 
 # OUTPUT FORMAT
 Return valid JSON:
 {{
   "claim_verdicts": [
-    {{"claim_id": "c1", "verdict_score": 0.9, "verdict": "verified", "reason": "..."}}
+    {_claim_verdict_example()}
   ],
   "verified_score": 0.5,
   "explainability_score": 0.8,
@@ -53,13 +81,63 @@ Return valid JSON:
   "rationale": "Global summary in {lang_name}..."
 }}
 
+# PER-CLAIM RGBA
+Each claim_verdict MUST include `rgba`: [R=danger, G=verdict_score, B=style, A=explainability].
+Values 0-1. Each claim may have DIFFERENT R, B, A based on its content and evidence.
+
 # GLOBAL SCORES EXPLANATION
-- **verified_score**: Placeholder only (set to 0.5). The engine computes the true global score in code.
-- **explainability_score** (0.0-1.0): How well the evidence supports your rationale. 1.0 = every claim verdict is backed by direct quotes.
-- **danger_score** (0.0-1.0): How harmful if acted upon? (0.0 = harmless, 1.0 = dangerous misinformation)
-- **style_score** (0.0-1.0): How neutral is the writing style? (0.0 = heavily biased, 1.0 = neutral journalism)
+- **verified_score**: Placeholder only (set to 0.5). Engine computes the true global score.
+- **explainability_score** (0.0-1.0): How well evidence supports rationale. 1.0 = backed by direct quotes.
+- **danger_score** (0.0-1.0): How harmful if acted upon? (0.0 = harmless, 1.0 = dangerous)
+- **style_score** (0.0-1.0): How neutral is writing style? (0.0 = biased, 1.0 = neutral)
 """
 
+
+# ==============================================================================
+# SINGLE CLAIM SCORING (Parallel Mode)
+# ==============================================================================
+
+def build_single_claim_scoring_instructions(*, lang_name: str, lang: str) -> str:
+    """Instructions for scoring a SINGLE claim (parallel scoring mode)."""
+    return f"""You are the Spectrue Verdict Engine.
+Score this SINGLE claim based strictly on the provided Evidence.
+
+{SCORING_SCALE}
+
+{RGBA_EXPLANATION}
+
+# OUTPUT FORMAT
+Return JSON:
+{{
+  "claim_id": "c1",
+  "verdict_score": 0.9,
+  "verdict": "verified",
+  "reason": "Explanation in {lang_name}...",
+  "rgba": [0.1, 0.9, 0.85, 0.8]
+}}
+
+{_language_contract(lang_name, lang)}
+Be concise.
+"""
+
+
+def build_single_claim_scoring_prompt(*, claim_info: dict, evidence: list[dict]) -> str:
+    """Prompt for scoring a SINGLE claim."""
+    return f"""Score this claim based on the evidence.
+
+Claim:
+{json.dumps(claim_info, indent=2, ensure_ascii=False)}
+
+Evidence:
+{json.dumps(evidence, indent=2, ensure_ascii=False)}
+
+Return JSON.
+"""
+
+
+# ==============================================================================
+# EVIDENCE PROMPTS
+# ==============================================================================
 
 def build_score_evidence_prompt(*, safe_original_fact: str, claims_info: list[dict], sources_by_claim: dict) -> str:
     return f"""Evaluate these claims based strictly on the Evidence.
@@ -77,6 +155,10 @@ Return JSON.
 """
 
 
+# ==============================================================================
+# STRUCTURED SCORING (Per-Assertion)
+# ==============================================================================
+
 def build_score_evidence_structured_instructions(*, lang_name: str, lang: str) -> str:
     return f"""You are the Spectrue Schema-First Verdict Engine.
 Your task is to score each ASSERTION individually, then aggregate to claim and global verdicts.
@@ -90,12 +172,7 @@ Your task is to score each ASSERTION individually, then aggregate to claim and g
    - If time_reference says "Ukraine time" but event is in "Miami" → location is still a FACT
    - Time context doesn't contradict location facts
 
-## SCORING SCALE (0.0 - 1.0)
-- **0.8 - 1.0**: Verified (strong evidence confirms)
-- **0.6 - 0.8**: Likely verified (supported but not definitive)
-- **0.4 - 0.6**: Ambiguous (insufficient evidence)
-- **0.2 - 0.4**: Unlikely (evidence suggests doubt)
-- **0.0 - 0.2**: Refuted (evidence contradicts)
+{SCORING_SCALE}
 
 ## AGGREGATION
 1. Score each assertion independently
@@ -146,7 +223,7 @@ If evidence has `content_status: "unavailable"`:
 }}
 ```
 
-Write rationale and reason in **{lang_name}** ({lang}).
+{_language_contract(lang_name, lang)}
 Return valid JSON.
 """
 

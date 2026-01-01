@@ -8,6 +8,9 @@ from spectrue_core.schema import (
 )
 from spectrue_core.agents.skills.scoring_sanitization import maybe_drop_style_section, strip_internal_source_markers
 from spectrue_core.utils.trace import Trace
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def safe_score(val, default: float = -1.0) -> float:
@@ -21,8 +24,20 @@ def safe_score(val, default: float = -1.0) -> float:
     return max(0.0, min(1.0, f))
 
 
-def clamp_score_evidence_result(result: dict) -> dict:
-    Trace.event("score_evidence.parsed_keys", {"keys": sorted(result.keys())})
+def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -> dict:
+    """
+    Normalize/validate LLM scoring result.
+    
+    Args:
+        result: Raw LLM output dict
+        judge_mode: "standard" or "deep"
+            - "standard": Apply normalization, defaults, thresholds
+            - "deep": Minimal validation only, preserve LLM output 1:1
+    """
+    # Deep mode: minimal validation, no defaults/normalization
+    is_deep = judge_mode == "deep"
+
+    Trace.event("score_evidence.parsed_keys", {"keys": sorted(result.keys()), "judge_mode": judge_mode})
 
     if "verified_score" in result:
         result["verified_score"] = safe_score(result["verified_score"], default=-1.0)
@@ -67,34 +82,86 @@ def clamp_score_evidence_result(result: dict) -> dict:
     if isinstance(claim_verdicts, list):
         for cv in claim_verdicts:
             if isinstance(cv, dict):
-                p = safe_score(cv.get("verdict_score", 0.5))
-                cv["verdict_score"] = p
+                cid = cv.get("claim_id")
 
-                # --- (1) Normalize verdict_state from p ---
-                # Contract: p >= 0.6 → supported, p <= 0.4 → refuted, else conflicted
-                raw_state = str(cv.get("verdict_state") or "").lower().strip()
-                if raw_state not in CANONICAL_STATES:
-                    # Derive verdict_state from p
-                    if p >= 0.6:
-                        cv["verdict_state"] = "supported"
-                    elif p <= 0.4:
-                        cv["verdict_state"] = "refuted"
-                    else:
-                        # 0.4 < p < 0.6 → conflicted (evidence exists but ambiguous)
-                        cv["verdict_state"] = "conflicted"
+                # Deep mode: skip normalization for claims with status=error
+                if is_deep and cv.get("status") == "error":
                     Trace.event(
-                        "verdict.state_normalized",
+                        "verdict.deep_error_claim_skipped",
+                        {"claim_id": cid, "error_type": cv.get("error_type")},
+                    )
+                    continue
+
+                # Track schema issues for this claim
+                claim_schema_issues: dict[str, str] = {}
+
+                # Deep mode: preserve LLM verdict_score without default
+                if is_deep:
+                    raw_vs = cv.get("verdict_score")
+                    if raw_vs is None:
+                        claim_schema_issues["verdict_score"] = "missing"
+                    elif not isinstance(raw_vs, (int, float)):
+                        claim_schema_issues["verdict_score"] = f"invalid type: {type(raw_vs).__name__}"
+                    else:
+                        p = safe_score(raw_vs, default=-1.0)
+                        if p >= 0:
+                            cv["verdict_score"] = p
+                        else:
+                            claim_schema_issues["verdict_score"] = f"out of range: {raw_vs}"
+                else:
+                    # Standard mode: use default 0.5
+                    raw_vs = cv.get("verdict_score")
+                    if raw_vs is None:
+                        claim_schema_issues["verdict_score"] = "missing, using default 0.5"
+                    p = safe_score(cv.get("verdict_score", 0.5))
+                    cv["verdict_score"] = p
+
+                # Log schema issues for this claim
+                if claim_schema_issues:
+                    logger.warning(
+                        "[Scoring] Claim %s schema issues: %s",
+                        cid, claim_schema_issues,
+                    )
+                    Trace.event(
+                        "verdict.claim_schema_mismatch",
                         {
-                            "claim_id": cv.get("claim_id"),
-                            "p": p,
-                            "raw_state": raw_state or None,
-                            "normalized_state": cv["verdict_state"],
+                            "claim_id": cid,
+                            "judge_mode": judge_mode,
+                            "issues": claim_schema_issues,
+                            "received_keys": list(cv.keys()),
                         },
                     )
 
+                p = cv.get("verdict_score", 0.5) if not is_deep else cv.get("verdict_score", -1.0)
+
+                # --- (1) Normalize verdict_state from p ---
+                # Deep mode: skip this normalization, preserve LLM output
+                if not is_deep:
+                    # Contract: p >= 0.6 → supported, p <= 0.4 → refuted, else conflicted
+                    raw_state = str(cv.get("verdict_state") or "").lower().strip()
+                    if raw_state not in CANONICAL_STATES:
+                        # Derive verdict_state from p
+                        if p >= 0.6:
+                            cv["verdict_state"] = "supported"
+                        elif p <= 0.4:
+                            cv["verdict_state"] = "refuted"
+                        else:
+                            # 0.4 < p < 0.6 → conflicted (evidence exists but ambiguous)
+                            cv["verdict_state"] = "conflicted"
+                        Trace.event(
+                            "verdict.state_normalized",
+                            {
+                                "claim_id": cv.get("claim_id"),
+                                "p": p,
+                                "raw_state": raw_state or None,
+                                "normalized_state": cv["verdict_state"],
+                            },
+                        )
+
                 # --- (2) Normalize verdict (UI label) from p ---
+                # Deep mode: skip this normalization, preserve LLM output
                 raw_verdict = str(cv.get("verdict") or "").lower().strip()
-                if raw_verdict not in CANONICAL_VERDICTS:
+                if not is_deep and raw_verdict not in CANONICAL_VERDICTS:
                     # Log non-canonical LLM verdict
                     Trace.event(
                         "verdict.label_noncanonical",
@@ -113,10 +180,67 @@ def clamp_score_evidence_result(result: dict) -> dict:
                         cv["verdict"] = "ambiguous"
 
                 # --- (3) Semantic contract: insufficient evidence = 0.5 ---
-                vs = str(cv.get("verdict_state") or "").lower().strip()
-                if vs in {"insufficient_evidence", "insufficient evidence", "insufficient"}:
-                    if cv["verdict_score"] != 0.5:
-                        cv["verdict_score"] = 0.5
+                # Deep mode: skip this normalization, preserve LLM output
+                if not is_deep:
+                    vs = str(cv.get("verdict_state") or "").lower().strip()
+                    if vs in {"insufficient_evidence", "insufficient evidence", "insufficient"}:
+                        if cv["verdict_score"] != 0.5:
+                            cv["verdict_score"] = 0.5
+
+                # --- (4) Validate and normalize per-claim RGBA ---
+                # Deep mode: if RGBA is None (error claim), don't touch it
+                raw_rgba = cv.get("rgba")
+                if raw_rgba is None and is_deep:
+                    # Deep mode error claim - leave rgba as None
+                    pass
+                elif isinstance(raw_rgba, list) and len(raw_rgba) == 4:
+                    try:
+                        # Clamp all values to [0, 1]
+                        normalized_rgba = [
+                            max(0.0, min(1.0, float(raw_rgba[0]))),  # R (danger)
+                            max(0.0, min(1.0, float(raw_rgba[1]))),  # G (veracity)
+                            max(0.0, min(1.0, float(raw_rgba[2]))),  # B (style)
+                            max(0.0, min(1.0, float(raw_rgba[3]))),  # A (explainability)
+                        ]
+                        cv["rgba"] = normalized_rgba
+                        Trace.event(
+                            "verdict.rgba_parsed",
+                            {
+                                "claim_id": cv.get("claim_id"),
+                                "rgba": normalized_rgba,
+                            },
+                        )
+                    except (TypeError, ValueError, IndexError):
+                        # Invalid rgba format
+                        if is_deep:
+                            # Deep mode: trace error, keep rgba as None (no fallback)
+                            cv["rgba"] = None
+                            Trace.event(
+                                "verdict.rgba_invalid_deep",
+                                {
+                                    "claim_id": cv.get("claim_id"),
+                                    "raw_rgba": raw_rgba,
+                                    "error": "Invalid RGBA format in deep mode - no fallback",
+                                },
+                            )
+                        else:
+                            # Standard mode: remove it so fallback will be used
+                            cv.pop("rgba", None)
+                            Trace.event(
+                                "verdict.rgba_invalid",
+                                {
+                                    "claim_id": cv.get("claim_id"),
+                                    "raw_rgba": raw_rgba,
+                                },
+                            )
+                else:
+                    # No rgba or wrong format
+                    if is_deep:
+                        # Deep mode: keep as None (no fallback)
+                        pass
+                    else:
+                        # Standard mode: fallback will be used later
+                        pass
     else:
         result["claim_verdicts"] = []
 

@@ -110,7 +110,7 @@ class ValidationPipeline:
         self.search_mgr = SearchManager(config, oracle_validator=agent.oracle_skill)
         # Optional translation service for Oracle result localization
         self.translation_service = translation_service
-        
+
         # ClaimGraph for key claim identification
         self._claim_graph: ClaimGraphBuilder | None = None
         claim_graph_enabled = (
@@ -207,6 +207,15 @@ class ValidationPipeline:
             },
         )
 
+        # M117: Infer pipeline_profile from search_type if not explicit
+        if not pipeline_profile:
+            if search_type in ("deep", "advanced"):
+                pipeline_profile = "deep"
+            else:
+                pipeline_profile = "normal"
+
+        Trace.event("pipeline.profile_resolved", {"profile": pipeline_profile, "from_search_type": search_type})
+
         policy = load_pricing_policy()
         ledger = CostLedger(run_id=current_trace_id())
         tavily_meter = TavilyMeter(ledger=ledger, policy=policy)
@@ -218,7 +227,7 @@ class ValidationPipeline:
             meter=llm_meter,
             meter_stage="embed",
         )
-        
+
         progress_emitter = CostProgressEmitter(
             ledger=ledger,
             min_delta_to_show=policy.min_delta_to_show,
@@ -624,7 +633,7 @@ class ValidationPipeline:
             if graph_flow_result and graph_flow_result.graph_result and not graph_flow_result.graph_result.disabled:
                 context_graph = ClaimContextGraph()
                 gr = graph_flow_result.graph_result
-                
+
                 # Add nodes
                 for c in claims:
                     role_str = c.get("type", "support").lower()
@@ -636,14 +645,14 @@ class ValidationPipeline:
                         role = ClaimRole.BACKGROUND
                     elif role_str == "counter":
                         role = ClaimRole.COUNTER
-                    
+
                     node = ClaimNode(
                         claim_id=c.get("id"),
                         text=c.get("text", ""),
                         role=role
                     )
                     context_graph.add_node(node)
-                
+
                 # Add edges
                 if getattr(gr, "typed_edges", None):
                     for te in gr.typed_edges:
@@ -653,7 +662,7 @@ class ValidationPipeline:
                             rel_type = RelationType.CONTRADICTS
                         elif "entail" in rel_val:
                             rel_type = RelationType.ENTAILS
-                        
+
                         edge = ClaimEdge(
                             source_id=te.src_id,
                             target_id=te.dst_id,
@@ -720,7 +729,7 @@ class ValidationPipeline:
             ]
 
             search_queries = self._select_diverse_queries(eligible_claims, max_queries=3, fact_fallback=fact)
-            
+
             # TARGET SELECTION GATE: Only top-K claims get actual Tavily searches
             # This prevents per-claim search explosion (6 claims × 2 searches = 12 Tavily calls)
             # Instead, we search for top 2 key claims and share evidence with others
@@ -741,28 +750,43 @@ class ValidationPipeline:
                     budget_class_str = "standard"
                 elif search_type == "deep":
                     budget_class_str = "deep"
-            
+
             graph_result_for_selection = None
             if graph_flow_result and graph_flow_result.graph_result:
                 graph_result_for_selection = graph_flow_result.graph_result
-            
+
             # For normal profile, pass anchor_claim_id to guarantee it's in targets.
             # This prevents normal_pipeline.violation when anchor would be deferred.
             profile = (pipeline_profile or "normal")
             anchor_for_selection = anchor_claim_id if profile == "normal" else None
-            
-            target_selection = select_verification_targets(
-                claims=eligible_claims,
-                # max_targets removed: let Bayesian EVOI model compute optimal count
-                graph_result=graph_result_for_selection,
-                budget_class=budget_class_str,
-                anchor_claim_id=anchor_for_selection,
-            )
-            
-            # Only target claims go through retrieval
-            retrieval_claims = target_selection.targets
-            deferred_claims = target_selection.deferred
-            
+
+            # DEEP MODE: Verify ALL claims (no target selection limits)
+            # Only normal/standard modes use Bayesian target selection
+            if profile == "deep":
+                # All claims are targets in deep mode
+                retrieval_claims = list(eligible_claims)
+                deferred_claims = []
+                Trace.event(
+                    "target_selection.deep_mode_all_claims",
+                    {
+                        "profile": profile,
+                        "claims_count": len(retrieval_claims),
+                        "claim_ids": [c.get("id") for c in retrieval_claims],
+                    },
+                )
+            else:
+                target_selection = select_verification_targets(
+                    claims=eligible_claims,
+                    # max_targets removed: let Bayesian EVOI model compute optimal count
+                    graph_result=graph_result_for_selection,
+                    budget_class=budget_class_str,
+                    anchor_claim_id=anchor_for_selection,
+                )
+
+                # Only target claims go through retrieval
+                retrieval_claims = target_selection.targets
+                deferred_claims = target_selection.deferred
+
             # Mark deferred claims in ledger
             for claim in deferred_claims:
                 claim_id = str(claim.get("id") or "c1")
@@ -774,7 +798,7 @@ class ValidationPipeline:
                     )
                 claim["deferred_from_search"] = True
                 claim["deferred_reason"] = reason
-            
+
             _end_phase("query_build")
 
             _start_phase("retrieval")
@@ -961,7 +985,7 @@ class ValidationPipeline:
 
             # Neutral prior (tier does not influence veracity)
             prior_log_odds = 0.0
-            
+
             prior_belief = BeliefState(log_odds=prior_log_odds)
 
             _start_phase("evidence_eval")
@@ -1146,7 +1170,7 @@ class ValidationPipeline:
                         if not isinstance(reasons_short, list):
                             reasons_short = []
                         reasons_str = "; ".join([str(r) for r in reasons_short if r])[:400]
-                        
+
                         # Prefer per-claim reason, fallback to article-level rationale, then deterministic
                         expl = str(cv.get("reason") or "").strip()
                         if not expl:
@@ -1160,15 +1184,27 @@ class ValidationPipeline:
                                 expl += f" Reasons: {reasons_str}"
                         per_claim_analysis[cid] = expl
 
-                        per_claim_details.append({
-                            "id": cid,
-                            "text": claim_text_by_id.get(cid, ""),
-                            "rgba": [
+                        # Use per-claim RGBA if available from LLM, else fallback to global
+                        cv_rgba = cv.get("rgba")
+                        if isinstance(cv_rgba, list) and len(cv_rgba) >= 4:
+                            claim_rgba = [
+                                max(0.0, float(cv_rgba[0])),
+                                max(0.0, float(cv_rgba[1])),
+                                max(0.0, float(cv_rgba[2])),
+                                max(0.0, float(cv_rgba[3])),
+                            ]
+                        else:
+                            claim_rgba = [
                                 max(0.0, global_r),
                                 max(0.0, verdict_score),
                                 max(0.0, global_b),
                                 max(0.0, global_a),
-                            ],
+                            ]
+
+                        per_claim_details.append({
+                            "id": cid,
+                            "text": claim_text_by_id.get(cid, ""),
+                            "rgba": claim_rgba,
                             "analysis": expl,
                             "rationale": expl,  # UI expects 'rationale' field
                             "sources": claim_sources,
@@ -1205,19 +1241,21 @@ class ValidationPipeline:
             except Exception:
                 # Never break verification due to UI materialization.
                 pass
-            
+
             # M114: Guarantee sources are always populated for frontend
             if not result.get("sources") and final_sources:
                 result["sources"] = final_sources
-            
+
             # Propagate verdicts to deferred claims (evidence sharing)
-            if target_selection.evidence_sharing and deferred_claims:
+            # Note: evidence_sharing is set in both deep mode (empty {}) and normal mode
+            evidence_sharing = getattr(target_selection, "evidence_sharing", {}) if 'target_selection' in dir() else {}
+            if evidence_sharing and deferred_claims:
                 result = propagate_deferred_verdicts(
                     result=result,
-                    evidence_sharing=target_selection.evidence_sharing,
+                    evidence_sharing=evidence_sharing,
                     deferred_claims=deferred_claims,
                 )
-            
+
             locale_decisions = getattr(search_state, "locale_decisions", {}) or {}
             _start_phase("verdict")
             locale_payload = None
@@ -1243,7 +1281,7 @@ class ValidationPipeline:
             if b_score < 0:
                 b_score = float(result.get("context_score", -1.0))
             a_score = float(result.get("explainability_score", -1.0))
-            
+
             # Normalize -1.0 to 0.0 for RGBA (visuals) or keep -1.0 if frontend handles it?
             # Standard RGBA usually expects 0.0-1.0. 
             # If missing, we use 0.0 to avoid glitches, or 0.5 for neutral.
@@ -1254,7 +1292,7 @@ class ValidationPipeline:
                 max(0.0, b_score),
                 max(0.0, a_score),
             ]
-            
+
             Trace.event("pipeline.run.completed", {"outcome": "scored"})
             _end_phase("verdict")
             return _attach_cost_summary(result)
@@ -1524,7 +1562,7 @@ class ValidationPipeline:
                         "primary": len([s for s in verified_inline_sources if s.get("is_primary")]),
                     },
                 )
-                
+
                 # Fetch content for primary inline sources
                 primary_sources = [s for s in verified_inline_sources if s.get("is_primary")]
                 if primary_sources and self.search_mgr:
@@ -1545,7 +1583,7 @@ class ValidationPipeline:
                                     })
                             except Exception as e:
                                 logger.debug("[Pipeline] Failed to fetch inline source: %s", e)
-                
+
                 final_sources.extend(verified_inline_sources)
             return final_sources
 
@@ -1575,7 +1613,7 @@ class ValidationPipeline:
             List of dicts with 'url', 'anchor', and 'domain' keys
         """
         return extract_url_anchors(text, exclude_url=exclude_url)
-    
+
     def _restore_urls_from_anchors(self, cleaned_text: str, url_anchors: list[dict]) -> list[dict]:
         """Find which URL anchors survived cleaning and return them as sources.
         
@@ -1599,7 +1637,7 @@ class ValidationPipeline:
     # ─────────────────────────────────────────────────────────────────────────
     # Topic-Aware Round-Robin Query Selection ("Coverage Engine")
     # ─────────────────────────────────────────────────────────────────────────
-    
+
     def _select_diverse_queries(
         self,
         claims: list,
@@ -1615,7 +1653,7 @@ class ValidationPipeline:
             fact_fallback=fact_fallback,
             log=logger,
         )
-    
+
     def _get_query_by_role(self, claim: dict, role: str) -> str | None:
         """
         Extract query with specific role from claim's query_candidates.
@@ -1628,7 +1666,7 @@ class ValidationPipeline:
             Query text or None if not found
         """
         return get_query_by_role(claim, role)
-    
+
     def _normalize_and_sanitize(self, query: str) -> str | None:
         """
         Normalize query.
@@ -1644,7 +1682,7 @@ class ValidationPipeline:
             Normalized query or None if invalid
         """
         return normalize_and_sanitize(query)
-    
+
     def _is_fuzzy_duplicate(self, query: str, existing: list[str], threshold: float = 0.9) -> bool:
         """
         Check if query is >threshold similar to any existing query.
@@ -1695,11 +1733,11 @@ class ValidationPipeline:
         url = oracle_result.get("url", "")
         claim_reviewed = oracle_result.get("claim_reviewed", "")
         summary = oracle_result.get("summary", "")
-        
+
         # Use LLM-determined scores from OracleValidationSkill (no heuristics!)
         verified_score = float(oracle_result.get("verified_score", -1.0))
         danger_score = float(oracle_result.get("danger_score", -1.0))
-        
+
         # Fallback for tests / legacy Oracle results without LLM-derived scores.
         if verified_score < 0:
             status_norm = str(oracle_result.get("status", "") or "").upper()
@@ -1713,23 +1751,23 @@ class ValidationPipeline:
                 verified_score = 0.5
         if danger_score < 0:
             danger_score = 0.0
-        
+
         # Build response (English first)
         analysis = f"According to {publisher}, this claim is rated as '{rating}'. {summary}"
         rationale = f"Fact check by {publisher}: Rated as '{rating}'. {claim_reviewed}"
-        
+
         # Translate if non-English and translation_service available
         if lang and lang.lower() not in ("en", "en-us") and self.translation_service:
             if progress_callback:
                 await progress_callback("localizing_content")
-            
+
             try:
                 analysis = await self.translation_service.translate(analysis, target_lang=lang)
                 rationale = await self.translation_service.translate(rationale, target_lang=lang)
             except Exception as e:
                 logger.warning("[Pipeline] Translation failed for Oracle result: %s", e)
                 # Keep English if translation fails
-        
+
         sources = [{
             "title": f"Fact Check by {publisher}",
             "link": url,
@@ -1740,7 +1778,7 @@ class ValidationPipeline:
             "source_type": "fact_check",
             "is_trusted": True,
         }]
-        
+
         return {
             "verified_score": verified_score,
             "confidence_score": 1.0,
@@ -1771,7 +1809,7 @@ class ValidationPipeline:
         summary = oracle_result.get("summary", "")
         relevance = oracle_result.get("relevance_score", 0.0)
         status = oracle_result.get("status", "MIXED")
-        
+
         return {
             "url": url,
             "domain": get_registrable_domain(url) if url else publisher.lower().replace(" ", ""),

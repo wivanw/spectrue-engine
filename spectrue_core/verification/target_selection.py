@@ -46,17 +46,17 @@ class TargetBudgetParams:
     """
     # Marginal cost per target claim (in normalized units, ~1 Tavily search)
     marginal_cost_per_target: float = 0.5
-    
+
     # How valuable uncertainty reduction is (domain constant)
     value_uncertainty: float = 1.0
-    
+
     # Diminishing returns factor: EVOI_i = base * (decay ^ i)
     # Models that later targets have less marginal value
     diminishing_returns_decay: float = 0.85
-    
+
     # Minimum EVOI threshold to include a target
     min_evoi_threshold: float = 0.05
-    
+
     # Hard ceiling per budget class (safety net)
     # Maps to BudgetClass enum: MINIMAL, STANDARD, DEEP
     budget_ceilings: dict[str, int] = field(default_factory=lambda: {
@@ -64,7 +64,7 @@ class TargetBudgetParams:
         "standard": 5,
         "deep": 30,
     })
-    
+
     # Hard floor per budget class (minimum targets)
     budget_floors: dict[str, int] = field(default_factory=lambda: {
         "minimal": 1,
@@ -99,14 +99,14 @@ def _expected_value_of_information(
     """
     # Entropy captures uncertainty - max at p=0.5
     entropy = _entropy_bernoulli(prior_p)
-    
+
     # Claim-specific factors
     worthiness = float(claim.get("check_worthiness", claim.get("importance", 0.5)) or 0.5)
-    harm = float(claim.get("harm_potential", 1.0) or 1.0)
+    harm = float(claim.get("harm_potential", 0.5) or 0.5)
     # Clamp to 0-1 range
     worthiness = max(0.0, min(1.0, worthiness))
     harm = max(0.0, min(1.0, harm))
-    
+
     # Confidence inversely affects EVOI (certain claims need less verification)
     conf = claim.get("metadata_confidence")
     if conf:
@@ -119,7 +119,7 @@ def _expected_value_of_information(
             conf_factor = 1.0
     else:
         conf_factor = 1.0
-    
+
     evoi = value_uncertainty * entropy * worthiness * harm * conf_factor
     return max(0.0, evoi)
 
@@ -150,14 +150,14 @@ def compute_optimal_target_count(
         (optimal_k, trace_dict) where trace_dict contains decision details
     """
     params = params or TargetBudgetParams()
-    
+
     if not claims:
         return 0, {"reason": "no_claims", "optimal_k": 0}
-    
+
     n_claims = len(claims)
     ceiling = params.budget_ceilings.get(budget_class, 5)
     floor = params.budget_floors.get(budget_class, 1)
-    
+
     # Compute EVOI for each claim (already sorted by utility in select_verification_targets)
     evoi_values: list[float] = []
     for claim in claims:
@@ -167,23 +167,23 @@ def compute_optimal_target_count(
             value_uncertainty=params.value_uncertainty,
         )
         evoi_values.append(evoi)
-    
+
     # Greedy selection: add targets while marginal EVOI > marginal cost
     # With diminishing returns: EVOI_effective(i) = EVOI_i * decay^i
     optimal_k = 0
     cumulative_value = 0.0
     cumulative_cost = 0.0
     marginal_values: list[float] = []
-    
+
     for i, evoi in enumerate(evoi_values):
         if i >= ceiling:
             break
-            
+
         # Diminishing returns for later targets
         decay_factor = params.diminishing_returns_decay ** i
         marginal_evoi = evoi * decay_factor
         marginal_cost = params.marginal_cost_per_target
-        
+
         marginal_values.append({
             "index": i,
             "raw_evoi": evoi,
@@ -192,22 +192,22 @@ def compute_optimal_target_count(
             "marginal_cost": marginal_cost,
             "net_value": marginal_evoi - marginal_cost,
         })
-        
+
         # Stop if marginal value is below threshold or negative
         if marginal_evoi < params.min_evoi_threshold:
             break
         if marginal_evoi < marginal_cost:
             break
-            
+
         cumulative_value += marginal_evoi
         cumulative_cost += marginal_cost
         optimal_k = i + 1
-    
+
     # Apply floor constraint
     optimal_k = max(floor, optimal_k)
     # Apply ceiling constraint
     optimal_k = min(ceiling, optimal_k, n_claims)
-    
+
     trace = {
         "optimal_k": optimal_k,
         "n_claims": n_claims,
@@ -225,9 +225,9 @@ def compute_optimal_target_count(
             "min_evoi_threshold": params.min_evoi_threshold,
         },
     }
-    
+
     Trace.event("target_selection.bayesian_budget", trace)
-    
+
     return optimal_k, trace
 
 
@@ -359,7 +359,7 @@ def select_verification_targets(
     # Use Bayesian EVOI model to compute optimal target count
     # This replaces the previous hard-coded budget_limits heuristic
     budget_params = budget_params or TargetBudgetParams()
-    
+
     if max_targets is not None:
         # Explicit override - respect user-provided limit but cap at ceiling
         ceiling = budget_params.budget_ceilings.get(budget_class, 5)

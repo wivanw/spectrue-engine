@@ -31,7 +31,7 @@ class DailyBonusState:
     smoothed_budget_B: Decimal = Decimal("0.0")
     last_user_bonus_b: Decimal = Decimal("0.0")
     last_run_stats: Dict[str, Any] = field(default_factory=dict)
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DailyBonusState":
         return cls(

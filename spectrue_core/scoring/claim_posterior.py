@@ -43,7 +43,7 @@ class PosteriorParams:
     alpha: float = 1.0  # Weight for LLM signal
     beta: float = 1.0   # Weight for evidence signal
     prior_default: float = 0.5  # Default prior when tier unknown
-    
+
     # Tier -> prior probability mapping
     tier_priors: dict[str, float] = field(default_factory=lambda: {
         "A": 0.7,   # High-quality source shifts prior toward trust
@@ -52,7 +52,7 @@ class PosteriorParams:
         "C": 0.5,   # Neutral
         "D": 0.4,   # Low-quality shifts prior toward skepticism
     })
-    
+
     # Stance weights for evidence aggregation
     stance_weights: dict[str, float] = field(default_factory=lambda: {
         "quote_present": 1.5,    # Strong structural signal
@@ -80,14 +80,14 @@ class PosteriorResult:
     log_odds_llm: float
     log_odds_evidence: float
     log_odds_posterior: float
-    
+
     # Breakdown
     n_support: int
     n_refute: int
     n_neutral: int
     effective_support: float
     effective_refute: float
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "p_posterior": round(self.p_posterior, 4),
@@ -144,11 +144,11 @@ def _evidence_weight(
         base = params.stance_weights.get("medium_relevance", 0.8)
     else:
         base = params.stance_weights.get("low_relevance", 0.3)
-    
+
     # Quote boost
     if item.quote_present:
         base *= params.stance_weights.get("quote_present", 1.5)
-    
+
     return base
 
 
@@ -178,18 +178,18 @@ def compute_claim_posterior(
     """
     if params is None:
         params = PosteriorParams()
-    
+
     # 1. Prior from tier
     p_prior = params.tier_priors.get(
         (best_tier or "").upper(),
         params.prior_default
     )
     l_prior = _logit(p_prior)
-    
+
     # 2. LLM signal
     p_llm = max(0.01, min(0.99, llm_verdict_score))
     l_llm = _logit(p_llm)
-    
+
     # 3. Evidence signal: Σ w_j · s_j
     l_evidence = 0.0
     n_support = 0
@@ -197,11 +197,11 @@ def compute_claim_posterior(
     n_neutral = 0
     effective_support = 0.0
     effective_refute = 0.0
-    
+
     for item in evidence_items:
         direction = _stance_direction(item.stance)
         weight = _evidence_weight(item, params)
-        
+
         if direction > 0:
             n_support += 1
             effective_support += weight
@@ -210,13 +210,13 @@ def compute_claim_posterior(
             effective_refute += weight
         else:
             n_neutral += 1
-        
+
         l_evidence += direction * weight
-    
+
     # 4. Combine in log-odds space
     l_posterior = l_prior + params.alpha * l_llm + params.beta * l_evidence
     p_posterior = _sigmoid(l_posterior)
-    
+
     result = PosteriorResult(
         p_posterior=p_posterior,
         log_odds_prior=l_prior,
@@ -229,7 +229,7 @@ def compute_claim_posterior(
         effective_support=effective_support,
         effective_refute=effective_refute,
     )
-    
+
     Trace.event(
         "claim.posterior.computed",
         {
@@ -242,7 +242,7 @@ def compute_claim_posterior(
             **result.to_dict(),
         },
     )
-    
+
     return result
 
 
@@ -262,9 +262,9 @@ def aggregate_article_posterior(
     """
     if not claim_posteriors:
         return 0.5  # Neutral
-    
+
     posteriors = [p for _, p in claim_posteriors]
-    
+
     if method == "max":
         # Take the most extreme posterior (furthest from 0.5)
         return max(posteriors, key=lambda p: abs(p - 0.5))

@@ -129,22 +129,22 @@ def _extract_search_query(claim) -> str:
         sq = claim.search_queries
     else:
         sq = claim.get("search_queries") if isinstance(claim, dict) else []
-    
+
     if sq and len(sq) > 0:
         return sq[0] if isinstance(sq[0], str) else str(sq[0])
-    
+
     # Try query_candidates (list of dicts with "text" key)
     if hasattr(claim, "query_candidates"):
         qc = claim.query_candidates
     else:
         qc = claim.get("query_candidates") if isinstance(claim, dict) else []
-    
+
     if qc and len(qc) > 0:
         first = qc[0]
         if isinstance(first, dict):
             return first.get("text", "")[:100]
         return str(first)[:100]
-    
+
     # Fallback to claim text (prefer original text over normalized)
     # INVARIANT: search queries should use original language, not normalized
     if hasattr(claim, "text"):
@@ -369,13 +369,13 @@ def postprocess_evidence_matrix(
         # Replaces hard rule: if relevance < 0.4 => NEUTRAL
         # Now uses soft P(S|features) calculation
         # =========================================================================
-        
+
         # Prepare structural features for posterior calculation
         quote_for_features = quote or r.get("quote") or ""
         has_chunk = has_evidence_chunk(r)
         tier = r.get("evidence_tier")
         source_prior = source_prior_from_tier(tier)
-        
+
         features = StanceFeatures(
             llm_stance=stance,
             llm_relevance=relevance if relevance > 0 else None,
@@ -383,13 +383,13 @@ def postprocess_evidence_matrix(
             has_evidence_chunk=has_chunk,
             source_prior=source_prior,
         )
-        
+
         posterior = compute_stance_posterior(features)
-        
+
         # Decision: Use argmax stance if p_evidence > threshold
         # This is softer than hard rule: we trust LLM more when evidence signals are strong
         EVIDENCE_THRESHOLD = 0.35  # P(S ∈ {SUPPORT, REFUTE}) threshold
-        
+
         if posterior.p_evidence >= EVIDENCE_THRESHOLD:
             # Strong evidence signal - use argmax (likely SUPPORT or REFUTE)
             stance = posterior.argmax_stance.upper()
@@ -477,7 +477,7 @@ def postprocess_evidence_matrix(
         )
 
     Trace.event("evidence.synthesis_stats", stats)
-    
+
     # M113+: Bayesian posterior summary for calibration monitoring
     if clustered_results:
         effective_support = sum(r.get("p_support", 0) for r in clustered_results)
@@ -494,7 +494,7 @@ def postprocess_evidence_matrix(
             "bayesian_downgraded": stats.get("bayesian_downgraded", 0),
             "bayesian_uncertain": stats.get("bayesian_uncertain", 0),
         })
-    
+
     logger.debug("[Clustering] Matrix stats: %s", stats)
 
     return clustered_results, stats

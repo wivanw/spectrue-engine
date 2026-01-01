@@ -46,21 +46,21 @@ class TextStructure:
     """
     sentences: tuple[TextSegment, ...]
     paragraphs: tuple[TextSegment, ...]
-    
+
     def find_sentence_at(self, char_pos: int) -> TextSegment | None:
         """Find the sentence containing the given character position."""
         for seg in self.sentences:
             if seg.start <= char_pos < seg.end:
                 return seg
         return None
-    
+
     def find_paragraph_at(self, char_pos: int) -> TextSegment | None:
         """Find the paragraph containing the given character position."""
         for seg in self.paragraphs:
             if seg.start <= char_pos < seg.end:
                 return seg
         return None
-    
+
     def get_sentence_window(
         self, 
         sentence_index: int, 
@@ -78,7 +78,7 @@ class TextStructure:
         """
         if not self.sentences:
             return ()
-        
+
         start_idx = max(0, sentence_index - window_size)
         end_idx = min(len(self.sentences), sentence_index + window_size + 1)
         return self.sentences[start_idx:end_idx]
@@ -120,34 +120,34 @@ def extract_sentences(text: str) -> tuple[TextSegment, ...]:
     """
     if not text or not text.strip():
         return ()
-    
+
     # Try main pattern first
     parts = _SENTENCE_PATTERN.split(text)
-    
+
     # If no splits, try simpler pattern
     if len(parts) <= 1:
         parts = _SIMPLE_SENTENCE_PATTERN.split(text)
-    
+
     # If still no splits, return whole text as one sentence
     if len(parts) <= 1:
         stripped = text.strip()
         if stripped:
             return (TextSegment(text=stripped, start=0, end=len(text), index=0),)
         return ()
-    
+
     segments: list[TextSegment] = []
     current_pos = 0
-    
+
     for idx, part in enumerate(parts):
         if not part:
             continue
-        
+
         # Find actual position in original text
         start = text.find(part, current_pos)
         if start == -1:
             start = current_pos
         end = start + len(part)
-        
+
         stripped = part.strip()
         if stripped:
             segments.append(TextSegment(
@@ -156,9 +156,9 @@ def extract_sentences(text: str) -> tuple[TextSegment, ...]:
                 end=end,
                 index=len(segments),
             ))
-        
+
         current_pos = end
-    
+
     return tuple(segments)
 
 
@@ -176,29 +176,29 @@ def extract_paragraphs(text: str) -> tuple[TextSegment, ...]:
     """
     if not text or not text.strip():
         return ()
-    
+
     parts = _PARAGRAPH_PATTERN.split(text)
-    
+
     # If no splits, return whole text as one paragraph
     if len(parts) <= 1:
         stripped = text.strip()
         if stripped:
             return (TextSegment(text=stripped, start=0, end=len(text), index=0),)
         return ()
-    
+
     segments: list[TextSegment] = []
     current_pos = 0
-    
+
     for part in parts:
         if not part:
             continue
-        
+
         # Find actual position in original text
         start = text.find(part, current_pos)
         if start == -1:
             start = current_pos
         end = start + len(part)
-        
+
         stripped = part.strip()
         if stripped:
             segments.append(TextSegment(
@@ -207,9 +207,9 @@ def extract_paragraphs(text: str) -> tuple[TextSegment, ...]:
                 end=end,
                 index=len(segments),
             ))
-        
+
         current_pos = end
-    
+
     return tuple(segments)
 
 
@@ -243,35 +243,35 @@ def find_claim_position(
     """
     if structure is None:
         structure = extract_text_structure(text)
-    
+
     # Try exact match first
     span_start = text.find(claim_text)
-    
+
     if span_start == -1:
         # Try normalized match (whitespace collapsed)
         normalized_text = ' '.join(text.split())
         normalized_claim = ' '.join(claim_text.split())
         norm_pos = normalized_text.find(normalized_claim)
-        
+
         if norm_pos == -1:
             # Could not find claim, return beginning of document
             return 0, min(len(claim_text), len(text)), None, None
-        
+
         # Approximate position in original text
         span_start = norm_pos
-    
+
     span_end = span_start + len(claim_text)
-    
+
     # Find sentence and paragraph indices
     sentence_index: int | None = None
     paragraph_index: int | None = None
-    
+
     sentence = structure.find_sentence_at(span_start)
     if sentence is not None:
         sentence_index = sentence.index
-    
+
     paragraph = structure.find_paragraph_at(span_start)
     if paragraph is not None:
         paragraph_index = paragraph.index
-    
+
     return span_start, span_end, sentence_index, paragraph_index
