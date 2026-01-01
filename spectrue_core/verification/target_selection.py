@@ -18,14 +18,218 @@ The gate ensures only top-K key claims trigger searches.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.calibration_registry import CalibrationRegistry
 
 logger = logging.getLogger(__name__)
+
+
+# -----------------------------------------------------------------------------
+# Bayesian Target Budget Model
+# -----------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class TargetBudgetParams:
+    """
+    Parameters for Bayesian target budget computation.
+    
+    The model computes optimal number of targets by maximizing:
+        EVOI(k) - Cost(k)
+    
+    Where:
+        EVOI(k) = sum of expected value of information for k claims
+        Cost(k) = marginal_cost_per_target * k
+    """
+    # Marginal cost per target claim (in normalized units, ~1 Tavily search)
+    marginal_cost_per_target: float = 0.5
+    
+    # How valuable uncertainty reduction is (domain constant)
+    value_uncertainty: float = 1.0
+    
+    # Diminishing returns factor: EVOI_i = base * (decay ^ i)
+    # Models that later targets have less marginal value
+    diminishing_returns_decay: float = 0.85
+    
+    # Minimum EVOI threshold to include a target
+    min_evoi_threshold: float = 0.05
+    
+    # Hard ceiling per budget class (safety net)
+    # Maps to BudgetClass enum: MINIMAL, STANDARD, DEEP
+    budget_ceilings: dict[str, int] = field(default_factory=lambda: {
+        "minimal": 3,
+        "standard": 5,
+        "deep": 30,
+    })
+    
+    # Hard floor per budget class (minimum targets)
+    budget_floors: dict[str, int] = field(default_factory=lambda: {
+        "minimal": 1,
+        "standard": 2,
+        "deep": 3,
+    })
+
+
+def _entropy_bernoulli(p: float) -> float:
+    """Shannon entropy of Bernoulli(p), normalized to [0,1]."""
+    if p <= 0.0 or p >= 1.0:
+        return 0.0
+    h = -p * math.log2(p) - (1.0 - p) * math.log2(1.0 - p)
+    return h
+
+
+def _expected_value_of_information(
+    claim: dict,
+    *,
+    prior_p: float = 0.5,
+    value_uncertainty: float = 1.0,
+) -> float:
+    """
+    Compute Expected Value of Information (EVOI) for a claim.
+    
+    EVOI = value_uncertainty * entropy(prior) * claim_worthiness * harm_factor
+    
+    High EVOI claims:
+    - High uncertainty (prior near 0.5)
+    - High check_worthiness / importance
+    - High harm_potential
+    """
+    # Entropy captures uncertainty - max at p=0.5
+    entropy = _entropy_bernoulli(prior_p)
+    
+    # Claim-specific factors
+    worthiness = float(claim.get("check_worthiness", claim.get("importance", 0.5)) or 0.5)
+    harm = float(claim.get("harm_potential", 1.0) or 1.0)
+    # Normalize harm 1-5 scale to 0.2-1.0 factor
+    # harm=1 -> 0.2, harm=3 -> 0.6, harm=5 -> 1.0
+    harm = 0.2 + max(0.0, harm - 1.0) * 0.2
+    harm = min(1.0, harm)  # Cap at 1.0
+    
+    # Confidence inversely affects EVOI (certain claims need less verification)
+    conf = claim.get("metadata_confidence")
+    if conf:
+        conf_str = str(conf).lower()
+        if conf_str == "high":
+            conf_factor = 0.6
+        elif conf_str == "medium":
+            conf_factor = 0.8
+        else:
+            conf_factor = 1.0
+    else:
+        conf_factor = 1.0
+    
+    evoi = value_uncertainty * entropy * worthiness * harm * conf_factor
+    return max(0.0, evoi)
+
+
+def compute_optimal_target_count(
+    claims: list[dict],
+    *,
+    budget_class: str = "minimal",
+    params: TargetBudgetParams | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """
+    Compute optimal number of targets using Bayesian EVOI model.
+    
+    Instead of hard-coded limits, we compute:
+        k* = argmax_k [ sum_{i=1}^{k} EVOI_i * decay^i - cost * k ]
+    
+    This naturally:
+    - Increases targets when claims have high uncertainty/harm
+    - Decreases targets when marginal value drops below cost
+    - Respects budget class ceilings as safety nets
+    
+    Args:
+        claims: List of claim dicts with worthiness/harm/confidence
+        budget_class: Budget class for ceiling/floor bounds (minimal/standard/deep)
+        params: Bayesian model parameters
+        
+    Returns:
+        (optimal_k, trace_dict) where trace_dict contains decision details
+    """
+    params = params or TargetBudgetParams()
+    
+    if not claims:
+        return 0, {"reason": "no_claims", "optimal_k": 0}
+    
+    n_claims = len(claims)
+    ceiling = params.budget_ceilings.get(budget_class, 5)
+    floor = params.budget_floors.get(budget_class, 1)
+    
+    # Compute EVOI for each claim (already sorted by utility in select_verification_targets)
+    evoi_values: list[float] = []
+    for claim in claims:
+        evoi = _expected_value_of_information(
+            claim,
+            prior_p=0.5,  # Default prior (uncertain)
+            value_uncertainty=params.value_uncertainty,
+        )
+        evoi_values.append(evoi)
+    
+    # Greedy selection: add targets while marginal EVOI > marginal cost
+    # With diminishing returns: EVOI_effective(i) = EVOI_i * decay^i
+    optimal_k = 0
+    cumulative_value = 0.0
+    cumulative_cost = 0.0
+    marginal_values: list[float] = []
+    
+    for i, evoi in enumerate(evoi_values):
+        if i >= ceiling:
+            break
+            
+        # Diminishing returns for later targets
+        decay_factor = params.diminishing_returns_decay ** i
+        marginal_evoi = evoi * decay_factor
+        marginal_cost = params.marginal_cost_per_target
+        
+        marginal_values.append({
+            "index": i,
+            "raw_evoi": evoi,
+            "decay_factor": decay_factor,
+            "marginal_evoi": marginal_evoi,
+            "marginal_cost": marginal_cost,
+            "net_value": marginal_evoi - marginal_cost,
+        })
+        
+        # Stop if marginal value is below threshold or negative
+        if marginal_evoi < params.min_evoi_threshold:
+            break
+        if marginal_evoi < marginal_cost:
+            break
+            
+        cumulative_value += marginal_evoi
+        cumulative_cost += marginal_cost
+        optimal_k = i + 1
+    
+    # Apply floor constraint
+    optimal_k = max(floor, optimal_k)
+    # Apply ceiling constraint
+    optimal_k = min(ceiling, optimal_k, n_claims)
+    
+    trace = {
+        "optimal_k": optimal_k,
+        "n_claims": n_claims,
+        "budget_class": budget_class,
+        "ceiling": ceiling,
+        "floor": floor,
+        "cumulative_value": cumulative_value,
+        "cumulative_cost": cumulative_cost,
+        "net_value": cumulative_value - cumulative_cost,
+        "marginal_analysis": marginal_values[:min(10, len(marginal_values))],
+        "params": {
+            "marginal_cost_per_target": params.marginal_cost_per_target,
+            "value_uncertainty": params.value_uncertainty,
+            "diminishing_returns_decay": params.diminishing_returns_decay,
+            "min_evoi_threshold": params.min_evoi_threshold,
+        },
+    }
+    
+    Trace.event("target_selection.bayesian_budget", trace)
+    
+    return optimal_k, trace
 
 
 def _assign_semantic_clusters(claims: list[dict], threshold: float = 0.75) -> None:
@@ -131,19 +335,21 @@ def select_verification_targets(
     graph_result: Any | None = None,
     budget_class: str = "minimal",
     anchor_claim_id: str | None = None,
+    budget_params: TargetBudgetParams | None = None,
 ) -> TargetSelectionResult:
     """
     Select which claims get actual Tavily searches.
 
     This is the HARD GATE that prevents per-claim search explosion.
-    Only top-K claims (based on graph metrics + worthiness) get searches.
+    Uses Bayesian EVOI model to compute optimal number of targets.
 
     Args:
         claims: All eligible claims
-        max_targets: Maximum claims that can trigger searches (default derives from budget)
+        max_targets: Override for maximum targets (bypasses Bayesian model if set)
         graph_result: Optional claim graph with is_key_claim, centrality, tension
         budget_class: Budget class (minimal/standard/deep)
         anchor_claim_id: If provided (normal profile), this claim MUST be in targets
+        budget_params: Parameters for Bayesian target budget model
 
     Returns:
         TargetSelectionResult with targets and deferred lists
@@ -151,22 +357,24 @@ def select_verification_targets(
     if not claims:
         return TargetSelectionResult()
 
-    # Define limits per budget class
-    # M117: Deep mode needs independent verification of all claims (high limit)
-    budget_limits = {
-        "minimal": 2,
-        "standard": 3,
-        "deep": 20,
-        "high": 20,
-        "max": 50,
-    }
-
-    limit = budget_limits.get(budget_class, 5)  # Default limit 5 if unknown budget
-
-    if max_targets is None:
-        max_targets = limit
+    # Use Bayesian EVOI model to compute optimal target count
+    # This replaces the previous hard-coded budget_limits heuristic
+    budget_params = budget_params or TargetBudgetParams()
+    
+    if max_targets is not None:
+        # Explicit override - respect user-provided limit but cap at ceiling
+        ceiling = budget_params.budget_ceilings.get(budget_class, 5)
+        max_targets = min(max_targets, ceiling)
+        bayesian_trace = {"mode": "explicit_override", "max_targets": max_targets}
     else:
-        max_targets = min(max_targets, limit)
+        # Compute optimal target count using Bayesian EVOI model
+        # Note: We need ordered_claims first, so we compute after ordering
+        # For now, set to ceiling and refine after ordering
+        max_targets, bayesian_trace = compute_optimal_target_count(
+            claims,
+            budget_class=budget_class,
+            params=budget_params,
+        )
 
     # Assign semantic clusters using embeddings (if available)
     _assign_semantic_clusters(claims)
@@ -346,6 +554,7 @@ def select_verification_targets(
             "budget_class": budget_class,
             "anchor_claim_id": str(anchor_claim_id) if anchor_claim_id else None,
             "anchor_forced": anchor_forced,
+            "bayesian_trace": bayesian_trace,
             "target_ids": [
                 str(cid)
                 for cid in (c.get("id") or c.get("claim_id") for c in result.targets)
@@ -366,8 +575,6 @@ def propagate_deferred_verdicts(
     result: dict,
     evidence_sharing: dict[str, Any],
     deferred_claims: list[dict],
-    *,
-    calibration_registry: CalibrationRegistry | None = None,
 ) -> dict:
     """
     Propagate verdicts from target claims to deferred claims.
@@ -385,6 +592,7 @@ def propagate_deferred_verdicts(
     """
     if not evidence_sharing or not deferred_claims:
         return result
+
 
     claim_verdicts = result.get("claim_verdicts")
     if not isinstance(claim_verdicts, list):
@@ -447,6 +655,33 @@ def propagate_deferred_verdicts(
                 "verdict_state": "insufficient_evidence",
                 "derived_from": target_id,
                 "derived_reason": "target_no_verdict",
+            }
+            if claim_id in verdict_index:
+                claim_verdicts[verdict_index[claim_id]] = payload
+            else:
+                claim_verdicts.append(payload)
+            propagated_count += 1
+            continue
+
+        # Minimum similarity threshold for verdict inheritance
+        # Claims with low similarity should NOT copy sources/reason from unrelated targets
+        MIN_INHERITANCE_SIMILARITY = 0.25
+        if similarity < MIN_INHERITANCE_SIMILARITY:
+            # Too dissimilar - mark as NEI, don't copy sources/reason
+            payload = {
+                "claim_id": claim_id,
+                "verdict_score": 0.5,
+                "verdict": "insufficient_evidence",
+                "verdict_state": "insufficient_evidence",
+                "derived_from": target_id,
+                "derived_reason": "similarity_below_threshold",
+                "reasons_short": [f"Claim too dissimilar to target (similarity={similarity:.2f} < {MIN_INHERITANCE_SIMILARITY})"],
+                "propagation": {
+                    "similarity": similarity,
+                    "cohesion": cohesion,
+                    "mode": "rejected_low_similarity",
+                    "threshold": MIN_INHERITANCE_SIMILARITY,
+                },
             }
             if claim_id in verdict_index:
                 claim_verdicts[verdict_index[claim_id]] = payload

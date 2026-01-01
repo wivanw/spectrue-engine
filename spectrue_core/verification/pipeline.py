@@ -753,7 +753,7 @@ class ValidationPipeline:
             
             target_selection = select_verification_targets(
                 claims=eligible_claims,
-                max_targets=2,  # Core limit: max 2 claims trigger Tavily
+                # max_targets removed: let Bayesian EVOI model compute optimal count
                 graph_result=graph_result_for_selection,
                 budget_class=budget_class_str,
                 anchor_claim_id=anchor_for_selection,
@@ -1216,7 +1216,6 @@ class ValidationPipeline:
                     result=result,
                     evidence_sharing=target_selection.evidence_sharing,
                     deferred_claims=deferred_claims,
-                    calibration_registry=self._calibration_registry,
                 )
             
             locale_decisions = getattr(search_state, "locale_decisions", {}) or {}
