@@ -67,6 +67,11 @@ from spectrue_core.verification.ledger_models import (
 )
 from spectrue_core.verification.pipeline_metering import (
     compute_budget_allocation,
+    PhaseTracker,
+    MeteringContext,
+    create_metering_context,
+    create_progress_callback,
+    attach_cost_summary,
 )
 from spectrue_core.verification.reason_codes import ReasonCodes
 from spectrue_core.verification.search_policy import decide_claim_policy
@@ -220,80 +225,32 @@ class ValidationPipeline:
 
         Trace.event("pipeline.profile_resolved", {"profile": pipeline_profile, "from_search_type": search_type})
 
-        policy = load_pricing_policy()
-        ledger = CostLedger(run_id=current_trace_id())
-        tavily_meter = TavilyMeter(ledger=ledger, policy=policy)
-        llm_meter = LLMMeter(ledger=ledger, policy=policy)
+        # M118: Use MeteringContext (Phase 7 refactor)
+        metering_ctx = create_metering_context()
+        ledger = metering_ctx.ledger
+        tavily_meter = metering_ctx.tavily_meter
+        llm_meter = metering_ctx.llm_meter
+        progress_emitter = metering_ctx.progress_emitter
+        run_ledger = metering_ctx.run_ledger
+        
+        # Aliases for local usage (backward compatibility during refactor)
+        phase_timings = metering_ctx.phase_tracker.phase_timings
+        phase_reason_codes = metering_ctx.phase_tracker.phase_reason_codes
+        reason_events = metering_ctx.phase_tracker.reason_events
+        claim_entries = metering_ctx.phase_tracker.claim_entries
 
-        # Configure embedding metering (M113+): embeddings also cost money.
+        # Configure embedding metering
         EmbedService.configure(
             openai_api_key=getattr(self.config, "openai_api_key", None),
             meter=llm_meter,
             meter_stage="embed",
         )
 
-        progress_emitter = CostProgressEmitter(
-            ledger=ledger,
-            min_delta_to_show=policy.min_delta_to_show,
-            emit_cost_deltas=policy.emit_cost_deltas,
-        )
+        # Aliases for closures
+        _start_phase = metering_ctx.phase_tracker.start_phase
+        _end_phase = metering_ctx.phase_tracker.end_phase
+        _record_reason = metering_ctx.phase_tracker.record_reason
 
-        run_ledger = RunLedger(
-            run_id=current_trace_id(),
-            engine_version=__version__,
-            prompt_version=PROMPT_VERSION,
-            search_strategy=SEARCH_STRATEGY_VERSION,
-            counts=PipelineCounts(),
-        )
-        phase_timings: dict[str, int] = {}
-        phase_reason_codes: dict[str, list[LedgerReasonCode]] = {}
-        reason_events: list[dict] = []
-        claim_entries: dict[str, ClaimLedgerEntry] = {}
-
-        def _start_phase(phase: str) -> None:
-            Trace.phase_start(phase)
-
-        def _end_phase(phase: str) -> None:
-            duration = Trace.phase_end(phase)
-            if duration is not None:
-                phase_timings[phase] = int(duration)
-
-        def _record_reason(
-            spec,
-            *,
-            claim_id: str | None = None,
-            count: int = 1,
-            sc_cost: float = 0.0,
-            tc_cost: float = 0.0,
-        ) -> LedgerReasonCode:
-            code = spec.qualified()
-            entry = LedgerReasonCode(
-                code=code,
-                label=spec.label,
-                phase=spec.phase,
-                action=spec.action,
-                count=count,
-            )
-            phase_reason_codes.setdefault(spec.phase, []).append(entry)
-            reason_events.append(
-                {
-                    "code": code,
-                    "label": spec.label,
-                    "phase": spec.phase,
-                    "action": spec.action,
-                    "count": count,
-                    "sc_cost": sc_cost,
-                    "tc_cost": tc_cost,
-                }
-            )
-            Trace.reason_code(
-                code=code,
-                phase=spec.phase,
-                action=spec.action,
-                label=spec.label,
-                claim_id=claim_id,
-            )
-            return entry
 
         # M118: Use imported function from pipeline_metering
         def _budget_allocation_for_metadata(metadata) -> BudgetAllocation:
@@ -305,98 +262,11 @@ class ValidationPipeline:
         self.agent.llm_client._meter = llm_meter
         self.search_mgr.web_tool._tavily._meter = tavily_meter
 
-        async def _progress(stage: str, processed: int | None = None, total: int | None = None) -> None:
-            if progress_callback:
-                await progress_callback(stage, processed, total)
-            payload = progress_emitter.maybe_emit(stage=stage)
-            if payload:
-                Trace.progress_cost_delta(
-                    stage=payload.stage,
-                    delta=payload.delta,
-                    total=payload.total,
-                )
+        _progress = await create_progress_callback(progress_callback, progress_emitter)
 
         def _attach_cost_summary(payload: dict) -> dict:
-            summary_obj = ledger.get_summary()
-            phase_costs = map_stage_costs_to_phases(summary_obj.by_stage_credits)
-            phase_order = [
-                "extraction",
-                "graph",
-                "query_build",
-                "retrieval",
-                "evidence_eval",
-                "verdict",
-            ]
-            run_ledger.phase_usage = [
-                PhaseUsage(
-                    phase=phase,
-                    sc_cost=float(phase_costs.get(phase, 0.0)),
-                    tc_cost=0.0,
-                    duration_ms=int(phase_timings.get(phase, 0)),
-                    reason_codes=phase_reason_codes.get(phase, []),
-                )
-                for phase in phase_order
-            ]
-            run_ledger.top_reason_codes = [
-                ReasonSummary(**item) for item in summarize_reason_codes(reason_events)
-            ]
-            run_ledger.claim_entries = list(claim_entries.values())
-            run_ledger.counts.llm_calls_total = len(
-                [e for e in summary_obj.events if e.provider == "openai"]
-            )
+            return attach_cost_summary(payload, metering=metering_ctx)
 
-            ledger.set_phase_usage([pu.to_dict() for pu in run_ledger.phase_usage])
-            ledger.set_reason_summaries([rs.to_dict() for rs in run_ledger.top_reason_codes])
-
-            summary = ledger.get_summary().to_dict()
-            payload["cost_summary"] = summary
-
-            # --- Backward-compatible, UI-safe cost fields ---
-            # UI often treats "credits" as integer and will show 0 for fractional runs (e.g. 0.18).
-            # Provide:
-            # - credits_used: float (raw)
-            # - credits_used_display: string (2 decimals)
-            # - credits_used_micro: int microcredits (1e4) for stable integer display if needed
-            #
-            # NOTE: 1 Spectrue credit == $0.01 in current policy (see cost_summary.total_usd mapping),
-            # so fractional credits are common and MUST NOT disappear.
-            total_credits = float(summary.get("total_credits") or 0.0)
-            payload["credits_used"] = total_credits
-            payload["credits_used_display"] = f"{total_credits:.2f}"
-            payload["credits_used_micro"] = int(round(total_credits * 10000.0))
-
-            # Legacy field: keep "cost" but make it display-safe (2 decimals).
-            # If frontend casts to int, it will still show 0 for <1; use credits_used_display then.
-            # But many frontends will render float as-is; rounding reduces noise.
-            payload["cost"] = float(f"{total_credits:.2f}")
-
-            audit = payload.get("audit") or {}
-            audit["usage_ledger"] = run_ledger.to_dict()
-            payload["audit"] = audit
-            Trace.event(
-                "usage_ledger.summary",
-                {
-                    "counts": run_ledger.counts.to_dict(),
-                    "phase_usage": [
-                        {
-                            "phase": pu.phase,
-                            "sc_cost": pu.sc_cost,
-                            "tc_cost": pu.tc_cost,
-                            "duration_ms": pu.duration_ms,
-                        }
-                        for pu in run_ledger.phase_usage
-                    ],
-                    "top_reason_codes": [
-                        rc.to_dict() for rc in run_ledger.top_reason_codes
-                    ],
-                },
-            )
-            Trace.event("cost_summary.attached", {
-                "total_credits": summary.get("total_credits"),
-                "total_usd": summary.get("total_usd"),
-                "event_count": len(summary.get("events", [])),
-            })
-            return payload
 
         await _progress("analyzing_input")
 
