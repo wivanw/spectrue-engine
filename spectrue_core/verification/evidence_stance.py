@@ -162,3 +162,145 @@ def check_has_direct_evidence(
     
     return False
 
+
+def assign_claim_rgba(
+    claim_verdict: dict[str, Any],
+    *,
+    global_r: float,
+    global_b: float,
+    global_a: float,
+    judge_mode: str,
+) -> None:
+    """
+    Assign RGBA to claim verdict based on mode.
+    
+    Deep mode: Preserve existing RGBA from LLM judge (1:1 contract)
+    Standard mode: Compute from global values
+    
+    Args:
+        claim_verdict: Claim verdict dict (mutated in-place)
+        global_r: Global danger score
+        global_b: Global bias score
+        global_a: Global explainability score
+        judge_mode: "deep" or "standard"
+    """
+    from spectrue_core.utils.trace import Trace
+    
+    cid = claim_verdict.get("claim_id", "unknown")
+    g_score = float(claim_verdict.get("verdict_score", 0.5) or 0.5)
+    existing_rgba = claim_verdict.get("rgba")
+    
+    has_valid_rgba = (
+        isinstance(existing_rgba, list)
+        and len(existing_rgba) == 4
+        and all(isinstance(x, (int, float)) for x in existing_rgba)
+    )
+    
+    Trace.event(
+        "cv.before_rgba_fill",
+        {
+            "claim_id": cid,
+            "judge_mode": judge_mode,
+            "has_rgba": has_valid_rgba,
+            "existing_rgba": existing_rgba,
+            "verdict_score": claim_verdict.get("verdict_score"),
+            "global_r": global_r,
+            "global_b": global_b,
+            "global_a": global_a,
+        },
+    )
+    
+    if has_valid_rgba:
+        # Deep claim-judge already provided RGBA - keep LLM output 1:1
+        Trace.event(
+            "cv.rgba_preserved",
+            {
+                "claim_id": cid,
+                "judge_mode": judge_mode,
+                "rgba": existing_rgba,
+            },
+        )
+    elif judge_mode == "deep":
+        # Deep mode but no RGBA from LLM - error handling
+        if claim_verdict.get("status") == "error":
+            # Expected: error claim has no RGBA
+            Trace.event(
+                "cv.rgba_deep_error_claim",
+                {
+                    "claim_id": cid,
+                    "judge_mode": "deep",
+                    "error_type": claim_verdict.get("error_type"),
+                    "note": "Error claim - no RGBA expected",
+                },
+            )
+        else:
+            # Unexpected: valid claim missing RGBA
+            claim_verdict["rgba"] = None
+            claim_verdict["rgba_error"] = "missing_from_llm"
+            Trace.event(
+                "cv.rgba_deep_missing",
+                {
+                    "claim_id": cid,
+                    "judge_mode": "deep",
+                    "verdict_score": claim_verdict.get("verdict_score"),
+                    "error": "Deep mode claim missing RGBA from judge - NOT using fallback",
+                },
+            )
+            logger.warning(
+                "[DeepMode] Claim %s missing RGBA from judge - marked as error",
+                cid,
+            )
+    else:
+        # Standard mode fallback: compute from global values
+        claim_verdict["rgba"] = [global_r, g_score, global_b, global_a]
+        Trace.event(
+            "cv.rgba_fallback",
+            {
+                "claim_id": cid,
+                "judge_mode": judge_mode,
+                "rgba": claim_verdict["rgba"],
+            },
+        )
+
+
+def enrich_claim_sources(
+    claim_verdict: dict[str, Any],
+    all_sources: list[dict[str, Any]],
+    enrich_func: Any,
+) -> None:
+    """
+    Filter and enrich sources for a specific claim.
+    
+    Args:
+        claim_verdict: Claim verdict dict (mutated in-place)
+        all_sources: All available sources (scored + context)
+        enrich_func: Function to enrich sources with trust metadata
+    """
+    from spectrue_core.verification.evidence_scoring import norm_id
+    
+    cid = norm_id(claim_verdict.get("claim_id"))
+    if not cid:
+        claim_verdict["sources"] = []
+        return
+    
+    # Filter sources for this claim
+    claim_sources = []
+    seen_urls = set()
+    
+    for s in all_sources:
+        if not isinstance(s, dict):
+            continue
+        
+        scid = norm_id(s.get("claim_id"))
+        # Match claim-specific sources OR shared sources (no claim_id)
+        if scid == cid or scid is None or s.get("claim_id") is None:
+            url = s.get("url")
+            if url and url not in seen_urls:
+                claim_sources.append(s)
+                seen_urls.add(url)
+    
+    # Enrich and assign
+    claim_verdict["sources"] = enrich_func(claim_sources)
+
+
+

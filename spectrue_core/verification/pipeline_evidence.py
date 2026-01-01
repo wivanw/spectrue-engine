@@ -82,6 +82,8 @@ from spectrue_core.verification.evidence_stance import (
     derive_verdict_from_score,
     detect_evidence_conflict,
     check_has_direct_evidence,
+    assign_claim_rgba,
+    enrich_claim_sources,
 )
 
 
@@ -246,8 +248,8 @@ async def run_evidence_flow(
 
     # NORMAL pipeline must be SINGLE-CLAIM (execution unit invariant).
     # This prevents multi-claim batch leakage (c1/c2 mentions) and cross-language mixing.
-    # NOTE: pipeline profile is passed via inp.pipeline by ValidationPipeline.
-    pipeline_profile = inp.pipeline or "normal"
+    # M119: Derive mode from explicit score_mode parameter (no inp.pipeline lookup)
+    is_normal_mode = (score_mode == "standard")
 
     # Language consistency validation (Phase 4 invariant)
     if claims and inp.content_lang:
@@ -255,20 +257,21 @@ async def run_evidence_flow(
             validate_claims_language_consistency,
         )
 
+        pipeline_mode_str = "normal" if is_normal_mode else "deep"
         lang_valid, lang_mismatches = validate_claims_language_consistency(
             claims,
             inp.content_lang,
-            pipeline_mode=pipeline_profile,
+            pipeline_mode=pipeline_mode_str,
             min_confidence=0.7,
         )
-        if not lang_valid and pipeline_profile == "normal":
+        if not lang_valid and is_normal_mode:
             # In normal mode, language mismatch is a violation
             raise RuntimeError(
                 f"Language mismatch in normal pipeline: expected={inp.content_lang}, "
                 f"mismatches={lang_mismatches}"
             )
 
-    if pipeline_profile == "normal" and claims:
+    if is_normal_mode and claims:
         if anchor_claim_id:
             claims = [
                 c
@@ -283,7 +286,7 @@ async def run_evidence_flow(
         Trace.event(
             "evidence_flow.single_claim.enforced",
             {
-                "profile": pipeline_profile,
+                "score_mode": score_mode,
                 "anchor_claim_id": str(anchor_claim_id or ""),
             },
         )
@@ -538,110 +541,24 @@ async def run_evidence_flow(
 
         all_scored = pack.get("scored_sources") or []
         all_context = pack.get("context_sources") or []
+        all_sources = all_scored + all_context
+        judge_mode = result.get("judge_mode", "standard")
 
         for cv in claim_verdicts:
             if not isinstance(cv, dict):
                 continue
-            cid = _norm_id(cv.get("claim_id"))
-            if not cid:
-                continue
 
-            # Filter sources for this claim
-            # Include: sources matching this claim_id OR shared sources (claim_id=None)
-            claim_sources = []
-            seen_urls = set()
-            for s in all_scored + all_context:
-                if not isinstance(s, dict):
-                    continue
-                scid = _norm_id(s.get("claim_id"))
-                # Match claim-specific sources OR shared sources (no claim_id)
-                if scid == cid or scid is None or s.get("claim_id") is None:
-                    url = s.get("url")
-                    if url and url not in seen_urls:
-                        claim_sources.append(s)
-                        seen_urls.add(url)
+            # Enrich per-claim sources using extracted function
+            enrich_claim_sources(cv, all_sources, enrich_sources_with_trust)
 
-            # Enrich per-claim sources
-            cv["sources"] = enrich_sources_with_trust(claim_sources)
-
-            # Per-claim RGBA handling
-            # Deep mode: LLM claim-judge provides cv["rgba"] - DO NOT overwrite
-            # Standard mode: compute from global values (fallback)
-            g_score = float(cv.get("verdict_score", 0.5) or 0.5)
-            existing_rgba = cv.get("rgba")
-            has_valid_rgba = (
-                isinstance(existing_rgba, list)
-                and len(existing_rgba) == 4
-                and all(isinstance(x, (int, float)) for x in existing_rgba)
+            # Assign RGBA using extracted function
+            assign_claim_rgba(
+                cv,
+                global_r=global_r,
+                global_b=global_b,
+                global_a=global_a,
+                judge_mode=judge_mode,
             )
-
-            Trace.event(
-                "cv.before_rgba_fill",
-                {
-                    "claim_id": cid,
-                    "judge_mode": result.get("judge_mode", "standard"),
-                    "has_rgba": has_valid_rgba,
-                    "existing_rgba": existing_rgba,
-                    "verdict_score": cv.get("verdict_score"),
-                    "global_r": global_r,
-                    "global_b": global_b,
-                    "global_a": global_a,
-                },
-            )
-
-            if has_valid_rgba:
-                # Deep claim-judge already provided RGBA - keep LLM output 1:1
-                # Contract: LLM output is final for deep mode
-                Trace.event(
-                    "cv.rgba_preserved",
-                    {
-                        "claim_id": cid,
-                        "judge_mode": result.get("judge_mode", "standard"),
-                        "rgba": existing_rgba,
-                    },
-                )
-            elif result.get("judge_mode") == "deep":
-                # Deep mode but no RGBA from LLM - this is an error!
-                # Check if this is an error claim from scoring
-                if cv.get("status") == "error":
-                    # Expected: error claim has no RGBA, leave as-is
-                    Trace.event(
-                        "cv.rgba_deep_error_claim",
-                        {
-                            "claim_id": cid,
-                            "judge_mode": "deep",
-                            "error_type": cv.get("error_type"),
-                            "note": "Error claim - no RGBA expected",
-                        },
-                    )
-                else:
-                    # Unexpected: valid claim missing RGBA - mark as error
-                    cv["rgba"] = None  # Do NOT use fallback
-                    cv["rgba_error"] = "missing_from_llm"
-                    Trace.event(
-                        "cv.rgba_deep_missing",
-                        {
-                            "claim_id": cid,
-                            "judge_mode": "deep",
-                            "verdict_score": cv.get("verdict_score"),
-                            "error": "Deep mode claim missing RGBA from judge - NOT using fallback",
-                        },
-                    )
-                    logger.warning(
-                        "[DeepMode] Claim %s missing RGBA from judge - marked as error",
-                        cid,
-                    )
-            else:
-                # Standard mode fallback: compute from global values
-                cv["rgba"] = [global_r, g_score, global_b, global_a]
-                Trace.event(
-                    "cv.rgba_fallback",
-                    {
-                        "claim_id": cid,
-                        "judge_mode": result.get("judge_mode", "standard"),
-                        "rgba": cv["rgba"],
-                    },
-                )
 
         changed = apply_dependency_penalties(claim_verdicts, claims)
         # Do NOT recompute article-level G as an average across claims.
