@@ -276,8 +276,8 @@ def test_evoi_function_high_entropy_at_uncertainty():
 
 def test_evoi_function_harm_increases_value():
     """Higher harm potential should increase EVOI."""
-    claim_high_harm = {"check_worthiness": 0.5, "harm_potential": 5.0}
-    claim_low_harm = {"check_worthiness": 0.5, "harm_potential": 1.0}
+    claim_high_harm = {"check_worthiness": 0.5, "harm_potential": 1.0}
+    claim_low_harm = {"check_worthiness": 0.5, "harm_potential": 0.2}
     
     evoi_high = _expected_value_of_information(claim_high_harm)
     evoi_low = _expected_value_of_information(claim_low_harm)

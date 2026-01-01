@@ -103,10 +103,9 @@ def _expected_value_of_information(
     # Claim-specific factors
     worthiness = float(claim.get("check_worthiness", claim.get("importance", 0.5)) or 0.5)
     harm = float(claim.get("harm_potential", 1.0) or 1.0)
-    # Normalize harm 1-5 scale to 0.2-1.0 factor
-    # harm=1 -> 0.2, harm=3 -> 0.6, harm=5 -> 1.0
-    harm = 0.2 + max(0.0, harm - 1.0) * 0.2
-    harm = min(1.0, harm)  # Cap at 1.0
+    # Clamp to 0-1 range
+    worthiness = max(0.0, min(1.0, worthiness))
+    harm = max(0.0, min(1.0, harm))
     
     # Confidence inversely affects EVOI (certain claims need less verification)
     conf = claim.get("metadata_confidence")
