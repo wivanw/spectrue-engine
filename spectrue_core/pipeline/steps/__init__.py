@@ -4,6 +4,8 @@
 Pipeline Steps Module
 
 Exports all available step implementations.
+
+M118: Legacy steps removed. All steps are now DAG-native.
 """
 
 from spectrue_core.pipeline.steps.invariants import (
@@ -13,11 +15,6 @@ from spectrue_core.pipeline.steps.invariants import (
     AssertMaxClaimsStep,
     AssertMeteringEnabledStep,
     get_invariant_steps_for_mode,
-)
-from spectrue_core.pipeline.steps.legacy import (
-    LegacyPhaseRunnerStep,
-    LegacyScoringStep,
-    LegacyClusteringStep,
 )
 from spectrue_core.pipeline.steps.decomposed import (
     MeteringSetupStep,
@@ -30,6 +27,12 @@ from spectrue_core.pipeline.steps.decomposed import (
     OracleFlowStep,
     ResultAssemblyStep,
 )
+from spectrue_core.pipeline.steps.deep_claim import (
+    BuildClaimFramesStep,
+    SummarizeEvidenceStep,
+    JudgeClaimsStep,
+    AssembleDeepResultStep,
+)
 
 __all__ = [
     # Invariant Steps
@@ -39,10 +42,6 @@ __all__ = [
     "AssertMaxClaimsStep",
     "AssertMeteringEnabledStep",
     "get_invariant_steps_for_mode",
-    # Legacy Steps
-    "LegacyPhaseRunnerStep",
-    "LegacyScoringStep",
-    "LegacyClusteringStep",
     # Decomposed Steps (M115)
     "MeteringSetupStep",
     "PrepareInputStep",
@@ -53,4 +52,9 @@ __all__ = [
     "EvidenceFlowStep",
     "OracleFlowStep",
     "ResultAssemblyStep",
+    # Deep Claim Steps (M117)
+    "BuildClaimFramesStep",
+    "SummarizeEvidenceStep",
+    "JudgeClaimsStep",
+    "AssembleDeepResultStep",
 ]

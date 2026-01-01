@@ -58,33 +58,30 @@ from spectrue_core.verification.search_policy import (
 )
 from spectrue_core.utils.trace import Trace
 
+# M118: Extracted scoring helpers
+from spectrue_core.verification.evidence_scoring import (
+    norm_id as _norm_id,
+    is_prob as _is_prob,
+    logit as _logit,
+    sigmoid as _sigmoid,
+    claim_text as _claim_text,
+    TIER_A_PRIOR_MEAN as _TIER_A_PRIOR_MEAN,
+    TIER_A_BASELINE as _TIER_A_BASELINE,
+    explainability_factor_for_tier as _explainability_factor_for_tier,
+    tier_rank as _tier_rank,
+    compute_article_g_from_anchor as _compute_article_g_from_anchor,
+    select_anchor_for_article_g as _select_anchor_for_article_g,
+    mark_anchor_duplicates_sync as _mark_anchor_duplicates_sync,
+    mark_anchor_duplicates_async as _mark_anchor_duplicates_async,
+)
+
+
 logger = logging.getLogger(__name__)
 
 
-def _norm_id(x: Any) -> str:
-    return str(x or "").strip().lower()
+# NOTE: Helper functions (_norm_id, _is_prob, _logit, _sigmoid, _claim_text) 
+# are now imported from evidence_scoring module (M118)
 
-
-def _is_prob(x: Any) -> bool:
-    return (
-        isinstance(x, (int, float))
-        and math.isfinite(float(x))
-        and 0.0 <= float(x) <= 1.0
-    )
-
-
-def _logit(p: float) -> float:
-    # Contract: p must be in (0,1). No clamping here.
-    return math.log(p / (1.0 - p))
-
-
-def _sigmoid(x: float) -> float:
-    return 1.0 / (1.0 + math.exp(-x))
-
-
-def _claim_text(cv: dict) -> str:
-    text = cv.get("claim_text") or cv.get("claim") or cv.get("text") or ""
-    return str(text).strip()
 
 
 def _aggregation_policy(search_mgr) -> dict:
