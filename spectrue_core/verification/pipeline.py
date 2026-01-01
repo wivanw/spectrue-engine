@@ -65,6 +65,9 @@ from spectrue_core.verification.ledger_models import (
     BudgetAllocation,
     RetrievalEvaluation,
 )
+from spectrue_core.verification.pipeline_metering import (
+    compute_budget_allocation,
+)
 from spectrue_core.verification.reason_codes import ReasonCodes
 from spectrue_core.verification.search_policy import decide_claim_policy
 from spectrue_core.verification.execution_plan import PolicyMode
@@ -77,6 +80,7 @@ import logging
 import asyncio
 from dataclasses import dataclass
 import hashlib
+
 
 logger = logging.getLogger(__name__)
 
@@ -291,31 +295,10 @@ class ValidationPipeline:
             )
             return entry
 
+        # M118: Use imported function from pipeline_metering
         def _budget_allocation_for_metadata(metadata) -> BudgetAllocation:
-            worthiness = float(getattr(metadata, "check_worthiness", 0.5) or 0.5)
-            if worthiness >= 0.75:
-                return BudgetAllocation(
-                    worthiness_tier="high",
-                    max_queries=3,
-                    max_docs=8,
-                    max_escalations=2,
-                    defer_allowed=False,
-                )
-            if worthiness <= 0.35:
-                return BudgetAllocation(
-                    worthiness_tier="low",
-                    max_queries=1,
-                    max_docs=3,
-                    max_escalations=0,
-                    defer_allowed=True,
-                )
-            return BudgetAllocation(
-                worthiness_tier="medium",
-                max_queries=2,
-                max_docs=5,
-                max_escalations=1,
-                defer_allowed=False,
-            )
+            return compute_budget_allocation(metadata)
+
 
         prior_llm_meter = getattr(self.agent.llm_client, "_meter", None)
         prior_tavily_meter = getattr(self.search_mgr.web_tool._tavily, "_meter", None)
