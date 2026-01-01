@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Awaitable, Callable, Any
 
-import asyncio
 import logging
 import math
 
@@ -58,33 +57,30 @@ from spectrue_core.verification.search_policy import (
 )
 from spectrue_core.utils.trace import Trace
 
+# M118: Extracted scoring helpers
+from spectrue_core.verification.evidence_scoring import (
+    norm_id as _norm_id,
+    is_prob as _is_prob,
+    logit as _logit,
+    sigmoid as _sigmoid,
+    claim_text as _claim_text,
+    TIER_A_PRIOR_MEAN as _TIER_A_PRIOR_MEAN,
+    TIER_A_BASELINE as _TIER_A_BASELINE,
+    explainability_factor_for_tier as _explainability_factor_for_tier,
+    tier_rank as _tier_rank,
+    compute_article_g_from_anchor as _compute_article_g_from_anchor,
+    select_anchor_for_article_g as _select_anchor_for_article_g,
+    mark_anchor_duplicates_sync as _mark_anchor_duplicates_sync,
+    mark_anchor_duplicates_async as _mark_anchor_duplicates_async,
+)
+
+
 logger = logging.getLogger(__name__)
 
 
-def _norm_id(x: Any) -> str:
-    return str(x or "").strip().lower()
+# NOTE: Helper functions (_norm_id, _is_prob, _logit, _sigmoid, _claim_text) 
+# are now imported from evidence_scoring module (M118)
 
-
-def _is_prob(x: Any) -> bool:
-    return (
-        isinstance(x, (int, float))
-        and math.isfinite(float(x))
-        and 0.0 <= float(x) <= 1.0
-    )
-
-
-def _logit(p: float) -> float:
-    # Contract: p must be in (0,1). No clamping here.
-    return math.log(p / (1.0 - p))
-
-
-def _sigmoid(x: float) -> float:
-    return 1.0 / (1.0 + math.exp(-x))
-
-
-def _claim_text(cv: dict) -> str:
-    text = cv.get("claim_text") or cv.get("claim") or cv.get("text") or ""
-    return str(text).strip()
 
 
 def _aggregation_policy(search_mgr) -> dict:
@@ -102,278 +98,15 @@ def _aggregation_policy(search_mgr) -> dict:
     }
 
 
-def _mark_anchor_duplicates_sync(
-    *,
-    anchor_claim_id: str | None,
-    claim_verdicts: list[dict],
-    embed_service: type[EmbedService] = EmbedService,
-    tau: float = 0.90,
-) -> None:
-    """
-    Sync implementation of anchor duplicate marking.
-    """
-    if not anchor_claim_id or not claim_verdicts:
-        return
-    if not embed_service.is_available():
-        return
-
-    anchor_norm = _norm_id(anchor_claim_id)
-    anc = next(
-        (
-            cv
-            for cv in claim_verdicts
-            if isinstance(cv, dict) and _norm_id(cv.get("claim_id")) == anchor_norm
-        ),
-        None,
-    )
-    if not anc:
-        return
-
-    anchor_text = _claim_text(anc)
-    if not anchor_text:
-        return
-
-    candidates: list[str] = []
-    candidate_refs: list[dict] = []
-    for cv in claim_verdicts:
-        if not isinstance(cv, dict):
-            continue
-        if _norm_id(cv.get("claim_id")) == anchor_norm:
-            continue
-        txt = _claim_text(cv)
-        if not txt:
-            continue
-        candidates.append(txt)
-        candidate_refs.append(cv)
-
-    if not candidates:
-        return
-
-    scores = embed_service.batch_similarity(anchor_text, candidates)
-    for cv, sim in zip(candidate_refs, scores):
-        if not isinstance(sim, (int, float)) or not math.isfinite(float(sim)):
-            continue
-        if sim >= tau:
-            cv["duplicate_of_anchor"] = True
-            cv["dup_sim"] = float(sim)
-        else:
-            cv["duplicate_of_anchor"] = False
-
-
-async def _mark_anchor_duplicates_async(
-    *,
-    anchor_claim_id: str | None,
-    claim_verdicts: list[dict],
-    embed_service: type[EmbedService] = EmbedService,
-    tau: float = 0.90,
-) -> None:
-    """
-    Async version: runs embedding in thread pool to avoid blocking.
-    """
-    if not anchor_claim_id or not claim_verdicts:
-        return
-    if not embed_service.is_available():
-        return
-
-    import concurrent.futures
-    from functools import partial
-
-    loop = asyncio.get_running_loop()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        await loop.run_in_executor(
-            executor,
-            partial(
-                _mark_anchor_duplicates_sync,
-                anchor_claim_id=anchor_claim_id,
-                claim_verdicts=claim_verdicts,
-                embed_service=embed_service,
-                tau=tau,
-            ),
-        )
-
-
-def _mark_anchor_duplicates(
-    *,
-    anchor_claim_id: str | None,
-    claim_verdicts: list[dict],
-    embed_service: type[EmbedService] = EmbedService,
-    tau: float = 0.90,
-) -> None:
-    """
-    Mark secondary claims that are semantic duplicates of the anchor claim.
-    Contract:
-      - anchor vs secondary only
-      - embedding-based cosine similarity
-      - no filtering, only marking
-
-    Note: This is a sync wrapper. Use _mark_anchor_duplicates_async in async context.
-    """
-    _mark_anchor_duplicates_sync(
-        anchor_claim_id=anchor_claim_id,
-        claim_verdicts=claim_verdicts,
-        embed_service=embed_service,
-        tau=tau,
-    )
-
-
-def _compute_article_g_from_anchor(
-    *,
-    anchor_claim_id: str | None,
-    claim_verdicts: list[dict] | None,
-    prior_p: float = 0.5,
-) -> tuple[float, dict]:
-    """
-    Pure formula (no orchestration heuristics):
-      G = sigmoid( logit(prior_p) + k * logit(p_anchor) )
-    where:
-      p_anchor = verdict_score for anchor claim
-      k = 0 if verdict_state is insufficient_evidence, else 1
-
-    If anchor is missing or invalid, return prior_p (neutral).
-    """
-    debug = {
-        "anchor_claim_id": anchor_claim_id,
-        "used_anchor": False,
-        "k": 0.0,
-        "p_anchor": None,
-        "prior_p": prior_p,
-    }
-    if not anchor_claim_id or not isinstance(claim_verdicts, list):
-        return float(prior_p), debug
-
-    anc_norm = _norm_id(anchor_claim_id)
-    cv = next(
-        (
-            x
-            for x in claim_verdicts
-            if isinstance(x, dict) and _norm_id(x.get("claim_id")) == anc_norm
-        ),
-        None,
-    )
-    if not cv:
-        return float(prior_p), debug
-
-    p = cv.get("verdict_score")
-    if not isinstance(p, (int, float)) or not math.isfinite(float(p)):
-        return float(prior_p), debug
-    p = float(p)
-    if not (0.0 < p < 1.0):
-        return float(prior_p), debug
-
-    vs = str(cv.get("verdict_state") or "").strip().lower()
-    k = 0.0 if vs == "insufficient_evidence" else 1.0
-    debug.update({"used_anchor": True, "k": k, "p_anchor": p})
-
-    L = _logit(float(prior_p)) + (k * _logit(p))
-    return float(_sigmoid(L)), debug
+# M118: The following functions are now imported from evidence_scoring module:
+#   - _mark_anchor_duplicates_sync, _mark_anchor_duplicates_async
+#   - _compute_article_g_from_anchor, _select_anchor_for_article_g
+#   - _explainability_factor_for_tier, _TIER_A_PRIOR_MEAN, _TIER_A_BASELINE
+#   - _norm_id, _is_prob, _logit, _sigmoid, _claim_text
+# See imports at top of file.
 
 
 ProgressCallback = Callable[[str], Awaitable[None]]
-
-
-# Tier is a first-class prior on A (Explainability) ONLY.
-# It must not bias veracity (G) or verdicts.
-_TIER_A_PRIOR_MEAN = {
-    "A": 0.96,
-    "A'": 0.93,
-    "B": 0.90,
-    "C": 0.85,
-    "D": 0.80,
-    "UNKNOWN": 0.38,
-}
-_TIER_A_BASELINE = _TIER_A_PRIOR_MEAN["B"]
-
-
-def _explainability_factor_for_tier(tier: str | None) -> tuple[float, str, float]:
-    if not tier:
-        prior = _TIER_A_PRIOR_MEAN["UNKNOWN"]
-        return prior / _TIER_A_BASELINE, "unknown_default", prior
-    prior = _TIER_A_PRIOR_MEAN.get(
-        str(tier).strip().upper(), _TIER_A_PRIOR_MEAN["UNKNOWN"]
-    )
-    return prior / _TIER_A_BASELINE, "best_tier", prior
-
-
-def _select_anchor_for_article_g(
-    *,
-    anchor_claim_id: str | None,
-    claim_verdicts: list[dict] | None,
-    veracity_debug: list[dict],
-) -> tuple[str | None, dict]:
-    debug: dict = {
-        "pre_anchor_id": anchor_claim_id,
-        "selected_anchor_id": anchor_claim_id,
-        "override_used": False,
-        "reason": "no_candidates",
-    }
-    if not claim_verdicts or not veracity_debug:
-        return anchor_claim_id, debug
-
-    verdict_score_by_claim: dict[str, float] = {}
-    for cv in claim_verdicts:
-        if not isinstance(cv, dict):
-            continue
-        cid = _norm_id(cv.get("claim_id"))
-        if not cid:
-            continue
-        score = cv.get("verdict_score")
-        if isinstance(score, (int, float)) and math.isfinite(float(score)):
-            verdict_score_by_claim[cid] = float(score)
-
-    candidates: list[dict] = []
-    for entry in veracity_debug:
-        if not isinstance(entry, dict):
-            continue
-        cid = _norm_id(entry.get("claim_id"))
-        if not cid:
-            continue
-        if not entry.get("has_direct_evidence"):
-            continue
-        p = verdict_score_by_claim.get(cid)
-        if p is None or not (0.0 < p < 1.0):
-            continue
-        best_tier = entry.get("best_tier")
-        factor, source, _prior = _explainability_factor_for_tier(best_tier)
-        if not isinstance(factor, (int, float)) or not math.isfinite(float(factor)):
-            continue
-        factor = max(0.0, float(factor))
-        score = abs(p - 0.5) * factor
-        candidates.append(
-            {
-                "id": cid,
-                "score": score,
-                "p": p,
-                "best_tier": best_tier,
-                "factor": factor,
-                "factor_source": source,
-            }
-        )
-
-    if not candidates:
-        return anchor_claim_id, debug
-
-    candidates.sort(key=lambda c: c["score"], reverse=True)
-    best = candidates[0]
-    if best["score"] <= 0:
-        debug["reason"] = "non_informative"
-        return anchor_claim_id, debug
-
-    selected_id = best["id"]
-    debug.update(
-        {
-            "selected_anchor_id": selected_id,
-            "override_used": _norm_id(selected_id) != _norm_id(anchor_claim_id),
-            "reason": "evidence_weighted_distance",
-            "selected_score": best["score"],
-            "selected_p": best["p"],
-            "selected_best_tier": best["best_tier"],
-            "selected_factor": best["factor"],
-            "selected_factor_source": best["factor_source"],
-            "candidate_count": len(candidates),
-            "top_candidates": candidates[:3],
-        }
-    )
-    return selected_id, debug
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,12 +135,19 @@ async def run_evidence_flow(
     inp: EvidenceFlowInput,
     claims: list[dict],
     sources: list[dict],
+    score_mode: str = "standard",  # M118: "standard" (single LLM call) or "parallel" (per-claim)
 ) -> dict:
     """
     Analysis + scoring: clustering, social verification, evidence pack, scoring, finalize.
 
+    Args:
+        score_mode: Scoring strategy - "standard" for single LLM call (normal mode),
+                   "parallel" for per-claim scoring (deep mode).
+                   M118: This replaces implicit is_deep_mode derivation from pipeline_profile.
+
     Matches existing pipeline behavior; expects sources/claims to be mutable dict shapes.
     """
+
     if inp.progress_callback:
         await inp.progress_callback("ai_analysis")
 
@@ -555,16 +295,14 @@ async def run_evidence_flow(
     if inp.progress_callback:
         await inp.progress_callback("score_evidence")
 
-    # LLM scoring call
-    # - In 'deep' profile, we use per-claim scoring (either via JudgeClaimsStep in DAG
-    #   or score_evidence_parallel for legacy flow)
-    # - In 'normal' profile, use standard single-call scoring
-    is_deep_mode = pipeline_profile == "deep"
+    # M118: LLM scoring call controlled by explicit score_mode parameter
+    # - "parallel": per-claim scoring (deep mode)
+    # - "standard": single LLM call for batch scoring (normal mode)
+    # Note: score_mode is passed explicitly by caller (factory determines it)
+    use_parallel_scoring = score_mode == "parallel"
 
-    if is_deep_mode:
-        # Deep mode: use parallel per-claim scoring
-        # Each claim gets its own LLM call with individual RGBA
-        # This avoids timeout on large prompts and gives true per-claim scores
+    if use_parallel_scoring:
+        # Per-claim scoring: each claim gets its own LLM call with individual RGBA
         result = await agent.score_evidence_parallel(
             pack, model=inp.gpt_model, lang=inp.lang, max_concurrency=5
         )
@@ -572,10 +310,9 @@ async def run_evidence_flow(
         # Standard mode: single LLM call for batch scoring
         result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
 
-    # Track judge mode for downstream logic:
-    # - "standard" (normal pipeline): single article-level LLM judge, global RGBA
-    # - "deep": per-claim LLM judges, each claim has its own RGBA
-    result["judge_mode"] = "deep" if is_deep_mode else "standard"
+    # Track judge mode for downstream logic
+    result["judge_mode"] = "deep" if use_parallel_scoring else "standard"
+
 
     if str(result.get("status", "")).lower() == "error":
         result["status"] = "error"

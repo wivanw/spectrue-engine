@@ -6,16 +6,6 @@
 # it under the terms of the GNU Affero General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-#
-# Spectrue Engine is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
-#
-# Constants for Google CSE (loaded from env usually, but defined here for legacy compat if they were here)
-# Upon review, these were NOT in trusted_sources.py, they were likely imported from there by mistake in my previous turn.
-# I will NOT add them here. I will fix verifier.py instead.
-
 
 """
 Tier 1 Trusted Sources Registry (v2)
@@ -415,4 +405,3 @@ def is_social_platform(domain: str) -> bool:
             return True
 
     return False
-

@@ -1,14 +1,174 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+from typing import Any, Callable, List, Optional, Tuple
+
+from spectrue_core.runtime_config import ContentBudgetConfig
+from spectrue_core.analysis.content_budgeter import ContentBudgeter, TrimResult
 
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.url_utils import get_registrable_domain
 
 logger = logging.getLogger(__name__)
+
+
+async def verify_inline_sources(
+    *,
+    inline_sources: List[dict],
+    claims: List[Any],
+    fact: str,
+    agent: Any,
+    search_mgr: Any = None,
+    content_budget_config: Optional[ContentBudgetConfig] = None,
+    progress_callback: Optional[Callable] = None,
+) -> List[dict]:
+    """
+    Verify inline sources against claims.
+    
+    Args:
+        inline_sources: List of source dicts
+        claims: List of claim objects
+        fact: The verification fact/text
+        agent: FactCheckerAgent for relevance check
+        search_mgr: SearchManager for ladder and fetching
+        content_budget_config: Config for budgeting fetched content
+        progress_callback: Async callback for progress
+        
+    Returns:
+        List of verified inline sources (added to final_sources)
+    """
+    if not inline_sources or not claims:
+        return []
+
+    if progress_callback:
+        await progress_callback("verifying_sources")
+
+    article_excerpt = fact[:500] if fact else ""
+    verified_inline_sources = []
+
+    verification_tasks = [
+        agent.verify_inline_source_relevance(claims, src, article_excerpt)
+        for src in inline_sources
+    ]
+    verification_results = await asyncio.gather(*verification_tasks, return_exceptions=True)
+
+    for src, result in zip(inline_sources, verification_results):
+        if isinstance(result, Exception):
+            logger.warning("[Pipeline] Inline source verification failed: %s", result)
+            src["is_primary"] = False
+            src["is_relevant"] = True
+            verified_inline_sources.append(src)
+            continue
+
+        is_relevant = result.get("is_relevant", True)
+        is_primary = result.get("is_primary", False)
+
+        if not is_relevant:
+            logger.debug("[Pipeline] Inline source rejected: %s", src.get("domain"))
+            continue
+
+        src["is_primary"] = is_primary
+        src["is_relevant"] = True
+        if is_primary:
+            src["is_trusted"] = True
+        verified_inline_sources.append(src)
+        logger.debug(
+            "[Pipeline] Inline source %s: relevant=%s, primary=%s",
+            src.get("domain"),
+            is_relevant,
+            is_primary,
+        )
+
+    if verified_inline_sources:
+        if search_mgr and hasattr(search_mgr, "apply_evidence_acquisition_ladder"):
+            verified_inline_sources = await search_mgr.apply_evidence_acquisition_ladder(
+                verified_inline_sources
+            )
+        Trace.event(
+            "pipeline.inline_sources_verified",
+            {
+                "total": len(inline_sources),
+                "passed": len(verified_inline_sources),
+                "primary": len([s for s in verified_inline_sources if s.get("is_primary")]),
+            },
+        )
+
+        # Fetch content for primary inline sources
+        primary_sources = [s for s in verified_inline_sources if s.get("is_primary")]
+        if primary_sources and search_mgr and content_budget_config:
+            for src in primary_sources[:2]:  # Limit to 2 primary sources
+                url = src.get("url", "")
+                if url and not src.get("content"):
+                    try:
+                        fetched = await search_mgr.web_tool.fetch_page_content(url)
+                        if fetched and len(fetched) > 100:
+                            budgeted_content, _ = apply_content_budget(
+                                fetched, content_budget_config, source="inline_source"
+                            )
+                            src["content"] = budgeted_content
+                            src["snippet"] = budgeted_content[:300]
+                            Trace.event("inline_source.content_fetched", {
+                                "url": url[:80],
+                                "chars": len(fetched),
+                            })
+                    except Exception as e:
+                        logger.debug("[Pipeline] Failed to fetch inline source: %s", e)
+
+    return verified_inline_sources
+
+
+
+def apply_content_budget(
+    text: str,
+    config: ContentBudgetConfig,
+    source: str = "unknown"
+) -> Tuple[str, Optional[TrimResult]]:
+    """
+    Apply deterministic content budgeting to plain text.
+    
+    Args:
+        text: Raw text to trim
+        config: Budget configuration
+        source: Source identifier for tracing events
+        
+    Returns:
+        Tuple of (trimmed_text, TrimResult or None)
+    """
+    if not text:
+        return text, None
+        
+    raw_len = len(text)
+    if raw_len > int(config.absolute_guardrail_chars):
+        Trace.event(
+            "content_budgeter.guardrail",
+            {
+                "raw_len": raw_len,
+                "absolute_guardrail_chars": int(config.absolute_guardrail_chars),
+                "source": source
+            },
+        )
+        raise ValueError("Input too large to process safely")
+
+    if raw_len <= int(config.max_clean_text_chars_default):
+        return text, None
+
+    budgeter = ContentBudgeter(config)
+    res = budgeter.trim_text(text)
+    return res.text, res
+
 
 
 def is_url_input(text: str) -> bool:

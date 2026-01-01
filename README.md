@@ -145,7 +145,7 @@ The core verification process follows this pipeline:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## 🎯 Claim-Centric Orchestration (M80)
+## 🎯 Claim-Centric Orchestration
 
 The engine uses metadata-driven routing to optimize verification:
 
@@ -279,7 +279,7 @@ print(f"Confidence: {result['confidence_score']:.2f}")
 print(f"Analysis: {result['rationale']}")
 ```
 
-### With Claim Orchestration (M80)
+### With Claim Orchestration
 
 ```python
 from spectrue_core.verification.orchestrator import ClaimOrchestrator
@@ -333,23 +333,31 @@ spectrue_core/
 │       └── relevance.py   # Semantic gating
 │
 ├── schema/                # Data types
-│   ├── claim_metadata.py  # M80: ClaimMetadata, VerificationTarget
+│   ├── claim_metadata.py  # ClaimMetadata, VerificationTarget
 │   ├── claims.py          # ClaimUnit, Assertion
 │   ├── verdict.py         # StructuredVerdict
 │   └── serialization.py   # Canonical JSON-safe serialization helpers
 │
-├── verification/          # Verification pipeline
-│   ├── pipeline.py        # Main orchestrator
-│   ├── orchestrator.py    # M80: ClaimOrchestrator
-│   ├── execution_plan.py  # M80: Phase, ExecutionPlan
-│   ├── phase_runner.py    # M80: PhaseRunner
-│   ├── sufficiency.py     # M80: Evidence sufficiency
-│   ├── rgba_aggregation.py# M80: Weighted RGBA
+├── pipeline/              # Pipeline Composition (DAG)
+│   ├── factory.py         # PipelineFactory (Mode -> DAG)
+│   ├── dag.py             # DAGPipeline & Execution Engine
+│   ├── core.py            # Step protocols & Context
+│   └── steps/             # Decomposed Pipeline Steps (Native)
+│
+├── verification/          # Verification Logic
+│   ├── pipeline.py        # Pipeline Facade (DAG Entry Point)
+│   ├── pipeline_metering.py # Cost tracking & PhaseTracker
+│   ├── evidence_scoring.py # Evidence scoring helpers
+│   ├── orchestrator.py    # ClaimOrchestrator
+│   ├── execution_plan.py  # Phase, ExecutionPlan
+│   ├── phase_runner.py    # PhaseRunner (Progressive Widening)
+│   ├── sufficiency.py     # Evidence sufficiency
+│   ├── rgba_aggregation.py# Weighted RGBA
 │   ├── evidence.py        # Evidence pack builder
 │   ├── evidence_pack.py   # Data structures
 │   └── search_mgr.py      # Search orchestration
 │
-├── graph/                 # ClaimGraph (M72)
+├── graph/                 # ClaimGraph
 │   ├── claim_graph.py     # Build pipeline orchestration
 │   ├── candidates.py      # B-stage: candidate generation
 │   ├── ranking.py         # Ranking (PageRank)
@@ -380,8 +388,8 @@ export GOOGLE_FACT_CHECK_KEY="..."  # For Oracle
 export SPECTRUE_ENGINE_DEBUG=true   # Enable debug logging
 
 # Feature Flags
-export FEATURE_CLAIM_ORCHESTRATION=true  # Enable M80 orchestration
-export M80_MAX_CONCURRENT_SEARCHES=3     # Parallel search limit
+export FEATURE_CLAIM_ORCHESTRATION=true  # Enable Orchestration
+export MAX_CONCURRENT_SEARCHES=3         # Parallel search limit
 
 # Trace Configuration
 export TRACE_SAFE_PAYLOADS=true    # Sanitize logs (default: true)
@@ -405,14 +413,14 @@ config = SpectrueConfig(
 ```bash
 # Run core suite
 pytest tests/unit tests/test_*.py \
-  tests/integration/test_m80_orchestration.py \
-  tests/integration/test_m81_calibration.py \
+  tests/integration/test_orchestration.py \
+  tests/integration/test_calibration.py \
   tests/integration/test_verification_pipeline.py
 
 # Run specific test suite
 pytest tests/unit/test_orchestrator.py -v
 pytest tests/unit/test_sufficiency.py -v
-pytest tests/integration/test_m80_orchestration.py -v
+pytest tests/integration/test_orchestration.py -v
 
 # With coverage
 pytest --cov=spectrue_core

@@ -7,8 +7,6 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-# Spectrue Engine - main entry point
-
 import logging
 import json
 from typing import Dict, Any, Optional, List

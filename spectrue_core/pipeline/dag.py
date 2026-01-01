@@ -1,3 +1,12 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
@@ -320,7 +329,7 @@ def build_normal_pipeline_dag(
                         │          SearchFlow ──▶ EvidenceFlow ──▶ ResultAssembly
                         └───────────────────────────────────────────────────────┘
     """
-    from spectrue_core.pipeline.steps.decomposed import (
+    from spectrue_core.pipeline.steps import (
         MeteringSetupStep,
         PrepareInputStep,
         ExtractClaimsStep,
@@ -344,7 +353,7 @@ def build_normal_pipeline_dag(
         # Invariants (after metering, before claims)
         StepNode(
             step=AssertNonEmptyClaimsStep(),
-            depends_on=["metering_setup"],
+            depends_on=["extract_claims"],
         ),
 
         # Input preparation

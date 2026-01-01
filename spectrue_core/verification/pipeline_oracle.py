@@ -1,3 +1,12 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -28,6 +37,10 @@ class OracleFlowInput:
     oracle_check_intents: set[str]
     oracle_skip_intents: set[str]
     progress_callback: ProgressCallback | None
+
+# Define shared constants for Oracle intents
+ORACLE_CHECK_INTENT = {"news", "claim", "rumor", "general", "fact", "stat", "quote"}
+ORACLE_SKIP_INTENT = {"opinion", "prediction", "analysis", "satire", "review", "personal_story"}
 
 
 @dataclass(slots=True)

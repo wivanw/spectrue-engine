@@ -1,16 +1,28 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 """
 Pipeline Factory
 
-Builds Pipeline instances with the correct step composition for each mode.
+Builds DAGPipeline instances with the correct step composition for each mode.
 This is the single place where mode -> step sequence mapping is defined.
+
+M118: Removed legacy steps. All pipelines now use DAG architecture with
+decomposed steps. No more `if(deep)` conditionals in pipeline code.
 
 Usage:
     from spectrue_core.pipeline.factory import PipelineFactory
 
     factory = PipelineFactory(search_mgr=search_mgr, agent=agent)
-    pipeline = factory.build("normal")  # or "deep"
+    pipeline = factory.build("normal", config=config, pipeline=validation_pipeline)
     result = await pipeline.run(ctx)
 """
 
@@ -18,24 +30,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from spectrue_core.pipeline.dag import DAGPipeline
 
-from spectrue_core.pipeline.core import Pipeline, Step
-from spectrue_core.pipeline.mode import PipelineMode, get_mode
+from spectrue_core.pipeline.mode import get_mode
 from spectrue_core.pipeline.steps.invariants import (
     AssertNonEmptyClaimsStep,
     AssertSingleClaimStep,
-    AssertSingleLanguageStep,
 )
-from spectrue_core.pipeline.steps.legacy import (
-    LegacyPhaseRunnerStep,
-    LegacyScoringStep,
-    LegacyClusteringStep,
-)
-
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +47,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PipelineFactory:
     """
-    Factory for building Pipeline instances.
+    Factory for building DAGPipeline instances.
 
     The factory is the ONLY place where mode -> step sequence is defined.
     This eliminates scattered if-statements throughout the codebase.
+
+    M118: All methods now build DAGPipeline. Legacy Pipeline class is deprecated.
 
     Attributes:
         search_mgr: SearchManager for retrieval steps
@@ -56,95 +62,54 @@ class PipelineFactory:
     search_mgr: Any  # SearchManager
     agent: Any  # FactCheckerAgent
 
-    def build(self, mode_name: str) -> Pipeline:
+    def build(
+        self,
+        mode_name: str = "normal", # Default if not specified, though caller usually specifies
+        *,
+        config: Any,
+        extraction_only: bool = False,
+    ) -> "DAGPipeline":
         """
-        Build a Pipeline for the specified mode.
+        Build a DAGPipeline with decomposed steps.
+
+        This is the primary entry point for pipeline construction.
+        All mode logic is encapsulated here.
 
         Args:
             mode_name: "normal", "general", or "deep"
+            config: SpectrueConfig
 
         Returns:
-            Pipeline configured with the correct step sequence
+            DAGPipeline configured with decomposed steps for the mode
         """
+        from spectrue_core.pipeline.dag import DAGPipeline
+
         mode = get_mode(mode_name)
 
-        if mode.name == "normal":
-            return self._build_normal_pipeline(mode)
+        if extraction_only:
+            mode_name = "normal" # Default mode for context
+            mode = get_mode(mode_name) # Ensure mode object exists
+            nodes = self._build_extraction_dag_nodes(config)
+        elif mode.name == "normal":
+            nodes = self._build_normal_dag_nodes(config)
         else:
-            return self._build_deep_pipeline(mode)
-
-    def _build_normal_pipeline(self, mode: PipelineMode) -> Pipeline:
-        """
-        Build pipeline for normal/general mode.
-
-        Normal mode characteristics:
-        - Single claim only
-        - Single language
-        - Basic search depth
-        - No clustering
-        """
-        steps: list[Step] = [
-            # Invariant gates (fail fast)
-            AssertNonEmptyClaimsStep(),
-            AssertSingleClaimStep(),
-            AssertSingleLanguageStep(),
-            # Retrieval
-            LegacyPhaseRunnerStep(
-                search_mgr=self.search_mgr,
-                agent=self.agent,
-                use_retrieval_loop=True,
-            ),
-            # Scoring
-            LegacyScoringStep(agent=self.agent),
-        ]
+            nodes = self._build_deep_dag_nodes(config)
 
         logger.debug(
-            "[PipelineFactory] Built normal pipeline with %d steps: %s",
-            len(steps),
-            [s.name for s in steps],
+            "[PipelineFactory] Built DAG pipeline with %d nodes: %s",
+            len(nodes),
+            [n.name for n in nodes],
         )
 
-        return Pipeline(mode=mode, steps=steps)
+        return DAGPipeline(mode=mode, nodes=nodes)
 
-    def _build_deep_pipeline(self, mode: PipelineMode) -> Pipeline:
-        """
-        Build pipeline for deep mode.
-
-        Deep mode characteristics:
-        - Batch claims allowed
-        - Multi-language allowed
-        - Advanced search depth
-        - Clustering enabled
-        """
-        steps: list[Step] = [
-            # Minimal invariants (just need claims)
-            AssertNonEmptyClaimsStep(),
-            # Retrieval (advanced)
-            LegacyPhaseRunnerStep(
-                search_mgr=self.search_mgr,
-                agent=self.agent,
-                use_retrieval_loop=True,
-            ),
-            # Clustering (deep mode only)
-            LegacyClusteringStep(agent=self.agent),
-            # Scoring (batch)
-            LegacyScoringStep(agent=self.agent),
-        ]
-
-        logger.debug(
-            "[PipelineFactory] Built deep pipeline with %d steps: %s",
-            len(steps),
-            [s.name for s in steps],
-        )
-
-        return Pipeline(mode=mode, steps=steps)
-
-    def build_from_profile(self, profile_name: str) -> Pipeline:
+    def build_from_profile(self, profile_name: str, *, config: Any) -> "DAGPipeline":
         """
         Build pipeline from a profile name.
 
         Maps profile names to modes:
         - "normal" -> normal mode
+        - "general" -> normal mode
         - "deep" -> deep mode
 
         This allows integration with the existing pipeline_builder module.
@@ -156,59 +121,23 @@ class PipelineFactory:
         }
 
         mode_name = mode_mapping.get(profile_name.lower(), "normal")
-        return self.build(mode_name)
+        return self.build(mode_name, config=config)
 
-    def build_dag(
-        self,
-        mode_name: str,
-        *,
-        config: Any,
-        pipeline: Any,  # ValidationPipeline
-    ) -> "DAGPipeline":
-        """
-        Build a DAGPipeline with decomposed steps.
-
-        This is the M115 replacement for build() that uses native Steps
-        instead of legacy wrappers.
-
-        Args:
-            mode_name: "normal", "general", or "deep"
-            config: SpectrueConfig
-            pipeline: ValidationPipeline (for _prepare_input access)
-
-        Returns:
-            DAGPipeline configured with decomposed steps
-        """
-        from spectrue_core.pipeline.dag import DAGPipeline
-
-        mode = get_mode(mode_name)
-
-        if mode.name == "normal":
-            nodes = self._build_normal_dag_nodes(config, pipeline)
-        else:
-            nodes = self._build_deep_dag_nodes(config, pipeline)
-
-        logger.debug(
-            "[PipelineFactory] Built DAG pipeline with %d nodes: %s",
-            len(nodes),
-            [n.name for n in nodes],
-        )
-
-        return DAGPipeline(mode=mode, nodes=nodes)
-
-    def _build_normal_dag_nodes(self, config: Any, pipeline: Any) -> list:
+    def _build_normal_dag_nodes(self, config: Any) -> list:
         """Build DAG nodes for normal mode."""
         from spectrue_core.pipeline.dag import StepNode
-        from spectrue_core.pipeline.steps.decomposed import (
-            MeteringSetupStep,
-            PrepareInputStep,
-            ExtractClaimsStep,
+        from spectrue_core.pipeline.steps import (
             ClaimGraphStep,
-            TargetSelectionStep,
-            SearchFlowStep,
             EvidenceFlowStep,
+            ExtractClaimsStep,
+            MeteringSetupStep,
             OracleFlowStep,
+            PrepareInputStep,
             ResultAssemblyStep,
+            EvaluateSemanticGatingStep,
+            SearchFlowStep,
+            TargetSelectionStep,
+            VerifyInlineSourcesStep,
         )
 
         return [
@@ -218,19 +147,25 @@ class PipelineFactory:
             # Invariants
             StepNode(
                 step=AssertNonEmptyClaimsStep(),
-                depends_on=["metering_setup"],
+                depends_on=["extract_claims"],
             ),
 
             # Input preparation
             StepNode(
-                step=PrepareInputStep(pipeline=pipeline),
-                depends_on=["assert_non_empty_claims"],
+                step=PrepareInputStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
+                depends_on=["metering_setup"],
             ),
 
             # Claim extraction
             StepNode(
                 step=ExtractClaimsStep(agent=self.agent),
                 depends_on=["prepare_input"],
+            ),
+
+            # Inline source verification
+            StepNode(
+                step=VerifyInlineSourcesStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
+                depends_on=["extract_claims"],
             ),
 
             # Normal mode: single claim check
@@ -241,7 +176,7 @@ class PipelineFactory:
 
             # Oracle fast path (optional)
             StepNode(
-                step=OracleFlowStep(pipeline=pipeline),
+                step=OracleFlowStep(search_mgr=self.search_mgr),
                 depends_on=["assert_single_claim"],
                 optional=True,
             ),
@@ -259,6 +194,12 @@ class PipelineFactory:
                 depends_on=["claim_graph", "oracle_flow"],
             ),
 
+            # Semantic Gating (filter candidates)
+            StepNode(
+                step=EvaluateSemanticGatingStep(agent=self.agent),
+                depends_on=["target_selection"],
+            ),
+
             # Search retrieval
             StepNode(
                 step=SearchFlowStep(
@@ -266,10 +207,10 @@ class PipelineFactory:
                     search_mgr=self.search_mgr,
                     agent=self.agent,
                 ),
-                depends_on=["target_selection"],
+                depends_on=["target_selection", "verify_inline_sources"],
             ),
 
-            # Evidence scoring
+            # Evidence scoring (enable_global_scoring=True is default)
             StepNode(
                 step=EvidenceFlowStep(agent=self.agent, search_mgr=self.search_mgr),
                 depends_on=["search_flow"],
@@ -282,23 +223,24 @@ class PipelineFactory:
             ),
         ]
 
-    def _build_deep_dag_nodes(self, config: Any, pipeline: Any) -> list:
+    def _build_deep_dag_nodes(self, config: Any) -> list:
         """Build DAG nodes for deep mode with per-claim judging."""
         from spectrue_core.pipeline.dag import StepNode
-        from spectrue_core.pipeline.steps.decomposed import (
+        from spectrue_core.pipeline.steps import (
+            ClaimGraphStep,
+            EvidenceFlowStep,
+            ExtractClaimsStep,
             MeteringSetupStep,
             PrepareInputStep,
-            ExtractClaimsStep,
-            ClaimGraphStep,
-            TargetSelectionStep,
             SearchFlowStep,
-            EvidenceFlowStep,
+            TargetSelectionStep,
+            VerifyInlineSourcesStep,
         )
         from spectrue_core.pipeline.steps.deep_claim import (
-            BuildClaimFramesStep,
-            SummarizeEvidenceStep,
-            JudgeClaimsStep,
             AssembleDeepResultStep,
+            BuildClaimFramesStep,
+            JudgeClaimsStep,
+            SummarizeEvidenceStep,
         )
 
         # Get LLM client from agent
@@ -311,19 +253,25 @@ class PipelineFactory:
             # Minimal invariants
             StepNode(
                 step=AssertNonEmptyClaimsStep(),
-                depends_on=["metering_setup"],
+                depends_on=["extract_claims"],
             ),
 
             # Input preparation
             StepNode(
-                step=PrepareInputStep(pipeline=pipeline),
-                depends_on=["assert_non_empty_claims"],
+                step=PrepareInputStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
+                depends_on=["metering_setup"],
             ),
 
             # Claim extraction
             StepNode(
                 step=ExtractClaimsStep(agent=self.agent),
                 depends_on=["prepare_input"],
+            ),
+
+            # Inline source verification
+            StepNode(
+                step=VerifyInlineSourcesStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
+                depends_on=["extract_claims"],
             ),
 
             # Claim graph (for clustering)
@@ -345,7 +293,7 @@ class PipelineFactory:
                     search_mgr=self.search_mgr,
                     agent=self.agent,
                 ),
-                depends_on=["target_selection"],
+                depends_on=["target_selection", "verify_inline_sources"],
             ),
 
             # Evidence collection ONLY (NO global scoring for deep mode!)
@@ -390,5 +338,56 @@ class PipelineFactory:
             # NOTE: No ResultAssemblyStep fallback in deep mode!
             # Deep mode MUST return per-claim results from AssembleDeepResultStep.
             # Legacy global fields (danger_score, style_score, etc.) are NOT populated.
+
         ]
 
+    def _build_extraction_dag_nodes(self, config: Any) -> list:
+        """Build DAG nodes for extraction-only mode."""
+        from spectrue_core.pipeline.dag import StepNode
+        from spectrue_core.pipeline.steps import (
+            ExtractClaimsStep,
+            MeteringSetupStep,
+            PrepareInputStep,
+            ExtractionResultAssemblyStep,
+        )
+
+        return [
+            # Infrastructure
+            StepNode(step=MeteringSetupStep(config=config)),
+
+            # Input preparation
+            StepNode(
+                step=PrepareInputStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
+                depends_on=["metering_setup"],
+            ),
+
+            # Claim extraction
+            StepNode(
+                step=ExtractClaimsStep(agent=self.agent),
+                depends_on=["prepare_input"],
+            ),
+            
+            # Result Assembly (Extraction specific)
+            StepNode(
+                step=ExtractionResultAssemblyStep(),
+                depends_on=["extract_claims"],
+            ),
+        ]
+
+    # Deprecated alias for backward compatibility
+    def build_dag(
+        self,
+        mode_name: str,
+        *,
+        config: Any,
+        pipeline: Any,
+    ) -> "DAGPipeline":
+        """
+        Deprecated: Use build() instead.
+
+        This method exists for backward compatibility during migration.
+        """
+        logger.warning(
+            "[PipelineFactory] build_dag() is deprecated, use build() instead"
+        )
+        return self.build(mode_name, config=config, pipeline=pipeline)

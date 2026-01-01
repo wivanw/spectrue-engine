@@ -6,6 +6,7 @@
 # it under the terms of the GNU Affero General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
+
 """Target selection gate for retrieval optimization.
 
 This module implements the critical gate that selects which claims
