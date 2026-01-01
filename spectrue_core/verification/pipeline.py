@@ -1067,7 +1067,9 @@ class ValidationPipeline:
                 ),
                 claims=claims_for_scoring,
                 sources=final_sources,
+                score_mode="parallel" if pipeline_profile == "deep" else "standard",  # M118
             )
+
             _end_phase("evidence_eval")
 
             # Cost invariant: if we did retrieval/scoring work but credits are still zero,

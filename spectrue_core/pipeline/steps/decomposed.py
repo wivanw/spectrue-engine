@@ -589,7 +589,9 @@ class EvidenceFlowStep:
                 inp=inp,
                 claims=claims,
                 sources=sources,
+                score_mode="standard",  # M118: explicit mode (never "parallel" here, deep uses branch above)
             )
+
 
             Trace.event(
                 "evidence_flow.step_completed",

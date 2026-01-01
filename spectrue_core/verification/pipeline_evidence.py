@@ -399,12 +399,19 @@ async def run_evidence_flow(
     inp: EvidenceFlowInput,
     claims: list[dict],
     sources: list[dict],
+    score_mode: str = "standard",  # M118: "standard" (single LLM call) or "parallel" (per-claim)
 ) -> dict:
     """
     Analysis + scoring: clustering, social verification, evidence pack, scoring, finalize.
 
+    Args:
+        score_mode: Scoring strategy - "standard" for single LLM call (normal mode),
+                   "parallel" for per-claim scoring (deep mode).
+                   M118: This replaces implicit is_deep_mode derivation from pipeline_profile.
+
     Matches existing pipeline behavior; expects sources/claims to be mutable dict shapes.
     """
+
     if inp.progress_callback:
         await inp.progress_callback("ai_analysis")
 
@@ -552,16 +559,14 @@ async def run_evidence_flow(
     if inp.progress_callback:
         await inp.progress_callback("score_evidence")
 
-    # LLM scoring call
-    # - In 'deep' profile, we use per-claim scoring (either via JudgeClaimsStep in DAG
-    #   or score_evidence_parallel for legacy flow)
-    # - In 'normal' profile, use standard single-call scoring
-    is_deep_mode = pipeline_profile == "deep"
+    # M118: LLM scoring call controlled by explicit score_mode parameter
+    # - "parallel": per-claim scoring (deep mode)
+    # - "standard": single LLM call for batch scoring (normal mode)
+    # Note: score_mode is passed explicitly by caller (factory determines it)
+    use_parallel_scoring = score_mode == "parallel"
 
-    if is_deep_mode:
-        # Deep mode: use parallel per-claim scoring
-        # Each claim gets its own LLM call with individual RGBA
-        # This avoids timeout on large prompts and gives true per-claim scores
+    if use_parallel_scoring:
+        # Per-claim scoring: each claim gets its own LLM call with individual RGBA
         result = await agent.score_evidence_parallel(
             pack, model=inp.gpt_model, lang=inp.lang, max_concurrency=5
         )
@@ -569,10 +574,9 @@ async def run_evidence_flow(
         # Standard mode: single LLM call for batch scoring
         result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
 
-    # Track judge mode for downstream logic:
-    # - "standard" (normal pipeline): single article-level LLM judge, global RGBA
-    # - "deep": per-claim LLM judges, each claim has its own RGBA
-    result["judge_mode"] = "deep" if is_deep_mode else "standard"
+    # Track judge mode for downstream logic
+    result["judge_mode"] = "deep" if use_parallel_scoring else "standard"
+
 
     if str(result.get("status", "")).lower() == "error":
         result["status"] = "error"
