@@ -120,7 +120,7 @@ class EvidenceFlowStep:
                 gpt_model=ctx.gpt_model,
                 search_type=ctx.search_type,
                 progress_callback=progress_callback,
-                pipeline=ctx.mode.name,
+                # M119: inp.pipeline removed - mode determined by score_mode parameter
             )
 
             result = await run_evidence_flow(

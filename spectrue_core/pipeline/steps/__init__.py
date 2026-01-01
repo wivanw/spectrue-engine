@@ -28,10 +28,12 @@ from .evidence_flow import EvidenceFlowStep
 from .oracle_flow import OracleFlowStep
 from .result_assembly import ResultAssemblyStep
 from .extraction_result_assembly import ExtractionResultAssemblyStep
-# Deep steps (assuming they are already in their own files or need similar treatment?)
-# Checking deep_claim.py existence or content.
-# Assuming deep_claim.py is already fine or I should check it.
-# For now, re-exporting the ones I extracted.
+# M119: Add invariant steps
+from .invariants import (
+    AssertNonEmptyClaimsStep,
+    AssertSingleClaimStep,
+    AssertSingleLanguageStep,
+)
 
 __all__ = [
     "MeteringSetupStep",
@@ -46,4 +48,8 @@ __all__ = [
     "OracleFlowStep",
     "ResultAssemblyStep",
     "ExtractionResultAssemblyStep",
+    # Invariants
+    "AssertNonEmptyClaimsStep",
+    "AssertSingleClaimStep",
+    "AssertSingleLanguageStep",
 ]

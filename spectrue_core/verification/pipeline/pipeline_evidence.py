@@ -31,7 +31,7 @@ from spectrue_core.scoring.belief import (
     apply_consensus_bound,
 )
 from spectrue_core.scoring.consensus import calculate_consensus
-# M117: Removed claim_posterior imports - using raw LLM scores now
+# Removed claim_posterior imports - using raw LLM scores now
 from spectrue_core.verification.temporal import (
     label_evidence_timeliness,
     normalize_time_window,
@@ -57,7 +57,7 @@ from spectrue_core.verification.search_policy import (
 )
 from spectrue_core.utils.trace import Trace
 
-# M118: Extracted scoring helpers
+# Extracted scoring helpers from previous refactoring
 from spectrue_core.verification.evidence_scoring import (
     norm_id as _norm_id,
     is_prob as _is_prob,
@@ -69,7 +69,7 @@ from spectrue_core.verification.evidence_scoring import (
     mark_anchor_duplicates_async as _mark_anchor_duplicates_async,
 )
 
-# M119: Explainability and stance processing
+# Explainability and stance processing modules
 from spectrue_core.verification.evidence_explainability import (
     get_tier_rank,
     compute_explainability_tier_adjustment,
@@ -84,6 +84,11 @@ from spectrue_core.verification.evidence_stance import (
     check_has_direct_evidence,
     assign_claim_rgba,
     enrich_claim_sources,
+)
+# Claim verdict processing
+from spectrue_core.verification.evidence_verdict_processing import (
+    process_claim_verdicts,
+    enrich_all_claim_verdicts,
 )
 
 
@@ -110,13 +115,6 @@ def _aggregation_policy(search_mgr) -> dict:
     }
 
 
-# M118: The following functions are now imported from evidence_scoring module:
-#   - _mark_anchor_duplicates_sync, _mark_anchor_duplicates_async
-#   - _compute_article_g_from_anchor, _select_anchor_for_article_g
-#   - _explainability_factor_for_tier, _TIER_A_PRIOR_MEAN, _TIER_A_BASELINE
-#   - _norm_id, _is_prob, _logit, _sigmoid, _claim_text
-# See imports at top of file.
-
 
 ProgressCallback = Callable[[str], Awaitable[None]]
 
@@ -133,8 +131,7 @@ class EvidenceFlowInput:
     prior_belief: BeliefState | None = None
     context_graph: ClaimContextGraph | None = None
     claim_extraction_text: str = ""
-    # M113: Pipeline profile name (e.g., 'normal', 'deep').
-    pipeline: str | None = None
+    # Pipeline field removed - mode determined by score_mode parameter in run_evidence_flow()
 
 
 async def run_evidence_flow(
@@ -147,7 +144,7 @@ async def run_evidence_flow(
     inp: EvidenceFlowInput,
     claims: list[dict],
     sources: list[dict],
-    score_mode: str = "standard",  # M118: "standard" (single LLM call) or "parallel" (per-claim)
+    score_mode: str = "standard",  # "standard" (single LLM call) or "parallel" (per-claim)
 ) -> dict:
     """
     Analysis + scoring: clustering, social verification, evidence pack, scoring, finalize.
@@ -155,7 +152,6 @@ async def run_evidence_flow(
     Args:
         score_mode: Scoring strategy - "standard" for single LLM call (normal mode),
                    "parallel" for per-claim scoring (deep mode).
-                   M118: This replaces implicit is_deep_mode derivation from pipeline_profile.
 
     Matches existing pipeline behavior; expects sources/claims to be mutable dict shapes.
     """
@@ -248,7 +244,7 @@ async def run_evidence_flow(
 
     # NORMAL pipeline must be SINGLE-CLAIM (execution unit invariant).
     # This prevents multi-claim batch leakage (c1/c2 mentions) and cross-language mixing.
-    # M119: Derive mode from explicit score_mode parameter (no inp.pipeline lookup)
+    # Derive mode from explicit score_mode parameter (no inp.pipeline lookup)
     is_normal_mode = (score_mode == "standard")
 
     # Language consistency validation (Phase 4 invariant)
@@ -308,10 +304,9 @@ async def run_evidence_flow(
     if inp.progress_callback:
         await inp.progress_callback("score_evidence")
 
-    # M118: LLM scoring call controlled by explicit score_mode parameter
+    # LLM scoring call controlled by explicit score_mode parameter
     # - "parallel": per-claim scoring (deep mode)
     # - "standard": single LLM call for batch scoring (normal mode)
-    # Note: score_mode is passed explicitly by caller (factory determines it)
     use_parallel_scoring = score_mode == "parallel"
 
     if use_parallel_scoring:
@@ -381,150 +376,21 @@ async def run_evidence_flow(
             importance_by_claim[cid_norm] = 1.0
 
     if isinstance(claim_verdicts, list):
-
-        # Prepare data for parallel processing
-        def _process_single_cv(cv_data: dict) -> dict:
-            """Process a single claim verdict using unified Bayesian posterior."""
-            cv = cv_data["cv"]
-            claim_id = cv_data["claim_id"]
-            claim_obj = cv_data["claim_obj"]
-            temporality = cv_data["temporality"]
-            has_direct_evidence = cv_data["has_direct_evidence"]
-            pack_ref = cv_data["pack"]
-            explainability = cv_data["explainability"]
-
-            # Get LLM verdict score (raw observation)
-            llm_score = cv.get("verdict_score")
-            if not isinstance(llm_score, (int, float)):
-                llm_score = 0.5
-            llm_score = float(llm_score)
-
-            # Count stance evidence using extracted function
-            items = pack_ref.get("items", []) if isinstance(pack_ref, dict) else []
-            n_support, n_refute, best_tier = count_stance_evidence(claim_id, items)
-
-            # M117: Use raw LLM score directly (no posterior boost)
-            # Posterior was causing all scores to drift toward 0.98+
-            cv["verdict_score"] = llm_score
-
-            # Derive verdict from LLM score using extracted function
-            cv["verdict"] = derive_verdict_from_score(llm_score)
-            cv["status"] = cv["verdict"]
-
-            # Legacy reasons_expert for backward compatibility
-            cv["reasons_expert"] = {
-                "best_tier": best_tier,
-                "n_support": n_support,
-                "n_refute": n_refute,
-            }
-            cv["reasons_short"] = cv.get("reasons_short", []) or []
-
-            # Explainability tier adjustment using extracted function
-            explainability_update = compute_explainability_tier_adjustment(
-                explainability, best_tier, claim_id
+        # Process all claim verdicts using extracted function
+        explainability_score = result.get("explainability_score", -1.0)
+        
+        verdict_state_by_claim, veracity_debug, conflict_detected, explainability_update = (
+            process_claim_verdicts(
+                claim_verdicts, claims, pack, explainability_score
             )
+        )
+        
+        if explainability_update is not None:
+            result["explainability_score"] = explainability_update
 
-            veracity_entry = {
-                "claim_id": claim_id,
-                "role": claim_obj.get("claim_role") if claim_obj else None,
-                "target": claim_obj.get("verification_target") if claim_obj else None,
-                "harm": claim_obj.get("harm_potential") if claim_obj else None,
-                "llm_verdict": cv.get("verdict"),
-                "llm_score": llm_score,
-                "has_direct_evidence": has_direct_evidence,
-                "best_tier": best_tier,
-            }
-
-            # Verdict state derivation using extracted function
-            existing_state = str(cv.get("verdict_state") or "").lower().strip()
-
-            if existing_state in CANONICAL_VERDICT_STATES:
-                verdict_state = existing_state
-            else:
-                verdict_state = derive_verdict_state_from_llm_score(
-                    llm_score, n_support, n_refute
-                )
-
-            cv["verdict_state"] = verdict_state
-
-            # Conflict detection using extracted function
-            has_conflict = detect_evidence_conflict(n_support, n_refute)
-
-            return {
-                "claim_id": claim_id,
-                "verdict_state": verdict_state,
-                "veracity_entry": veracity_entry,
-                "explainability_update": explainability_update,
-                "has_conflict": has_conflict,
-                "llm_score": llm_score,
-            }
-
-        # Prepare all CV data
-        cv_data_list = []
-        items = pack.get("items", []) if isinstance(pack, dict) else []
-        explainability = result.get("explainability_score", -1.0)
-
-        for cv in claim_verdicts:
-            if not isinstance(cv, dict):
-                continue
-            claim_id = _norm_id(cv.get("claim_id"))
-            if not claim_id and claims:
-                claim_id = _norm_id(claims[0].get("id") or "c1")
-                cv["claim_id"] = claim_id
-
-            claim_obj = None
-            for c in claims or []:
-                if _norm_id(c.get("id") or c.get("claim_id")) == claim_id:
-                    claim_obj = c
-                    break
-            temporality = (
-                claim_obj.get("temporality") if isinstance(claim_obj, dict) else None
-            )
-
-            # Check for direct evidence using extracted function
-            has_direct_evidence = check_has_direct_evidence(claim_id, items)
-
-            cv_data_list.append(
-                {
-                    "cv": cv,
-                    "claim_id": claim_id,
-                    "claim_obj": claim_obj,
-                    "temporality": temporality,
-                    "has_direct_evidence": has_direct_evidence,
-                    "pack": pack,
-                    "explainability": explainability,
-                }
-            )
-
-        # Process in parallel using thread pool
-        import concurrent.futures
-
-        if len(cv_data_list) > 1:
-            # Parallel execution for multiple claims
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(4, len(cv_data_list))
-            ) as executor:
-                results_list = list(executor.map(_process_single_cv, cv_data_list))
-        else:
-            # Sequential for single claim (avoid thread overhead)
-            results_list = [_process_single_cv(d) for d in cv_data_list]
-
-        # Merge results
-        for res in results_list:
-            verdict_state_by_claim[res["claim_id"]] = res["verdict_state"]
-            veracity_debug.append(res["veracity_entry"])
-            if res["explainability_update"] is not None:
-                result["explainability_score"] = res["explainability_update"]
-            if res["has_conflict"]:
-                conflict_detected = True
-
-        # Enrich verdicts with per-claim sources and RGBA
-        # This fixes the UI showing cumulative sources and identical        # Enrich with per-claim verdicts and RGBA
-        # RGBA order: [R=danger, G=verified, B=style, A=explainability]
-        #
+        # Prepare global RGBA for enrichment
         # IMPORTANT: These global_* values are ONLY used as fallback for standard mode.
         # In deep mode, each claim_verdict MUST have its own RGBA from claim-judge.
-        # See the cv["rgba"] assignment below - it respects existing RGBA from LLM.
         global_r = float(result.get("danger_score", -1.0))
         if global_r < 0:
             global_r = 0.0
@@ -539,26 +405,14 @@ async def run_evidence_flow(
         if global_a < 0:
             global_a = 1.0  # Default A=1.0 if missing
 
-        all_scored = pack.get("scored_sources") or []
-        all_context = pack.get("context_sources") or []
-        all_sources = all_scored + all_context
-        judge_mode = result.get("judge_mode", "standard")
-
-        for cv in claim_verdicts:
-            if not isinstance(cv, dict):
-                continue
-
-            # Enrich per-claim sources using extracted function
-            enrich_claim_sources(cv, all_sources, enrich_sources_with_trust)
-
-            # Assign RGBA using extracted function
-            assign_claim_rgba(
-                cv,
-                global_r=global_r,
-                global_b=global_b,
-                global_a=global_a,
-                judge_mode=judge_mode,
-            )
+        # Enrich all claim verdicts with sources and RGBA
+        enrich_all_claim_verdicts(
+            claim_verdicts,
+            pack,
+            enrich_sources_with_trust,
+            (global_r, 0.0, global_b, global_a),  # G will be set per-claim
+            result.get("judge_mode", "standard"),
+        )
 
         changed = apply_dependency_penalties(claim_verdicts, claims)
         # Do NOT recompute article-level G as an average across claims.
