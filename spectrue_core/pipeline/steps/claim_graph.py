@@ -38,7 +38,8 @@ class ClaimGraphStep:
         - extras: graph_result, key_claims
     """
 
-    config: Any  # SpectrueConfig
+    claim_graph: Any  # ClaimGraphBuilder instance
+    runtime_config: Any  # RuntimeConfig
     name: str = "claim_graph"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
@@ -53,20 +54,26 @@ class ClaimGraphStep:
                 Trace.event("claim_graph.skipped", {"reason": "single_claim"})
                 return ctx.set_extra("graph_result", None)
 
-            graph_result = await run_claim_graph_flow(
+            progress_callback = ctx.get_extra("progress_callback")
+            
+            result = await run_claim_graph_flow(
+                self.claim_graph,
                 claims=eligible_claims,
-                config=self.config,
+                runtime_config=self.runtime_config,
+                progress_callback=progress_callback,
             )
 
             Trace.event(
                 "claim_graph.completed",
                 {
                     "claims_in_graph": len(eligible_claims),
-                    "key_claims_count": len(getattr(graph_result, "key_claims", []) or []),
+                    "key_claims_count": len(result.key_claim_ids),
                 },
             )
 
-            return ctx.set_extra("graph_result", graph_result)
+            return ctx.set_extra("graph_result", result.graph_result).set_extra(
+                "key_claim_ids", result.key_claim_ids
+            )
 
         except Exception as e:
             logger.warning("[ClaimGraphStep] Non-fatal failure: %s", e)

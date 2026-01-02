@@ -61,6 +61,7 @@ class PipelineFactory:
 
     search_mgr: Any  # SearchManager
     agent: Any  # FactCheckerAgent
+    claim_graph: Any | None = None  # ClaimGraphBuilder (optional)
 
     def build(
         self,
@@ -183,7 +184,10 @@ class PipelineFactory:
 
             # Claim graph (optional, parallel with oracle)
             StepNode(
-                step=ClaimGraphStep(config=config),
+                step=ClaimGraphStep(
+                    claim_graph=self.claim_graph,
+                    runtime_config=config.runtime if hasattr(config, 'runtime') else None,
+                ),
                 depends_on=["extract_claims"],
                 optional=True,
             ),
@@ -276,7 +280,10 @@ class PipelineFactory:
 
             # Claim graph (for clustering)
             StepNode(
-                step=ClaimGraphStep(config=config),
+                step=ClaimGraphStep(
+                    claim_graph=self.claim_graph,
+                    runtime_config=config.runtime if hasattr(config, 'runtime') else None,
+                ),
                 depends_on=["extract_claims"],
             ),
 

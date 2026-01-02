@@ -161,7 +161,11 @@ class ValidationPipeline:
             )
 
             # Build DAG (with extraction logic if needed)
-            dag = PipelineFactory(search_mgr=self.search_mgr, agent=self.agent).build(
+            dag = PipelineFactory(
+                search_mgr=self.search_mgr,
+                agent=self.agent,
+                claim_graph=self._claim_graph,
+            ).build(
                 mode_name, config=self.config, extraction_only=extract_claims_only
             )
             
