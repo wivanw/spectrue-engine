@@ -25,7 +25,19 @@ from typing import Literal, TypedDict, Any
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.calibration.calibration_models import logistic_score
 from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
-from spectrue_core.verification.search.source_utils import has_evidence_chunk
+
+def _has_evidence_chunk(source: Any) -> bool:
+    """Check whether a source includes a usable evidence chunk."""
+    if not isinstance(source, dict):
+        return False
+    return bool(
+        source.get("quote")
+        or source.get("snippet")
+        or source.get("content")
+        or source.get("content_excerpt")
+        or source.get("key_snippet")
+    )
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -221,7 +233,7 @@ def _evidence_feature_row(src: dict) -> dict[str, float]:
     has_digits = 1.0 if isinstance(text, str) and any(ch.isdigit() for ch in text) else 0.0
     return {
         "has_quote": 1.0 if quote else 0.0,
-        "has_chunk": 1.0 if has_evidence_chunk(src) else 0.0,
+        "has_chunk": 1.0 if _has_evidence_chunk(src) else 0.0,
         "has_digits": has_digits,
         "quote_len_norm": min(1.0, len(str(quote)) / 200.0) if quote else 0.0,
         "snippet_len_norm": min(1.0, len(str(snippet)) / 400.0) if snippet else 0.0,
