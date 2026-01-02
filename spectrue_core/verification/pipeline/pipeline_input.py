@@ -95,7 +95,8 @@ async def verify_inline_sources(
     if verified_inline_sources:
         if search_mgr and hasattr(search_mgr, "apply_evidence_acquisition_ladder"):
             verified_inline_sources = await search_mgr.apply_evidence_acquisition_ladder(
-                verified_inline_sources
+                verified_inline_sources,
+                budget_context="inline",  # Use separate budget from claim verification
             )
         Trace.event(
             "pipeline.inline_sources_verified",

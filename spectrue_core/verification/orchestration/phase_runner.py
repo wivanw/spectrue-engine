@@ -477,9 +477,11 @@ class PhaseRunner:
                 for src in self.inline_sources:
                     if isinstance(src, dict) and not src.get("quote_matches"):
                         try:
+                            # verify_inline_source_relevance expects: claims (list[dict]), inline_source (dict), article_excerpt
                             verification = await self.agent.verify_inline_source_relevance(
-                                src, 
-                                claim_text
+                                claims=[claim],  # Pass claim as list
+                                inline_source=src,
+                                article_excerpt=claim_text[:500],
                             )
                             if verification:
                                 src.update(verification)
@@ -661,7 +663,8 @@ class PhaseRunner:
 
                 if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
                     self.inline_sources = await self.search_mgr.apply_evidence_acquisition_ladder(
-                        self.inline_sources
+                        self.inline_sources,
+                        budget_context="inline",  # Use separate budget from claim verification
                     )
 
                 # IMPORTANT: We must return the inline sources too!

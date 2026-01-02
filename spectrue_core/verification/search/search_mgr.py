@@ -25,6 +25,7 @@ from spectrue_core.verification.search.search_policy import (
     should_fallback_news_to_general,
     SearchPolicyProfile,
 )
+from spectrue_core.scoring.budget_allocation import GlobalBudgetTracker
 from spectrue_core.utils.trace import Trace
 import logging
 
@@ -58,7 +59,16 @@ class SearchManager:
         self.google_cse_calls = 0
         self.page_fetches = 0
         self.oracle_calls = 0  # Track Oracle API calls
-        self.global_extracts_used = 0  # Global EAL limit
+        
+        # Separate budget trackers for different extraction contexts
+        # Inline sources (homepage links, article citations) have different
+        # quote hit-rates than claim-specific search results
+        self.inline_budget_tracker = GlobalBudgetTracker()  # For inline source verification
+        self.claim_budget_tracker = GlobalBudgetTracker()   # For claim evidence acquisition
+        
+        # Backward compatibility alias (defaults to claim budget)
+        self.budget_tracker = self.claim_budget_tracker
+        
         self.policy_profile: SearchPolicyProfile | None = None
 
     def reset_metrics(self):
@@ -66,7 +76,9 @@ class SearchManager:
         self.google_cse_calls = 0
         self.page_fetches = 0
         self.oracle_calls = 0
-        self.global_extracts_used = 0  # Global EAL limit
+        self.inline_budget_tracker = GlobalBudgetTracker()  # Reset inline budget
+        self.claim_budget_tracker = GlobalBudgetTracker()   # Reset claim budget
+        self.budget_tracker = self.claim_budget_tracker     # Maintain alias
         self.policy_profile = None
 
     def set_policy_profile(self, profile: SearchPolicyProfile | None) -> None:
@@ -208,6 +220,7 @@ class SearchManager:
         sources: list[dict],
         *,
         max_fetches: int = 2,
+        budget_context: str = "claim",
     ) -> list[dict]:
         """
         EAL: Enrich snippet-only sources with content + quote candidates.
@@ -216,8 +229,21 @@ class SearchManager:
         1. If source has content but no quote, extract quote from existing content
         2. If source has no content, fetch URL and extract quote
         
+        Args:
+            sources: List of source dicts to enrich
+            max_fetches: Maximum number of URL fetches
+            budget_context: Which budget tracker to use:
+                - "claim": For claim-specific evidence acquisition (default)
+                - "inline": For inline source verification (separate budget)
+        
         Uses batch quote extraction for efficiency (single embedding call).
         """
+        # Select appropriate budget tracker based on context
+        if budget_context == "inline":
+            tracker = self.inline_budget_tracker
+        else:
+            tracker = self.claim_budget_tracker
+
         if not needs_evidence_acquisition_ladder(sources):
             return sources
 
@@ -242,11 +268,16 @@ class SearchManager:
             should_fetch = False
 
             if fetch_count < max_fetches:
-                # Check global limit (across all claims)
-                if self.global_extracts_used >= 4:
+                # Check Bayesian budget allocation (dynamic limit)
+                should_continue, reason = tracker.should_extract()
+                if not should_continue:
                     Trace.event(
-                        "eal.global_limit_reached",
-                        {"global_extracts_used": self.global_extracts_used, "max": 4},
+                        "eal.budget_stop",
+                        {
+                            "reason": reason,
+                            "budget_context": budget_context,
+                            "budget_state": tracker.to_dict(),
+                        },
                     )
                     break
                 # If explicitly marked as fulltext, don't re-fetch
@@ -271,7 +302,16 @@ class SearchManager:
                         src["fulltext"] = True
                         current_content = fetched
                         fetch_count += 1
-                        self.global_extracts_used += 1  # Track globally
+                        
+                        # Record extract with Bayesian update
+                        relevance = float(src.get("relevance_score", 0.5) or 0.5)
+                        is_authoritative = src.get("source_tier") in ("A", "B")
+                        # Quote detection will happen in Phase 2
+                        tracker.record_extract(
+                            relevance_score=relevance,
+                            has_quote=False,  # Updated after quote extraction
+                            is_authoritative=is_authoritative,
+                        )
 
             # Collect sources that need quote extraction
             if current_content and len(current_content) >= 50:
@@ -309,6 +349,9 @@ class SearchManager:
                             src["eal_enriched"] = True
                             enriched_count += 1
                             quoted_count += 1
+                            # Update Bayesian state: quote found = success
+                            tracker.state.quotes_found += 1
+                            tracker.state.alpha += 0.5  # Bonus for quote
                         else:
                             # Fallback to heuristic extraction
                             content = src.get("content") or src.get("snippet") or ""
@@ -319,6 +362,7 @@ class SearchManager:
                                 src["eal_enriched"] = True
                                 enriched_count += 1
                                 quoted_count += 1
+                                tracker.state.quotes_found += 1
                 else:
                     # Embeddings unavailable - use heuristic for all
                     for _, src in sources_for_quote_extraction:
@@ -330,6 +374,7 @@ class SearchManager:
                             src["eal_enriched"] = True
                             enriched_count += 1
                             quoted_count += 1
+                            tracker.state.quotes_found += 1
             except ImportError:
                 # Fallback to heuristic extraction
                 for _, src in sources_for_quote_extraction:
@@ -341,7 +386,9 @@ class SearchManager:
                         src["eal_enriched"] = True
                         enriched_count += 1
                         quoted_count += 1
+                        tracker.state.quotes_found += 1
 
+        # Log budget state at end of EAL
         Trace.event(
             "evidence.ladder.summary",
             {
@@ -351,6 +398,8 @@ class SearchManager:
                 "quotes_added": quoted_count,
                 "enriched": enriched_count,
                 "batch_size": len(sources_for_quote_extraction),
+                "budget_context": budget_context,
+                "budget_state": tracker.to_dict(),
             },
         )
 
