@@ -143,7 +143,7 @@ class EngineLLMConfig:
     max_output_tokens_deep: int = 1100
 
     # Responses API configuration
-    cluster_timeout_sec: float = 60.0
+    cluster_timeout_sec: float = 90.0
 
     @property
     def nano_concurrency(self) -> int:
