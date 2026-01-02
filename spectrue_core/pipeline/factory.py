@@ -169,16 +169,10 @@ class PipelineFactory:
                 depends_on=["extract_claims"],
             ),
 
-            # Normal mode: single claim check
-            StepNode(
-                step=AssertSingleClaimStep(),
-                depends_on=["extract_claims"],
-            ),
-
             # Oracle fast path (optional)
             StepNode(
                 step=OracleFlowStep(search_mgr=self.search_mgr),
-                depends_on=["assert_single_claim"],
+                depends_on=["extract_claims"],
                 optional=True,
             ),
 
