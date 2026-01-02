@@ -226,26 +226,6 @@ async def run_evidence_flow(
     # Derive mode from explicit score_mode parameter (no inp.pipeline lookup)
     is_normal_mode = (score_mode == "standard")
 
-    # Language consistency validation (Phase 4 invariant)
-    if claims and inp.content_lang:
-        from spectrue_core.utils.language_validation import (
-            validate_claims_language_consistency,
-        )
-
-        pipeline_mode_str = "normal" if is_normal_mode else "deep"
-        lang_valid, lang_mismatches = validate_claims_language_consistency(
-            claims,
-            inp.content_lang,
-            pipeline_mode=pipeline_mode_str,
-            min_confidence=0.7,
-        )
-        if not lang_valid and is_normal_mode:
-            # In normal mode, language mismatch is a violation
-            raise RuntimeError(
-                f"Language mismatch in normal pipeline: expected={inp.content_lang}, "
-                f"mismatches={lang_mismatches}"
-            )
-
     if is_normal_mode and claims:
         if anchor_claim_id:
             claims = [
@@ -265,6 +245,26 @@ async def run_evidence_flow(
                 "anchor_claim_id": str(anchor_claim_id or ""),
             },
         )
+
+    # Language consistency validation (Phase 4 invariant)
+    if claims and inp.content_lang:
+        from spectrue_core.utils.language_validation import (
+            validate_claims_language_consistency,
+        )
+
+        pipeline_mode_str = "normal" if is_normal_mode else "deep"
+        lang_valid, lang_mismatches = validate_claims_language_consistency(
+            claims,
+            inp.content_lang,
+            pipeline_mode=pipeline_mode_str,
+            min_confidence=0.7,
+        )
+        if not lang_valid and is_normal_mode:
+            # In normal mode, language mismatch is a violation
+            raise RuntimeError(
+                f"Language mismatch in normal pipeline: expected={inp.content_lang}, "
+                f"mismatches={lang_mismatches}"
+            )
 
     # T7: Deterministic Ranking
     claims.sort(key=lambda c: (-c.get("importance", 0.0), c.get("text", "")))
