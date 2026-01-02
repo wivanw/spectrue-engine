@@ -42,6 +42,8 @@ class ResultAssemblyStep:
                 "verified_score": verdict.get("verified_score", 0.0),
                 "explainability_score": verdict.get("explainability_score", 0.0),
                 "danger_score": verdict.get("danger_score", 0.0),
+                "style_score": verdict.get("style_score", 0.0),
+                "bias_score": verdict.get("style_score", 0.0), # Compat alias
                 "rgba": ctx.get_extra("rgba", [0.0, 0.0, 0.0, 0.5]),
                 "sources": sources,
                 "rationale": verdict.get("rationale", ""),
@@ -49,6 +51,9 @@ class ResultAssemblyStep:
                 "cost_summary": cost_summary,
                 "cost": verdict.get("cost", 0.0),
             }
+
+            if not ledger:
+                logger.warning(f"[ResultAssemblyStep] Ledger not found in context. Cost summary will be empty/zero. Extras keys: {list(ctx.extras.keys())}")
 
             if ctx.get_extra("oracle_hit"):
                 final_result["oracle_hit"] = True

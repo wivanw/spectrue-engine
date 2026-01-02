@@ -28,6 +28,7 @@ from typing import Any, Literal
 from openai import AsyncOpenAI
 
 from spectrue_core.billing.metering import LLMMeter
+from spectrue_core.billing.meter_context import get_current_llm_meter
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -477,9 +478,10 @@ class LLMClient:
                     "usage": usage,
                 }
 
-                if self._meter:
+                meter = self._meter or get_current_llm_meter()
+                if meter:
                     try:
-                        event = self._meter.record_completion(
+                        event = meter.record_completion(
                             model=response.model,
                             stage=stage or trace_kind,
                             usage=usage,

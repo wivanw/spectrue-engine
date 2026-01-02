@@ -57,6 +57,11 @@ class MeteringSetupStep:
             ledger = CostLedger(run_id=current_trace_id())
             tavily_meter = TavilyMeter(ledger=ledger, policy=policy)
             llm_meter = LLMMeter(ledger=ledger, policy=policy)
+            
+            # Set context var so Agent can access metering without explicit param
+            # (Fixes "Credits used: 0" issue where default agent meter writes nowhere)
+            from spectrue_core.billing.meter_context import set_current_llm_meter
+            set_current_llm_meter(llm_meter)
 
             # Configure embedding metering
             EmbedService.configure(
