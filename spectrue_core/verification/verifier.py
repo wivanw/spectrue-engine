@@ -45,8 +45,8 @@ class FactVerifier:
         search_type: str = "advanced",
         gpt_model: str = "gpt-5.2",
         lang: str = "en",
-        content_lang: str | None = None,
-        max_cost: int | None = None,
+        content_lang: str | None = None,  # Kept for API compatibility but not used
+        max_cost: int | None = None,  # Kept for API compatibility but not used
         preloaded_context: str | None = None,
         preloaded_sources: list | None = None,
         progress_callback=None,
@@ -59,20 +59,23 @@ class FactVerifier:
         """
         Execute verification via ValidationPipeline.
         """
+        # Map pipeline_profile to runtime_config for new DAG architecture
+        runtime_config = None
+        if pipeline_profile:
+            runtime_config = {"profile": pipeline_profile}
+        
         result = await self.pipeline.execute(
             fact=fact,
             search_type=search_type,
             gpt_model=gpt_model,
             lang=lang,
-            content_lang=content_lang,
-            max_cost=max_cost,
+            runtime_config=runtime_config,
             progress_callback=progress_callback,
             preloaded_context=preloaded_context,
             preloaded_sources=preloaded_sources,
             needs_cleaning=needs_cleaning,
             source_url=source_url,
             extract_claims_only=extract_claims_only,
-            pipeline_profile=pipeline_profile,
             preloaded_claims=preloaded_claims,
         )
         if "audit" not in result:
