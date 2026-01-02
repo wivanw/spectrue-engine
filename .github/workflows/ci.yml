@@ -43,10 +43,7 @@ jobs:
         run: |
           pytest -v --tb=short \
             tests/unit \
-            tests/test_*.py \
-            tests/integration/test_m80_orchestration.py \
-            tests/integration/test_m81_calibration.py \
-            tests/integration/test_verification_pipeline.py
+            tests/integration
 
   coverage:
     runs-on: ubuntu-latest
@@ -73,10 +70,7 @@ jobs:
         run: |
           pytest --cov=spectrue_core --cov-report=xml \
             tests/unit \
-            tests/test_*.py \
-            tests/integration/test_m80_orchestration.py \
-            tests/integration/test_m81_calibration.py \
-            tests/integration/test_verification_pipeline.py
+            tests/integration
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
