@@ -38,7 +38,6 @@ if TYPE_CHECKING:
 from spectrue_core.pipeline.mode import get_mode
 from spectrue_core.pipeline.steps.invariants import (
     AssertNonEmptyClaimsStep,
-    AssertSingleClaimStep,
 )
 
 logger = logging.getLogger(__name__)

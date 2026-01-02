@@ -145,11 +145,6 @@ class EngineLLMConfig:
     # Responses API configuration
     cluster_timeout_sec: float = 90.0
 
-    @property
-    def nano_concurrency(self) -> int:
-        # Keep nano query generation responsive even when analysis calls are in-flight.
-        return max(1, min(12, int(self.concurrency) * 2))
-
 
 @dataclass(frozen=True)
 class EngineSearchConfig:
@@ -662,7 +657,6 @@ class EngineRuntimeConfig:
                 "concurrency": int(self.llm.concurrency),
                 "nano_timeout_sec": float(self.llm.nano_timeout_sec),
                 "nano_max_output_tokens": int(self.llm.nano_max_output_tokens),
-                "nano_concurrency": int(self.llm.nano_concurrency),
                 "max_output_tokens_general": int(self.llm.max_output_tokens_general),
                 "max_output_tokens_lite": int(self.llm.max_output_tokens_lite),
                 "max_output_tokens_deep": int(self.llm.max_output_tokens_deep),
