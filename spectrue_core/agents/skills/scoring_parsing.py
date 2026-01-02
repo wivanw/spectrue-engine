@@ -118,11 +118,14 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                         else:
                             claim_schema_issues["verdict_score"] = f"out of range: {raw_vs}"
                 else:
-                    # Standard mode: use default 0.5
+                    # Standard mode: allow -1.0 default
                     raw_vs = cv.get("verdict_score")
                     if raw_vs is None:
-                        claim_schema_issues["verdict_score"] = "missing, using default 0.5"
-                    p = safe_score(cv.get("verdict_score", 0.5))
+                        claim_schema_issues["verdict_score"] = "missing, using default -1.0"
+                    
+                    # Use -1.0 as default if missing
+                    # Note: safe_score allows -1.0 if default is -1.0
+                    p = safe_score(cv.get("verdict_score", -1.0), default=-1.0)
                     cv["verdict_score"] = p
 
                 # Log schema issues for this claim
@@ -141,22 +144,27 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                         },
                     )
 
-                p = cv.get("verdict_score", 0.5) if not is_deep else cv.get("verdict_score", -1.0)
+                # p is already set above
+                # p = cv.get("verdict_score", 0.5) if not is_deep else cv.get("verdict_score", -1.0)
 
                 # --- (1) Normalize verdict_state from p ---
                 # Deep mode: skip this normalization, preserve LLM output
                 if not is_deep:
-                    # Contract: p >= 0.6 → supported, p <= 0.4 → refuted, else conflicted
+                    # Contract: p >= 0.6 → supported, p <= 0.4 → refuted
+                    # p < 0 -> unverified (insufficient)
                     raw_state = str(cv.get("verdict_state") or "").lower().strip()
                     if raw_state not in CANONICAL_STATES:
                         # Derive verdict_state from p
-                        if p >= 0.6:
+                        if p < 0:
+                            cv["verdict_state"] = "insufficient_evidence"
+                        elif p >= 0.6:
                             cv["verdict_state"] = "supported"
                         elif p <= 0.4:
                             cv["verdict_state"] = "refuted"
                         else:
                             # 0.4 < p < 0.6 → conflicted (evidence exists but ambiguous)
                             cv["verdict_state"] = "conflicted"
+                        
                         Trace.event(
                             "verdict.state_normalized",
                             {
@@ -181,20 +189,22 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                         },
                     )
                     # Normalize to canonical UI label
-                    if p >= 0.8:
+                    if p < 0:
+                        cv["verdict"] = "unverified"
+                    elif p >= 0.8:
                         cv["verdict"] = "verified"
                     elif p <= 0.2:
                         cv["verdict"] = "refuted"
                     else:
                         cv["verdict"] = "ambiguous"
 
-                # --- (3) Semantic contract: insufficient evidence = 0.5 ---
+                # --- (3) Semantic contract: insufficient evidence = -1.0 (was 0.5) ---
                 # Deep mode: skip this normalization, preserve LLM output
                 if not is_deep:
                     vs = str(cv.get("verdict_state") or "").lower().strip()
-                    if vs in {"insufficient_evidence", "insufficient evidence", "insufficient"}:
-                        if cv["verdict_score"] != 0.5:
-                            cv["verdict_score"] = 0.5
+                    if vs in {"insufficient_evidence", "insufficient evidence", "insufficient", "unverified"}:
+                        if cv["verdict_score"] != -1.0:
+                            cv["verdict_score"] = -1.0
 
                 # --- (4) Validate and normalize per-claim RGBA ---
                 # Deep mode: if RGBA is None (error claim), don't touch it

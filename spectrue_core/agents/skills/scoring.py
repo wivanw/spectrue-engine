@@ -203,7 +203,67 @@ class ScoringSkill(BaseSkill):
                 timeout=float(self.runtime.llm.timeout_sec),
                 trace_kind="score_evidence",
             )
+            # Parse and normalize result
             clamped = clamp_score_evidence_result(result)
+
+            # --- POST-PROCESSING: Force -1.0 for claims without evidence ---
+            # LLM might hallucinate a score even with no evidence, or follow old habits.
+            # We strictly enforce "Unverified" (-1.0) if matched_evidence_count == 0.
+            claim_verdicts = clamped.get("claim_verdicts", [])
+            claims_without_evidence = set(no_evidence)
+            
+            for cv in claim_verdicts:
+                cid = cv.get("claim_id")
+                if cid in claims_without_evidence:
+                    cv["verdict_score"] = -1.0
+                    cv["verdict"] = "unverified"
+                    cv["verdict_state"] = "insufficient_evidence"
+                    cv["reason"] = cv.get("reason", "No evidence found for this claim.")
+                    
+                    # Update RGBA if present
+                    if cv.get("rgba"):
+                        # Keep R, B, A but set G to -1.0
+                        # Or should we zero out A (explainability)?
+                        r, g, b, a = cv["rgba"]
+                        cv["rgba"] = [r, -1.0, b, 0.0] # Explainability 0 implies no evidence
+            
+            # --- POST-PROCESSING: Aggregate Global Scores ---
+            # Since instructions force LLM to output 0.5 placeholder, we must aggregate manually.
+            # Logic: Average of valid (>=0) claim scores weighted by importance (if available? No, simple avg for now).
+            
+            valid_g = []
+            valid_r = []
+            valid_b = []
+            valid_a = []
+            
+            for cv in claim_verdicts:
+                # Find matching input claim to get importance?
+                # For now, simple average of G.
+                g = cv.get("verdict_score", -1.0)
+                rgba = cv.get("rgba")
+                
+                if g >= 0:
+                    valid_g.append(g)
+                
+                if rgba and len(rgba) == 4:
+                    valid_r.append(rgba[0])
+                    # valid_g.append(rgba[1]) # Already got from verdict_score
+                    valid_b.append(rgba[2])
+                    valid_a.append(rgba[3])
+            
+            if valid_g:
+                clamped["verified_score"] = sum(valid_g) / len(valid_g)
+            else:
+                # If no claims have valid score (all unverified), global is unverified
+                clamped["verified_score"] = -1.0
+                
+            if valid_r:
+                clamped["danger_score"] = sum(valid_r) / len(valid_r)
+            if valid_b:
+                clamped["style_score"] = sum(valid_b) / len(valid_b)
+            if valid_a:
+                clamped["explainability_score"] = sum(valid_a) / len(valid_a)
+
             metrics = pack.get("metrics", {})
             if isinstance(metrics, dict) and metrics.get("stance_failure") is True:
                 current = clamped.get("explainability_score", -1.0)
