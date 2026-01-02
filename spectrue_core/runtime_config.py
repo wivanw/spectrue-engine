@@ -148,7 +148,7 @@ class EngineLLMConfig:
     @property
     def nano_concurrency(self) -> int:
         # Keep nano query generation responsive even when analysis calls are in-flight.
-        return max(1, min(16, min(12, int(self.concurrency) * 2)))
+        return max(1, min(12, int(self.concurrency) * 2))
 
 
 @dataclass(frozen=True)
