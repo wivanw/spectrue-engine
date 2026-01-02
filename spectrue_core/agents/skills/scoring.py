@@ -429,9 +429,16 @@ Return valid JSON now."""
                     result["status"] = "ok"
 
                     # Clamp RGBA values
+                    # Allow -1.0 for G (verified_score) to signal "unknown"
+                    g_val = float(rgba[1])
+                    if g_val < 0:
+                        g_val = -1.0
+                    else:
+                        g_val = max(0.0, min(1.0, g_val))
+
                     result["rgba"] = [
                         max(0.0, min(1.0, float(rgba[0]))),
-                        max(0.0, min(1.0, float(rgba[1]))),
+                        g_val,                               # G (verified)
                         max(0.0, min(1.0, float(rgba[2]))),
                         max(0.0, min(1.0, float(rgba[3]))),
                     ]
@@ -511,12 +518,21 @@ Return valid JSON now."""
 
         if valid_verdicts:
             all_r = [cv["rgba"][0] for cv in valid_verdicts]
-            all_g = [cv["rgba"][1] for cv in valid_verdicts]
+            # Handle -1.0 in G (ignore them for average, unless ALL are -1)
+            raw_g = [cv["rgba"][1] for cv in valid_verdicts]
+            valid_g_values = [g for g in raw_g if g >= 0]
+            
             all_b = [cv["rgba"][2] for cv in valid_verdicts]
             all_a = [cv["rgba"][3] for cv in valid_verdicts]
 
             global_danger = sum(all_r) / len(all_r)
-            global_verified = sum(all_g) / len(all_g)
+            
+            if valid_g_values:
+                global_verified = sum(valid_g_values) / len(valid_g_values)
+            else:
+                # All claims are unknown/unverified
+                global_verified = -1.0 # Signal unknown
+                
             global_style = sum(all_b) / len(all_b)
             global_explain = sum(all_a) / len(all_a)
         else:

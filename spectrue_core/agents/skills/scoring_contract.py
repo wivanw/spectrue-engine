@@ -19,17 +19,18 @@ STANCE_PASS_TYPES = {STANCE_PASS_SUPPORT_ONLY, STANCE_PASS_REFUTE_ONLY, STANCE_P
 # SHARED SCORING CONSTANTS (Single Source of Truth)
 # ==============================================================================
 
-SCORING_SCALE = """# SCORING SCALE (0.0 - 1.0)
+SCORING_SCALE = """# SCORING SCALE (-1.0 to 1.0)
 - **0.8 - 1.0 (Verified)**: Strong confirmation (direct quotes, official consensus).
 - **0.6 - 0.8 (Plausible)**: Supported, but may lack direct confirmation.
-- **0.4 - 0.6 (Ambiguous)**: Insufficient or conflicting evidence. Absence of evidence is not False.
+- **0.4 - 0.6 (Ambiguous)**: Conflicting evidence. (Use 0.5 only if evidence effectively cancels out).
 - **0.2 - 0.4 (Unlikely)**: Evidence suggests the claim is doubtful.
-- **0.0 - 0.2 (Refuted)**: Evidence contradicts the claim."""
+- **0.0 - 0.2 (Refuted)**: Evidence contradicts the claim.
+- **-1.0 (Unverified/Unknown)**: NO usable evidence found. Cannot judge at all. (Do NOT use 0.5 for lack of info)."""
 
 RGBA_EXPLANATION = """# RGBA SCORING
 Return `rgba`: [R, G, B, A] where:
 - R = danger (0=harmless, 1=dangerous misinformation)
-- G = verdict_score (same as verdict_score)
+- G = verdict_score (same as verdict_score, use -1.0 if unknown)
 - B = style (0=biased, 1=neutral)
 - A = explainability (0=no evidence, 1=strong direct quotes)"""
 
@@ -92,7 +93,7 @@ Return valid JSON:
 
 # PER-CLAIM RGBA
 Each claim_verdict MUST include `rgba`: [R=danger, G=verdict_score, B=style, A=explainability].
-Values 0-1. Each claim may have DIFFERENT R, B, A based on its content and evidence.
+Values 0-1 (except G which can be -1.0). Each claim may have DIFFERENT R, B, A based on its content and evidence.
 
 # GLOBAL SCORES EXPLANATION
 - **verified_score**: Placeholder only (set to 0.5). Engine computes the true global score.
@@ -113,16 +114,23 @@ Score this SINGLE claim based strictly on the provided Evidence.
 
 {SCORING_SCALE}
 
+# CRITICAL: NO EVIDENCE HANDLING
+If the provided evidence is empty, unrelated, or insufficient to form ANY opinion:
+- Set `verdict_score` to **-1.0**.
+- Set `verdict` to "unverified".
+- Explain in `reason` that evidence is missing.
+- **DO NOT** use 0.5 (Ambiguous) for missing evidence. 0.5 is for conflicting evidence.
+
 {RGBA_EXPLANATION}
 
 # OUTPUT FORMAT
 Return JSON:
 {{
   "claim_id": "c1",
-  "verdict_score": 0.9,
-  "verdict": "verified",
+  "verdict_score": -1.0,
+  "verdict": "unverified",
   "reason": "Explanation in {lang_name}...",
-  "rgba": [0.1, 0.9, 0.85, 0.8]
+  "rgba": [0.1, -1.0, 0.85, 0.0]
 }}
 
 {_language_contract(lang_name, lang)}
