@@ -20,7 +20,7 @@ import concurrent.futures
 import logging
 from typing import Any
 
-from spectrue_core.verification.evidence_stance import (
+from spectrue_core.verification.evidence.evidence_stance import (
     count_stance_evidence,
     derive_verdict_from_score,
     derive_verdict_state_from_llm_score,
@@ -30,10 +30,10 @@ from spectrue_core.verification.evidence_stance import (
     assign_claim_rgba,
     enrich_claim_sources,
 )
-from spectrue_core.verification.evidence_explainability import (
+from spectrue_core.verification.evidence.evidence_explainability import (
     compute_explainability_tier_adjustment,
 )
-from spectrue_core.verification.evidence_scoring import norm_id as _norm_id
+from spectrue_core.verification.evidence.evidence_scoring import norm_id as _norm_id
 
 logger = logging.getLogger(__name__)
 

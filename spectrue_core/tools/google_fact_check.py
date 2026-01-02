@@ -15,7 +15,7 @@ from typing import Tuple, List, Optional
 
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.evidence_pack import OracleCheckResult
+from spectrue_core.verification.evidence.evidence_pack import OracleCheckResult
 
 logger = logging.getLogger(__name__)
 

@@ -8,9 +8,9 @@
 # (at your option) any later version.
 
 from spectrue_core.schema.claim_metadata import ClaimMetadata
-from spectrue_core.verification.orchestrator import ClaimOrchestrator
-from spectrue_core.verification.search_policy import default_search_policy
-from spectrue_core.verification.search_policy_adapter import (
+from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
+from spectrue_core.verification.search.search_policy import default_search_policy
+from spectrue_core.verification.search.search_policy_adapter import (
     apply_search_policy_to_plan,
     budget_class_for_profile,
 )

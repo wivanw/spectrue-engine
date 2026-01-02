@@ -11,13 +11,13 @@ from spectrue_core.tools.search_tool import WebSearchTool
 from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
-from spectrue_core.verification.evidence_pack import OracleCheckResult
-from spectrue_core.verification.evidence import (
+from spectrue_core.verification.evidence.evidence_pack import OracleCheckResult
+from spectrue_core.verification.evidence.evidence import (
     needs_evidence_acquisition_ladder,
     extract_quote_candidates,
 )
 from spectrue_core.verification.types import SearchResponse
-from spectrue_core.verification.search_policy import (
+from spectrue_core.verification.search.search_policy import (
     build_context_from_sources,
     filter_search_results,
     rerank_search_results,

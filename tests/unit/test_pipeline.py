@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from spectrue_core.verification.pipeline import ValidationPipeline
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 # M119: Updated imports to use new modularized structure
-from spectrue_core.verification.evidence_scoring import (
+from spectrue_core.verification.evidence.evidence_scoring import (
     explainability_factor_for_tier as _explainability_factor_for_tier,
     TIER_A_BASELINE as _TIER_A_BASELINE,
 )

@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.verification.evidence_pack import EvidencePack
+from spectrue_core.verification.evidence.evidence_pack import EvidencePack
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES

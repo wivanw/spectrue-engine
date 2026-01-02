@@ -13,8 +13,8 @@ from __future__ import annotations
 from typing import Iterable
 
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.calibration_registry import CalibrationRegistry
-from spectrue_core.verification.claim_utility import score_claim_utility
+from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.verification.claims.claim_utility import score_claim_utility
 
 
 def _has_nonempty_text(claim: dict) -> bool:

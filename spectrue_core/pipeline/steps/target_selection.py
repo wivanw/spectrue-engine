@@ -42,7 +42,7 @@ class TargetSelectionStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Select verification targets."""
-        from spectrue_core.verification.target_selection import select_verification_targets
+        from spectrue_core.verification.targeting.target_selection import select_verification_targets
 
         try:
             eligible_claims = ctx.get_extra("eligible_claims", ctx.claims)

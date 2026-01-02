@@ -17,8 +17,8 @@ Tests phase generation logic based on claim metadata.
 
 import pytest
 
-from spectrue_core.verification.orchestrator import ClaimOrchestrator
-from spectrue_core.verification.execution_plan import BudgetClass
+from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
+from spectrue_core.verification.orchestration.execution_plan import BudgetClass
 from spectrue_core.schema.claim_metadata import (
     ClaimMetadata,
     ClaimRole,
@@ -28,7 +28,7 @@ from spectrue_core.schema.claim_metadata import (
     RetrievalPolicy,
     EvidenceChannel,
 )
-from spectrue_core.verification.evidence_pack import Claim
+from spectrue_core.verification.evidence.evidence_pack import Claim
 
 
 # ─────────────────────────────────────────────────────────────────────────────

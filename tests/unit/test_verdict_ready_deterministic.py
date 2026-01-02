@@ -13,7 +13,7 @@ Deterministic tests for verdict_ready_for_claim.
 Only contract fields are used: claim_id, stance, evidence_tier, quote_matches, source_type.
 """
 
-from spectrue_core.verification.sufficiency import verdict_ready_for_claim
+from spectrue_core.verification.orchestration.sufficiency import verdict_ready_for_claim
 
 
 def test_ready_with_quote_matches() -> None:

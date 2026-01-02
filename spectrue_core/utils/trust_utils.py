@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.verification.trusted_sources import TRUSTED_SOURCES
+from spectrue_core.verification.search.trusted_sources import TRUSTED_SOURCES
 from urllib.parse import urlparse
 
 def enrich_sources_with_trust(sources_list: list) -> list:

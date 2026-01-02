@@ -32,12 +32,12 @@ from spectrue_core.utils.text_structure import (
     extract_text_structure,
     find_claim_position,
 )
-from spectrue_core.verification.evidence_stats import build_evidence_stats
-from spectrue_core.verification.retrieval_trace import (
+from spectrue_core.verification.evidence.evidence_stats import build_evidence_stats
+from spectrue_core.verification.search.retrieval_trace import (
     create_empty_retrieval_trace,
     format_retrieval_trace,
 )
-from spectrue_core.verification.execution_plan import ClaimExecutionState
+from spectrue_core.verification.orchestration.execution_plan import ClaimExecutionState
 
 
 def _generate_evidence_id(claim_id: str, url: str, index: int) -> str:

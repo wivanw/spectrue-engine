@@ -14,7 +14,7 @@ Tests that reranking sorts by combined score without discarding results.
 """
 
 import pytest
-from spectrue_core.verification.search_policy import (
+from spectrue_core.verification.search.search_policy import (
     rerank_search_results,
     filter_search_results,
 )

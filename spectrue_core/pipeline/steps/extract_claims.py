@@ -64,7 +64,7 @@ class ExtractClaimsStep:
 
             # Semantic claim dedup right after extraction (pre-oracle/graph/search).
             # This reduces cost + prevents anchor/secondary duplicates.
-            from spectrue_core.verification.claim_dedup import dedup_claims_post_extraction_async
+            from spectrue_core.verification.claims.claim_dedup import dedup_claims_post_extraction_async
             try:
                 before_n = len(claims)
                 claims, dedup_pairs = await dedup_claims_post_extraction_async(claims, tau=0.90)

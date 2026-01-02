@@ -10,7 +10,7 @@
 import json
 from pathlib import Path
 
-from spectrue_core.verification.scoring_aggregation import aggregate_claim_verdict
+from spectrue_core.verification.scoring.scoring_aggregation import aggregate_claim_verdict
 
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "scoring"

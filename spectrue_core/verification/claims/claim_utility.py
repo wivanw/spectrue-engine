@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from spectrue_core.runtime_config import CalibrationPolicyConfig
-from spectrue_core.verification.calibration_registry import CalibrationRegistry
+from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
 
 
 def _safe_float(value: Any, *, default: float = 0.0) -> float:

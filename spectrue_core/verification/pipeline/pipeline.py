@@ -11,14 +11,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from spectrue_core.verification.search_mgr import SearchManager
-from spectrue_core.verification.calibration_registry import CalibrationRegistry
+from spectrue_core.verification.search.search_mgr import SearchManager
+from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
 from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import ContentBudgetConfig
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 from spectrue_core.graph import ClaimGraphBuilder
-from spectrue_core.verification.pipeline_input import apply_content_budget
+from spectrue_core.verification.pipeline.pipeline_input import apply_content_budget
 from spectrue_core.pipeline.factory import PipelineFactory
 from spectrue_core.pipeline.dag import PipelineContext
 import time

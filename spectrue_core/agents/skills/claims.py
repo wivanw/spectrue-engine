@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.verification.evidence_pack import Claim, ClaimAnchor, EvidenceRequirement, ArticleIntent
+from spectrue_core.verification.evidence.evidence_pack import Claim, ClaimAnchor, EvidenceRequirement, ArticleIntent
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace

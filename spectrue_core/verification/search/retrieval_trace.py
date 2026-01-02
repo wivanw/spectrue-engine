@@ -20,7 +20,7 @@ from spectrue_core.schema.claim_frame import (
     RetrievalHop as RetrievalHopFrame,
     RetrievalTrace,
 )
-from spectrue_core.verification.execution_plan import (
+from spectrue_core.verification.orchestration.execution_plan import (
     ClaimExecutionState,
     RetrievalHop as ExecutionRetrievalHop,
 )

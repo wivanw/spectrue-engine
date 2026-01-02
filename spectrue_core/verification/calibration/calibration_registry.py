@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.runtime_config import CalibrationPolicyConfig, CalibrationModelPolicy, EngineRuntimeConfig
-from spectrue_core.verification.calibration_models import (
+from spectrue_core.verification.calibration.calibration_models import (
     build_trace_payload,
     linear_score,
     logistic_score,

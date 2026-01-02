@@ -25,8 +25,8 @@ from unittest.mock import MagicMock, AsyncMock
 
 from spectrue_core.verification.pipeline import ValidationPipeline
 from spectrue_core.verification.pipeline_search import SearchFlowInput
-from spectrue_core.verification.phase_runner import PhaseRunner
-from spectrue_core.verification.search_mgr import SearchManager
+from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+from spectrue_core.verification.search.search_mgr import SearchManager
 
 
 # Shared State Container
@@ -168,7 +168,7 @@ async def test_pipeline_algorithmic_chain():
     # directly with the inputs to verify IT accepts them.
     
     # We need a policy profile
-    from spectrue_core.verification.search_policy import default_search_policy
+    from spectrue_core.verification.search.search_policy import default_search_policy
     profile = default_search_policy().get_profile("deep_research")
     
     runner = PhaseRunner(
@@ -197,7 +197,7 @@ async def test_pipeline_algorithmic_chain():
     # decision should be SufficiencyDecision.ENOUGH
     # To avoid import issues, check .value if sure, or just string equality insensitive?
     # Or import the enum.
-    from spectrue_core.verification.sufficiency import SufficiencyDecision
+    from spectrue_core.verification.orchestration.sufficiency import SufficiencyDecision
     assert decision == SufficiencyDecision.ENOUGH, f"Decision should be ENOUGH, got {decision}"
     assert reason == "inline_sufficient", f"Reason should be inline_sufficient, got {reason}"
     assert len(sources) >= 1, "Must return evidence sources"

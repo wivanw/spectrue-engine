@@ -17,10 +17,10 @@ for fine-grained control over the verification process.
 import asyncio
 from unittest.mock import MagicMock, AsyncMock
 
-from spectrue_core.verification.orchestrator import ClaimOrchestrator
-from spectrue_core.verification.phase_runner import PhaseRunner
-from spectrue_core.verification.execution_plan import BudgetClass
-from spectrue_core.verification.sufficiency import evidence_sufficiency
+from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
+from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+from spectrue_core.verification.orchestration.execution_plan import BudgetClass
+from spectrue_core.verification.orchestration.sufficiency import evidence_sufficiency
 from spectrue_core.schema.claim_metadata import (
     ClaimMetadata,
     VerificationTarget,
@@ -196,7 +196,7 @@ async def main():
     print("Step 3: RGBA Aggregation")
     print("-" * 40)
     
-    from spectrue_core.verification.rgba_aggregation import (
+    from spectrue_core.verification.scoring.rgba_aggregation import (
         aggregate_weighted,
         ClaimScore,
     )

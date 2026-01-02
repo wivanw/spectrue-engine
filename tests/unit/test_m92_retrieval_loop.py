@@ -25,9 +25,9 @@ from spectrue_core.schema.claim_metadata import (
     RetrievalPolicy,
     EvidenceChannel,
 )
-from spectrue_core.verification.execution_plan import ExecutionPlan, phase_a
-from spectrue_core.verification.phase_runner import PhaseRunner
-from spectrue_core.verification.search_policy import SearchPolicyProfile
+from spectrue_core.verification.orchestration.execution_plan import ExecutionPlan, phase_a
+from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+from spectrue_core.verification.search.search_policy import SearchPolicyProfile
 
 
 @pytest.mark.asyncio

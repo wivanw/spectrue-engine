@@ -49,7 +49,7 @@ def count_stance_evidence(
     n_refute = 0
     best_tier = None
     
-    from spectrue_core.verification.evidence_explainability import get_tier_rank
+    from spectrue_core.verification.evidence.evidence_explainability import get_tier_rank
     
     for item in evidence_items:
         if not isinstance(item, dict):
@@ -276,7 +276,7 @@ def enrich_claim_sources(
         all_sources: All available sources (scored + context)
         enrich_func: Function to enrich sources with trust metadata
     """
-    from spectrue_core.verification.evidence_scoring import norm_id
+    from spectrue_core.verification.evidence.evidence_scoring import norm_id
     
     cid = norm_id(claim_verdict.get("claim_id"))
     if not cid:

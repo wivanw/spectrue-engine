@@ -21,7 +21,7 @@ import logging
 import math
 from typing import Any
 
-from spectrue_core.verification.evidence_scoring import (
+from spectrue_core.verification.evidence.evidence_scoring import (
     logit,
     sigmoid,
     TIER_A_BASELINE,
@@ -66,7 +66,7 @@ def compute_explainability_tier_adjustment(
     Returns:
         Adjusted explainability score, or None if no adjustment needed
     """
-    from spectrue_core.verification.evidence_scoring import explainability_factor_for_tier
+    from spectrue_core.verification.evidence.evidence_scoring import explainability_factor_for_tier
     
     if not isinstance(explainability_score, (int, float)) or explainability_score < 0:
         return None

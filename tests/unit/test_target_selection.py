@@ -10,7 +10,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 
-from spectrue_core.verification.target_selection import (
+from spectrue_core.verification.targeting.target_selection import (
     select_verification_targets,
     compute_optimal_target_count,
     TargetBudgetParams,

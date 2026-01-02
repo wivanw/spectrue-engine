@@ -18,8 +18,8 @@ from spectrue_core.constants import (
 )
 from spectrue_core.schema.claim_metadata import EvidenceChannel, SearchLocalePlan, UsePolicy
 from spectrue_core.schema.signals import LocaleDecision
-from spectrue_core.verification.execution_plan import BudgetClass, ExecutionPlan, Phase
-from spectrue_core.verification.search_policy import LocalePolicy, SearchPolicyProfile
+from spectrue_core.verification.orchestration.execution_plan import BudgetClass, ExecutionPlan, Phase
+from spectrue_core.verification.search.search_policy import LocalePolicy, SearchPolicyProfile
 
 if TYPE_CHECKING:
     from spectrue_core.pipeline_builder.spec import PipelineProfile

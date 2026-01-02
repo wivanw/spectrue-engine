@@ -32,12 +32,12 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from spectrue_core.verification.execution_plan import (
+from spectrue_core.verification.orchestration.execution_plan import (
     Phase,
     ExecutionPlan,
     ExecutionState,
 )
-from spectrue_core.verification.sufficiency import (
+from spectrue_core.verification.orchestration.sufficiency import (
     check_sufficiency_for_claim,
     judge_sufficiency_for_claim,
     verdict_ready_for_claim,
@@ -47,15 +47,15 @@ from spectrue_core.verification.sufficiency import (
 )
 from spectrue_core.agents.skills.query import generate_followup_query_from_evidence
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.trusted_sources import get_trusted_domains_by_lang
+from spectrue_core.verification.search.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.schema.claim_metadata import EvidenceChannel
-from spectrue_core.verification.source_utils import canonicalize_sources, extract_domain
-from spectrue_core.verification.retrieval_eval import evaluate_retrieval_confidence
-from spectrue_core.verification.stop_decision import EVStopParams, evaluate_stop_decision
+from spectrue_core.verification.search.source_utils import canonicalize_sources, extract_domain
+from spectrue_core.verification.search.retrieval_eval import evaluate_retrieval_confidence
+from spectrue_core.verification.orchestration.stop_decision import EVStopParams, evaluate_stop_decision
 
 if TYPE_CHECKING:
-    from spectrue_core.verification.search_mgr import SearchManager
-    from spectrue_core.verification.evidence_pack import Claim
+    from spectrue_core.verification.search.search_mgr import SearchManager
+    from spectrue_core.verification.evidence.evidence_pack import Claim
 
 logger = logging.getLogger(__name__)
 

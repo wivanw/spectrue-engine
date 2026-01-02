@@ -14,9 +14,9 @@ from typing import Iterable, Union
 
 from spectrue_core.schema import ClaimUnit
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.evidence_pack import SearchResult
-from spectrue_core.verification.source_utils import has_evidence_chunk
-from spectrue_core.verification.stance_posterior import (
+from spectrue_core.verification.evidence.evidence_pack import SearchResult
+from spectrue_core.verification.search.source_utils import has_evidence_chunk
+from spectrue_core.verification.scoring.stance_posterior import (
     StanceFeatures,
     compute_stance_posterior,
     source_prior_from_tier,

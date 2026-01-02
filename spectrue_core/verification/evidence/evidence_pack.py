@@ -23,9 +23,9 @@ Philosophy:
 from typing import Literal, TypedDict, Any
 
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.calibration_models import logistic_score
-from spectrue_core.verification.calibration_registry import CalibrationRegistry
-from spectrue_core.verification.source_utils import has_evidence_chunk
+from spectrue_core.verification.calibration.calibration_models import logistic_score
+from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.verification.search.source_utils import has_evidence_chunk
 
 
 # ─────────────────────────────────────────────────────────────────────────────

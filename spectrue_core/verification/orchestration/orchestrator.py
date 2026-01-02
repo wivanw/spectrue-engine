@@ -43,7 +43,7 @@ from spectrue_core.schema.claim_metadata import (
     MetadataConfidence,
     RetrievalPolicy,
 )
-from spectrue_core.verification.execution_plan import (
+from spectrue_core.verification.orchestration.execution_plan import (
     Phase,
     ExecutionPlan,
     BudgetClass,
@@ -57,7 +57,7 @@ from spectrue_core.verification.execution_plan import (
 from spectrue_core.utils.trace import Trace
 
 if TYPE_CHECKING:
-    from spectrue_core.verification.evidence_pack import Claim
+    from spectrue_core.verification.evidence.evidence_pack import Claim
 
 logger = logging.getLogger(__name__)
 

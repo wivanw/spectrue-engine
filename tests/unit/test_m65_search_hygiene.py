@@ -9,7 +9,7 @@
 
 import pytest
 from unittest.mock import AsyncMock
-from spectrue_core.verification.search_mgr import SearchManager
+from spectrue_core.verification.search.search_mgr import SearchManager
 from spectrue_core.config import SpectrueConfig
 
 @pytest.fixture

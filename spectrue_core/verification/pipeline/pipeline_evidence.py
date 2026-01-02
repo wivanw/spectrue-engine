@@ -32,33 +32,33 @@ from spectrue_core.scoring.belief import (
 )
 from spectrue_core.scoring.consensus import calculate_consensus
 # Removed claim_posterior imports - using raw LLM scores now
-from spectrue_core.verification.temporal import (
+from spectrue_core.verification.temporal.temporal import (
     label_evidence_timeliness,
     normalize_time_window,
 )
-from spectrue_core.verification.source_utils import canonicalize_sources
+from spectrue_core.verification.search.source_utils import canonicalize_sources
 
 # Suppress deprecation warning - full migration to Bayesian scoring is future work
 import warnings
 
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=DeprecationWarning)
-    from spectrue_core.verification.scoring_aggregation import aggregate_claim_verdict
+    from spectrue_core.verification.scoring.scoring_aggregation import aggregate_claim_verdict
 
-from spectrue_core.verification.rgba_aggregation import (
+from spectrue_core.verification.scoring.rgba_aggregation import (
     apply_dependency_penalties,
     apply_conflict_explainability_penalty,
 )
-from spectrue_core.verification.calibration_registry import CalibrationRegistry
-from spectrue_core.verification.claim_selection import pick_ui_main_claim
-from spectrue_core.verification.search_policy import (
+from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.verification.claims.claim_selection import pick_ui_main_claim
+from spectrue_core.verification.search.search_policy import (
     resolve_profile_name,
     resolve_stance_pass_mode,
 )
 from spectrue_core.utils.trace import Trace
 
 # Extracted scoring helpers from previous refactoring
-from spectrue_core.verification.evidence_scoring import (
+from spectrue_core.verification.evidence.evidence_scoring import (
     norm_id as _norm_id,
     is_prob as _is_prob,
     logit as _logit,
@@ -70,12 +70,12 @@ from spectrue_core.verification.evidence_scoring import (
 )
 
 # Explainability and stance processing modules
-from spectrue_core.verification.evidence_explainability import (
+from spectrue_core.verification.evidence.evidence_explainability import (
     get_tier_rank,
     compute_explainability_tier_adjustment,
     find_best_tier_for_claim,
 )
-from spectrue_core.verification.evidence_stance import (
+from spectrue_core.verification.evidence.evidence_stance import (
     CANONICAL_VERDICT_STATES,
     count_stance_evidence,
     derive_verdict_state_from_llm_score,

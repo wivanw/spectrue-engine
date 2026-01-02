@@ -18,7 +18,7 @@ from spectrue_core.schema.claim_metadata import (
     MetadataConfidence,
     ClaimMetadata,
 )
-from spectrue_core.verification.execution_plan import ClaimPolicyDecision, PolicyMode
+from spectrue_core.verification.orchestration.execution_plan import ClaimPolicyDecision, PolicyMode
 
 
 @dataclass(frozen=True)

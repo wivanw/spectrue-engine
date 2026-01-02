@@ -34,8 +34,8 @@ from typing import Any, TYPE_CHECKING
 from urllib.parse import urlparse
 
 from spectrue_core.schema.claim_metadata import VerificationTarget, EvidenceChannel, UsePolicy
-from spectrue_core.verification.source_utils import has_evidence_chunk
-from spectrue_core.verification.trusted_sources import (
+from spectrue_core.verification.search.source_utils import has_evidence_chunk
+from spectrue_core.verification.search.trusted_sources import (
     TRUSTED_SOURCES,
     TIER_A_TLDS,
     TIER_A_SUFFIXES,
@@ -47,7 +47,7 @@ from spectrue_core.utils.trace import Trace
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from spectrue_core.verification.search_policy import SearchPolicyProfile
+    from spectrue_core.verification.search.search_policy import SearchPolicyProfile
 
 
 # ─────────────────────────────────────────────────────────────────────────────

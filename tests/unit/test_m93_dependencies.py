@@ -24,9 +24,9 @@ from spectrue_core.schema.claim_metadata import (
     SearchLocalePlan,
     VerificationTarget,
 )
-from spectrue_core.verification.execution_plan import BudgetClass
-from spectrue_core.verification.orchestrator import ClaimOrchestrator
-from spectrue_core.verification.phase_runner import PhaseRunner
+from spectrue_core.verification.orchestration.execution_plan import BudgetClass
+from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
+from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
 
 
 @pytest.mark.asyncio

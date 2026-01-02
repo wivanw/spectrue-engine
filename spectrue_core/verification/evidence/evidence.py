@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.verification.evidence_pack import (
+from spectrue_core.verification.evidence.evidence_pack import (
     ArticleContext, Claim, ClaimMetrics, ConfidenceConstraints,
     EvidenceItem, EvidenceMetrics, EvidencePack, EvidencePackStats,
     SearchResult, AssertionMetrics

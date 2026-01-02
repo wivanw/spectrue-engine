@@ -16,19 +16,19 @@ import logging
 
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.url_utils import get_registrable_domain
-from spectrue_core.verification.orchestrator import ClaimOrchestrator
-from spectrue_core.verification.phase_runner import PhaseRunner
-from spectrue_core.verification.search_policy import (
+from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
+from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+from spectrue_core.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )
-from spectrue_core.verification.search_policy_adapter import (
+from spectrue_core.verification.search.search_policy_adapter import (
     apply_search_policy_to_plan,
     apply_claim_retrieval_policy,
     budget_class_for_profile,
     evaluate_locale_decision,
 )
-from spectrue_core.verification.source_utils import canonicalize_sources
+from spectrue_core.verification.search.source_utils import canonicalize_sources
 
 logger = logging.getLogger(__name__)
 

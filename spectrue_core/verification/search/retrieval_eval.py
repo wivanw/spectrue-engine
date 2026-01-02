@@ -17,10 +17,10 @@ from typing import Any
 
 from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.calibration_models import linear_score, logistic_score
-from spectrue_core.verification.calibration_registry import CalibrationRegistry
-from spectrue_core.verification.evidence_pack import score_evidence_likeness
-from spectrue_core.verification.source_utils import extract_domain, score_source_quality
+from spectrue_core.verification.calibration.calibration_models import linear_score, logistic_score
+from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.verification.evidence.evidence_pack import score_evidence_likeness
+from spectrue_core.verification.search.source_utils import extract_domain, score_source_quality
 
 
 def _safe_float(value: Any, *, default: float = 0.0) -> float:

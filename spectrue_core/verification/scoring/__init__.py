@@ -6,4 +6,3 @@ __all__ = [
     "apply_dependency_penalties",
     "apply_conflict_explainability_penalty",
 ]
-к

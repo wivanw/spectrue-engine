@@ -47,7 +47,7 @@ class EvidenceFlowStep:
             EvidenceFlowInput,
             run_evidence_flow,
         )
-        from spectrue_core.verification.evidence import build_evidence_pack
+        from spectrue_core.verification.evidence.evidence import build_evidence_pack
 
         try:
             claims = ctx.claims
