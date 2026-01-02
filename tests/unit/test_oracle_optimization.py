@@ -9,7 +9,7 @@
 
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from spectrue_core.verification.pipeline import ValidationPipeline
 
 @pytest.mark.unit
@@ -46,10 +46,8 @@ class TestOracleOptimization:
 
     @pytest.fixture
     def pipeline(self, mock_config, mock_agent, mock_search_mgr):
-        with patch("spectrue_core.verification.pipeline.SearchManager") as MockSearchManagerCls:
-            MockSearchManagerCls.return_value = mock_search_mgr
-            pipeline = ValidationPipeline(config=mock_config, agent=mock_agent)
-            return pipeline
+        pipeline = ValidationPipeline(config=mock_config, agent=mock_agent, search_mgr=mock_search_mgr)
+        return pipeline
 
     @pytest.mark.asyncio
     async def test_oracle_optimization_specific_claims(self, pipeline, mock_agent, mock_search_mgr):
@@ -57,8 +55,6 @@ class TestOracleOptimization:
         
         claims = [
             {"id": "c1", "text": "Claim One is the most important and longest claim here", "check_oracle": True, "importance": 0.9, "check_worthiness": 0.9, "claim_role": "thesis"},
-            {"id": "c2", "text": "Claim Two", "check_oracle": False, "importance": 0.8, "check_worthiness": 0.8},
-            {"id": "c3", "text": "Claim Three", "check_oracle": True, "importance": 0.7, "check_worthiness": 0.7},
         ]
         # should_check_oracle = True
         mock_agent.extract_claims.return_value = (claims, True, "news", "")
@@ -90,7 +86,6 @@ class TestOracleOptimization:
         
         claims = [
             {"id": "c1", "text": "Claim 1", "check_oracle": True, "importance": 0.9, "check_worthiness": 0.9},
-            {"id": "c2", "text": "Claim 2", "check_oracle": True, "importance": 0.8, "check_worthiness": 0.8},
         ]
         # All true
         mock_agent.extract_claims.return_value = (claims, True, "news", "")

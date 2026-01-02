@@ -25,7 +25,7 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from spectrue_core.verification.types import Source
-from spectrue_core.verification.search.trusted_sources import get_tier_ceiling_for_domain
+from spectrue_core.tools.trusted_sources import get_tier_ceiling_for_domain
 
 
 def extract_domain(url: str) -> str:

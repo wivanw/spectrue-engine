@@ -28,7 +28,7 @@ from spectrue_core.schema.claim_metadata import (
     VerificationTarget,
 )
 from spectrue_core.schema.claims import ClaimStructureType
-from spectrue_core.verification.search.trusted_sources import AVAILABLE_TOPICS
+from spectrue_core.tools.trusted_sources import AVAILABLE_TOPICS
 from spectrue_core.graph.types import EdgeRelation
 
 

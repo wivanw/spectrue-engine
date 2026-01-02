@@ -326,6 +326,7 @@ class AssembleDeepResultStep(Step):
                 # - verified_score (as global)
                 # These are ONLY valid in standard mode.
                 # Deep mode has per-claim RGBA in deep_analysis.claim_results[].judge_output.rgba
+                "cost": (ctx.verdict or {}).get("cost", 0.0),
             }
 
             Trace.event("assemble_deep_result.complete", {

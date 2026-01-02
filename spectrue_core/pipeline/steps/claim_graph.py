@@ -43,7 +43,7 @@ class ClaimGraphStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Build claim graph."""
-        from spectrue_core.verification.pipeline_claim_graph import run_claim_graph_flow
+        from spectrue_core.verification.pipeline.pipeline_claim_graph import run_claim_graph_flow
 
         try:
             eligible_claims = ctx.get_extra("eligible_claims", ctx.claims)

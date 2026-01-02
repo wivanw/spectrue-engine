@@ -43,7 +43,7 @@ class EvidenceFlowStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Process evidence and compute verdicts."""
-        from spectrue_core.verification.pipeline_evidence import (
+        from spectrue_core.verification.pipeline.pipeline_evidence import (
             EvidenceFlowInput,
             run_evidence_flow,
         )
@@ -83,6 +83,9 @@ class EvidenceFlowStep:
                             evidence_by_claim[cid] = []
                         evidence_by_claim[cid].append(src)
 
+                # Calculate cost for deep mode
+                current_cost = self.search_mgr.calculate_cost(ctx.gpt_model, ctx.search_type)
+
                 # Create minimal result for deep mode (no global scores)
                 result = {
                     "judge_mode": "deep",
@@ -91,6 +94,7 @@ class EvidenceFlowStep:
                     "claim_verdicts": [],  # Will be filled by JudgeClaimsStep
                     "sources": sources,
                     "claims": claims,
+                    "cost": current_cost,
                 }
 
                 Trace.event(

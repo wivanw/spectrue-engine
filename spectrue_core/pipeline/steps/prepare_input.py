@@ -49,7 +49,7 @@ class PrepareInputStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Prepare input text."""
-        from spectrue_core.verification.pipeline_input import (
+        from spectrue_core.verification.pipeline.pipeline_input import (
             is_url_input,
             resolve_url_content,
             extract_url_anchors,

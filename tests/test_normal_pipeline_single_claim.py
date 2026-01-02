@@ -9,7 +9,7 @@
 
 import pytest
 
-from spectrue_core.verification.pipeline_evidence import run_evidence_flow, EvidenceFlowInput
+from spectrue_core.verification.pipeline.pipeline_evidence import run_evidence_flow, EvidenceFlowInput
 
 
 class _DummyAgent:
@@ -88,7 +88,7 @@ async def test_normal_profile_enforces_single_claim():
             gpt_model="gpt-5.2",
             search_type="smart",
             progress_callback=None,
-            pipeline="normal",
+            
         ),
         claims=claims,
         sources=[],
@@ -121,7 +121,7 @@ async def test_normal_profile_raises_if_anchor_missing():
                 gpt_model="gpt-5.2",
                 search_type="smart",
                 progress_callback=None,
-                pipeline="normal",
+                
             ),
             claims=claims,
             sources=[],

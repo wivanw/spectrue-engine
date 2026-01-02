@@ -50,7 +50,7 @@ class MeteringSetupStep:
         from spectrue_core.billing.config_loader import load_pricing_policy
         from spectrue_core.billing.progress_emitter import CostProgressEmitter
         from spectrue_core.utils.embedding_service import EmbedService
-        from spectrue_core.verification.pipeline_metering import create_progress_callback
+        from spectrue_core.verification.pipeline.pipeline_metering import create_progress_callback
 
         try:
             policy = load_pricing_policy()

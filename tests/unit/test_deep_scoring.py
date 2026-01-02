@@ -47,7 +47,7 @@ class TestDeepScoringPipeline:
     @pytest.fixture
     def pipeline(self, mock_config, mock_agent, mock_search_mgr):
         # Mock CalibrationRegistry to avoid reading from real config
-        with patch("spectrue_core.verification.pipeline.CalibrationRegistry") as MockRegistry:
+        with patch("spectrue_core.verification.calibration.calibration_registry.CalibrationRegistry") as MockRegistry:
             mock_registry_instance = MagicMock()
             
             # Setup mock model with valid score return
@@ -62,11 +62,11 @@ class TestDeepScoringPipeline:
             
             MockRegistry.from_runtime.return_value = mock_registry_instance
             
-            with patch("spectrue_core.verification.pipeline.SearchManager") as MockSearchManagerCls:
+            with patch("spectrue_core.verification.search.search_mgr.SearchManager") as MockSearchManagerCls:
                 MockSearchManagerCls.return_value = mock_search_mgr
                 
                 # Mock EmbedService to avoid OpenAI calls
-                with patch("spectrue_core.verification.pipeline.EmbedService"):
+                with patch("spectrue_core.utils.embedding_service.EmbedService"):
                     pipeline = ValidationPipeline(config=mock_config, agent=mock_agent)
                     # Manually attach registry if needed, but __init__ does it
                     return pipeline
@@ -80,7 +80,7 @@ class TestDeepScoringPipeline:
             {"id": "c2", "text": "Claim 2", "search_queries": ["q2"]},
             {"id": "c3", "text": "Claim 3", "search_queries": ["q3"]},
         ]
-        mock_agent.extract_claims.return_value = (claims, False, "news", "", "")
+        mock_agent.extract_claims.return_value = (claims, False, "news", "")
         
         # Setup parallel scoring to return dummy result (deep mode uses this)
         mock_agent.score_evidence_parallel.return_value = {
@@ -104,9 +104,10 @@ class TestDeepScoringPipeline:
             lang="en"
         )
 
-        # Deep mode uses score_evidence_parallel, not score_evidence
-        assert mock_agent.score_evidence_parallel.call_count == 1
+        # Deep mode uses per-claim judging via JudgeClaimsStep, avoiding batch score_evidence
         assert mock_agent.score_evidence.call_count == 0
+        # NOTE: score_evidence_parallel is also avoided in new architecture (JudgeClaimsStep uses LLM directly)
+        assert mock_agent.score_evidence_parallel.call_count == 0
 
     @pytest.mark.asyncio
     async def test_smart_mode_uses_batch_scoring(self, pipeline, mock_agent, mock_search_mgr):
@@ -114,10 +115,8 @@ class TestDeepScoringPipeline:
         # Setup: 3 claims
         claims = [
             {"id": "c1", "text": "Claim 1", "search_queries": ["q1"]},
-            {"id": "c2", "text": "Claim 2", "search_queries": ["q2"]},
-            {"id": "c3", "text": "Claim 3", "search_queries": ["q3"]},
         ]
-        mock_agent.extract_claims.return_value = (claims, False, "news", "", "")
+        mock_agent.extract_claims.return_value = (claims, False, "news", "")
         
         # smart mode uses "normal" profile which uses standard score_evidence
         mock_agent.score_evidence.return_value = {

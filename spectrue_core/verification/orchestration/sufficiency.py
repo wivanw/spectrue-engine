@@ -35,7 +35,7 @@ from urllib.parse import urlparse
 
 from spectrue_core.schema.claim_metadata import VerificationTarget, EvidenceChannel, UsePolicy
 from spectrue_core.verification.search.source_utils import has_evidence_chunk
-from spectrue_core.verification.search.trusted_sources import (
+from spectrue_core.tools.trusted_sources import (
     TRUSTED_SOURCES,
     TIER_A_TLDS,
     TIER_A_SUFFIXES,

@@ -46,7 +46,7 @@ class VerifyInlineSourcesStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Verify inline sources."""
-        from spectrue_core.verification.pipeline_input import verify_inline_sources
+        from spectrue_core.verification.pipeline.pipeline_input import verify_inline_sources
         from spectrue_core.runtime_config import ContentBudgetConfig
 
         try:

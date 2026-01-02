@@ -46,7 +46,7 @@ class SearchFlowStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Execute search retrieval."""
-        from spectrue_core.verification.pipeline_search import (
+        from spectrue_core.verification.pipeline.pipeline_search import (
             SearchFlowInput,
             SearchFlowState,
             run_search_flow,

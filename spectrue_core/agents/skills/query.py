@@ -10,7 +10,7 @@
 import re
 
 from .base_skill import BaseSkill, logger
-from spectrue_core.verification.search.trusted_sources import AVAILABLE_TOPICS
+from spectrue_core.tools.trusted_sources import AVAILABLE_TOPICS
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from spectrue_core.agents.llm_schemas import QUERY_GENERATION_SCHEMA

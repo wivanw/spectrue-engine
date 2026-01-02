@@ -47,6 +47,7 @@ class ResultAssemblyStep:
                 "rationale": verdict.get("rationale", ""),
                 "analysis": verdict.get("analysis") or verdict.get("rationale", ""), # Legacy compat
                 "cost_summary": cost_summary,
+                "cost": verdict.get("cost", 0.0),
             }
 
             if ctx.get_extra("oracle_hit"):

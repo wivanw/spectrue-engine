@@ -10,7 +10,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from spectrue_core.tools.search_tool import WebSearchTool
+from spectrue_core.tools.web_search_tool import WebSearchTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 
 @pytest.mark.unit

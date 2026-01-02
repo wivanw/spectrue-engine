@@ -47,7 +47,7 @@ from spectrue_core.verification.orchestration.sufficiency import (
 )
 from spectrue_core.agents.skills.query import generate_followup_query_from_evidence
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.search.trusted_sources import get_trusted_domains_by_lang
+from spectrue_core.tools.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.schema.claim_metadata import EvidenceChannel
 from spectrue_core.verification.search.source_utils import canonicalize_sources, extract_domain
 from spectrue_core.verification.search.retrieval_eval import evaluate_retrieval_confidence

@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.tools.search_tool import WebSearchTool
+from spectrue_core.tools.web_search_tool import WebSearchTool
 from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig

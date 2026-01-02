@@ -11,7 +11,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from spectrue_core.agents.llm_client import LLMClient
-from spectrue_core.tools.search_tool import WebSearchTool
+from spectrue_core.tools.web_search_tool import WebSearchTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
 
@@ -23,6 +23,7 @@ def mock_config():
     config.tavily_api_key = "test-tavily-key"
     config.google_search_api_key = "test-google-key"
     config.google_search_cse_id = "test-cse-id"
+    config.google_fact_check_key = "test-fc-key"
     
     # Mock runtime config
     config.runtime = MagicMock()

@@ -11,7 +11,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from spectrue_core.verification.pipeline_search import run_search_flow, SearchFlowInput, SearchFlowState
+from spectrue_core.verification.pipeline.pipeline_search import run_search_flow, SearchFlowInput, SearchFlowState
 from spectrue_core.verification.search.search_mgr import SearchManager
 from spectrue_core.utils.embedding_service import EmbedService
 
