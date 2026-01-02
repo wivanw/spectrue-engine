@@ -16,7 +16,6 @@ and identifies evidence gaps.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from spectrue_core.agents.llm_client import LLMClient

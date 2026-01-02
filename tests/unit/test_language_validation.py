@@ -11,7 +11,6 @@
 Unit tests for language validation utilities (Phase 4).
 """
 
-import pytest
 from spectrue_core.utils.language_validation import (
     detect_claim_language,
     validate_claim_language,

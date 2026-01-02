@@ -45,8 +45,8 @@ class FactVerifier:
         search_type: str = "advanced",
         gpt_model: str = "gpt-5.2",
         lang: str = "en",
-        content_lang: str | None = None,  # Kept for API compatibility but not used
-        max_cost: int | None = None,  # Kept for API compatibility but not used
+        _content_lang: str | None = None,  # Kept for API compatibility but not used
+        _max_cost: int | None = None,  # Kept for API compatibility but not used
         preloaded_context: str | None = None,
         preloaded_sources: list | None = None,
         progress_callback=None,

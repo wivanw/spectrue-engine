@@ -24,13 +24,10 @@ from spectrue_core.schema.claim_frame import (
     ContextExcerpt,
     ContextMeta,
     EvidenceItemFrame,
-    EvidenceStats,
-    RetrievalTrace,
 )
 from spectrue_core.utils.text_structure import (
     TextStructure,
     extract_text_structure,
-    find_claim_position,
 )
 from spectrue_core.verification.evidence.evidence_stats import build_evidence_stats
 from spectrue_core.verification.search.retrieval_trace import (

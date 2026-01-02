@@ -11,10 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Awaitable, Callable, Any
+from typing import Awaitable, Callable
 
 import logging
-import math
 
 from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.schema.signals import TimeWindow
@@ -43,7 +42,6 @@ import warnings
 
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=DeprecationWarning)
-    from spectrue_core.verification.scoring.scoring_aggregation import aggregate_claim_verdict
 
 from spectrue_core.verification.scoring.rgba_aggregation import (
     apply_dependency_penalties,
@@ -61,30 +59,12 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.evidence.evidence_scoring import (
     norm_id as _norm_id,
     is_prob as _is_prob,
-    logit as _logit,
-    sigmoid as _sigmoid,
-    TIER_A_BASELINE as _TIER_A_BASELINE,
     compute_article_g_from_anchor as _compute_article_g_from_anchor,
     select_anchor_for_article_g as _select_anchor_for_article_g,
     mark_anchor_duplicates_async as _mark_anchor_duplicates_async,
 )
 
 # Explainability and stance processing modules
-from spectrue_core.verification.evidence.evidence_explainability import (
-    get_tier_rank,
-    compute_explainability_tier_adjustment,
-    find_best_tier_for_claim,
-)
-from spectrue_core.verification.evidence.evidence_stance import (
-    CANONICAL_VERDICT_STATES,
-    count_stance_evidence,
-    derive_verdict_state_from_llm_score,
-    derive_verdict_from_score,
-    detect_evidence_conflict,
-    check_has_direct_evidence,
-    assign_claim_rgba,
-    enrich_claim_sources,
-)
 # Claim verdict processing
 from spectrue_core.verification.evidence_verdict_processing import (
     process_claim_verdicts,

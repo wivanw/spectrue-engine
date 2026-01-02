@@ -35,7 +35,6 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.claims.claim_frame_builder import (
     build_claim_frames_from_pipeline,
 )
-from spectrue_core.verification.orchestration.execution_plan import ClaimExecutionState
 
 
 @dataclass

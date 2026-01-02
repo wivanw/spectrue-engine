@@ -13,7 +13,6 @@ Unit tests for search result reranking (Phase 3).
 Tests that reranking sorts by combined score without discarding results.
 """
 
-import pytest
 from spectrue_core.verification.search.search_policy import (
     rerank_search_results,
     filter_search_results,

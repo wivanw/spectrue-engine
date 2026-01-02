@@ -13,7 +13,6 @@ Unit tests for ClaimPosteriorModel (Phase 2: Bayesian Calibration).
 Tests the unified posterior computation that replaces double-counting.
 """
 
-import pytest
 from spectrue_core.scoring.claim_posterior import (
     compute_claim_posterior,
     aggregate_article_posterior,

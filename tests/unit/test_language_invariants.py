@@ -14,7 +14,6 @@ Tests that search queries use original claim.text language,
 and that normalized_text is not used for search.
 """
 
-import pytest
 from spectrue_core.agents.skills.clustering_parsing import _extract_search_query
 
 

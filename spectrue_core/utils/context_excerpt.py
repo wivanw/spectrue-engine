@@ -20,10 +20,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from spectrue_core.utils.text_structure import TextStructure
+    pass
 
 from spectrue_core.utils.text_structure import (
-    TextSegment,
     extract_text_structure,
     find_claim_position,
 )

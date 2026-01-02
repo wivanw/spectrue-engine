@@ -8,6 +8,7 @@
 # (at your option) any later version.
 
 from __future__ import annotations
+import hashlib
 import logging
 from typing import Any
 
@@ -18,9 +19,11 @@ from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import ContentBudgetConfig
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 from spectrue_core.graph import ClaimGraphBuilder
-from spectrue_core.verification.pipeline.pipeline_input import apply_content_budget
+from spectrue_core.verification.pipeline.pipeline_input import apply_content_budget, TrimResult
 from spectrue_core.pipeline.factory import PipelineFactory
 from spectrue_core.pipeline.dag import PipelineContext
+from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.pipeline.pipeline_metering import attach_cost_summary
 import time
 
 logger = logging.getLogger(__name__)

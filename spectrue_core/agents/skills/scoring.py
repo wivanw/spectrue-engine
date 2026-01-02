@@ -17,6 +17,7 @@ from spectrue_core.agents.llm_client import is_schema_failure
 from datetime import datetime
 import hashlib
 import asyncio
+import json
 
 # Structured output schemas
 from spectrue_core.agents.llm_schemas import (
