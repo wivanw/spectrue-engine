@@ -142,7 +142,6 @@ async def run_evidence_flow(
     current_cost = search_mgr.calculate_cost(inp.gpt_model, inp.search_type)
 
     sources = canonicalize_sources(sources)
-    agg_policy = _aggregation_policy(search_mgr)
 
     time_windows: dict[str, TimeWindow] = {}
     if claims:

@@ -196,7 +196,7 @@ class ValidationPipeline:
                     if metering:
                             metering.phase_tracker.record_reason("execution_error", str(e))
                             return attach_cost_summary(error_payload, metering=metering)
-            except:
+            except Exception:
                 pass
                 
             return error_payload

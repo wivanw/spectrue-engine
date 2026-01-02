@@ -83,7 +83,6 @@ def build_sentence_window_excerpt(
     # Truncate if too long
     if len(excerpt_text) > max_chars:
         # Prioritize sentences closest to claim
-        center_idx = sentence_index
         start_offset = sentence_index - window[0].index
 
         # Keep claim sentence always

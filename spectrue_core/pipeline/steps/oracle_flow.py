@@ -63,7 +63,8 @@ class OracleFlowStep:
         verified_score = relevance
         if status in ("REFUTED", "FALSE", "MISLEADING", "INCORRECT", "FAKE"):
             verified_score = 1.0 - relevance
-            if verified_score < 0: verified_score = 0.0
+            if verified_score < 0:
+                verified_score = 0.0
             
         return {
             "verified_score": verified_score,

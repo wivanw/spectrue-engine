@@ -164,13 +164,13 @@ def validate_claim_response(
         val = raw_claim.get(field)
         if val is None:
             defaults_used[field] = default_val
-        elif expected_type == float and not isinstance(val, (int, float)):
+        elif expected_type is float and not isinstance(val, (int, float)):
             defaults_used[field] = default_val
             invalid_fields[field] = f"expected float, got {type(val).__name__}"
-        elif expected_type == int and not isinstance(val, int):
+        elif expected_type is int and not isinstance(val, int):
             defaults_used[field] = default_val
             invalid_fields[field] = f"expected int, got {type(val).__name__}"
-        elif expected_type == str and not isinstance(val, str):
+        elif expected_type is str and not isinstance(val, str):
             defaults_used[field] = default_val
             invalid_fields[field] = f"expected str, got {type(val).__name__}"
 
