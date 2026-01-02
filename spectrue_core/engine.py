@@ -172,8 +172,8 @@ class SpectrueEngine:
                     gpt_model=model,
                     lang=lang,
                     progress_callback=progress_callback,
-                    content_lang=content_lang,
-                    max_cost=max_credits,
+                    _content_lang=content_lang,
+                    _max_cost=max_credits,
                     extract_claims_only=True,  # Just extract claims, don't verify
                 )
 
@@ -212,8 +212,8 @@ class SpectrueEngine:
                     gpt_model=model,
                     lang=lang,
                     progress_callback=progress_callback,
-                    content_lang=content_lang,
-                    max_cost=max_credits - int(extraction_cost)
+                    _content_lang=content_lang,
+                    _max_cost=max_credits - int(extraction_cost)
                     if max_credits is not None
                     else None,
                     pipeline_profile="deep",
@@ -347,8 +347,8 @@ class SpectrueEngine:
                 gpt_model=model,
                 lang=lang,
                 progress_callback=progress_callback,
-                content_lang=content_lang,
-                max_cost=max_credits,
+                _content_lang=content_lang,
+                _max_cost=max_credits,
                 pipeline_profile="normal",  # Use normal profile for general mode
             )
             result.pop("_internal", None)
