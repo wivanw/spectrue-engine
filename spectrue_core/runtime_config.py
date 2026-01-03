@@ -101,19 +101,9 @@ class EngineFeatureFlags:
     # Flags
     coverage_chunking: bool = False
     topic_aware_claim_graph: bool = False
-    semantic_gating_v2: bool = False
-    claim_sanitize: bool = True
-    log_redaction: bool = False
-
-    trace_safe_payloads: bool = False
-
-    clean_md_output: bool = True
     # NOTE: claim_orchestration is REMOVED - orchestration is always enabled
-    # When enabled, the engine may "salvage" a run with missing input text by
-    # extracting claims from retrieved web snippets/titles.
-    # Default MUST be False: salvage changes the task definition and can hide
-    # upstream input failures.
-    allow_salvage_mode: bool = False
+    # NOTE: semantic_gating_v2, claim_sanitize, allow_salvage_mode REMOVED - unused/dead code
+    # NOTE: embeddings_verdict_ready, embeddings_quotes, embeddings_clustering REMOVED - always enabled
     # NOTE: embeddings_verdict_ready, embeddings_quotes, embeddings_clustering REMOVED - always enabled
 
 
@@ -432,18 +422,17 @@ class EngineRuntimeConfig:
             trace_enabled=not _parse_bool(os.getenv("SPECTRUE_TRACE_DISABLE"), default=False),
             fulltext_fetch=_parse_bool(os.getenv("SPECTRUE_FULLTEXT_FETCH"), default=False),
             # Feature Flags
+            # Feature Flags
             coverage_chunking=_parse_bool(os.getenv("FEATURE_COVERAGE_CHUNKING"), default=False),
             topic_aware_claim_graph=_parse_bool(os.getenv("FEATURE_TOPIC_AWARE_CLAIM_GRAPH"), default=False),
-            semantic_gating_v2=_parse_bool(os.getenv("FEATURE_SEMANTIC_GATING_V2"), default=False),
-            claim_sanitize=_parse_bool(os.getenv("FEATURE_CLAIM_SANITIZE"), default=True),
+            # NOTE: semantic_gating_v2, claim_sanitize removed - unused
             log_redaction=_parse_bool(os.getenv("FEATURE_LOG_REDACTION"), default=False),
 
             trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=False),
 
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
             # NOTE: claim_orchestration removed - always enabled
-            # Explicitly gated degraded mode
-            allow_salvage_mode=_parse_bool(os.getenv("FEATURE_ALLOW_SALVAGE_MODE"), default=False),
+            # NOTE: allow_salvage_mode removed - unused
             # Embeddings
             # NOTE: embeddings_verdict_ready, embeddings_quotes, embeddings_clustering removed - always enabled
         )
@@ -609,8 +598,7 @@ class EngineRuntimeConfig:
                 "fulltext_fetch": bool(self.features.fulltext_fetch),
                 "coverage_chunking": bool(self.features.coverage_chunking),
                 "topic_aware_graph": bool(self.features.topic_aware_claim_graph),
-                "semantic_gating_v2": bool(self.features.semantic_gating_v2),
-                "claim_sanitize": bool(self.features.claim_sanitize),
+                # semantic_gating_v2, claim_sanitize removed
                 "trace_safe_payloads": bool(self.features.trace_safe_payloads),
                 "clean_md_output": bool(self.features.clean_md_output),
                 # claim_orchestration removed - always enabled
