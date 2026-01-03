@@ -88,9 +88,8 @@ config = SpectrueConfig(
 | `OPENAI_API_KEY` | OpenAI API key | Required |
 | `TAVILY_API_KEY` | Tavily search API key | Required |
 | `GOOGLE_FACT_CHECK_KEY` | Google Fact Check API key | Optional |
-| `FEATURE_CLAIM_ORCHESTRATION` | Enable M80 orchestration | `false` |
 | `M80_MAX_CONCURRENT_SEARCHES` | Max parallel searches | `3` |
-| `TRACE_SAFE_PAYLOADS` | Sanitize trace logs | `true` |
+| `TRACE_SAFE_PAYLOADS` | Sanitize trace logs | `false` |
 
 ---
 

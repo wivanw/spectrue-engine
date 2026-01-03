@@ -388,11 +388,10 @@ export GOOGLE_FACT_CHECK_KEY="..."  # For Oracle
 export SPECTRUE_ENGINE_DEBUG=true   # Enable debug logging
 
 # Feature Flags
-export FEATURE_CLAIM_ORCHESTRATION=true  # Enable Orchestration
 export MAX_CONCURRENT_SEARCHES=3         # Parallel search limit
 
 # Trace Configuration
-export TRACE_SAFE_PAYLOADS=true    # Sanitize logs (default: true)
+export TRACE_SAFE_PAYLOADS=false   # Sanitize logs (default: false)
 export TRACE_MAX_HEAD_CHARS=120    # Truncation limit
 ```
 

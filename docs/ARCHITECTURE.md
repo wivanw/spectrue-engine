@@ -520,13 +520,7 @@ def my_aggregate(scores: list[ClaimScore]) -> dict:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `TRACE_SAFE_PAYLOADS` | `false` | Sanitize trace logs (redact PII/secrets) |
-| `FEATURE_EMBEDDINGS_VERDICT_READY` | `true` | Use embeddings in verdict_ready_for_claim |
 | `FEATURE_EMBEDDINGS_CLUSTERING` | `true` | Use embeddings for claim clustering |
-| `FEATURE_EMBEDDINGS_QUOTES` | `true` | Use embeddings for quote extraction |
-
-**Removed Flags** (always enabled):
-- `FEATURE_CLAIM_ORCHESTRATION` — orchestration is always on
-- `CLAIM_GRAPH_ENABLED` — ClaimGraph is always on
 
 Configure via environment or `EngineRuntimeConfig`:
 
