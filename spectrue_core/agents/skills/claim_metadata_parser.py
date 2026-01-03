@@ -12,7 +12,7 @@
 """
 Claim Metadata Parsing
 
-This module isolates parsing/validation of Claim metadata (M80) from the
+This module isolates parsing/validation of Claim metadata for claim orchestration from the
 ClaimExtractionSkill implementation, so the main skill code reads as a pipeline.
 """
 

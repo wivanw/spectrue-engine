@@ -8,7 +8,7 @@
 # (at your option) any later version.
 
 """
-Claim Orchestration Example (M80)
+Claim Orchestration Example (Orchestration)
 
 This example demonstrates how to use the claim-centric orchestration
 for fine-grained control over the verification process.
@@ -104,7 +104,7 @@ def create_sample_claims():
 
 async def main():
     print("=" * 60)
-    print("CLAIM ORCHESTRATION EXAMPLE (M80)")
+    print("CLAIM ORCHESTRATION EXAMPLE (Orchestration)")
     print("=" * 60)
     
     # Create sample claims

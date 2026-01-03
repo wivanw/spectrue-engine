@@ -237,7 +237,7 @@ class ClaimExtractionSkill(BaseSkill):
                     search_queries = []
                     query_candidates = []
                     reason = "satire" if satire_likelihood >= 0.8 else f"target={metadata.verification_target.value}"
-                    logger.debug("[M80] Skip search (%s): %s", reason, normalized[:50])
+                    logger.debug("[Orchestration] Skip search (%s): %s", reason, normalized[:50])
 
                 c = Claim(
                     id=f"c{idx_offset+idx+1}",
@@ -402,7 +402,7 @@ class ClaimExtractionSkill(BaseSkill):
 
     def _trace_metadata_distribution(self, claims: list[Claim]) -> None:
         """
-        M80/T8: Emit trace event with metadata distribution for debugging.
+        Trace: Emit trace event with metadata distribution for debugging.
         
         Logs distribution counts for:
         - verification_target: {reality: N, attribution: M, existence: K, none: L}
@@ -448,7 +448,7 @@ class ClaimExtractionSkill(BaseSkill):
 
         # Also log summary
         logger.debug(
-            "[M80] Metadata: targets=%s, roles=%s, confidence=%s, skip_search=%d",
+            "[Orchestration] Metadata: targets=%s, roles=%s, confidence=%s, skip_search=%d",
             target_dist, role_dist, confidence_dist, skip_search_count
         )
 

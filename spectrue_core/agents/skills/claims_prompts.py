@@ -54,7 +54,7 @@ Also provide **satire_likelihood** (0.0-1.0):
 
 **ROUTING RULE**: If satire_likelihood >= 0.8, do NOT generate search queries. Mark as SATIRE.
 
-## STEP 1.6: CLAIM METADATA FOR ORCHESTRATION (M80/M81)
+## STEP 1.6: CLAIM METADATA FOR ORCHESTRATION 
 For each claim, provide orchestration metadata:
 
 1. **verification_target** (CRITICAL - READ CAREFULLY):

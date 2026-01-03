@@ -161,7 +161,7 @@ def aggregate_weighted(claim_scores: list[ClaimScore]) -> AggregatedRGBA:
         result.style = 0.5
         result.explainability = 0.5
         logger.warning(
-            "[M80] No verifiable claims (all weights=0). "
+            "[Orchestration] No verifiable claims (all weights=0). "
             "Returning neutral RGBA scores."
         )
 

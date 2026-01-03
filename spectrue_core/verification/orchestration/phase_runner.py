@@ -206,7 +206,7 @@ class PhaseRunner:
                     continue
 
                 logger.debug(
-                    "[M80] Running Phase %s for %d claim(s)",
+                    "[Orchestration] Running Phase %s for %d claim(s)",
                     phase_id, len(claims_for_phase)
                 )
 
@@ -216,7 +216,7 @@ class PhaseRunner:
                     try:
                         await self.progress_callback(status_key)
                     except Exception as e:
-                        logger.warning("[M80] Progress callback failed: %s", e)
+                        logger.warning("[Orchestration] Progress callback failed: %s", e)
 
                 # Execute phase in parallel for all eligible claims
                 phase_results = await self._run_phase_parallel(
@@ -283,7 +283,7 @@ class PhaseRunner:
                             })
 
                             logger.debug(
-                                "[M80] Claim %s sufficient after Phase %s (rule=%s), skipping %s",
+                                "[Orchestration] Claim %s sufficient after Phase %s (rule=%s), skipping %s",
                                 claim_id, result.phase_id, sufficiency.rule_matched, remaining
                             )
                         elif sufficiency.status == SufficiencyStatus.SKIP:
@@ -305,7 +305,7 @@ class PhaseRunner:
                                 "skipped_phases": remaining,
                             })
                             logger.debug(
-                                "[M80] Claim %s skipped after Phase %s (reason=%s), skipping %s",
+                                "[Orchestration] Claim %s skipped after Phase %s (reason=%s), skipping %s",
                                 claim_id, result.phase_id, sufficiency.reason, remaining
                             )
                         else:
@@ -862,7 +862,7 @@ class PhaseRunner:
             except Exception as e:
                 # T27: Fail-soft - log warning and return empty results
                 logger.warning(
-                    "[M80] Phase %s failed for claim %s: %s",
+                    "[Orchestration] Phase %s failed for claim %s: %s",
                     phase.phase_id, claim_id, e
                 )
                 # T27: Trace search failure
@@ -967,7 +967,7 @@ class PhaseRunner:
         else:
             cid = claim.get("id", "unknown") if isinstance(claim, dict) else "unknown"
             logger.warning(
-                "[M80] Unexpected search result type for claim %s phase %s: %s",
+                "[Orchestration] Unexpected search result type for claim %s phase %s: %s",
                 cid, phase.phase_id, type(raw_result).__name__
             )
             return []
@@ -1097,7 +1097,7 @@ class PhaseRunner:
                     })
 
             except Exception as e:
-                logger.warning("[M80] Phase %s failed: %s", phase.phase_id, e)
+                logger.warning("[Orchestration] Phase %s failed: %s", phase.phase_id, e)
                 Trace.event("phase.error", {
                     "claim_id": claim_id,
                     "phase_id": phase.phase_id,

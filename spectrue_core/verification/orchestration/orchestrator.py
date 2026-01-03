@@ -155,7 +155,7 @@ class ClaimOrchestrator:
         })
 
         logger.debug(
-            "[M80] Orchestrator: %d claims, budget=%s | reality=%d, attribution=%d, existence=%d, none=%d, fail_open=%d",
+            "[Orchestration] Orchestrator: %d claims, budget=%s | reality=%d, attribution=%d, existence=%d, none=%d, fail_open=%d",
             len(claims), budget_class.value, stats["reality"], stats["attribution"], 
             stats["existence"], stats["none"], stats["fail_open"]
         )
@@ -206,11 +206,11 @@ class ClaimOrchestrator:
             if confidence == MetadataConfidence.LOW:
                 # Fail-open: still do minimal search
                 phases = [phase_a_light(primary_locale)]
-                logger.debug("[M80] Claim %s: target=none, confidence=low → fail-open A-light", claim_id)
+                logger.debug("[Orchestration] Claim %s: target=none, confidence=low → fail-open A-light", claim_id)
             else:
                 # Skip search entirely
                 phases = []
-                logger.debug("[M80] Claim %s: target=none → skip search", claim_id)
+                logger.debug("[Orchestration] Claim %s: target=none → skip search", claim_id)
             return phases
 
         # 2. Handle ATTRIBUTION target
@@ -266,7 +266,7 @@ class ClaimOrchestrator:
         # T12: Fail-open injection for low confidence
         if confidence == MetadataConfidence.LOW:
             phases.append(phase_a_light(locale))
-            logger.debug("[M80] Claim %s: low confidence → prepending A-light", claim_id)
+            logger.debug("[Orchestration] Claim %s: low confidence → prepending A-light", claim_id)
 
         # Budget-based phase selection
         if budget_class == BudgetClass.MINIMAL:
@@ -306,7 +306,7 @@ class ClaimOrchestrator:
         # Fail-open injection
         if confidence == MetadataConfidence.LOW:
             phases.append(phase_a_light(locale))
-            logger.debug("[M80] Claim %s (attribution): low confidence → prepending A-light", claim_id)
+            logger.debug("[Orchestration] Claim %s (attribution): low confidence → prepending A-light", claim_id)
 
         # Origin-focused primary phase
         phases.append(phase_a_origin(locale))
@@ -340,7 +340,7 @@ class ClaimOrchestrator:
         # Fail-open injection
         if confidence == MetadataConfidence.LOW:
             phases.append(phase_a_light(locale))
-            logger.debug("[M80] Claim %s (existence): low confidence → prepending A-light", claim_id)
+            logger.debug("[Orchestration] Claim %s (existence): low confidence → prepending A-light", claim_id)
 
         # Existence claims typically need fewer phases
         phases.append(phase_a(locale))

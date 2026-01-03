@@ -78,7 +78,7 @@ async def run_search_flow(
     state: SearchFlowState,
 ) -> SearchFlowState:
     """
-    M80/Search phase (orchestration or legacy unified + CSE fallback).
+    Search phase (orchestration or legacy unified + CSE fallback).
 
     Mutates state by appending context/sources, matching existing pipeline behavior.
     """

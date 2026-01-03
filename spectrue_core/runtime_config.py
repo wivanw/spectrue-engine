@@ -468,7 +468,7 @@ class EngineRuntimeConfig:
             tavily_include_raw_content=include_raw,
             tavily_raw_max_results=_parse_int(os.getenv("SPECTRUE_TAVILY_RAW_MAX_RESULTS"), default=4, min_v=1, max_v=10),
             # Phase runner concurrency limit
-            max_concurrent_searches=_parse_int(os.getenv("M80_MAX_CONCURRENT_SEARCHES"), default=3, min_v=1, max_v=10),
+            max_concurrent_searches=_parse_int(os.getenv("SPECTRUE_MAX_CONCURRENT_SEARCHES"), default=3, min_v=1, max_v=10),
         )
 
         calibration = CalibrationPolicyConfig(
