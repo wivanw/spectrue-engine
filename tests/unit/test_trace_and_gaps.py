@@ -29,6 +29,9 @@ def test_trace_keeps_tail_snippet_and_hash(monkeypatch, tmp_path):
     long_text = "start-" + ("x" * 4500) + "-TAIL_MARKER"
 
     trace_mod.Trace.start(trace_id)
+    # Force Safe Payloads for this test (default in env might differ)
+    trace_mod._trace_safe_payloads_var.set(True)
+    
     trace_mod.Trace.event("llm.prompt", {"prompt": long_text})
     trace_mod.Trace.stop()
 

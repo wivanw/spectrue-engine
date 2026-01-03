@@ -65,7 +65,7 @@ def _noop_enrich_sources_with_trust(sources):
 
 
 @pytest.mark.asyncio
-async def test_normal_profile_enforces_single_claim():
+async def test_normal_profile_allows_multiple_claims():
     agent = _DummyAgent()
     search_mgr = _DummySearchMgr()
 
@@ -73,6 +73,21 @@ async def test_normal_profile_enforces_single_claim():
         {"id": "c1", "text": "Перве твердження", "importance": 0.9},
         {"id": "c2", "text": "Друге твердження", "importance": 0.8},
     ]
+
+    # Mock agent expects multiple claims now
+    async def mock_score_evidence(pack, *, model="gpt-5.2", lang="en"):
+        claims = pack.get("claims")
+        assert len(claims) == 2
+        return {
+            "status": "ok",
+            "verified_score": 0.5,
+            "claim_verdicts": [
+                {"claim_id": "c1", "verdict_score": 0.5},
+                {"claim_id": "c2", "verdict_score": 0.5},
+            ]
+        }
+    
+    agent.score_evidence = mock_score_evidence
 
     result = await run_evidence_flow(
         agent=agent,
@@ -95,35 +110,9 @@ async def test_normal_profile_enforces_single_claim():
     )
 
     assert result["status"] == "ok"
-    assert len(result["claim_verdicts"]) == 1
+    # M120: Normal mode allows multiple claims, so we get veridcts for both
+    assert len(result["claim_verdicts"]) == 2
 
 
-@pytest.mark.asyncio
-async def test_normal_profile_raises_if_anchor_missing():
-    agent = _DummyAgent()
-    search_mgr = _DummySearchMgr()
 
-    # Claims without ids -> anchor selection can't filter properly; should raise.
-    claims = [{"text": "a", "importance": 1.0}, {"text": "b", "importance": 0.9}]
-
-    with pytest.raises(RuntimeError):
-        await run_evidence_flow(
-            agent=agent,
-            search_mgr=search_mgr,
-            build_evidence_pack=_build_evidence_pack,
-            enrich_sources_with_trust=_noop_enrich_sources_with_trust,
-            calibration_registry=None,
-            inp=EvidenceFlowInput(
-                fact="x",
-                original_fact="x",
-                lang="uk",
-                content_lang="uk",
-                gpt_model="gpt-5.2",
-                search_type="smart",
-                progress_callback=None,
-                
-            ),
-            claims=claims,
-            sources=[],
-        )
 

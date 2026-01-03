@@ -59,7 +59,8 @@ async def test_two_hop_loop_reaches_sufficiency():
 
     search_mgr.search_phase = AsyncMock(side_effect=mock_search)
     # Mock apply_evidence_acquisition_ladder to avoid TypeError on await
-    search_mgr.apply_evidence_acquisition_ladder = AsyncMock(side_effect=lambda x: x)
+    search_mgr.apply_evidence_acquisition_ladder = AsyncMock(side_effect=lambda x, **kwargs: x)
+    search_mgr.estimate_hop_cost = MagicMock(return_value=0.0)
 
     from spectrue_core.verification.search.search_policy import QualityThresholds
 

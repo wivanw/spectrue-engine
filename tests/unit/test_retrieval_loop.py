@@ -39,7 +39,7 @@ async def test_hop_limit_enforced_main_profile():
         ])
     )
     # Mock apply_evidence_acquisition_ladder to avoid TypeError on await
-    search_mgr.apply_evidence_acquisition_ladder = AsyncMock(side_effect=lambda x: x)
+    search_mgr.apply_evidence_acquisition_ladder = AsyncMock(side_effect=lambda x, **kwargs: x)
 
 
     profile = SearchPolicyProfile(
@@ -50,6 +50,7 @@ async def test_hop_limit_enforced_main_profile():
         channels_allowed=[EvidenceChannel.AUTHORITATIVE],
     )
 
+    search_mgr.estimate_hop_cost = MagicMock(return_value=0.0)
     runner = PhaseRunner(search_mgr, use_retrieval_loop=True, policy_profile=profile)
 
     metadata = ClaimMetadata(
@@ -85,7 +86,7 @@ async def test_stop_when_followup_query_fails():
         ])
     )
     # Mock apply_evidence_acquisition_ladder to avoid TypeError on await
-    search_mgr.apply_evidence_acquisition_ladder = AsyncMock(side_effect=lambda x: x)
+    search_mgr.apply_evidence_acquisition_ladder = AsyncMock(side_effect=lambda x, **kwargs: x)
 
 
     profile = SearchPolicyProfile(
@@ -96,6 +97,7 @@ async def test_stop_when_followup_query_fails():
         channels_allowed=[EvidenceChannel.REPUTABLE_NEWS],
     )
 
+    search_mgr.estimate_hop_cost = MagicMock(return_value=0.0)
     runner = PhaseRunner(search_mgr, use_retrieval_loop=True, policy_profile=profile)
 
     metadata = ClaimMetadata(
@@ -120,5 +122,6 @@ async def test_stop_when_followup_query_fails():
     await runner.run_all_claims([claim], plan)
 
     state = runner.execution_state.get_or_create("c1")
+    assert not state.error, f"State error: {state.error}"
     assert state.sufficiency_reason == "followup_failed"
     assert search_mgr.search_phase.call_count == 1

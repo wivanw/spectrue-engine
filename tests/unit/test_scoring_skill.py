@@ -43,8 +43,8 @@ class TestScoringSkill:
         }
         result = await skill.score_evidence(pack)
         
-        # LLM's verified_score is trusted directly
-        assert result["verified_score"] == 0.85
+        # LLM's verified_score is ignored in favor of re-aggregation from claims
+        assert result["verified_score"] == 0.8
         assert result["rationale"] == "Solid evidence."
 
     @pytest.mark.asyncio

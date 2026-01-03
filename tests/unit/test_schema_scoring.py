@@ -50,6 +50,7 @@ class TestStructuredScoringParsing:
                     "claim_id": "c1",
                     "verdict_score": 0.85,
                     "status": "verified",
+                    "verdict_state": "supported",  # Required to preserve score!
                     "assertion_verdicts": [
                         {
                             "assertion_key": "event.location.city",
@@ -109,6 +110,7 @@ class TestStructuredScoringParsing:
                     "claim_id": "c1",
                     "verdict_score": 0.45,  # Weighted average
                     "status": "partially_verified",
+                    "verdict_state": "supported",
                     "assertion_verdicts": [
                         {
                             "assertion_key": "event.participants",
