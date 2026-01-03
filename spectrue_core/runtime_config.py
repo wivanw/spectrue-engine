@@ -116,8 +116,7 @@ class EngineFeatureFlags:
     # Default MUST be False: salvage changes the task definition and can hide
     # upstream input failures.
     allow_salvage_mode: bool = False
-    # NOTE: embeddings_verdict_ready and embeddings_quotes REMOVED - always enabled
-    embeddings_clustering: bool = True     # Use embeddings for claim clustering
+    # NOTE: embeddings_verdict_ready, embeddings_quotes, embeddings_clustering REMOVED - always enabled
 
 
 @dataclass(frozen=True)
@@ -449,8 +448,7 @@ class EngineRuntimeConfig:
             # Explicitly gated degraded mode
             allow_salvage_mode=_parse_bool(os.getenv("FEATURE_ALLOW_SALVAGE_MODE"), default=False),
             # Embeddings
-            # NOTE: embeddings_verdict_ready and embeddings_quotes removed - always enabled
-            embeddings_clustering=_parse_bool(os.getenv("FEATURE_EMBEDDINGS_CLUSTERING"), default=True),
+            # NOTE: embeddings_verdict_ready, embeddings_quotes, embeddings_clustering removed - always enabled
         )
 
         # Search knobs
@@ -620,8 +618,7 @@ class EngineRuntimeConfig:
                 "trace_safe_payloads": bool(self.features.trace_safe_payloads),
                 "clean_md_output": bool(self.features.clean_md_output),
                 # claim_orchestration removed - always enabled
-                # embeddings_verdict_ready and embeddings_quotes removed - always enabled
-                "embeddings_clustering": bool(self.features.embeddings_clustering),
+                # embeddings_verdict_ready, embeddings_quotes, embeddings_clustering removed - always enabled
             },
             "calibration": {
                 "claim_utility_version": self.calibration.claim_utility.version,

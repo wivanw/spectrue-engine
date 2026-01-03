@@ -520,7 +520,6 @@ def my_aggregate(scores: list[ClaimScore]) -> dict:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `TRACE_SAFE_PAYLOADS` | `false` | Sanitize trace logs (redact PII/secrets) |
-| `FEATURE_EMBEDDINGS_CLUSTERING` | `true` | Use embeddings for claim clustering |
 
 Configure via environment or `EngineRuntimeConfig`:
 
