@@ -497,10 +497,10 @@ CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
             "additionalProperties": False,
             "required": ["R", "G", "B", "A"],
             "properties": {
-                "R": {"type": "number", "minimum": 0, "maximum": 1, "description": "Danger (harm if believed)"},
-                "G": {"type": "number", "minimum": 0, "maximum": 1, "description": "Veracity (factual accuracy)"},
-                "B": {"type": "number", "minimum": 0, "maximum": 1, "description": "Honesty (good faith presentation)"},
-                "A": {"type": "number", "minimum": 0, "maximum": 1, "description": "Explainability (traceability)"},
+                "R": {"type": "number", "minimum": -1, "maximum": 1, "description": "Danger (harm if believed). Use -1 if cannot assess."},
+                "G": {"type": "number", "minimum": -1, "maximum": 1, "description": "Veracity (factual accuracy). Use -1 for NEI/Unverifiable."},
+                "B": {"type": "number", "minimum": -1, "maximum": 1, "description": "Honesty (good faith presentation). Use -1 if cannot assess."},
+                "A": {"type": "number", "minimum": -1, "maximum": 1, "description": "Explainability (traceability). Use -1 if no evidence."},
             },
         },
         "confidence": {

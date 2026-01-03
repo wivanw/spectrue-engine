@@ -85,10 +85,8 @@ async def run_search_flow(
     # Feature flags must be explicit booleans; this prevents MagicMock configs
     # (used in tests) from accidentally enabling orchestration.
     features = getattr(getattr(config, "runtime", None), "features", None)
-    claim_orchestration_flag = getattr(features, "claim_orchestration", False)
-    use_orchestration = (
-        claim_orchestration_flag is True and inp.claims and not inp.preloaded_context
-    )
+    # NOTE: claim_orchestration flag REMOVED - orchestration is always enabled
+    use_orchestration = bool(inp.claims) and not inp.preloaded_context
 
     # ─────────────────────────────────────────────────────────────────────────
     # Preflight invariant validation for Step-based pipeline

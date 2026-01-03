@@ -9,7 +9,7 @@
 
 from datetime import datetime, timedelta
 from typing import Iterator
-from spectrue_core.auth.models import User
+from spectrue_core.users.models import User
 
 def get_active_users(db, days_threshold: int = 7) -> Iterator[User]:
     cutoff = datetime.utcnow() - timedelta(days=days_threshold)

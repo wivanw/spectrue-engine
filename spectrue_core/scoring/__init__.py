@@ -33,6 +33,17 @@ from spectrue_core.scoring.rgba_belief import (
 # Consensus
 from spectrue_core.scoring.consensus import calculate_consensus
 
+# Budget allocation
+from spectrue_core.scoring.budget_allocation import (
+    BudgetState,
+    GlobalBudgetTracker,
+    ExtractBudgetParams,
+    QueryBudgetParams,
+    estimate_claim_complexity,
+    has_named_entities,
+    compute_query_count,
+)
+
 __all__ = [
     # Functions
     "prob_to_log_odds",
@@ -43,7 +54,14 @@ __all__ = [
     "process_updates",
     "sigmoid_impact",
     "calculate_consensus",
+    "estimate_claim_complexity",
+    "has_named_entities",
+    "compute_query_count",
     # Classes
     "RGBABeliefState",
     "create_rgba_belief_from_tier",
+    "BudgetState",
+    "GlobalBudgetTracker",
+    "ExtractBudgetParams",
+    "QueryBudgetParams",
 ]

@@ -8,5 +8,6 @@
 # (at your option) any later version.
 
 from spectrue_core.users.query import get_active_users, count_active_users
+from spectrue_core.users.models import User
 
-__all__ = ["get_active_users", "count_active_users"]
+__all__ = ["User", "get_active_users", "count_active_users"]

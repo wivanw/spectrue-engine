@@ -556,6 +556,51 @@ class LLMClient:
         )
         return result["parsed"]
 
+    async def call_structured(
+        self,
+        *,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        schema: dict[str, Any],
+        schema_name: str = "structured_output",
+        model: str = "gpt-5-nano",
+        reasoning_effort: ReasoningEffort = "low",
+        timeout: float | None = None,
+        max_output_tokens: int | None = None,
+        trace_kind: str = "llm_call",
+    ) -> dict:
+        """
+        Structured output call with JSON schema.
+        
+        This is a convenience wrapper around call_json that uses a specific
+        parameter naming convention used by skills.
+        
+        Args:
+            user_prompt: The user message content
+            system_prompt: Optional system instructions
+            schema: JSON schema for structured output
+            schema_name: Name for the schema
+            model: Model to use (default: gpt-5-nano)
+            
+        Returns:
+            Parsed JSON response matching the schema
+        """
+        # Ensure schema has title for the API
+        schema_with_title = dict(schema)
+        if "title" not in schema_with_title:
+            schema_with_title["title"] = schema_name
+            
+        return await self.call_json(
+            model=model,
+            input=user_prompt,
+            instructions=system_prompt,
+            response_schema=schema_with_title,
+            reasoning_effort=reasoning_effort,
+            timeout=timeout,
+            max_output_tokens=max_output_tokens,
+            trace_kind=trace_kind,
+        )
+
     async def close(self) -> None:
         """Clean up resources."""
         if self.client:

@@ -113,6 +113,8 @@ class ScoringSkill(BaseSkill):
 
             sources_by_claim[cid].append({
                 "domain": r.get("domain"),
+                "link": r.get("url"),
+                "title": r.get("title"),
                 "source_reliability_hint": "high" if r.get("is_trusted") else "general",
                 "stance": stance, 
                 "excerpt": content_text
@@ -212,8 +214,15 @@ class ScoringSkill(BaseSkill):
             claim_verdicts = clamped.get("claim_verdicts", [])
             claims_without_evidence = set(no_evidence)
             
+            # Map for re-attaching text
+            claim_text_map = {c["id"]: c["text"] for c in claims_info}
+
             for cv in claim_verdicts:
                 cid = cv.get("claim_id")
+                # UI requires 'text' to render the claim card
+                if cid in claim_text_map:
+                    cv["text"] = claim_text_map[cid]
+
                 if cid in claims_without_evidence:
                     cv["verdict_score"] = -1.0
                     cv["verdict"] = "unverified"
@@ -232,37 +241,37 @@ class ScoringSkill(BaseSkill):
             # Logic: Average of valid (>=0) claim scores weighted by importance (if available? No, simple avg for now).
             
             valid_g = []
-            valid_r = []
-            valid_b = []
-            valid_a = []
             
             for cv in claim_verdicts:
-                # Find matching input claim to get importance?
-                # For now, simple average of G.
+                # Aggregate only G (verified_score) from claims
+                # R, B, A remain as global article-level scores from LLM
                 g = cv.get("verdict_score", -1.0)
-                rgba = cv.get("rgba")
                 
                 if g >= 0:
                     valid_g.append(g)
-                
-                if rgba and len(rgba) == 4:
-                    valid_r.append(rgba[0])
-                    # valid_g.append(rgba[1]) # Already got from verdict_score
-                    valid_b.append(rgba[2])
-                    valid_a.append(rgba[3])
             
             if valid_g:
                 clamped["verified_score"] = sum(valid_g) / len(valid_g)
             else:
                 # If no claims have valid score (all unverified), global is unverified
                 clamped["verified_score"] = -1.0
-                
-            if valid_r:
-                clamped["danger_score"] = sum(valid_r) / len(valid_r)
-            if valid_b:
-                clamped["style_score"] = sum(valid_b) / len(valid_b)
-            if valid_a:
-                clamped["explainability_score"] = sum(valid_a) / len(valid_a)
+            
+            # Debug: trace aggregation decision
+            Trace.event(
+                "score_evidence.aggregation",
+                {
+                    "claim_count": len(claim_verdicts),
+                    "valid_g_count": len(valid_g),
+                    "valid_g_values": valid_g[:5] if valid_g else [],
+                    "computed_verified_score": clamped["verified_score"],
+                    "claims_without_evidence": list(claims_without_evidence)[:5],
+                    "preserved_global_r": clamped.get("danger_score"),
+                    "preserved_global_b": clamped.get("style_score"),
+                    "preserved_global_a": clamped.get("explainability_score"),
+                },
+            )
+            # NOTE: Do NOT aggregate R, B, A from claim-level RGBA
+            # Those remain as global article-level scores from LLM
 
             metrics = pack.get("metrics", {})
             if isinstance(metrics, dict) and metrics.get("stance_failure") is True:
@@ -486,6 +495,7 @@ Return valid JSON now."""
 
                     # SUCCESS: All fields valid
                     result["claim_id"] = cid
+                    result["text"] = claim_info.get("text", "")
                     result["status"] = "ok"
 
                     # Clamp RGBA values

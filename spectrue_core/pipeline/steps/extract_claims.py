@@ -46,6 +46,37 @@ class ExtractClaimsStep:
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Extract claims from fact."""
         try:
+            # Check if claims are preloaded (e.g., from deep mode first pass)
+            preloaded_claims = ctx.get_extra("preloaded_claims")
+            if preloaded_claims and isinstance(preloaded_claims, list) and len(preloaded_claims) > 0:
+                # Use preloaded claims, skip extraction
+                claims = preloaded_claims
+                Trace.event("extract_claims.using_preloaded", {
+                    "count": len(claims),
+                    "claim_ids": [c.get("id") for c in claims[:10]],
+                })
+                # Still need to select anchor claim
+                anchor_claim = max(claims, key=lambda c: float(c.get("importance", 0.5)))
+                anchor_claim_id = str(anchor_claim.get("id", "c1"))
+                
+                Trace.event(
+                    "extract_claims.completed",
+                    {
+                        "total_claims": len(claims),
+                        "eligible_claims": len(claims),
+                        "anchor_claim_id": anchor_claim_id,
+                        "preloaded": True,
+                    },
+                )
+                
+                return ctx.with_update(claims=claims).set_extra(
+                    "anchor_claim_id", anchor_claim_id
+                ).set_extra(
+                    "eligible_claims", claims
+                ).set_extra(
+                    "_extracted_claims", claims
+                )
+            
             fact = ctx.get_extra("prepared_fact") or ctx.get_extra("raw_fact", "")
             progress_callback = ctx.get_extra("progress_callback")
 

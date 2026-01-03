@@ -365,20 +365,20 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
                     reasons_expert=reasons_expert,
                 )
             )
-            # Enforce semantic neutral score for insufficient evidence
+            # Enforce unverified score for insufficient evidence
             if claim_verdicts[-1].verdict_state == VerdictState.INSUFFICIENT_EVIDENCE:
                 original_score = safe_score(rc.get("verdict_score"), default=-1.0)
-                if original_score != 0.5:
+                if original_score != -1.0:
                     Trace.event(
                         "verdict.score_corrected",
                         {
                             "claim_id": claim_verdicts[-1].claim_id,
                             "from": original_score,
-                            "to": 0.5,
+                            "to": -1.0,
                             "reason": "insufficient_evidence",
                         },
                     )
-                claim_verdicts[-1].verdict_score = 0.5
+                claim_verdicts[-1].verdict_score = -1.0
             else:
                 claim_verdicts[-1].verdict_score = safe_score(rc.get("verdict_score"), default=-1.0)
 

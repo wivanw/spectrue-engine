@@ -63,19 +63,20 @@ class BuildClaimFramesStep(Step):
     def name(self) -> str:
         return "build_claim_frames"
 
-    async def execute(self, ctx: PipelineContext) -> PipelineContext:
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("build_claim_frames")
 
         try:
             # Get required data from context
-            claims = ctx.extras.get("claims", [])
-            document_text = ctx.extras.get("clean_text", "") or ctx.extras.get("input_text", "")
+            # Claims are stored in ctx.claims by ExtractClaimsStep
+            claims = ctx.claims or []
+            document_text = ctx.extras.get("clean_text", "") or ctx.extras.get("input_text", "") or ctx.extras.get("prepared_fact", "")
             evidence_by_claim = ctx.extras.get("evidence_by_claim", {})
             execution_states = ctx.extras.get("execution_states", {})
 
             if not claims:
                 Trace.event("build_claim_frames.skip", {"reason": "no_claims"})
-                return ctx.with_extras(deep_claim_ctx=DeepClaimContext())
+                return ctx.set_extra("deep_claim_ctx", DeepClaimContext())
 
             # Build frames
             frames = build_claim_frames_from_pipeline(
@@ -92,7 +93,7 @@ class BuildClaimFramesStep(Step):
                 "claim_ids": [f.claim_id for f in frames],
             })
 
-            return ctx.with_extras(deep_claim_ctx=deep_ctx)
+            return ctx.set_extra("deep_claim_ctx", deep_ctx)
 
         finally:
             Trace.phase_end("build_claim_frames")
@@ -112,7 +113,7 @@ class SummarizeEvidenceStep(Step):
     def name(self) -> str:
         return "summarize_evidence"
 
-    async def execute(self, ctx: PipelineContext) -> PipelineContext:
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("summarize_evidence")
 
         try:
@@ -146,7 +147,7 @@ class SummarizeEvidenceStep(Step):
                 "summary_count": len(summaries),
             })
 
-            return ctx.with_extras(deep_claim_ctx=deep_ctx)
+            return ctx.set_extra("deep_claim_ctx", deep_ctx)
 
         finally:
             Trace.phase_end("summarize_evidence")
@@ -167,7 +168,7 @@ class JudgeClaimsStep(Step):
     def name(self) -> str:
         return "judge_claims"
 
-    async def execute(self, ctx: PipelineContext) -> PipelineContext:
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("judge_claims")
 
         try:
@@ -203,7 +204,7 @@ class JudgeClaimsStep(Step):
                 "verdicts": {cid: out.verdict for cid, out in outputs.items()},
             })
 
-            return ctx.with_extras(deep_claim_ctx=deep_ctx)
+            return ctx.set_extra("deep_claim_ctx", deep_ctx)
 
         finally:
             Trace.phase_end("judge_claims")
@@ -222,7 +223,7 @@ class AssembleDeepResultStep(Step):
     def name(self) -> str:
         return "assemble_deep_result"
 
-    async def execute(self, ctx: PipelineContext) -> PipelineContext:
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("assemble_deep_result")
 
         try:
@@ -276,8 +277,54 @@ class AssembleDeepResultStep(Step):
             # CRITICAL: Update claim_verdicts in verdict with RGBA from judge_outputs
             # This ensures pipeline_evidence doesn't overwrite per-claim RGBA with globals
             verdict = ctx.verdict or {}
-            claim_verdicts = verdict.get("claim_verdicts", [])
-            if isinstance(claim_verdicts, list):
+            claim_verdicts = verdict.get("claim_verdicts")
+            
+            # If claim_verdicts is empty (deep mode default behavior since EvidenceFlow
+            # returns empty list in collect_only mode), we must build it from scratch
+            # using the ClaimResults we just assembled.
+            if not claim_verdicts:
+                claim_verdicts = []
+                for cr in claim_results:
+                    frame = cr.claim_frame
+                    judge = cr.judge_output
+                    
+                    # Map sources used by judge back to full source objects
+                    # We look up in frame.evidence_items
+                    used_sources = []
+                    evidence_map = {ei.evidence_id: ei for ei in frame.evidence_items}
+                    
+                    for src_ref in (judge.sources_used or []):
+                        # src_ref likely evidence_id or URL
+                        if src_ref in evidence_map:
+                            ei = evidence_map[src_ref]
+                            used_sources.append({
+                                "url": ei.url,
+                                "domain": ei.source_type or "web", # Fallback
+                                "title": ei.title,
+                                "citation_text": ei.snippet,
+                                "trust_category": ei.source_tier,
+                                "is_trusted": ei.source_tier in ("tier1", "tier2"),
+                            })
+
+                    cv = {
+                        "claim_id": frame.claim_id,
+                        "text": frame.claim_text,
+                        "rgba": [
+                            judge.rgba.r,
+                            judge.rgba.g,
+                            judge.rgba.b,
+                            judge.rgba.a,
+                        ],
+                        "verdict": judge.verdict,
+                        "confidence": judge.confidence,
+                        "explanation": judge.explanation,
+                        "sources": used_sources,
+                    }
+                    claim_verdicts.append(cv)
+                verdict["claim_verdicts"] = claim_verdicts
+
+            elif isinstance(claim_verdicts, list):
+                # Update existing claim_verdicts (if any existed, e.g. from legacy flow)
                 for cv in claim_verdicts:
                     if not isinstance(cv, dict):
                         continue
@@ -311,6 +358,63 @@ class AssembleDeepResultStep(Step):
             # IMPORTANT: Deep mode does NOT populate global scores (danger_score, style_score, etc.)
             # These are computed per-claim and stored in claim_results[].judge_output.rgba
             # The UI MUST read from deep_analysis.claim_results, not from global fields
+            
+            # Import trust enrichment
+            from spectrue_core.utils.trust_utils import enrich_sources_with_trust
+            
+            # Build details in format expected by frontend
+            # Frontend expects: {text, rgba, rationale, sources, verified_score, danger_score}
+            details_for_frontend = []
+            for cr in claim_results:
+                frame = cr.claim_frame
+                judge = cr.judge_output
+                
+                # Build sources list
+                sources_list = []
+                evidence_map = {ei.evidence_id: ei for ei in frame.evidence_items}
+                # Also map by URL for fallback matching
+                url_map = {ei.url: ei for ei in frame.evidence_items if ei.url}
+                
+                for src_ref in (judge.sources_used or []):
+                    # Try to find by evidence_id first, then by URL
+                    ei = evidence_map.get(src_ref) or url_map.get(src_ref)
+                    if ei:
+                        sources_list.append({
+                            "url": ei.url,
+                            "domain": ei.source_type or "web",
+                            "title": ei.title,
+                            "citation_text": ei.snippet,
+                        })
+                
+                # If no sources matched, include all evidence items as sources
+                # This ensures frontend always has sources to display
+                if not sources_list and frame.evidence_items:
+                    for ei in frame.evidence_items:
+                        sources_list.append({
+                            "url": ei.url,
+                            "domain": ei.source_type or "web",
+                            "title": ei.title,
+                            "citation_text": ei.snippet,
+                        })
+                
+                # Enrich sources with trust_category from TRUSTED_SOURCES registry
+                # This maps domain -> category (e.g., bbc.com -> general_news_western)
+                sources_list = enrich_sources_with_trust(sources_list)
+                
+                details_for_frontend.append({
+                    "text": frame.claim_text,
+                    "rgba": [
+                        judge.rgba.r,
+                        judge.rgba.g,
+                        judge.rgba.b,
+                        judge.rgba.a,
+                    ],
+                    "rationale": judge.explanation or f"Verdict: {judge.verdict}",
+                    "sources": sources_list,
+                    "verified_score": judge.rgba.g,  # G component = verified score
+                    "danger_score": judge.rgba.r,    # R component = danger score
+                })
+            
             final_result = {
                 **existing_final,
                 "analysis_mode": "deep",
@@ -319,6 +423,10 @@ class AssembleDeepResultStep(Step):
                     "analysis_mode": "deep",
                     "claim_results": claim_results_serialized,
                 },
+                # For UI compatibility, populate 'details' with the claim verdicts
+                # This ensures the main sentence list in the UI renders correctly
+                "details": details_for_frontend,
+                "claim_verdicts": verdict.get("claim_verdicts", []),  # Keep for API compatibility
                 # NOTE: We intentionally do NOT set these global fields in deep mode:
                 # - danger_score
                 # - style_score  

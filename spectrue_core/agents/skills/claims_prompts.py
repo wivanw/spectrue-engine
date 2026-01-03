@@ -174,6 +174,10 @@ Also assign:
 IMPORTANT: Every claim MUST include all keys shown below. Use empty arrays/objects
 or neutral defaults when a field does not apply.
 - "text" MUST be an exact substring from the article (no paraphrase).
+- **CRITICAL**: "text" must be in the SAME LANGUAGE as the article. Do NOT translate to English!
+  - If article is in Ukrainian, "text" MUST be in Ukrainian (exact quote from article)
+  - If article is in Russian, "text" MUST be in Russian
+  - "normalized_text" can be in English for search purposes, but "text" is ALWAYS original language
 
 ```json
 {{

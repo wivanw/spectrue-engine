@@ -127,9 +127,14 @@ class ValidationPipeline:
 
         # Determine Mode
         mode_name = "normal"
+        
+        # M118: Map search_type="deep" to deep mode for backward compatibility
+        if search_type == "deep":
+            mode_name = "deep"
+            
         if runtime_config:
             if isinstance(runtime_config, dict):
-                 mode_name = runtime_config.get("profile", "normal")
+                 mode_name = runtime_config.get("profile", mode_name)
             elif hasattr(runtime_config, "profile"):
                  mode_name = runtime_config.profile
                  

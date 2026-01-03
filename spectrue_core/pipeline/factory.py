@@ -142,7 +142,7 @@ class PipelineFactory:
 
         return [
             # Infrastructure
-            StepNode(step=MeteringSetupStep(config=config)),
+            StepNode(step=MeteringSetupStep(config=config, agent=self.agent, search_mgr=self.search_mgr)),
 
             # Invariants
             StepNode(
@@ -245,7 +245,7 @@ class PipelineFactory:
 
         return [
             # Infrastructure
-            StepNode(step=MeteringSetupStep(config=config)),
+            StepNode(step=MeteringSetupStep(config=config, agent=self.agent, search_mgr=self.search_mgr)),
 
             # Minimal invariants
             StepNode(
@@ -353,7 +353,7 @@ class PipelineFactory:
 
         return [
             # Infrastructure
-            StepNode(step=MeteringSetupStep(config=config)),
+            StepNode(step=MeteringSetupStep(config=config, agent=self.agent, search_mgr=self.search_mgr)),
 
             # Input preparation
             StepNode(

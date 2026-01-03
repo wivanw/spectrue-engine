@@ -226,25 +226,29 @@ async def run_evidence_flow(
     # Derive mode from explicit score_mode parameter (no inp.pipeline lookup)
     is_normal_mode = (score_mode == "standard")
 
-    if is_normal_mode and claims:
-        if anchor_claim_id:
-            claims = [
-                c
-                for c in claims
-                if isinstance(c, dict)
-                and str(c.get("id") or c.get("claim_id")) == str(anchor_claim_id)
-            ]
-        if len(claims) != 1:
-            raise RuntimeError(
-                f"Normal evidence flow violation: expected 1 claim, got {len(claims)}"
-            )
-        Trace.event(
-            "evidence_flow.single_claim.enforced",
-            {
-                "score_mode": score_mode,
-                "anchor_claim_id": str(anchor_claim_id or ""),
-            },
-        )
+    # NORMAL pipeline restriction removed (M120):
+    # We now allow multi-claim batch scoring in Normal Mode to provide better utility.
+    # The Single-Claim enforcement is disabled.
+    #
+    # if is_normal_mode and claims:
+    #     if anchor_claim_id:
+    #         claims = [
+    #             c
+    #             for c in claims
+    #             if isinstance(c, dict)
+    #             and str(c.get("id") or c.get("claim_id")) == str(anchor_claim_id)
+    #         ]
+    #     if len(claims) != 1:
+    #         raise RuntimeError(
+    #             f"Normal evidence flow violation: expected 1 claim, got {len(claims)}"
+    #         )
+    #     Trace.event(
+    #         "evidence_flow.single_claim.enforced",
+    #         {
+    #             "score_mode": score_mode,
+    #             "anchor_claim_id": str(anchor_claim_id or ""),
+    #         },
+    #     )
 
     # Language consistency validation (Phase 4 invariant)
     if claims and inp.content_lang:
@@ -260,10 +264,19 @@ async def run_evidence_flow(
             min_confidence=0.7,
         )
         if not lang_valid and is_normal_mode:
-            # In normal mode, language mismatch is a violation
-            raise RuntimeError(
-                f"Language mismatch in normal pipeline: expected={inp.content_lang}, "
-                f"mismatches={lang_mismatches}"
+            # In normal mode, language mismatch used to be a violation, but we relax this
+            # because LLMs sometimes translate claims. We log it and proceed.
+            logger.warning(
+                "Language mismatch in normal pipeline (proceeding): expected=%s, mismatches=%s",
+                inp.content_lang,
+                lang_mismatches,
+            )
+            Trace.event(
+                "pipeline.language_mismatch_ignored",
+                {
+                    "expected": inp.content_lang,
+                    "mismatches": lang_mismatches,
+                },
             )
 
     # T7: Deterministic Ranking
@@ -589,9 +602,10 @@ async def run_evidence_flow(
         result["audit"] = audit
 
     verified = result.get("verified_score", -1.0)
-    if verified < 0:
-        logger.warning("[Pipeline] ⚠️ Missing verified_score in result - using 0.5")
-        verified = 0.5
+    # -1.0 is now a valid value meaning "unverified/unknown" - do not override
+    if verified is None:
+        logger.warning("[Pipeline] ⚠️ Missing verified_score in result - using -1.0 (unverified)")
+        verified = -1.0
         result["verified_score"] = verified
 
     # Preserve stitched claim-extraction text for audit/history.

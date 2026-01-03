@@ -146,15 +146,20 @@ class PrepareInputStep:
                 "prepare_input.completed",
                 {
                     "fact_len": len(fact),
+                    "prepared_fact_len": len(fact),  # Explicitly log for debugging
                     "has_context": bool(final_context),
                     "sources_count": len(final_sources),
                     "inline_count": len(inline_sources_list),
                 },
             )
 
+            # Store input_text as well for fallback in result_assembly
+            raw_input = ctx.get_extra("raw_fact", "") or (ctx.claims[0].get("text", "") if ctx.claims else "")
+
             return (
                 ctx.set_extra("prepared_fact", fact)
                 .set_extra("original_fact", ctx.get_extra("raw_fact", "") or fact) # Fallback to new fact as original if missing
+                .set_extra("input_text", raw_input)  # Store raw input for display fallback
                 .set_extra("prepared_context", final_context)
                 .set_extra("prepared_sources", final_sources)
                 .set_extra("inline_sources", inline_sources_list)

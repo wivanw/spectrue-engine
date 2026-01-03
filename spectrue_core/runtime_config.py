@@ -107,11 +107,10 @@ class EngineFeatureFlags:
     claim_sanitize: bool = True
     log_redaction: bool = False
 
-    trace_safe_payloads: bool = True
+    trace_safe_payloads: bool = False
 
     clean_md_output: bool = True
-    # Claim-Centric Orchestration (progressive widening, metadata-driven routing)
-    claim_orchestration: bool = True
+    # NOTE: claim_orchestration is REMOVED - orchestration is always enabled
     # When enabled, the engine may "salvage" a run with missing input text by
     # extracting claims from retrieved web snippets/titles.
     # Default MUST be False: salvage changes the task definition and can hide
@@ -344,8 +343,7 @@ class ClaimGraphConfig:
     - B-stage: cheap candidate generation (embeddings + adjacency)
     - C-stage: LLM edge typing (GPT-5 nano)
     """
-    # Feature flag
-    enabled: bool = True
+    # NOTE: enabled flag is REMOVED - ClaimGraph is always enabled
 
     # B-Stage parameters
     k_sim: int = 10              # Top-K by embedding similarity
@@ -446,11 +444,10 @@ class EngineRuntimeConfig:
             claim_sanitize=_parse_bool(os.getenv("FEATURE_CLAIM_SANITIZE"), default=True),
             log_redaction=_parse_bool(os.getenv("FEATURE_LOG_REDACTION"), default=False),
 
-            trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=True),
+            trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=False),
 
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
-            # Claim Orchestration
-            claim_orchestration=_parse_bool(os.getenv("FEATURE_CLAIM_ORCHESTRATION"), default=True),
+            # NOTE: claim_orchestration removed - always enabled
             # Explicitly gated degraded mode
             allow_salvage_mode=_parse_bool(os.getenv("FEATURE_ALLOW_SALVAGE_MODE"), default=False),
             # Embeddings
@@ -560,9 +557,9 @@ class EngineRuntimeConfig:
             max_output_tokens_deep=int(max_out_deep),
         )
 
-        # ClaimGraph configuration
+        # ClaimGraph configuration (always enabled, no feature flag)
         claim_graph = ClaimGraphConfig(
-            enabled=_parse_bool(os.getenv("CLAIM_GRAPH_ENABLED"), default=True),
+            # enabled flag removed - ClaimGraph always on
             k_sim=_parse_int(os.getenv("CLAIM_GRAPH_K_SIM"), default=10, min_v=1, max_v=200),
             max_nodes_for_full_pairwise=_parse_int(
                 os.getenv("CLAIM_GRAPH_MAX_PAIRWISE"), default=50, min_v=2, max_v=500
@@ -625,7 +622,7 @@ class EngineRuntimeConfig:
                 "claim_sanitize": bool(self.features.claim_sanitize),
                 "trace_safe_payloads": bool(self.features.trace_safe_payloads),
                 "clean_md_output": bool(self.features.clean_md_output),
-                "claim_orchestration": bool(self.features.claim_orchestration),
+                # claim_orchestration removed - always enabled
                 "embeddings_verdict_ready": bool(self.features.embeddings_verdict_ready),
                 "embeddings_clustering": bool(self.features.embeddings_clustering),
                 "embeddings_quotes": bool(self.features.embeddings_quotes),
@@ -690,7 +687,7 @@ class EngineRuntimeConfig:
                 "absolute_guardrail_chars": int(self.content_budget.absolute_guardrail_chars),
             },
             "claim_graph": {
-                "enabled": bool(self.claim_graph.enabled),
+                # enabled flag removed - ClaimGraph always on
                 "k_sim": int(self.claim_graph.k_sim),
                 "max_nodes_for_full_pairwise": int(self.claim_graph.max_nodes_for_full_pairwise),
                 "top_k": int(self.claim_graph.top_k),

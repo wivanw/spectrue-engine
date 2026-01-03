@@ -44,3 +44,4 @@ class User:
             "last_share_bonus_date": self.last_share_bonus_date,
             "plan_tier": self.plan_tier
         }
+

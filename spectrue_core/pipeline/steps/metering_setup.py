@@ -41,6 +41,8 @@ class MeteringSetupStep:
     """
 
     config: Any  # SpectrueConfig
+    agent: Any | None = None  # FactCheckerAgent
+    search_mgr: Any | None = None  # SearchManager
     name: str = "metering_setup"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
@@ -75,6 +77,26 @@ class MeteringSetupStep:
                 min_delta_to_show=policy.min_delta_to_show,
                 emit_cost_deltas=policy.emit_cost_deltas,
             )
+
+            # --- Wire meters into runtime clients (fix "Credits used: 0") ---
+            # LLM client wiring
+            try:
+                if self.agent is not None and hasattr(self.agent, "llm_client"):
+                    prior = getattr(self.agent.llm_client, "_meter", None)
+                    self.agent.llm_client._prior_meter = prior
+                    self.agent.llm_client._meter = llm_meter
+                    self.agent.llm_client._meter_stage = "llm"
+            except Exception:
+                pass
+
+            # Tavily/search wiring
+            try:
+                if self.search_mgr is not None and hasattr(self.search_mgr, "web_tool") and hasattr(self.search_mgr.web_tool, "_tavily"):
+                    prior_t = getattr(self.search_mgr.web_tool._tavily, "_meter", None)
+                    self.search_mgr.web_tool._tavily._prior_meter = prior_t
+                    self.search_mgr.web_tool._tavily._meter = tavily_meter
+            except Exception:
+                pass
             
             # Wrap progress callback to include costs
             raw_cb = ctx.get_extra("progress_callback")

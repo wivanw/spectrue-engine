@@ -83,8 +83,9 @@ class EvidenceFlowStep:
                             evidence_by_claim[cid] = []
                         evidence_by_claim[cid].append(src)
 
-                # Calculate cost for deep mode
-                current_cost = self.search_mgr.calculate_cost(ctx.gpt_model, ctx.search_type)
+                # NOTE: Cost is tracked via metering (LLMMeter, TavilyMeter)
+                # We don't use legacy calculate_cost anymore as it gives incorrect values
+                # The actual cost will be computed from metering events in cost_summary
 
                 # Create minimal result for deep mode (no global scores)
                 result = {
@@ -94,7 +95,7 @@ class EvidenceFlowStep:
                     "claim_verdicts": [],  # Will be filled by JudgeClaimsStep
                     "sources": sources,
                     "claims": claims,
-                    "cost": current_cost,
+                    "cost": 0.0,  # Cost tracked via metering, not legacy calculate_cost
                 }
 
                 Trace.event(

@@ -157,61 +157,94 @@ Claim Language: {frame.claim_language}
 
 {stats_section}
 
-## JUDGMENT INSTRUCTIONS
+## JUDGMENT METHODOLOGY
 
-Produce an RGBA verdict for this claim:
+Follow this evaluation process:
 
-**R (Danger: 0.0-1.0)**: How harmful is it if this claim is believed?
-  - 0.0 = Not harmful at all
-  - 1.0 = Extremely dangerous (medical misinformation, incitement, etc.)
+1. **Evidence Assessment**: What do sources actually say? Name specific sources/domains.
+2. **Manipulation Check**: Look for cherry-picking, missing context, sensationalism, loaded language.
+3. **Gaps Identification**: What evidence is missing? Be explicit about limitations.
+4. **Verdict**: Base ONLY on evidence. If evidence is insufficient, say so — use -1 for scores.
 
-**G (Veracity: 0.0-1.0)**: How factually accurate is this claim?
-  - 0.0 = Completely false
-  - 0.5 = Unverifiable or mixed
-  - 1.0 = Fully supported by evidence
+## RGBA SCORING GUIDANCE
 
-**B (Honesty: 0.0-1.0)**: Is the claim presented in good faith?
-  - 0.0 = Deliberately misleading
-  - 0.5 = Unclear intent
-  - 1.0 = Honest presentation
+**R (Danger: 0.0-1.0 or -1)**: Harm potential if this claim is believed
+  - 0.0-0.2 = Harmless, informational only
+  - 0.2-0.5 = Potentially misleading but low risk
+  - 0.5-0.8 = Medical, financial, or safety misinformation
+  - 0.8-1.0 = Dangerous incitement, doxxing, illegal advice
+  - **-1** = Cannot assess (use when claim nature is unclear)
 
-**A (Explainability: 0.0-1.0)**: How well can we trace and explain the verdict?
-  - 0.0 = No traceable evidence
-  - 1.0 = Clear, quotable evidence trail
+**G (Veracity: 0.0-1.0 or -1)**: Factual accuracy — MUST match verdict!
+  - 0.0-0.2 = **Strong refutation** by authoritative sources
+  - 0.2-0.4 = Mostly false, misleading with some true elements
+  - 0.4-0.6 = **Insufficient evidence** / conflicting sources
+  - 0.6-0.8 = Mostly supported by reliable sources
+  - 0.8-1.0 = **Strong confirmation** by multiple independent authoritative sources
+  - **-1** = Cannot determine (for NEI/Unverifiable verdicts ONLY)
 
-**Verdict**: Choose one of:
-  - "Supported" - Evidence confirms the claim
-  - "Refuted" - Evidence contradicts the claim
-  - "NEI" - Not Enough Information to decide
-  - "Mixed" - Evidence is contradictory
-  - "Unverifiable" - Claim cannot be verified with available sources
+**B (Honesty: 0.0-1.0 or -1)**: Presentation quality and good faith
+  - 0.0-0.3 = Deliberately misleading, propaganda techniques
+  - 0.3-0.5 = Sensationalism, loaded language, missing crucial context
+  - 0.5-0.7 = Cherry-picking, absolutist claims ("always/never")
+  - 0.7-0.9 = Minor framing issues but generally fair
+  - 0.9-1.0 = Neutral, balanced presentation
+  - **-1** = Cannot assess (claim too short or context unavailable)
 
-**Confidence**: Your overall confidence in this verdict (0.0-1.0)
+**A (Explainability: 0.0-1.0 or -1)**: Evidence traceability
+  - 0.0-0.2 = No traceable evidence found
+  - 0.2-0.4 = Indirect evidence, no direct quotes
+  - 0.4-0.6 = Some supporting snippets but no exact quotes
+  - 0.6-0.8 = Direct quotes supporting verdict
+  - 0.8-1.0 = Multiple independent quotes, strong evidence trail
+  - **-1** = No relevant evidence at all
 
-**Explanation**: Brief explanation of your verdict (1-3 sentences)
+**Verdict**: Choose based on G (Veracity) score:
+  - **"Supported"** → G should be 0.7-1.0
+  - **"Refuted"** → G should be 0.0-0.3
+  - **"Mixed"** → G should be 0.3-0.7 (conflicting evidence)
+  - **"NEI"** → G = -1 (Not Enough Information)
+  - **"Unverifiable"** → G = -1 (claim cannot be verified)
 
-**sources_used**: ONLY include URLs from this list that you actually used:
+**Confidence**: Your overall confidence (0.0-1.0)
+  - Lower if sources are weak, single, or contradictory
+  - Lower if key context is missing
+
+**Explanation**: STRUCTURED format, same language as claim ({frame.claim_language}):
+  - Line 1: "Evidence:" - cite specific sources/domains
+  - Line 2: "Gaps:" - what's missing (if any)
+  - Line 3: "Verdict:" - conclude briefly
+  - Optional Line 4: "Style:" - ONLY if B < 0.7 (manipulation detected)
+
+**sources_used**: ONLY URLs from this list that you actually referenced:
 {urls_list}
 
-**missing_evidence**: What additional evidence would strengthen or change the verdict?
+**missing_evidence**: What would strengthen or change the verdict?
 
 ## OUTPUT FORMAT
 
-Respond with valid JSON:
 {{
   "claim_id": "{frame.claim_id}",
   "rgba": {{
-    "R": 0.0,
-    "G": 0.0,
-    "B": 0.0,
-    "A": 0.0
+    "R": <danger_score>,
+    "G": <veracity_score_or_-1>,
+    "B": <honesty_score>,
+    "A": <explainability_score_or_-1>
   }},
-  "confidence": 0.0,
-  "verdict": "...",
-  "explanation": "...",
-  "sources_used": ["url1", "url2"],
-  "missing_evidence": ["...", "..."]
+  "confidence": <0.0_to_1.0>,
+  "verdict": "<Supported|Refuted|NEI|Mixed|Unverifiable>",
+  "explanation": "<structured_explanation_in_claim_language>",
+  "sources_used": ["<urls_from_evidence>"],
+  "missing_evidence": ["<what_is_missing>"]
 }}
+
+## CRITICAL RULES
+
+1. **G MUST match verdict**: Supported→0.7-1.0, Refuted→0.0-0.3, NEI/Unverifiable→-1
+2. **Use -1 honestly** when you cannot assess — do NOT guess with 0.5
+3. **Never all zeros** — use -1 for insufficient evidence
+4. **sources_used MUST be from evidence list** — don't invent URLs
+5. **Explanation in claim language** — match {frame.claim_language} exactly
 
 Judge this claim fairly and objectively."""
 
@@ -222,17 +255,46 @@ def build_claim_judge_system_prompt() -> str:
     """Build system prompt for claim judge."""
     return """You are an impartial fact-checking judge. Your role is to evaluate claims based on evidence.
 
-Key principles:
-1. Base verdicts ONLY on provided evidence, not prior knowledge
-2. Be conservative - if uncertain, lean toward NEI
-3. High-trust sources (Tier A, B) carry more weight than low-trust ones
-4. Direct quotes are stronger evidence than summaries
-5. Conflicting evidence should result in "Mixed" or lower confidence
-6. sources_used must ONLY contain URLs that appear in the evidence list
-7. Explain your reasoning clearly and concisely
+## CORE PRINCIPLES
 
-RGBA scoring guidance:
-- R (Danger): Consider health, safety, financial, or social harm
-- G (Veracity): Focus on factual accuracy, not opinions
-- B (Honesty): Consider context, framing, and potential intent
-- A (Explainability): How well can you cite evidence for your verdict?"""
+1. **Evidence-Based Only**: Verdicts based ONLY on provided evidence, not prior knowledge
+2. **Conservative Approach**: If uncertain, lean toward NEI with G = -1
+3. **Source Hierarchy**: High-trust sources (Tier A, B) > Low-trust (Tier C, D)
+4. **Quote Priority**: Direct quotes > Summaries > Snippets
+5. **Conflict Detection**: Contradictory evidence → "Mixed" verdict with 0.3-0.7 G
+6. **Honest Uncertainty**: Use -1 when you genuinely cannot assess
+
+## MANIPULATION DETECTION (for B - Honesty score)
+
+Lower B score when you detect:
+- **Cherry-picking**: Using isolated data points out of context
+- **Absolutist language**: "always", "never", "all", "none" without evidence
+- **Loaded/emotional language**: Fear-mongering, ad hominem attacks
+- **Missing crucial context**: Key qualifications omitted
+- **Sensationalism**: Exaggerated claims, clickbait framing
+- **Conspiracy markers**: "they don't want you to know", "wake up"
+
+## DANGER ASSESSMENT (for R - Danger score)
+
+Increase R for claims that:
+- Give medical advice without professional context
+- Provide financial/investment recommendations
+- Suggest dangerous actions or substances
+- Incite violence or discrimination
+- Spread health misinformation (vaccines, treatments)
+
+## EXPLANATION FORMAT
+
+Use structured labels:
+- "Evidence: [cite specific sources/domains]"
+- "Gaps: [what's missing]"
+- "Verdict: [conclusion]"
+- "Style: [manipulation issues]" — ONLY if B < 0.7
+
+## ABSOLUTE RULES
+
+1. **G MUST match verdict**: Supported→0.7-1.0, Refuted→0.0-0.3, Mixed→0.3-0.7, NEI/Unverifiable→-1
+2. **sources_used MUST be from evidence list** — never invent URLs
+3. **Explanation in claim's language** — match exactly
+4. **Never all zeros** — use -1 for "cannot assess"
+5. **-1 over 0.5** — honest uncertainty is better than fake neutrality"""
