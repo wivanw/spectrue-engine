@@ -437,7 +437,7 @@ class EngineRuntimeConfig:
 
         search = EngineSearchConfig(
             google_cse_cost=_parse_int(os.getenv("SPECTRUE_GOOGLE_CSE_COST"), default=0, min_v=0, max_v=10_000),
-            tavily_concurrency=_parse_int(os.getenv("TAVILY_CONCURRENCY"), default=8, min_v=1, max_v=32),
+            tavily_concurrency=_parse_int(os.getenv("TAVILY_CONCURRENCY"), default=5, min_v=1, max_v=32),
             tavily_exclude_domains=_parse_csv_domains(os.getenv("SPECTRUE_TAVILY_EXCLUDE_DOMAINS", "")),
             tavily_include_raw_content=include_raw,
             tavily_raw_max_results=_parse_int(os.getenv("SPECTRUE_TAVILY_RAW_MAX_RESULTS"), default=4, min_v=1, max_v=10),
@@ -502,7 +502,7 @@ class EngineRuntimeConfig:
                 max_v=2_000_000,
             ),
             block_min_chars=_parse_int(
-                os.getenv("CONTENT_BUDGET_BLOCK_MIN_CHARS"), default=80, min_v=1, max_v=2_000
+                os.getenv("CONTENT_BUDGET_BLOCK_MIN_CHARS"), default=30, min_v=1, max_v=2_000
             ),
             trace_top_blocks=_parse_int(
                 os.getenv("CONTENT_BUDGET_TRACE_TOP_BLOCKS"), default=8, min_v=1, max_v=50

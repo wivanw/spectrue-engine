@@ -44,4 +44,4 @@ def test_generate_search_queries_short_fact_does_not_call_llm(monkeypatch):
 
 def test_responses_api_defaults():
     cfg = EngineRuntimeConfig.load_from_env()
-    assert cfg.llm.cluster_timeout_sec == 60.0
+    assert cfg.llm.cluster_timeout_sec == 90.0
