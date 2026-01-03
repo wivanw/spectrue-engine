@@ -204,7 +204,7 @@ class PipelineFactory:
                     search_mgr=self.search_mgr,
                     agent=self.agent,
                 ),
-                depends_on=["target_selection", "verify_inline_sources"],
+                depends_on=["target_selection", "semantic_gating", "verify_inline_sources"],
             ),
 
             # Evidence scoring (enable_global_scoring=True is default)
@@ -280,9 +280,10 @@ class PipelineFactory:
                 depends_on=["extract_claims"],
             ),
 
-            # Target selection (more targets for deep)
+            # Target selection (all claims for deep mode)
+            # M119: Mode logic via constructor param, not runtime check
             StepNode(
-                step=TargetSelectionStep(),
+                step=TargetSelectionStep(process_all_claims=True),
                 depends_on=["claim_graph"],
             ),
 

@@ -49,6 +49,15 @@ from spectrue_core.pipeline.errors import (
     PipelineViolation,
     PipelineExecutionError,
 )
+from spectrue_core.pipeline.constants import (
+    DAG_EXECUTION_STATE_KEY,
+    DAG_EXECUTION_SUMMARY_KEY,
+    DAG_STEP_STATUS_PENDING,
+    DAG_STEP_STATUS_RUNNING,
+    DAG_STEP_STATUS_SUCCEEDED,
+    DAG_STEP_STATUS_FAILED,
+    DAG_STEP_STATUS_SKIPPED,
+)
 from spectrue_core.pipeline.factory import PipelineFactory
 from spectrue_core.pipeline.executor import (
     execute_pipeline,
@@ -66,6 +75,14 @@ __all__ = [
     "PipelineContext",
     "Step",
     "Pipeline",
+    # DAG constants
+    "DAG_EXECUTION_STATE_KEY",
+    "DAG_EXECUTION_SUMMARY_KEY",
+    "DAG_STEP_STATUS_PENDING",
+    "DAG_STEP_STATUS_RUNNING",
+    "DAG_STEP_STATUS_SUCCEEDED",
+    "DAG_STEP_STATUS_FAILED",
+    "DAG_STEP_STATUS_SKIPPED",
     # Factory
     "PipelineFactory",
     # Executor

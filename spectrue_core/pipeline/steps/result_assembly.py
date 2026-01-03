@@ -37,13 +37,17 @@ class ResultAssemblyStep:
             ledger = ctx.get_extra("ledger")
 
             cost_summary = ledger.to_summary_dict() if ledger else None
+            analysis_mode = "deep" if ctx.mode.name == "deep" else "general"
 
             final_result = {
                 "status": "ok",
+                "analysis_mode": analysis_mode,
                 "verified_score": verdict.get("verified_score", 0.0),
                 "explainability_score": verdict.get("explainability_score", 0.0),
                 "danger_score": verdict.get("danger_score", 0.0),
+                "context_score": verdict.get("context_score", 0.0),
                 "style_score": verdict.get("style_score", 0.0),
+                "confidence_score": verdict.get("confidence_score", 0.0),
                 "bias_score": verdict.get("style_score", 0.0), # Compat alias
                 "rgba": ctx.get_extra("rgba", [0.0, 0.0, 0.0, 0.5]),
                 "sources": sources,
