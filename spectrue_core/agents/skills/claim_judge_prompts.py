@@ -159,7 +159,7 @@ def build_claim_judge_prompt(
             stats_section=stats_section,
             urls_list=urls_list
         )
-    except KeyError as e:
+    except KeyError:
         # Fallback if template has broken keys
         return _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list)
 
@@ -185,7 +185,7 @@ Lang: {frame.claim_language}
 Return JSON with: claim_id, rgba, confidence, verdict, explanation, sources_used, missing_evidence.
 Explanation MUST be in {frame.claim_language}.
 """
-    return prompt
+
 
 
 

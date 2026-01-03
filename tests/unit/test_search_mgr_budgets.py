@@ -2,9 +2,7 @@
 import pytest
 from unittest.mock import MagicMock
 from spectrue_core.verification.search.search_mgr import SearchManager
-from spectrue_core.runtime_config import EngineRuntimeConfig, EngineSearchConfig
-
-from spectrue_core.scoring.budget_allocation import GlobalBudgetTracker
+from spectrue_core.runtime_config import EngineRuntimeConfig
 
 from spectrue_core.config import SpectrueConfig
 
