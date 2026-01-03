@@ -120,11 +120,31 @@ class ClaimJudgeSkill:
 
         # Extract RGBA scores
         rgba_dict = response.get("rgba", {})
+        
+        # Parse raw values
+        raw_r = float(rgba_dict.get("R", 0.0))
+        raw_g = float(rgba_dict.get("G", 0.5))
+        raw_b = float(rgba_dict.get("B", 0.5))
+        raw_a = float(rgba_dict.get("A", 0.3))
+        
+        # Validate A (explainability): if we have explanation text, A cannot be 0
+        # Having an explanation inherently means there IS some explainability
+        explanation_text = str(response.get("explanation", ""))
+        MIN_A_WITH_EXPLANATION = 0.3
+        
+        if explanation_text.strip() and raw_a < MIN_A_WITH_EXPLANATION:
+            Trace.event("claim_judge.a_score_corrected", {
+                "original_a": raw_a,
+                "corrected_a": MIN_A_WITH_EXPLANATION,
+                "reason": "explanation_present",
+            })
+            raw_a = MIN_A_WITH_EXPLANATION
+        
         rgba = RGBAScore(
-            r=float(rgba_dict.get("R", 0.0)),
-            g=float(rgba_dict.get("G", 0.5)),
-            b=float(rgba_dict.get("B", 0.5)),
-            a=float(rgba_dict.get("A", 0.3)),
+            r=raw_r,
+            g=raw_g,
+            b=raw_b,
+            a=raw_a,
         )
 
         # Extract other fields
