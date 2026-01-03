@@ -222,7 +222,7 @@ def select_diverse_queries(
     return selected[:max_queries]
 
 
-def resolve_budgeted_max_queries(claims: list, *, default_max: int = 3) -> int:
+def resolve_budgeted_max_queries(claims: list, *, default_max: int = 5) -> int:
     """
     Apply per-claim policy caps to the run-level query budget.
     """

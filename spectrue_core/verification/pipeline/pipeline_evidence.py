@@ -19,18 +19,7 @@ from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.schema.signals import TimeWindow
 from spectrue_core.schema.scoring import BeliefState
 from spectrue_core.graph.context import ClaimContextGraph
-from spectrue_core.graph.propagation import (
-    propagate_belief,
-    propagation_routing_signals,
-)
-from spectrue_core.scoring.belief import (
-    calculate_evidence_impact,
-    update_belief,
-    log_odds_to_prob,
-    apply_consensus_bound,
-)
-from spectrue_core.scoring.consensus import calculate_consensus
-# Removed claim_posterior imports - using raw LLM scores now
+# Bayesian scoring imports moved to bayesian_update.py (M119)
 from spectrue_core.verification.temporal.temporal import (
     label_evidence_timeliness,
     normalize_time_window,
@@ -58,9 +47,6 @@ from spectrue_core.utils.trace import Trace
 # Extracted scoring helpers from previous refactoring
 from spectrue_core.verification.evidence.evidence_scoring import (
     norm_id as _norm_id,
-    is_prob as _is_prob,
-    compute_article_g_from_anchor as _compute_article_g_from_anchor,
-    select_anchor_for_article_g as _select_anchor_for_article_g,
     mark_anchor_duplicates_async as _mark_anchor_duplicates_async,
 )
 
@@ -70,6 +56,9 @@ from spectrue_core.verification.evidence_verdict_processing import (
     process_claim_verdicts,
     enrich_all_claim_verdicts,
 )
+
+# Bayesian update logic (M119)
+from spectrue_core.verification.evidence.bayesian_update import apply_bayesian_update
 
 
 logger = logging.getLogger(__name__)
@@ -221,63 +210,18 @@ async def run_evidence_flow(
         )
         anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
 
-    # NORMAL pipeline must be SINGLE-CLAIM (execution unit invariant).
-    # This prevents multi-claim batch leakage (c1/c2 mentions) and cross-language mixing.
-    # Derive mode from explicit score_mode parameter (no inp.pipeline lookup)
-    is_normal_mode = (score_mode == "standard")
-
-    # NORMAL pipeline restriction removed (M120):
-    # We now allow multi-claim batch scoring in Normal Mode to provide better utility.
-    # The Single-Claim enforcement is disabled.
-    #
-    # if is_normal_mode and claims:
-    #     if anchor_claim_id:
-    #         claims = [
-    #             c
-    #             for c in claims
-    #             if isinstance(c, dict)
-    #             and str(c.get("id") or c.get("claim_id")) == str(anchor_claim_id)
-    #         ]
-    #     if len(claims) != 1:
-    #         raise RuntimeError(
-    #             f"Normal evidence flow violation: expected 1 claim, got {len(claims)}"
-    #         )
-    #     Trace.event(
-    #         "evidence_flow.single_claim.enforced",
-    #         {
-    #             "score_mode": score_mode,
-    #             "anchor_claim_id": str(anchor_claim_id or ""),
-    #         },
-    #     )
-
-    # Language consistency validation (Phase 4 invariant)
+    # Language consistency validation (optional, just for tracing)
     if claims and inp.content_lang:
         from spectrue_core.utils.language_validation import (
             validate_claims_language_consistency,
         )
-
-        pipeline_mode_str = "normal" if is_normal_mode else "deep"
         lang_valid, lang_mismatches = validate_claims_language_consistency(
-            claims,
-            inp.content_lang,
-            pipeline_mode=pipeline_mode_str,
-            min_confidence=0.7,
+            claims, inp.content_lang, pipeline_mode=score_mode, min_confidence=0.7,
         )
-        if not lang_valid and is_normal_mode:
-            # In normal mode, language mismatch used to be a violation, but we relax this
-            # because LLMs sometimes translate claims. We log it and proceed.
-            logger.warning(
-                "Language mismatch in normal pipeline (proceeding): expected=%s, mismatches=%s",
-                inp.content_lang,
-                lang_mismatches,
-            )
-            Trace.event(
-                "pipeline.language_mismatch_ignored",
-                {
-                    "expected": inp.content_lang,
-                    "mismatches": lang_mismatches,
-                },
-            )
+        if not lang_valid:
+            Trace.event("pipeline.language_mismatch_ignored", {
+                "expected": inp.content_lang, "mismatches": lang_mismatches,
+            })
 
     # T7: Deterministic Ranking
     claims.sort(key=lambda c: (-c.get("importance", 0.0), c.get("text", "")))
@@ -424,127 +368,21 @@ async def run_evidence_flow(
     except Exception as e:
         logger.warning("Anchor dedup failed (non-fatal): %s", e)
 
-    # Bayesian Scoring
+    # Bayesian Scoring (extracted to bayesian_update.py, M119)
     if inp.prior_belief:
-        current_belief = inp.prior_belief
-
-        # Consensus Calculation
-        evidence_list = []
-        raw_evidence = (
-            getattr(pack, "evidence", [])
-            if not isinstance(pack, dict)
-            else pack.get("evidence", [])
+        result["bayesian_trace"] = apply_bayesian_update(
+            prior_belief=inp.prior_belief,
+            context_graph=inp.context_graph,
+            claim_verdicts=claim_verdicts if isinstance(claim_verdicts, list) else [],
+            anchor_claim_id=anchor_claim_id,
+            importance_by_claim=importance_by_claim,
+            veracity_debug=veracity_debug,
+            pack=pack,
+            result=result,
+            raw_verified_score=raw_verified_score,
+            raw_confidence_score=raw_confidence_score,
+            raw_rationale=raw_rationale,
         )
-
-        # Helper to wrap dicts if needed
-        class MockEvidence:
-            def __init__(self, d):
-                self.domain = d.get("domain")
-                self.stance = d.get("stance")
-
-        for e in raw_evidence:
-            if isinstance(e, dict):
-                evidence_list.append(MockEvidence(e))
-            else:
-                evidence_list.append(e)
-
-        consensus = calculate_consensus(evidence_list)
-
-        # Claim Graph Propagation
-        if inp.context_graph and isinstance(claim_verdicts, list):
-            for cv in claim_verdicts:
-                cid = cv.get("claim_id")
-                node = inp.context_graph.get_node(cid)
-                if node:
-                    v = cv.get("verdict", "ambiguous")
-                    conf = cv.get("confidence")
-                    if not _is_prob(conf):
-                        conf = cv.get("verdict_score")
-                    if not _is_prob(conf):
-                        conf = 0.5
-                    impact = calculate_evidence_impact(v, confidence=conf)
-                    node.local_belief = BeliefState(log_odds=impact)
-
-            propagate_belief(inp.context_graph)
-            result["graph_propagation"] = propagation_routing_signals(inp.context_graph)
-
-            # Update from Anchor
-            if anchor_claim_id:
-                anchor_node = inp.context_graph.get_node(anchor_claim_id)
-                if anchor_node and anchor_node.propagated_belief:
-                    current_belief = update_belief(
-                        current_belief, anchor_node.propagated_belief.log_odds
-                    )
-
-        elif isinstance(claim_verdicts, list):
-            # Fallback: Sum updates (weighted by verdict strength + claim importance)
-            for cv in claim_verdicts:
-                if not isinstance(cv, dict):
-                    continue
-                v = cv.get("verdict", "ambiguous")
-                cid = _norm_id(cv.get("claim_id"))
-                try:
-                    strength = float(cv.get("verdict_score", 0.5) or 0.5)
-                except Exception:
-                    strength = 0.5
-                strength = max(0.0, min(1.0, strength))
-                relevance = max(0.0, min(1.0, importance_by_claim.get(cid, 1.0)))
-                impact = calculate_evidence_impact(
-                    v, confidence=strength, relevance=relevance
-                )
-                current_belief = update_belief(current_belief, impact)
-
-        # Apply Consensus
-        current_belief = apply_consensus_bound(current_belief, consensus)
-        belief_g = log_odds_to_prob(current_belief.log_odds)
-
-        anchor_for_g = anchor_claim_id
-        anchor_dbg = {}
-        if isinstance(claim_verdicts, list) and veracity_debug:
-            anchor_for_g, anchor_dbg = _select_anchor_for_article_g(
-                anchor_claim_id=anchor_claim_id,
-                claim_verdicts=claim_verdicts,
-                veracity_debug=veracity_debug,
-            )
-            Trace.event("anchor_selection.post_evidence", anchor_dbg)
-
-        # Article-level G: pure anchor formula (no thesis/worthiness heuristics, no dedup).
-        g_article, g_dbg = _compute_article_g_from_anchor(
-            anchor_claim_id=anchor_for_g,
-            claim_verdicts=claim_verdicts if isinstance(claim_verdicts, list) else None,
-            prior_p=0.5,
-        )
-        prev = result.get("verified_score")
-        result["verified_score"] = g_article
-        Trace.event(
-            "verdict.article_g_formula",
-            {
-                **g_dbg,
-                "prev_verified_score": prev,
-                "belief_score": belief_g,
-            },
-        )
-
-        Trace.event_full(
-            "verdict.veracity_debug",
-            {
-                "raw_verified_score": raw_verified_score,
-                "raw_confidence_score": raw_confidence_score,
-                "final_verified_score": result.get("verified_score"),
-                "final_confidence_score": result.get("confidence_score"),
-                "veracity_by_claim": veracity_debug,
-                "rationale": raw_rationale,
-            },
-        )
-
-        # Trace
-        result["bayesian_trace"] = {
-            "prior_log_odds": inp.prior_belief.log_odds,
-            "consensus_score": consensus.score,
-            "posterior_log_odds": current_belief.log_odds,
-            "final_probability": result["verified_score"],
-            "belief_probability": belief_g,
-        }
 
     if conflict_detected:
         explainability = result.get("explainability_score", -1.0)
