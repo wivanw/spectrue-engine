@@ -335,6 +335,7 @@ class Claim(TypedDict, total=False):
     """A single atomic claim extracted from the article."""
     id: str                         # Unique claim ID (c1, c2, ...)
     text: str                       # The claim text (may contain pronouns)
+    language: str                   # ISO-639-1 language code (e.g., "en", "uk")
     type: ClaimType                 # Claim classification
     importance: float               # 0-1, how critical to main thesis
     evidence_requirement: EvidenceRequirement

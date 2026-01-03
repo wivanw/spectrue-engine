@@ -242,6 +242,7 @@ class ClaimExtractionSkill(BaseSkill):
                 c = Claim(
                     id=f"c{idx_offset+idx+1}",
                     text=rc.get("text", ""),
+                    language=lang,  # Store claim language for localization
                     type=rc.get("type", "core"),  # type: ignore
                     importance=float(rc.get("importance", 0.5)),
                     evidence_requirement=req,
