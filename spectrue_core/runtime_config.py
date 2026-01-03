@@ -100,11 +100,7 @@ class EngineFeatureFlags:
 
     # Flags
     coverage_chunking: bool = False
-    topic_aware_claim_graph: bool = False
-    # NOTE: claim_orchestration is REMOVED - orchestration is always enabled
-    # NOTE: semantic_gating_v2, claim_sanitize, allow_salvage_mode REMOVED - unused/dead code
-    # NOTE: embeddings_verdict_ready, embeddings_quotes, embeddings_clustering REMOVED - always enabled
-    # NOTE: embeddings_verdict_ready, embeddings_quotes, embeddings_clustering REMOVED - always enabled
+    log_redaction: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,7 +129,7 @@ class EngineLLMConfig:
 @dataclass(frozen=True)
 class EngineSearchConfig:
     google_cse_cost: int = 0
-    tavily_concurrency: int = 8
+    tavily_concurrency: int = 5
     tavily_exclude_domains: list[str] = field(default_factory=list)
     # None means "auto" (depth/domain-filter aware); otherwise forced on/off.
     tavily_include_raw_content: Optional[bool] = None
@@ -307,14 +303,13 @@ class LocalePolicyConfig:
 @dataclass(frozen=True)
 class EngineTunableConfig:
     langdetect_min_prob: float = 0.80
-    max_claims_deep: int = 2
 
 
 @dataclass(frozen=True)
 class ContentBudgetConfig:
     max_clean_text_chars_default: int = 120_000
     max_clean_text_chars_huge_input: int = 200_000
-    block_min_chars: int = 80
+    block_min_chars: int = 30
     trace_top_blocks: int = 8
     absolute_guardrail_chars: int = 2_000_000
 
@@ -355,10 +350,9 @@ class ClaimGraphConfig:
     mu_redundancy: float = 0.1
 
     # Quality gates
-    min_kept_ratio: float = 0.05
+    min_kept_ratio: float = 0.15
     max_kept_ratio: float = 0.60
     trace_top_k: int = 5
-    topic_aware: bool = False
     beta_prior_alpha: float = 1.0
     beta_prior_beta: float = 1.0
 
@@ -371,7 +365,6 @@ class ClaimGraphConfig:
     tension_signal_enabled: bool = True
 
 
-    topic_aware: bool = False
     tension_threshold: float = 0.5            # min in_contradict_weight for "high tension"
     tension_boost: float = 0.15               # importance boost for high-tension claims
 
@@ -422,19 +415,12 @@ class EngineRuntimeConfig:
             trace_enabled=not _parse_bool(os.getenv("SPECTRUE_TRACE_DISABLE"), default=False),
             fulltext_fetch=_parse_bool(os.getenv("SPECTRUE_FULLTEXT_FETCH"), default=False),
             # Feature Flags
-            # Feature Flags
             coverage_chunking=_parse_bool(os.getenv("FEATURE_COVERAGE_CHUNKING"), default=False),
-            topic_aware_claim_graph=_parse_bool(os.getenv("FEATURE_TOPIC_AWARE_CLAIM_GRAPH"), default=False),
-            # NOTE: semantic_gating_v2, claim_sanitize removed - unused
             log_redaction=_parse_bool(os.getenv("FEATURE_LOG_REDACTION"), default=False),
 
             trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=False),
 
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
-            # NOTE: claim_orchestration removed - always enabled
-            # NOTE: allow_salvage_mode removed - unused
-            # Embeddings
-            # NOTE: embeddings_verdict_ready, embeddings_quotes, embeddings_clustering removed - always enabled
         )
 
         # Search knobs
@@ -498,7 +484,6 @@ class EngineRuntimeConfig:
             langdetect_min_prob=_parse_float(
                 os.getenv("SPECTRUE_LANGDETECT_MIN_PROB"), default=0.80, min_v=0.0, max_v=1.0
             ),
-            max_claims_deep=_parse_int(os.getenv("SPECTRUE_MAX_CLAIMS"), default=2, min_v=1, max_v=1000),
         )
 
         content_budget = ContentBudgetConfig(
@@ -559,7 +544,7 @@ class EngineRuntimeConfig:
             default_claim_cost=_parse_float(os.getenv("CLAIM_GRAPH_DEFAULT_CLAIM_COST"), default=0.0, min_v=-1e3, max_v=1e3),
             lambda_rank=_parse_float(os.getenv("CLAIM_GRAPH_LAMBDA_RANK"), default=0.3, min_v=0.0, max_v=5.0),
             mu_redundancy=_parse_float(os.getenv("CLAIM_GRAPH_MU_REDUNDANCY"), default=0.1, min_v=0.0, max_v=5.0),
-            min_kept_ratio=_parse_float(os.getenv("CLAIM_GRAPH_MIN_KEPT_RATIO"), default=0.05, min_v=0.0, max_v=0.5),
+            min_kept_ratio=_parse_float(os.getenv("CLAIM_GRAPH_MIN_KEPT_RATIO"), default=0.15, min_v=0.0, max_v=0.5),
             max_kept_ratio=_parse_float(os.getenv("CLAIM_GRAPH_MAX_KEPT_RATIO"), default=0.60, min_v=0.3, max_v=1.0),
             trace_top_k=_parse_int(os.getenv("CLAIM_GRAPH_TRACE_TOP_K"), default=5, min_v=1, max_v=100),
             beta_prior_alpha=_parse_float(os.getenv("CLAIM_GRAPH_BETA_PRIOR_ALPHA"), default=1.0, min_v=0.1, max_v=10.0),
@@ -572,7 +557,6 @@ class EngineRuntimeConfig:
             tension_threshold=_parse_float(os.getenv("CLAIM_GRAPH_TENSION_THRESHOLD"), default=0.5, min_v=0.0, max_v=2.0),
             tension_boost=_parse_float(os.getenv("CLAIM_GRAPH_TENSION_BOOST"), default=0.15, min_v=0.0, max_v=0.5),
             evidence_need_routing_enabled=_parse_bool(os.getenv("CLAIM_GRAPH_EVIDENCE_NEED_ENABLED"), default=True),
-            topic_aware=features.topic_aware_claim_graph,
         )
 
         return EngineRuntimeConfig(
@@ -597,7 +581,6 @@ class EngineRuntimeConfig:
                 "trace_enabled": bool(self.features.trace_enabled),
                 "fulltext_fetch": bool(self.features.fulltext_fetch),
                 "coverage_chunking": bool(self.features.coverage_chunking),
-                "topic_aware_graph": bool(self.features.topic_aware_claim_graph),
                 # semantic_gating_v2, claim_sanitize removed
                 "trace_safe_payloads": bool(self.features.trace_safe_payloads),
                 "clean_md_output": bool(self.features.clean_md_output),
@@ -654,7 +637,6 @@ class EngineRuntimeConfig:
             },
             "tunables": {
                 "langdetect_min_prob": float(self.tunables.langdetect_min_prob),
-                "max_claims_deep": int(self.tunables.max_claims_deep),
             },
             "content_budget": {
                 "max_clean_text_chars_default": int(self.content_budget.max_clean_text_chars_default),
