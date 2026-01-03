@@ -111,6 +111,8 @@ def _format_stats_section(frame: ClaimFrame) -> str:
 def build_claim_judge_prompt(
     frame: ClaimFrame,
     evidence_summary: EvidenceSummary | None = None,
+    *,
+    ui_locale: str = "en",
 ) -> str:
     """
     Build prompt for claim judging.
@@ -121,6 +123,7 @@ def build_claim_judge_prompt(
     Args:
         frame: ClaimFrame with claim and evidence
         evidence_summary: Optional pre-analyzed evidence summary
+        ui_locale: UI language for explanation output (e.g., "uk", "en")
     
     Returns:
         Formatted prompt string
@@ -133,8 +136,9 @@ def build_claim_judge_prompt(
     available_urls = [item.url for item in frame.evidence_items]
     urls_list = "\n".join(f"  - {url}" for url in available_urls) if available_urls else "  (none)"
 
-    # Load prompt template from locales
-    lang = frame.claim_language.lower()[:2]
+    # Use UI locale for prompt language (not claim language)
+    # This ensures explanations are in the user's interface language
+    lang = ui_locale.lower()[:2]
     from spectrue_core.agents.prompts import get_prompt
     
     # Try to get specific locale prompt, fallback to English if missing
@@ -144,7 +148,7 @@ def build_claim_judge_prompt(
 
     # If even English is missing (should not happen if files are correct), use fallback code
     if not prompt_template or "Prompt key" in prompt_template:
-        return _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list)
+        return _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list, ui_locale)
 
     # Fill template variables
     # We must ensure keys match what's in the YAML files
@@ -153,6 +157,7 @@ def build_claim_judge_prompt(
             claim_id=frame.claim_id,
             claim_text=frame.claim_text,
             claim_language=frame.claim_language,
+            ui_locale=ui_locale,  # Add UI locale for explicit instruction
             context_text=frame.context_excerpt.text,
             evidence_section=evidence_section,
             summary_section=summary_section,
@@ -161,19 +166,19 @@ def build_claim_judge_prompt(
         )
     except KeyError:
         # Fallback if template has broken keys
-        return _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list)
+        return _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list, ui_locale)
 
     return prompt
 
 
-def _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list):
+def _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list, ui_locale: str = "en"):
     """Hardcoded English fallback just in case."""
     return f"""You are a fact-checking judge. Evaluate the following claim based on the provided evidence.
 
 ## CLAIM
 ID: {frame.claim_id}
 Text: "{frame.claim_text}"
-Lang: {frame.claim_language}
+Claim Language: {frame.claim_language}
 
 ## EVIDENCE
 {evidence_section}
@@ -183,7 +188,7 @@ Lang: {frame.claim_language}
 
 ## OUTPUT FORMAT
 Return JSON with: claim_id, rgba, confidence, verdict, explanation, sources_used, missing_evidence.
-Explanation MUST be in {frame.claim_language}.
+Explanation MUST be in {ui_locale} (user's interface language).
 """
 
 

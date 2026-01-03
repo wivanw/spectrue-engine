@@ -54,6 +54,8 @@ class ClaimJudgeSkill:
         self,
         frame: ClaimFrame,
         evidence_summary: EvidenceSummary | None = None,
+        *,
+        ui_locale: str = "en",
     ) -> JudgeOutput:
         """
         Judge a claim and produce RGBA verdict.
@@ -61,13 +63,14 @@ class ClaimJudgeSkill:
         Args:
             frame: ClaimFrame with claim and evidence
             evidence_summary: Optional pre-analyzed evidence summary
+            ui_locale: UI language code for explanation output (e.g., "uk", "en")
         
         Returns:
             JudgeOutput with RGBA scores and verdict (unchanged from LLM)
         """
-        # Build prompt
-        user_prompt = build_claim_judge_prompt(frame, evidence_summary)
-        system_prompt = build_claim_judge_system_prompt()
+        # Build prompt with UI locale for explanation language
+        user_prompt = build_claim_judge_prompt(frame, evidence_summary, ui_locale=ui_locale)
+        system_prompt = build_claim_judge_system_prompt(lang=ui_locale)
 
         Trace.event("claim_judge.start", {
             "claim_id": frame.claim_id,

@@ -179,11 +179,16 @@ class JudgeClaimsStep(Step):
                 return ctx
 
             skill = ClaimJudgeSkill(self._llm)
+            
+            # Get UI locale from pipeline context
+            # This is the user's interface language from the API request
+            ui_locale = ctx.lang or "en"
 
             # Process all claims in parallel
             async def judge_one(frame: ClaimFrame) -> tuple[str, JudgeOutput]:
                 summary = deep_ctx.evidence_summaries.get(frame.claim_id)
-                output = await skill.judge(frame, summary)
+                # Pass ui_locale to generate explanation in user's language
+                output = await skill.judge(frame, summary, ui_locale=ui_locale)
                 return frame.claim_id, output
 
             tasks = [judge_one(frame) for frame in deep_ctx.claim_frames]
@@ -202,6 +207,7 @@ class JudgeClaimsStep(Step):
             Trace.event("judge_claims.complete", {
                 "output_count": len(outputs),
                 "verdicts": {cid: out.verdict for cid, out in outputs.items()},
+                "ui_locale": ui_locale,
             })
 
             return ctx.set_extra("deep_claim_ctx", deep_ctx)
