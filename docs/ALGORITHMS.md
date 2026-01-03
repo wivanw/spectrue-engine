@@ -193,15 +193,52 @@ Determines when to stop searching:
 
 ### Evidence Acquisition Ladder (EAL) [B]
 
-**Status:** Engineering Heuristic
+**Status:** Engineering Heuristic + Bayesian Budget Model
 
-Escalation strategy when evidence is insufficient:
-1. Start with snippets
-2. Fetch full content for top candidates
-3. Extract quotes
-4. Re-evaluate sufficiency
+Escalation strategy to enrich sources with quotes:
+1. Start with snippets from search results
+2. Fetch full content for top candidates (Tavily Extract)
+3. Extract quotes (semantic or heuristic)
+4. Use Bayesian EVOI model to decide when to stop fetching
 
-**Code location:** `spectrue_core/verification/pipeline_evidence.py`
+**Code location:** `spectrue_core/verification/search/search_mgr.py` → `apply_evidence_acquisition_ladder()`
+
+#### Bayesian Budget Allocation
+
+EAL uses Expected Value of Information (EVOI) to decide when to stop:
+
+```
+EVOI(next) = value × entropy × posterior_mean × decay × (1 - 0.5 × sufficiency)
+Continue if: EVOI(next) ≥ marginal_cost (default: 0.5)
+```
+
+**Budget Parameters** (`ExtractBudgetParams` in `spectrue_core/scoring/budget_allocation.py`):
+- `marginal_cost_per_extract = 0.5` — EVOI threshold
+- `diminishing_returns_decay = 0.85` — each extract worth 85% of previous
+- `min_extracts = 2` — always try at least 2
+- `max_extracts = 12` — hard ceiling
+
+#### Per-Claim Budget Trackers (Deep Mode)
+
+In deep mode, claims are verified in parallel. Each claim gets an **independent** `GlobalBudgetTracker`:
+
+```python
+# Per-claim trackers dictionary
+self._claim_budget_trackers: dict[str, GlobalBudgetTracker] = {}
+
+# Get tracker for specific claim
+tracker = search_mgr.get_claim_budget_tracker(claim_id)
+```
+
+This prevents budget pollution between claims running concurrently via `asyncio.gather()`.
+
+#### Separate Inline vs Claim Budgets
+
+Two independent budget contexts:
+- `inline_budget_tracker` — for inline source verification (homepage links, article references)
+- Per-claim trackers — for claim evidence acquisition
+
+Inline sources often have lower quote hit-rates, so their Bayesian prior shouldn't pollute claim verification.
 
 ---
 

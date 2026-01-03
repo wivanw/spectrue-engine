@@ -263,16 +263,25 @@ sufficiency rules.
 
 ### SearchManager
 
-Abstracts search APIs:
-- Tavily (primary)
+Abstracts search APIs and manages Evidence Acquisition Ladder (EAL):
+- Tavily (primary search + extract)
 - Google Custom Search (fallback)
 - Google Fact Check (oracle)
 
-**Location**: `spectrue_core/verification/search_mgr.py`
+**Evidence Acquisition Ladder (EAL)**:
+- `apply_evidence_acquisition_ladder()` — enriches sources with full content and quotes
+- Uses Bayesian EVOI model for budget allocation
+- Per-claim budget trackers for deep mode (prevents budget pollution between parallel claims)
+
+**Budget Trackers**:
+- `inline_budget_tracker` — for inline source verification
+- `get_claim_budget_tracker(claim_id)` — returns per-claim tracker for deep mode
+
+**Location**: `spectrue_core/verification/search/search_mgr.py`
 
 **Canonical shapes**:
 - Search returns `(context_text, sources)` (`SearchResponse`) — `spectrue_core/verification/types.py`
-- Provider source normalization lives in `spectrue_core/verification/source_utils.py`
+- Provider source normalization lives in `spectrue_core/verification/search/source_utils.py`
 
 ### Skills (LLM Agents)
 
