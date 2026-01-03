@@ -102,6 +102,7 @@ class EngineFeatureFlags:
     coverage_chunking: bool = False
     log_redaction: bool = False
     trace_safe_payloads: bool = False
+    clean_md_output: bool = True
 
 
 @dataclass(frozen=True)
