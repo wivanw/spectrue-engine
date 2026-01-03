@@ -132,12 +132,20 @@ def _apply_policy_to_phase(phase: Phase, profile: SearchPolicyProfile) -> Phase 
 
 
 def budget_class_for_profile(profile: SearchPolicyProfile) -> BudgetClass:
+    """
+    Derive budget class from profile's max_hops setting.
+    
+    Thresholds:
+    - max_hops <= 1: MINIMAL (fast, limited search)
+    - max_hops >= 3: DEEP (thorough search)
+    - otherwise: STANDARD (balanced)
+    """
     max_hops = profile.max_hops
     if max_hops is None:
         return BudgetClass.STANDARD
     if max_hops <= 1:
         return BudgetClass.MINIMAL
-    if max_hops >= 4:
+    if max_hops >= 3:
         return BudgetClass.DEEP
     return BudgetClass.STANDARD
 
