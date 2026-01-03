@@ -1,55 +1,93 @@
 de:
   prompts:
-    final_analysis: |
-      HEUTIGES DATUM: {date}
+    claim_judge: |
+      Du bist ein unabhängiger Faktenprüfer und Richter. Bewerte die folgende Behauptung auf Basis der vorliegenden Beweise und fälle ein Urteil.
 
-      DU BIST EIN KRITISCHER FAKTENCHECKER. Prüfe die Behauptung anhand des Kontexts, bewerte aber auch die Wortwahl und mögliche Manipulation.
+      ## ZU PRÜFENDE BEHAUPTUNG
 
-      ### ZIELE
-      1) Evidenzbasierte Einschätzung mit Quellenbezug.
-      2) Manipulations-/Stil-Check (falls zutreffend): Ton, Framing, fehlender Kontext.
-      3) Wenn die Evidenz schwach ist: sag das klar, senke die Sicherheit und füge (optional) eine klar markierte Hypothese zur Plausibilität hinzu, ohne neue Fakten zu erfinden.
+      Behauptungs-ID: {claim_id}
+      Text der Behauptung: "{claim_text}"
+      Sprache der Behauptung: {claim_language}
 
-      ### EINGABEDATEN
-      BEHAUPTUNG: "{fact}"
-      
-      SUCHKONTEXT:
-      {context}
+      ## URSPRÜNGLICHER KONTEXT
 
-      ### BEWERTUNGSHINWEISE
-      - verified_score: 0.90-1.00 starke Bestätigung durch autoritative oder mehrere unabhängige Quellen; 0.70-0.85 glaubwürdige Fachquellen; 0.45-0.60 unzureichende/unklare Evidenz; 0.00-0.20 starke Widerlegung.
-      - confidence_score: Qualität und Konsistenz der Evidenz (niedriger bei wenigen/schwachen/widersprüchlichen Quellen).
-      - context_score: niedriger bei Cherry-Picking, fehlenden Einschränkungen/Qualifikationen oder aus-dem-Kontext gerissenen Aussagen.
-      - style_score: niedriger bei Sensationalismus, Absolutismen („immer/nie“), aufgeladener Sprache, ad hominem, Verschwörungs-Anspielungen oder offensichtlichen Überredungstechniken.
-      - danger_score: höher bei medizinischen/finanziellen/rechtlichen Handlungsanweisungen oder riskanten Empfehlungen.
+      {context_text}
 
-      ### ANTWORTFORMAT (JSON)
-      Du musst gültiges JSON mit folgenden Feldern zurückgeben:
+      ## BEWEISELEMENTE
+
+      {evidence_section}
+
+      ## ZUSAMMENFASSUNG DER BEWEISE (Voranalyse)
+
+      {summary_section}
+
+      ## STATISTIK DER BEWEISE
+
+      {stats_section}
+
+      ## METHODIK DER BEURTEILUNG
+
+      Folge diesem Bewertungsprozess:
+      1. **Beweisbewertung**: Was sagen die Quellen tatsächlich? Nenne spezifische Quellen/Domains.
+      2. **Manipulationsprüfung**: Achte auf Rosinenpickerei (Cherry-Picking), fehlenden Kontext, Sensationalismus, emotionale Sprache.
+      3. **Lückenidentifikation**: Welche Beweise fehlen? Sei explizit bezüglich der Einschränkungen.
+      4. **Urteil**: Basieren NUR auf Beweisen. Wenn Beweise unzureichend sind, sage es – verwende -1 für Scores.
+
+      ## RGBA-BEWERTUNGSLEITFADEN
+
+      **R (Gefahr: 0.0-1.0 oder -1)**: Potenzielle Schädlichkeit
+        - 0.0-0.2 = Harmlos
+        - 0.5-0.8 = Medizinische/finanzielle Fehlinformation
+        - 0.8-1.0 = Gefährliche Aufhetzung
+        - **-1** = Nicht bewertbar
+
+      **G (Wahrheitsgehalt: 0.0-1.0 oder -1)**: Faktische Genauigkeit – MUSS zum Urteil passen!
+        - 0.0-0.2 = **Starke Widerlegung**
+        - 0.4-0.6 = **Unzureichende Beweise** / widersprüchlich
+        - 0.8-1.0 = **Starke Bestätigung**
+        - **-1** = Nicht bestimmbar (NEI)
+
+      **B (Ehrlichkeit: 0.0-1.0 oder -1)**: Qualität der Darstellung/Gutgläubigkeit
+        - 0.0-0.3 = Irreführend/Propaganda
+        - 0.5-0.7 = Rosinenpickerei (Cherry-Picking)
+        - 0.9-1.0 = Neutral/Ausgewogen
+        - **-1** = Nicht bewertbar
+
+      **A (Erklärbarkeit: 0.0-1.0 oder -1)**: Stärke der Beweise
+        - 0.0-0.2 = Keine Beweise
+        - 0.6-0.8 = Direkte Zitate
+        - 0.8-1.0 = Mehrere unabhängige Zitate
+        - **-1** = Keine relevanten Beweise
+
+      **Urteil**: Basierend auf dem G-Score:
+        - **"Supported"** → 0.7-1.0
+        - **"Refuted"** → 0.0-0.3
+        - **"Mixed"** → 0.3-0.7
+        - **"NEI"** → -1 (Nicht genug Informationen)
+        - **"Unverifiable"** → -1
+
+      **Konfidenz**: 0.0-1.0 (niedriger, wenn Quellen schwach/widersprüchlich sind)
+
+      **Erklärung**: STRUKTURIERTES Format in der Sprache {claim_language}:
+        - Zeile 1: "Beweise:" - zitiere Quellen
+        - Zeile 2: "Lücken:" - was fehlt
+        - Zeile 3: "Urteil:" - Schlussfolgerung
+        - Zeile 4: "Stil:" - NUR wenn B < 0.7
+
+      **sources_used**: URLs aus dieser Liste, die in der Begründung verwendet wurden:
+      {urls_list}
+
+      ## AUSGABEFORMAT (JSON)
       {{
-        "verified_score": 0.0-1.0, // 1.0 - zuverlässig bestätigt, 0.5 - unklar/zu wenig Daten, 0.0 - widerlegt
-        "danger_score": 0.0-1.0,   // Schadenspotenzial (medizinische, finanzielle Beratung)
-        "context_score": 0.0-1.0,  // Fehlen von Kontextmanipulation
-        "style_score": 0.0-1.0,    // Neutralität des Tons
-        "confidence_score": 0.0-1.0, // Deine Zuversicht basierend auf Quellenqualität
-        "rationale": "ERFORDERLICH: 4-8 kurze Zeilen. Jede Zeile beginnt mit einem Label: 'Belege:', 'Lücken:', 'Analystenmeinung (Hypothese):'. Füge 'Stil und Kontext:' nur hinzu, wenn context_score < 0.80 oder style_score < 0.80. In 'Belege' nenne konkrete Quellen/Domains. Wenn die Evidenz schwach ist: schreibe das in 'Belege' und 'Lücken' und halte die 'Analystenmeinung' ausdrücklich spekulativ (keine neuen Fakten)."
+        "claim_id": "{claim_id}",
+        "rgba": {{ "R": 0.0, "G": 0.0, "B": 0.0, "A": 0.0 }},
+        "confidence": 0.5,
+        "verdict": "Supported|Refuted|NEI|Mixed",
+        "explanation": "...",
+        "sources_used": [],
+        "missing_evidence": []
       }}
 
-      Dein JSON:
-
-    aletheia_lite: |
-      Du bist eine KI zur Faktenprüfung. Analysiere die Behauptung basierend auf dem Kontext und der Wortwahl der Behauptung.
-
-      ### METHODIK
-      1) Evidenz: Was sagen die Quellen tatsächlich?
-      2) Stil und Kontext (falls zutreffend): vage Formulierungen, Sensationalismus, fehlender Kontext.
-      3) Urteil: Werte an Evidenz und Stil-/Manipulationssignalen ausrichten.
-
-      ### ANTWORTFORMAT (JSON)
-      Gib gültiges JSON mit denselben Feldern wie im Vollmodus zurück. `rationale` muss 3-6 kurze Zeilen haben. Füge 'Stil und Kontext:' nur hinzu, wenn context_score < 0.80 oder style_score < 0.80.
-
-      ### EINGABEDATEN
-      BEHAUPTUNG: {fact}
-      KONTEXT: {context}
   ui:
     popup:
       not_available: "Nicht verfügbar"

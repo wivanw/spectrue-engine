@@ -1,68 +1,93 @@
 es:
   prompts:
-    final_analysis: |
-      FECHA DE HOY: {date}
+    claim_judge: |
+      Eres un juez de verificación de hechos. Evalúa la siguiente afirmación basándote en la evidencia proporcionada y emite un veredicto.
 
-      ERES UN VERIFICADOR CRÍTICO. Verifica la afirmación usando el contexto proporcionado, pero también evalúa la redacción de la afirmación y posibles manipulaciones.
+      ## AFIRMACIÓN A JUZGAR
 
-      ### OBJETIVOS
-      1) Evaluación basada en evidencia y anclada a fuentes.
-      2) Chequeo de manipulación/estilo (cuando aplique): tono, encuadre, contexto omitido.
-      3) Si la evidencia es débil: dilo claramente, baja la confianza y (opcionalmente) añade una hipótesis de plausibilidad claramente etiquetada sin inventar hechos nuevos.
+      ID de afirmación: {claim_id}
+      Texto de la afirmación: "{claim_text}"
+      Idioma de la afirmación: {claim_language}
 
-      ### DATOS DE ENTRADA
-      AFIRMACIÓN: "{fact}"
-      
-      CONTEXTO DE BÚSQUEDA:
-      {context}
+      ## CONTEXTO ORIGINAL
 
-      ### PISTAS PARA PUNTUAR
-      - verified_score: 0.90-1.00 confirmación fuerte por fuentes autoritativas o varias fuentes independientes; 0.70-0.85 fuentes especializadas creíbles; 0.45-0.60 evidencia insuficiente/incierta; 0.00-0.20 refutación fuerte.
-      - confidence_score: calidad y consistencia de la evidencia (más bajo si hay pocas/fuentes débiles o contradictorias).
-      - context_score: baja si parece cherry-picking, fuera de contexto o faltan matices/condiciones clave.
-      - style_score: baja por sensacionalismo, absolutos (“siempre/nunca”), lenguaje cargado, ad hominem, insinuaciones conspirativas o técnicas de persuasión claras.
-      - danger_score: sube si promueve instrucciones médicas/financieras/legales o acciones arriesgadas.
+      {context_text}
 
-      ### FORMATO DE RESPUESTA (JSON)
-      Debes devolver un JSON válido con los siguientes campos:
+      ## ELEMENTOS DE EVIDENCIA
+
+      {evidence_section}
+
+      ## RESUMEN DE EVIDENCIA (Pre-analizado)
+
+      {summary_section}
+
+      ## ESTADÍSTICAS DE EVIDENCIA
+
+      {stats_section}
+
+      ## METODOLOGÍA DE JUICIO
+
+      Sigue este proceso de evaluación:
+      1. **Evaluación de Evidencia**: ¿Qué dicen realmente las fuentes? Nombra fuentes/dominios específicos.
+      2. **Verificación de Manipulación**: Busca cherry-picking, contexto faltante, sensacionalismo, lenguaje cargado.
+      3. **Identificación de Brechas**: ¿Qué evidencia falta? Sé explícito sobre las limitaciones.
+      4. **Veredicto**: Básate ÚNICAMENTE en la evidencia. Si la evidencia es insuficiente, dilo — usa -1 para las puntuaciones.
+
+      ## GUÍA DE PUNTUACIÓN RGBA
+
+      **R (Peligro: 0.0-1.0 o -1)**: Potencial de daño
+        - 0.0-0.2 = Inofensivo
+        - 0.5-0.8 = Desinformación médica/financiera
+        - 0.8-1.0 = Incitación peligrosa
+        - **-1** = No se puede evaluar
+
+      **G (Veracidad: 0.0-1.0 o -1)**: Precisión factual — ¡DEBE coincidir con el veredicto!
+        - 0.0-0.2 = **Fuerte refutación**
+        - 0.4-0.6 = **Evidencia insuficiente** / contradictoria
+        - 0.8-1.0 = **Fuerte confirmación**
+        - **-1** = No se puede determinar (NEI)
+
+      **B (Honestidad: 0.0-1.0 o -1)**: Calidad de presentación/buena fe
+        - 0.0-0.3 = Engañoso/Propaganda
+        - 0.5-0.7 = Cherry-picking
+        - 0.9-1.0 = Neutral/Equilibrado
+        - **-1** = No se puede evaluar
+
+      **A (Explicabilidad: 0.0-1.0 o -1)**: Fuerza de la evidencia
+        - 0.0-0.2 = Sin evidencia
+        - 0.6-0.8 = Citas directas
+        - 0.8-1.0 = Múltiples citas independientes
+        - **-1** = Sin evidencia relevante
+
+      **Veredicto**: Basado en la puntuación G:
+        - **"Supported"** → 0.7-1.0
+        - **"Refuted"** → 0.0-0.3
+        - **"Mixed"** → 0.3-0.7
+        - **"NEI"** → -1 (No hay suficiente información)
+        - **"Unverifiable"** → -1
+
+      **Confianza**: 0.0-1.0 (más bajo si las fuentes son débiles/contradictorias)
+
+      **Explicación**: Formato ESTRUCTURADO en el idioma {claim_language}:
+        - Línea 1: "Evidencia:" - citar fuentes
+        - Línea 2: "Brechas:" - qué falta
+        - Línea 3: "Veredicto:" - conclusión
+        - Línea 4: "Estilo:" - SOLO si B < 0.7
+
+      **sources_used**: URLs de esta lista usadas en el razonamiento:
+      {urls_list}
+
+      ## FORMATO DE SALIDA (JSON)
       {{
-        "verified_score": 0.0-1.0, // 1.0 - confirmado con fiabilidad, 0.5 - incierto/poca evidencia, 0.0 - refutado
-        "danger_score": 0.0-1.0,   // Potencial de daño (consejos médicos, financieros)
-        "context_score": 0.0-1.0,  // Ausencia de manipulación de contexto
-        "style_score": 0.0-1.0,    // Neutralidad del tono
-        "confidence_score": 0.0-1.0, // Tu confianza basada en la calidad de las fuentes
-        "rationale": "REQUERIDO: 4-8 líneas cortas. Cada línea empieza con una etiqueta: 'Evidencia:', 'Lagunas:', 'Opinión del analista (hipótesis):'. Añade 'Estilo y Contexto:' solo si context_score < 0.80 o style_score < 0.80. En 'Evidencia' cita fuentes/dominios concretos. Si la evidencia es débil, dilo en 'Evidencia' y 'Lagunas' y mantén la 'Opinión' como hipótesis (sin hechos nuevos)."
+        "claim_id": "{claim_id}",
+        "rgba": {{ "R": 0.0, "G": 0.0, "B": 0.0, "A": 0.0 }},
+        "confidence": 0.5,
+        "verdict": "Supported|Refuted|NEI|Mixed",
+        "explanation": "...",
+        "sources_used": [],
+        "missing_evidence": []
       }}
 
-      ### EJEMPLO (Few-Shot)
-      Afirmación: "NASA descubrió una nueva luna de Júpiter."
-      Contexto: "Source: [TRUSTED] NASA JPL\n...\nSource: Space.com\n..."
-      Respuesta: {{
-        "thought_process": "Confirmación encontrada en NASA JPL [TRUSTED] y Space.com (Nivel 2). Hecho verificado.",
-        "verified_score": 1.0,
-        "danger_score": 0.0,
-        "context_score": 1.0,
-        "style_score": 1.0,
-        "confidence_score": 1.0,
-        "rationale": "El sitio oficial de NASA y Space.com confirman el descubrimiento de una nueva luna de Júpiter durante la misión Europa Clipper."
-      }}
-
-      Tu JSON:
-
-    aletheia_lite: |
-      Eres una IA para verificación de hechos. Analiza la afirmación basándote en el contexto y en la redacción de la afirmación.
-
-      ### METODOLOGÍA
-      1) Evidencia: ¿qué dicen realmente las fuentes?
-      2) Estilo y Contexto (cuando aplique): formulaciones vagas, sensacionalismo, contexto omitido.
-      3) Veredicto: ajusta puntuaciones a la evidencia y a las señales de estilo/manipulación.
-
-      ### FORMATO DE RESPUESTA (JSON)
-      Devuelve JSON válido con los mismos campos que en el modo completo. `rationale` debe tener 3-6 líneas cortas. Añade 'Estilo y Contexto:' solo si context_score < 0.80 o style_score < 0.80.
-
-      ### DATOS DE ENTRADA
-      AFIRMACIÓN: {fact}
-      CONTEXTO: {context}
   ui:
     popup:
       not_available: "No disponible"

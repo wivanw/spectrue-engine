@@ -79,16 +79,16 @@ For each claim, provide orchestration metadata:
    → DEFAULT to verification_target="attribution", NOT "reality"!
 
 2. **claim_role** (STRICT LIMITS):
-   - **"thesis"**: Main thesis or conclusion. **MAXIMUM 2 per article!**
+   - **"thesis"**: Main thesis or conclusion. (Use sparingly for the central points).
    - **"support"**: Evidence supporting a thesis claim.
    - **"background"**: Background context (explain-only).
    - **"example"**: Illustrative example for another claim.
    - **"hedge"**: Qualified/uncertain statement ("may", "might").
    - **"counterclaim"**: Opposing or rebuttal claim.
    
-   ⚠️ ROLE DISTRIBUTION RULE:
-   For a 5-claim article: max 2 "thesis", rest must be "support"/"background"/"example"/"hedge"/"counterclaim".
-   If ALL claims are "thesis", you are doing it WRONG!
+   ⚠️ ROLE DISTRIBUTION:
+   Prioritize "thesis" for the central arguments. Use "support" for the specific evidence backing them.
+   If EVERYTHING is a "thesis", you are doing it WRONG!
 
 3. **search_locale_plan**:
    - primary: Main search language ("en" for science, article language for local news)
@@ -402,7 +402,13 @@ You MUST respond in valid JSON.
 
 
 def build_claim_strategist_prompt(*, text_excerpt: str, max_claims: int) -> str:
-    return f"""Extract 3-{max_claims} atomic verifiable claims.
+    return f"""Tasks:
+1. Analyze the article text below.
+2. Extract ALL distinct, atomic, check-worthy factual assertions (claims).
+   - Do NOT limit the number of claims. Extract everything that matters.
+   - Ignore trivial details or filler text.
+   - Separate compound sentences into individual atomic claims.
+3. For each claim, provide the full metadata as defined in the system instructions.
 
 ARTICLE:
 {text_excerpt}

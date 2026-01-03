@@ -1,55 +1,97 @@
 en:
   prompts:
-    final_analysis: |
-      TODAY'S DATE: {date}
 
-      YOU ARE A CRITICAL-THINKING FACT-CHECKER. Verify the claim using the provided context, but also evaluate the claim's wording and possible manipulation.
 
-      ### GOALS
-      1) Evidence-based assessment grounded in sources.
-      2) Manipulation/style check (when applicable): tone, framing, missing context.
-      3) If evidence is weak: say so explicitly, lower confidence, and (optionally) add a clearly-labeled hypothesis about plausibility without introducing new factual claims.
 
-      ### INPUT DATA
-      CLAIM: "{fact}"
-      
-      SEARCH CONTEXT:
-      {context}
 
-      ### SCORING HINTS
-      - verified_score: 0.90-1.00 strong confirmation by high-authority or multiple independent sources; 0.70-0.85 credible specialized sources; 0.45-0.60 insufficient/unclear evidence; 0.00-0.20 strong refutation.
-      - confidence_score: reflect evidence quality and consistency (lower if sources are weak, few, or conflicting).
-      - context_score: lower if the claim appears cherry-picked, out-of-context, or missing key qualifiers.
-      - style_score: lower for sensational wording, absolutes ("always/never"), loaded language, ad hominem, conspiracy cues, or obvious persuasion tactics.
-      - danger_score: raise if the claim encourages medical/financial/legal instructions or risky actions.
+    claim_judge: |
+      You are a fact-checking judge. Evaluate the following claim based on the provided evidence and produce a verdict.
 
-      ### RESPONSE FORMAT (JSON)
-      You must return valid JSON with the following fields:
+      ## CLAIM TO JUDGE
+
+      Claim ID: {claim_id}
+      Claim Text: "{claim_text}"
+      Claim Language: {claim_language}
+
+      ## ORIGINAL CONTEXT
+
+      {context_text}
+
+      ## EVIDENCE ITEMS
+
+      {evidence_section}
+
+      ## EVIDENCE SUMMARY (Pre-analyzed)
+
+      {summary_section}
+
+      ## EVIDENCE STATISTICS
+
+      {stats_section}
+
+      ## JUDGMENT METHODOLOGY
+
+      Follow this evaluation process:
+      1. **Evidence Assessment**: What do sources actually say? Name specific sources/domains.
+      2. **Manipulation Check**: Look for cherry-picking, missing context, sensationalism, loaded language.
+      3. **Gaps Identification**: What evidence is missing? Be explicit about limitations.
+      4. **Verdict**: Base ONLY on evidence. If evidence is insufficient, say so — use -1 for scores.
+
+      ## RGBA SCORING GUIDANCE
+
+      **R (Danger: 0.0-1.0 or -1)**: Harm potential
+        - 0.0-0.2 = Harmless
+        - 0.5-0.8 = Medical/financial misinfo
+        - 0.8-1.0 = Dangerous incitement
+        - **-1** = Cannot assess
+
+      **G (Veracity: 0.0-1.0 or -1)**: Factual accuracy — MUST match verdict!
+        - 0.0-0.2 = **Strong refutation**
+        - 0.4-0.6 = **Insufficient evidence** / conflicting
+        - 0.8-1.0 = **Strong confirmation**
+        - **-1** = Cannot determine (NEI)
+
+      **B (Honesty: 0.0-1.0 or -1)**: Presentation quality/faith
+        - 0.0-0.3 = Misleading/Propaganda
+        - 0.5-0.7 = Cherry-picking
+        - 0.9-1.0 = Neutral/Balanced
+        - **-1** = Cannot assess
+
+      **A (Explainability: 0.0-1.0 or -1)**: Evidence strength
+        - 0.0-0.2 = No evidence
+        - 0.6-0.8 = Direct quotes
+        - 0.8-1.0 = Multiple independent quotes
+        - **-1** = No relevant evidence
+
+      **Verdict**: Based on G score:
+        - **"Supported"** → 0.7-1.0
+        - **"Refuted"** → 0.0-0.3
+        - **"Mixed"** → 0.3-0.7
+        - **"NEI"** → -1 (Not Enough Info)
+        - **"Unverifiable"** → -1
+
+      **Confidence**: 0.0-1.0 (lower if sources weak/conflicting)
+
+      **Explanation**: STRUCTURED format in {claim_language}:
+        - Line 1: "Evidence:" - cite sources
+        - Line 2: "Gaps:" - what is missing
+        - Line 3: "Verdict:" - conclusion
+        - Line 4: "Style:" - ONLY if B < 0.7
+
+      **sources_used**: URLs from this list used in reasoning:
+      {urls_list}
+
+      ## OUTPUT FORMAT (JSON)
       {{
-        "verified_score": 0.0-1.0, // 1.0 - reliably confirmed, 0.5 - unclear/insufficient evidence, 0.0 - refuted
-        "danger_score": 0.0-1.0,   // Harm potential (medical, financial advice)
-        "context_score": 0.0-1.0,  // Absence of context manipulation
-        "style_score": 0.0-1.0,    // Tone neutrality
-        "confidence_score": 0.0-1.0, // Your confidence based on source quality
-        "rationale": "REQUIRED: 4-8 short lines. Start each line with one of these labels: 'Evidence:', 'Gaps:', 'Analyst view (hypothesis):'. Only add 'Style and Context:' if context_score < 0.80 or style_score < 0.80. In 'Evidence', cite specific source names/domains when available. If evidence is weak, say so in 'Evidence' and 'Gaps', and keep 'Analyst view' clearly speculative (no new facts)."
+        "claim_id": "{claim_id}",
+        "rgba": {{ "R": 0.0, "G": 0.0, "B": 0.0, "A": 0.0 }},
+        "confidence": 0.5,
+        "verdict": "Supported|Refuted|NEI|Mixed",
+        "explanation": "...",
+        "sources_used": [],
+        "missing_evidence": []
       }}
 
-      Your JSON:
-
-    aletheia_lite: |
-      You are an AI for fact-checking. Analyze the claim based on the provided context and the claim’s wording.
-
-      ### METHODOLOGY
-      1) Evidence check: what do sources actually say?
-      2) Style and Context (when applicable): vague wording, sensational tone, missing context, absolutist claims.
-      3) Verdict: set scores to match the evidence and style/manipulation signals.
-
-      ### RESPONSE FORMAT (JSON)
-      Return valid JSON with the same fields as in the full mode. The `rationale` must have 3-6 short lines. Only add a 'Style and Context:' line if context_score < 0.80 or style_score < 0.80.
-
-      ### INPUT DATA
-      CLAIM: {fact}
-      CONTEXT: {context}
   ui:
     popup:
       not_available: "Not available"

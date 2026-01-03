@@ -133,126 +133,72 @@ def build_claim_judge_prompt(
     available_urls = [item.url for item in frame.evidence_items]
     urls_list = "\n".join(f"  - {url}" for url in available_urls) if available_urls else "  (none)"
 
-    prompt = f"""You are a fact-checking judge. Evaluate the following claim based on the provided evidence and produce a verdict.
+    # Load prompt template from locales
+    lang = frame.claim_language.lower()[:2]
+    from spectrue_core.agents.prompts import get_prompt
+    
+    # Try to get specific locale prompt, fallback to English if missing
+    prompt_template = get_prompt(lang, "prompts.claim_judge")
+    if not prompt_template or "Prompt key" in prompt_template:
+        prompt_template = get_prompt("en", "prompts.claim_judge")
 
-## CLAIM TO JUDGE
+    # If even English is missing (should not happen if files are correct), use fallback code
+    if not prompt_template or "Prompt key" in prompt_template:
+        return _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list)
 
-Claim ID: {frame.claim_id}
-Claim Text: "{frame.claim_text}"
-Claim Language: {frame.claim_language}
-
-## ORIGINAL CONTEXT
-
-{frame.context_excerpt.text}
-
-## EVIDENCE ITEMS
-
-{evidence_section}
-
-## EVIDENCE SUMMARY (Pre-analyzed)
-
-{summary_section}
-
-## EVIDENCE STATISTICS
-
-{stats_section}
-
-## JUDGMENT METHODOLOGY
-
-Follow this evaluation process:
-
-1. **Evidence Assessment**: What do sources actually say? Name specific sources/domains.
-2. **Manipulation Check**: Look for cherry-picking, missing context, sensationalism, loaded language.
-3. **Gaps Identification**: What evidence is missing? Be explicit about limitations.
-4. **Verdict**: Base ONLY on evidence. If evidence is insufficient, say so — use -1 for scores.
-
-## RGBA SCORING GUIDANCE
-
-**R (Danger: 0.0-1.0 or -1)**: Harm potential if this claim is believed
-  - 0.0-0.2 = Harmless, informational only
-  - 0.2-0.5 = Potentially misleading but low risk
-  - 0.5-0.8 = Medical, financial, or safety misinformation
-  - 0.8-1.0 = Dangerous incitement, doxxing, illegal advice
-  - **-1** = Cannot assess (use when claim nature is unclear)
-
-**G (Veracity: 0.0-1.0 or -1)**: Factual accuracy — MUST match verdict!
-  - 0.0-0.2 = **Strong refutation** by authoritative sources
-  - 0.2-0.4 = Mostly false, misleading with some true elements
-  - 0.4-0.6 = **Insufficient evidence** / conflicting sources
-  - 0.6-0.8 = Mostly supported by reliable sources
-  - 0.8-1.0 = **Strong confirmation** by multiple independent authoritative sources
-  - **-1** = Cannot determine (for NEI/Unverifiable verdicts ONLY)
-
-**B (Honesty: 0.0-1.0 or -1)**: Presentation quality and good faith
-  - 0.0-0.3 = Deliberately misleading, propaganda techniques
-  - 0.3-0.5 = Sensationalism, loaded language, missing crucial context
-  - 0.5-0.7 = Cherry-picking, absolutist claims ("always/never")
-  - 0.7-0.9 = Minor framing issues but generally fair
-  - 0.9-1.0 = Neutral, balanced presentation
-  - **-1** = Cannot assess (claim too short or context unavailable)
-
-**A (Explainability: 0.0-1.0 or -1)**: Evidence traceability
-  - 0.0-0.2 = No traceable evidence found
-  - 0.2-0.4 = Indirect evidence, no direct quotes
-  - 0.4-0.6 = Some supporting snippets but no exact quotes
-  - 0.6-0.8 = Direct quotes supporting verdict
-  - 0.8-1.0 = Multiple independent quotes, strong evidence trail
-  - **-1** = No relevant evidence at all
-
-**Verdict**: Choose based on G (Veracity) score:
-  - **"Supported"** → G should be 0.7-1.0
-  - **"Refuted"** → G should be 0.0-0.3
-  - **"Mixed"** → G should be 0.3-0.7 (conflicting evidence)
-  - **"NEI"** → G = -1 (Not Enough Information)
-  - **"Unverifiable"** → G = -1 (claim cannot be verified)
-
-**Confidence**: Your overall confidence (0.0-1.0)
-  - Lower if sources are weak, single, or contradictory
-  - Lower if key context is missing
-
-**Explanation**: STRUCTURED format, same language as claim ({frame.claim_language}):
-  - Line 1: "Evidence:" - cite specific sources/domains
-  - Line 2: "Gaps:" - what's missing (if any)
-  - Line 3: "Verdict:" - conclude briefly
-  - Optional Line 4: "Style:" - ONLY if B < 0.7 (manipulation detected)
-
-**sources_used**: ONLY URLs from this list that you actually referenced:
-{urls_list}
-
-**missing_evidence**: What would strengthen or change the verdict?
-
-## OUTPUT FORMAT
-
-{{
-  "claim_id": "{frame.claim_id}",
-  "rgba": {{
-    "R": <danger_score>,
-    "G": <veracity_score_or_-1>,
-    "B": <honesty_score>,
-    "A": <explainability_score_or_-1>
-  }},
-  "confidence": <0.0_to_1.0>,
-  "verdict": "<Supported|Refuted|NEI|Mixed|Unverifiable>",
-  "explanation": "<structured_explanation_in_claim_language>",
-  "sources_used": ["<urls_from_evidence>"],
-  "missing_evidence": ["<what_is_missing>"]
-}}
-
-## CRITICAL RULES
-
-1. **G MUST match verdict**: Supported→0.7-1.0, Refuted→0.0-0.3, NEI/Unverifiable→-1
-2. **Use -1 honestly** when you cannot assess — do NOT guess with 0.5
-3. **Never all zeros** — use -1 for insufficient evidence
-4. **sources_used MUST be from evidence list** — don't invent URLs
-5. **Explanation in claim language** — match {frame.claim_language} exactly
-
-Judge this claim fairly and objectively."""
+    # Fill template variables
+    # We must ensure keys match what's in the YAML files
+    try:
+        prompt = prompt_template.format(
+            claim_id=frame.claim_id,
+            claim_text=frame.claim_text,
+            claim_language=frame.claim_language,
+            context_text=frame.context_excerpt.text,
+            evidence_section=evidence_section,
+            summary_section=summary_section,
+            stats_section=stats_section,
+            urls_list=urls_list
+        )
+    except KeyError as e:
+        # Fallback if template has broken keys
+        return _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list)
 
     return prompt
 
 
-def build_claim_judge_system_prompt() -> str:
+def _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list):
+    """Hardcoded English fallback just in case."""
+    return f"""You are a fact-checking judge. Evaluate the following claim based on the provided evidence.
+
+## CLAIM
+ID: {frame.claim_id}
+Text: "{frame.claim_text}"
+Lang: {frame.claim_language}
+
+## EVIDENCE
+{evidence_section}
+
+## SUMMARY
+{summary_section}
+
+## OUTPUT FORMAT
+Return JSON with: claim_id, rgba, confidence, verdict, explanation, sources_used, missing_evidence.
+Explanation MUST be in {frame.claim_language}.
+"""
+    return prompt
+
+
+
+def build_claim_judge_system_prompt(*, lang: str = "en") -> str:
     """Build system prompt for claim judge."""
+    # Try to load localized system prompt
+    from spectrue_core.agents.prompts import get_prompt
+    
+    system_prompt = get_prompt(lang[:2], "prompts.claim_judge_system")
+    if system_prompt and "Prompt key" not in system_prompt:
+        return system_prompt
+
+    # Fallback to English hardcoded
     return """You are an impartial fact-checking judge. Your role is to evaluate claims based on evidence.
 
 ## CORE PRINCIPLES

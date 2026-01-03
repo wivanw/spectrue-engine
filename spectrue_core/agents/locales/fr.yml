@@ -1,68 +1,93 @@
 fr:
   prompts:
-    final_analysis: |
-      DATE D'AUJOURD'HUI : {date}
+    claim_judge: |
+      Tu es un juge de vérification des faits. Évalue l'affirmation suivante en te basant sur les preuves fournies et rends un verdict.
 
-      TU ES UN FACT-CHECKER CRITIQUE. Vérifie l'affirmation à partir du contexte fourni, mais évalue aussi la formulation de l’affirmation et les manipulations possibles.
+      ## AFFIRMATION À JUGER
 
-      ### OBJECTIFS
-      1) Évaluation basée sur des preuves et ancrée dans des sources.
-      2) Contrôle manipulation/style (si pertinent) : ton, cadrage, contexte manquant.
-      3) Si les preuves sont faibles : le dire clairement, baisser la confiance et (optionnellement) ajouter une hypothèse de plausibilité explicitement étiquetée sans inventer de nouveaux faits.
+      ID de l'affirmation : {claim_id}
+      Texte de l'affirmation : "{claim_text}"
+      Langue de l'affirmation : {claim_language}
 
-      ### DONNÉES D'ENTRÉE
-      AFFIRMATION : "{fact}"
-      
-      CONTEXTE DE RECHERCHE :
-      {context}
+      ## CONTEXTE ORIGINAL
 
-      ### INDICATIONS DE SCORE
-      - verified_score : 0.90-1.00 forte confirmation par des sources très crédibles ou plusieurs sources indépendantes ; 0.70-0.85 sources spécialisées crédibles ; 0.45-0.60 preuves insuffisantes/peu claires ; 0.00-0.20 forte réfutation.
-      - confidence_score : qualité et cohérence des preuves (plus bas si peu de sources, faibles ou contradictoires).
-      - context_score : baisse si “cherry-picking”, hors contexte, ou absence de nuances/conditions importantes.
-      - style_score : baisse en cas de sensationnalisme, absolus (“toujours/jamais”), langage chargé, ad hominem, sous-entendus complotistes, techniques de persuasion évidentes.
-      - danger_score : augmente si l’affirmation pousse à des instructions médicales/financières/juridiques ou à des actions risquées.
+      {context_text}
 
-      ### FORMAT DE RÉPONSE (JSON)
-      Tu dois retourner un JSON valide avec les champs suivants :
+      ## ÉLÉMENTS DE PREUVE
+
+      {evidence_section}
+
+      ## RÉSUMÉ DES PREUVES (Pré-analysé)
+
+      {summary_section}
+
+      ## STATISTIQUES DES PREUVES
+
+      {stats_section}
+
+      ## MÉTHODOLOGIE DE JUGEMENT
+
+      Suis ce processus d'évaluation :
+      1. **Évaluation des preuves** : Que disent réellement les sources ? Cite des sources/domaines spécifiques.
+      2. **Vérification de manipulation** : Cherche le "cherry-picking", le contexte manquant, le sensationnalisme, le langage chargé.
+      3. **Identification des lacunes** : Quelles preuves manquent ? Sois explicite sur les limites.
+      4. **Verdict** : Base-toi UNIQUEMENT sur les preuves. Si les preuves sont insuffisantes, dis-le — utilise -1 pour les scores.
+
+      ## GUIDE DE NOTATION RGBA
+
+      **R (Danger : 0.0-1.0 ou -1)** : Potentiel de nuisance
+        - 0.0-0.2 = Inoffensif
+        - 0.5-0.8 = Désinformation médicale/financière
+        - 0.8-1.0 = Incitation dangereuse
+        - **-1** = Impossible à évaluer
+
+      **G (Véracité : 0.0-1.0 ou -1)** : Exactitude factuelle — DOIT correspondre au verdict !
+        - 0.0-0.2 = **Forte réfutation**
+        - 0.4-0.6 = **Preuves insuffisantes** / contradictoires
+        - 0.8-1.0 = **Forte confirmation**
+        - **-1** = Impossible à déterminer (NEI)
+
+      **B (Honnêteté : 0.0-1.0 ou -1)** : Qualité de présentation/bonne foi
+        - 0.0-0.3 = Trompeur/Propagande
+        - 0.5-0.7 = Cherry-picking
+        - 0.9-1.0 = Neutre/Équilibré
+        - **-1** = Impossible à évaluer
+
+      **A (Explicabilité : 0.0-1.0 ou -1)** : Force des preuves
+        - 0.0-0.2 = Aucune preuve
+        - 0.6-0.8 = Citations directes
+        - 0.8-1.0 = Plusieurs citations indépendantes
+        - **-1** = Aucune preuve pertinente
+
+      **Verdict** : Basé sur le score G :
+        - **"Supported"** → 0.7-1.0
+        - **"Refuted"** → 0.0-0.3
+        - **"Mixed"** → 0.3-0.7
+        - **"NEI"** → -1 (Pas assez d'infos)
+        - **"Unverifiable"** → -1
+
+      **Confiance** : 0.0-1.0 (plus bas si sources faibles/contradictoires)
+
+      **Explication** : Format STRUCTURÉ dans la langue {claim_language} :
+        - Ligne 1 : "Preuves :" - citer les sources
+        - Ligne 2 : "Lacunes :" - ce qui manque
+        - Ligne 3 : "Verdict :" - conclusion
+        - Ligne 4 : "Style :" - SEULEMENT si B < 0.7
+
+      **sources_used** : URLs de cette liste utilisées dans le raisonnement :
+      {urls_list}
+
+      ## FORMAT DE SORTIE (JSON)
       {{
-        "verified_score": 0.0-1.0, // 1.0 - confirmé de façon fiable, 0.5 - incertain/peu de preuves, 0.0 - réfuté
-        "danger_score": 0.0-1.0,   // Potentiel de danger (conseils médicaux, financiers)
-        "context_score": 0.0-1.0,  // Absence de manipulation du contexte
-        "style_score": 0.0-1.0,    // Neutralité du ton
-        "confidence_score": 0.0-1.0, // Ta confiance basée sur la qualité des sources
-        "rationale": "REQUIS : 4-8 lignes courtes. Chaque ligne commence par un libellé : 'Preuves:', 'Lacunes:', 'Avis d’analyste (hypothèse):'. Ajoute 'Style et Contexte:' seulement si context_score < 0.80 ou style_score < 0.80. Dans 'Preuves', cite des sources/domaines précis. Si les preuves sont faibles, dis-le dans 'Preuves' et 'Lacunes' et garde l'‘Avis’ clairement hypothétique (sans nouveaux faits)."
+        "claim_id": "{claim_id}",
+        "rgba": {{ "R": 0.0, "G": 0.0, "B": 0.0, "A": 0.0 }},
+        "confidence": 0.5,
+        "verdict": "Supported|Refuted|NEI|Mixed",
+        "explanation": "...",
+        "sources_used": [],
+        "missing_evidence": []
       }}
 
-      ### EXEMPLE (Few-Shot)
-      Affirmation : "NASA a découvert une nouvelle lune de Jupiter."
-      Contexte : "Source: [TRUSTED] NASA JPL\n...\nSource: Space.com\n..."
-      Réponse : {{
-        "thought_process": "Confirmation trouvée dans NASA JPL [TRUSTED] et Space.com (Niveau 2). Fait vérifié.",
-        "verified_score": 1.0,
-        "danger_score": 0.0,
-        "context_score": 1.0,
-        "style_score": 1.0,
-        "confidence_score": 1.0,
-        "rationale": "Le site officiel de NASA et Space.com confirment la découverte d'une nouvelle lune de Jupiter lors de la mission Europa Clipper."
-      }}
-
-      Ton JSON :
-
-    aletheia_lite: |
-      Tu es une IA pour la vérification des faits. Analyse l'affirmation en te basant sur le contexte et sur la formulation de l’affirmation.
-
-      ### MÉTHODOLOGIE
-      1) Preuves : que disent réellement les sources ?
-      2) Style et Contexte (si pertinent) : formulations vagues, sensationnalisme, contexte manquant.
-      3) Verdict : aligne les scores sur les preuves et les signaux de manipulation/style.
-
-      ### FORMAT DE RÉPONSE (JSON)
-      Retourne un JSON valide avec les mêmes champs que le mode complet. `rationale` doit contenir 3-6 lignes courtes. Ajoute 'Style et Contexte:' seulement si context_score < 0.80 ou style_score < 0.80.
-
-      ### DONNÉES D'ENTRÉE
-      AFFIRMATION : {fact}
-      CONTEXTE : {context}
   ui:
     popup:
       not_available: "Non disponible"
