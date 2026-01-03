@@ -179,12 +179,18 @@ class ValidationPipeline:
             
             # Assemble Result
             # ResultAssemblyStep puts final payload in "final_result"
-            if result_ctx.get_extra("final_result"):
-                return result_ctx.get_extra("final_result")
+            final_result = result_ctx.get_extra("final_result")
+            metering = result_ctx.get_extra("metering")
+            
+            if final_result:
+                # Still need to attach cost summary for proper credit tracking
+                # Deep mode builds final_result but doesn't include ledger costs
+                if metering:
+                    return attach_cost_summary(final_result, metering=metering)
+                return final_result
 
             # Fallback (should not happen if ResultAssemblyStep runs)
             payload = result_ctx.verdict or {}
-            metering = result_ctx.get_extra("metering")
             
             return attach_cost_summary(payload, metering=metering)
 
