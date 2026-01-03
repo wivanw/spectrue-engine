@@ -93,8 +93,6 @@ def _parse_csv_locales(raw: str) -> list[str]:
 
 @dataclass(frozen=True)
 class EngineFeatureFlags:
-    # Feature flags: default False unless explicitly enabled.
-    query_rewrite_short: bool = False
     # Trace is a local-only debug feature; it is enabled by default and can be disabled via env.
     trace_enabled: bool = True
     # Optional crawler behavior: default False to avoid server-side crawling / IP reputation issues.
@@ -431,7 +429,6 @@ class EngineRuntimeConfig:
         )
 
         features = EngineFeatureFlags(
-            query_rewrite_short=_parse_bool(os.getenv("SPECTRUE_LLM_QUERY_REWRITE_SHORT"), default=False),
             trace_enabled=not _parse_bool(os.getenv("SPECTRUE_TRACE_DISABLE"), default=False),
             fulltext_fetch=_parse_bool(os.getenv("SPECTRUE_FULLTEXT_FETCH"), default=False),
             # Feature Flags
@@ -608,7 +605,6 @@ class EngineRuntimeConfig:
         more = max(0, len(ex) - len(exclude_preview))
         return {
             "features": {
-                "query_rewrite_short": bool(self.features.query_rewrite_short),
                 "trace_enabled": bool(self.features.trace_enabled),
                 "fulltext_fetch": bool(self.features.fulltext_fetch),
                 "coverage_chunking": bool(self.features.coverage_chunking),

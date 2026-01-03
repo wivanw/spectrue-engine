@@ -14,10 +14,7 @@ from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 
 
-def test_feature_flag_query_rewrite_short_default_false(monkeypatch):
-    monkeypatch.delenv("SPECTRUE_LLM_QUERY_REWRITE_SHORT", raising=False)
-    cfg = EngineRuntimeConfig.load_from_env()
-    assert cfg.features.query_rewrite_short is False
+
 
 
 def test_llm_concurrency_is_clamped(monkeypatch):
