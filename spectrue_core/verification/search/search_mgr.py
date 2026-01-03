@@ -61,15 +61,39 @@ class SearchManager:
         self.oracle_calls = 0  # Track Oracle API calls
         
         # Separate budget trackers for different extraction contexts
-        # Inline sources (homepage links, article citations) have different
-        # quote hit-rates than claim-specific search results
+        # Inline sources use a single tracker (processed once before claims)
         self.inline_budget_tracker = GlobalBudgetTracker()  # For inline source verification
-        self.claim_budget_tracker = GlobalBudgetTracker()   # For claim evidence acquisition
         
-        # Backward compatibility alias (defaults to claim budget)
-        self.budget_tracker = self.claim_budget_tracker
+        # Per-claim budget trackers (each claim gets independent budget in deep mode)
+        self._claim_budget_trackers: dict[str, GlobalBudgetTracker] = {}
+        
+        # Backward compatibility alias (creates default tracker on demand)
+        self._default_claim_tracker: GlobalBudgetTracker | None = None
         
         self.policy_profile: SearchPolicyProfile | None = None
+    
+    def get_claim_budget_tracker(self, claim_id: str | None = None) -> GlobalBudgetTracker:
+        """Get budget tracker for a specific claim (or default if no claim_id)."""
+        if claim_id is None:
+            # Backward compatibility: use a single default tracker
+            if self._default_claim_tracker is None:
+                self._default_claim_tracker = GlobalBudgetTracker()
+            return self._default_claim_tracker
+        
+        # Per-claim tracker: create if doesn't exist
+        if claim_id not in self._claim_budget_trackers:
+            self._claim_budget_trackers[claim_id] = GlobalBudgetTracker()
+        return self._claim_budget_trackers[claim_id]
+    
+    @property
+    def budget_tracker(self) -> GlobalBudgetTracker:
+        """Backward compatibility: returns default claim tracker."""
+        return self.get_claim_budget_tracker(None)
+    
+    @property
+    def claim_budget_tracker(self) -> GlobalBudgetTracker:
+        """Backward compatibility alias."""
+        return self.get_claim_budget_tracker(None)
 
     def reset_metrics(self):
         self.tavily_calls = 0
@@ -77,8 +101,8 @@ class SearchManager:
         self.page_fetches = 0
         self.oracle_calls = 0
         self.inline_budget_tracker = GlobalBudgetTracker()  # Reset inline budget
-        self.claim_budget_tracker = GlobalBudgetTracker()   # Reset claim budget
-        self.budget_tracker = self.claim_budget_tracker     # Maintain alias
+        self._claim_budget_trackers = {}  # Reset all per-claim budgets
+        self._default_claim_tracker = None  # Reset default tracker
         self.policy_profile = None
 
     def set_policy_profile(self, profile: SearchPolicyProfile | None) -> None:
@@ -221,6 +245,7 @@ class SearchManager:
         *,
         max_fetches: int = 2,
         budget_context: str = "claim",
+        claim_id: str | None = None,
     ) -> list[dict]:
         """
         EAL: Enrich snippet-only sources with content + quote candidates.
@@ -235,6 +260,8 @@ class SearchManager:
             budget_context: Which budget tracker to use:
                 - "claim": For claim-specific evidence acquisition (default)
                 - "inline": For inline source verification (separate budget)
+            claim_id: If provided, use per-claim budget tracker (for deep mode).
+                Each claim gets its own independent budget.
         
         Uses batch quote extraction for efficiency (single embedding call).
         """
@@ -242,7 +269,8 @@ class SearchManager:
         if budget_context == "inline":
             tracker = self.inline_budget_tracker
         else:
-            tracker = self.claim_budget_tracker
+            # Per-claim tracker if claim_id provided, else default
+            tracker = self.get_claim_budget_tracker(claim_id)
 
         if not needs_evidence_acquisition_ladder(sources):
             return sources
@@ -276,6 +304,7 @@ class SearchManager:
                         {
                             "reason": reason,
                             "budget_context": budget_context,
+                            "claim_id": claim_id,
                             "budget_state": tracker.to_dict(),
                         },
                     )
@@ -399,6 +428,7 @@ class SearchManager:
                 "enriched": enriched_count,
                 "batch_size": len(sources_for_quote_extraction),
                 "budget_context": budget_context,
+                "claim_id": claim_id,
                 "budget_state": tracker.to_dict(),
             },
         )

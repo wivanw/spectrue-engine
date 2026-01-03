@@ -548,7 +548,10 @@ class PhaseRunner:
                         src["claim_text"] = claim_text
 
             if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
-                sources = await self.search_mgr.apply_evidence_acquisition_ladder(sources)
+                sources = await self.search_mgr.apply_evidence_acquisition_ladder(
+                    sources,
+                    claim_id=claim_id,  # Per-claim budget in deep mode
+                )
 
             all_sources.extend(sources)
 
