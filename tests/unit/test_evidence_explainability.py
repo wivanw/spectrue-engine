@@ -13,7 +13,7 @@ Unit tests for evidence_explainability module (M119).
 Tests tier ranking, explainability adjustments, and best tier selection.
 """
 
-import pytest
+
 
 from spectrue_core.verification.evidence.evidence_explainability import (
     get_tier_rank,

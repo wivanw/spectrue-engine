@@ -13,8 +13,6 @@ Unit tests for evidence_scoring.py module.
 Tests the evidence scoring utilities extracted in M119.
 """
 
-import math
-import pytest
 
 from spectrue_core.verification.evidence.evidence_scoring import (
     norm_id,

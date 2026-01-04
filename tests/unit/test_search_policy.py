@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-import pytest
+
 
 from spectrue_core.schema.claim_metadata import ClaimMetadata
 from spectrue_core.verification.orchestration.execution_plan import BudgetClass
