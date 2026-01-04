@@ -216,8 +216,7 @@ async def collect_evidence(
                 "expected": inp.content_lang, "mismatches": lang_mismatches,
             })
 
-    # Deterministic ranking
-    claims.sort(key=lambda c: (-c.get("importance", 0.0), c.get("text", "")))
+    # NOTE: Claim sorting moved to TargetSelectionStep (M124 - no side-effects)
 
     pack = build_evidence_pack(
         fact=inp.original_fact,

@@ -71,7 +71,11 @@ class TargetSelectionStep:
             # M119: Mode logic moved to factory.py via process_all_claims constructor param
             if self.process_all_claims:
                 # All claims are targets when process_all_claims=True
-                target_claims = list(eligible_claims)
+                # Apply deterministic sorting for reproducible order
+                target_claims = sorted(
+                    eligible_claims,
+                    key=lambda c: (-c.get("importance", 0.0), c.get("text", "")),
+                )
                 deferred_claims = []
                 evidence_sharing = {}
                 target_reasons = {c.get("id"): "process_all_claims" for c in target_claims}
