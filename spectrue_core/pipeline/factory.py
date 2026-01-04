@@ -138,7 +138,6 @@ class PipelineFactory:
             PrepareInputStep,
             AssembleStandardResultStep,
             EvaluateSemanticGatingStep,
-            SearchFlowStep,
             BuildQueriesStep,
             WebSearchStep,
             RerankStep,
@@ -151,8 +150,8 @@ class PipelineFactory:
             AssertRetrievalTraceStep,
         )
 
+        # Optional features (no more retrieval_steps flag - atomic steps always used)
         features = getattr(getattr(config, "runtime", None), "features", None)
-        use_retrieval_steps = bool(getattr(features, "retrieval_steps", False))
         enable_fetch = bool(getattr(features, "fulltext_fetch", False))
         enable_stance = bool(getattr(features, "stance_annotate", False))
         enable_cluster = bool(getattr(features, "cluster_evidence", False))
@@ -214,57 +213,41 @@ class PipelineFactory:
                 depends_on=["target_selection"],
             ),
 
-            # Search retrieval
+            # Search retrieval (atomic steps - no more SearchFlowStep fallback)
+            StepNode(
+                step=BuildQueriesStep(),
+                depends_on=["target_selection", "semantic_gating", "verify_inline_sources"],
+            ),
+            StepNode(
+                step=WebSearchStep(
+                    config=config,
+                    search_mgr=self.search_mgr,
+                    agent=self.agent,
+                ),
+                depends_on=["build_queries"],
+            ),
+            StepNode(
+                step=RerankStep(),
+                depends_on=["web_search"],
+            ),
             *(
                 [
                     StepNode(
-                        step=BuildQueriesStep(),
-                        depends_on=["target_selection", "semantic_gating", "verify_inline_sources"],
-                    ),
-                    StepNode(
-                        step=WebSearchStep(
-                            config=config,
-                            search_mgr=self.search_mgr,
-                            agent=self.agent,
-                        ),
-                        depends_on=["build_queries"],
-                    ),
-                    StepNode(
-                        step=RerankStep(),
-                        depends_on=["web_search"],
-                    ),
-                ]
-                + (
-                    [
-                        StepNode(
-                            step=FetchChunksStep(search_mgr=self.search_mgr),
-                            depends_on=["rerank_results"],
-                        )
-                    ]
-                    if enable_fetch
-                    else []
-                )
-                + [
-                    StepNode(
-                        step=AssembleRetrievalItemsStep(),
-                        depends_on=["fetch_chunks" if enable_fetch else "rerank_results"],
-                    ),
-                    StepNode(
-                        step=AssertRetrievalTraceStep(),
-                        depends_on=["assemble_retrieval_items"],
-                    ),
-                ]
-                if use_retrieval_steps
-                else [
-                    StepNode(
-                        step=SearchFlowStep(
-                            config=config,
-                            search_mgr=self.search_mgr,
-                            agent=self.agent,
-                        ),
-                        depends_on=["target_selection", "semantic_gating", "verify_inline_sources"],
+                        step=FetchChunksStep(search_mgr=self.search_mgr),
+                        depends_on=["rerank_results"],
+                        optional=True,
                     )
                 ]
+                if enable_fetch
+                else []
+            ),
+            StepNode(
+                step=AssembleRetrievalItemsStep(),
+                depends_on=["fetch_chunks" if enable_fetch else "rerank_results"],
+            ),
+            StepNode(
+                step=AssertRetrievalTraceStep(),
+                depends_on=["assemble_retrieval_items"],
             ),
 
             # Evidence collection (collect-only)
@@ -274,7 +257,7 @@ class PipelineFactory:
                     search_mgr=self.search_mgr,
                     include_global_pack=True,
                 ),
-                depends_on=["assert_retrieval_trace" if use_retrieval_steps else "search_flow"],
+                depends_on=["assert_retrieval_trace"],
             ),
 
             # Optional stance annotation
@@ -341,7 +324,6 @@ class PipelineFactory:
             ExtractClaimsStep,
             MeteringSetupStep,
             PrepareInputStep,
-            SearchFlowStep,
             BuildQueriesStep,
             WebSearchStep,
             RerankStep,
@@ -363,9 +345,8 @@ class PipelineFactory:
 
         # Get LLM client from agent
         llm_client = getattr(self.agent, "_llm", None) or getattr(self.agent, "llm", None)
-
+        # Optional features (no more retrieval_steps flag - atomic steps always used)
         features = getattr(getattr(config, "runtime", None), "features", None)
-        use_retrieval_steps = bool(getattr(features, "retrieval_steps", False))
         enable_fetch = bool(getattr(features, "fulltext_fetch", False))
         enable_stance = bool(getattr(features, "stance_annotate", False))
         enable_cluster = bool(getattr(features, "cluster_evidence", False))
@@ -415,57 +396,41 @@ class PipelineFactory:
                 depends_on=["claim_graph"],
             ),
 
-            # Search retrieval (advanced depth)
+            # Search retrieval (atomic steps - no more SearchFlowStep fallback)
+            StepNode(
+                step=BuildQueriesStep(),
+                depends_on=["target_selection", "verify_inline_sources"],
+            ),
+            StepNode(
+                step=WebSearchStep(
+                    config=config,
+                    search_mgr=self.search_mgr,
+                    agent=self.agent,
+                ),
+                depends_on=["build_queries"],
+            ),
+            StepNode(
+                step=RerankStep(),
+                depends_on=["web_search"],
+            ),
             *(
                 [
                     StepNode(
-                        step=BuildQueriesStep(),
-                        depends_on=["target_selection", "verify_inline_sources"],
-                    ),
-                    StepNode(
-                        step=WebSearchStep(
-                            config=config,
-                            search_mgr=self.search_mgr,
-                            agent=self.agent,
-                        ),
-                        depends_on=["build_queries"],
-                    ),
-                    StepNode(
-                        step=RerankStep(),
-                        depends_on=["web_search"],
-                    ),
-                ]
-                + (
-                    [
-                        StepNode(
-                            step=FetchChunksStep(search_mgr=self.search_mgr),
-                            depends_on=["rerank_results"],
-                        )
-                    ]
-                    if enable_fetch
-                    else []
-                )
-                + [
-                    StepNode(
-                        step=AssembleRetrievalItemsStep(),
-                        depends_on=["fetch_chunks" if enable_fetch else "rerank_results"],
-                    ),
-                    StepNode(
-                        step=AssertRetrievalTraceStep(),
-                        depends_on=["assemble_retrieval_items"],
-                    ),
-                ]
-                if use_retrieval_steps
-                else [
-                    StepNode(
-                        step=SearchFlowStep(
-                            config=config,
-                            search_mgr=self.search_mgr,
-                            agent=self.agent,
-                        ),
-                        depends_on=["target_selection", "verify_inline_sources"],
+                        step=FetchChunksStep(search_mgr=self.search_mgr),
+                        depends_on=["rerank_results"],
+                        optional=True,
                     )
                 ]
+                if enable_fetch
+                else []
+            ),
+            StepNode(
+                step=AssembleRetrievalItemsStep(),
+                depends_on=["fetch_chunks" if enable_fetch else "rerank_results"],
+            ),
+            StepNode(
+                step=AssertRetrievalTraceStep(),
+                depends_on=["assemble_retrieval_items"],
             ),
 
             # Evidence collection ONLY (NO global scoring for deep mode!)
@@ -475,7 +440,7 @@ class PipelineFactory:
                     search_mgr=self.search_mgr,
                     include_global_pack=False,
                 ),
-                depends_on=["assert_retrieval_trace" if use_retrieval_steps else "search_flow"],
+                depends_on=["assert_retrieval_trace"],
             ),
 
             # Optional stance annotation
