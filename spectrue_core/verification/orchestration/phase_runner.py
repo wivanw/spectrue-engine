@@ -467,15 +467,24 @@ class PhaseRunner:
         all_sources: list[dict] = []
         hops: list[RetrievalHop] = []
 
+        # Create claim-specific copies of inline sources to avoid mutation
+        # Each claim needs its own copy with claim_id set correctly
+        claim_inline_sources: list[dict] = []
+        for src in self.inline_sources:
+            if isinstance(src, dict):
+                src_copy = dict(src)
+                src_copy["claim_id"] = claim_id
+                claim_inline_sources.append(src_copy)
+
 
         # CRITICAL SHORTCUT: Check inline sources first (M109)
-        if self.inline_sources:
+        if claim_inline_sources:
             logger.debug("[M109] Checking inline sources shortcut for claim %s", claim_id)
 
             # Enrich inline sources if agent is available
             if self.agent and hasattr(self.agent, "verify_inline_source_relevance"):
-                for src in self.inline_sources:
-                    if isinstance(src, dict) and not src.get("quote_matches"):
+                for src in claim_inline_sources:
+                    if not src.get("quote_matches"):
                         try:
                             # verify_inline_source_relevance expects: claims (list[dict]), inline_source (dict), article_excerpt
                             verification = await self.agent.verify_inline_source_relevance(
@@ -488,18 +497,14 @@ class PhaseRunner:
                         except Exception as e:
                             logger.warning("[M109] Inline verification failed for %s: %s", src.get("url"), e)
 
-            for src in self.inline_sources:
-                if isinstance(src, dict) and not src.get("claim_id"):
-                    src["claim_id"] = claim_id
-
             sufficient, stats = verdict_ready_for_claim(
-                self.inline_sources,
+                claim_inline_sources,
                 claim_id=claim_id,
             )
 
             if sufficient:
                 logger.info("[M109] Inline sources sufficient (shortcut) for %s. Stats: %s", claim_id, stats)
-                return list(self.inline_sources), hops, SufficiencyDecision.ENOUGH, "inline_sufficient"
+                return list(claim_inline_sources), hops, SufficiencyDecision.ENOUGH, "inline_sufficient"
 
         if not phases:
             return all_sources, hops, SufficiencyDecision.STOP, "no_phases"
@@ -646,12 +651,12 @@ class PhaseRunner:
 
             claim_sources = [s for s in all_sources if isinstance(s, dict) and s.get("claim_id") == claim_id]
 
-            # Include inline sources in potential evidence
-            # They may not have claim_id set yet; verdict_ready uses strict claim_id matching
-            potential_evidence = claim_sources + self.inline_sources
+            # Include claim-specific inline sources in potential evidence
+            # claim_inline_sources already have claim_id set correctly
+            potential_evidence = claim_sources + claim_inline_sources
             logger.debug(
                 "[M109] verdict_ready call: claim_id=%s sources=%d (claim=%d + inline=%d)",
-                claim_id, len(potential_evidence), len(claim_sources), len(self.inline_sources)
+                claim_id, len(potential_evidence), len(claim_sources), len(claim_inline_sources)
             )
             ready, ready_stats = verdict_ready_for_claim(
                 potential_evidence,
@@ -665,8 +670,8 @@ class PhaseRunner:
                 )
 
                 if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
-                    self.inline_sources = await self.search_mgr.apply_evidence_acquisition_ladder(
-                        self.inline_sources,
+                    claim_inline_sources = await self.search_mgr.apply_evidence_acquisition_ladder(
+                        claim_inline_sources,
                         budget_context="inline",  # Use separate budget from claim verification
                     )
 
@@ -674,7 +679,7 @@ class PhaseRunner:
                 # Filter to only unique sources to avoid dupes if they were already in claim_sources
                 seen_urls = {s.get("url") for s in claim_sources if s.get("url")}
                 combined = list(claim_sources)
-                for src in self.inline_sources:
+                for src in claim_inline_sources:
                     if src.get("url") not in seen_urls:
                         combined.append(src)
 

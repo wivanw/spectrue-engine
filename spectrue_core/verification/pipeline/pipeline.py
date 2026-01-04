@@ -20,7 +20,6 @@ from spectrue_core.runtime_config import ContentBudgetConfig
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
 from spectrue_core.graph import ClaimGraphBuilder
 from spectrue_core.verification.pipeline.pipeline_input import apply_content_budget, TrimResult
-from spectrue_core.pipeline.factory import PipelineFactory
 from spectrue_core.pipeline.dag import PipelineContext
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.pipeline.pipeline_metering import attach_cost_summary
@@ -111,6 +110,7 @@ class ValidationPipeline:
         Execute the validation pipeline using DAG architecture.
         """
         from spectrue_core.pipeline.mode import get_mode
+        from spectrue_core.pipeline.factory import PipelineFactory
         
         start_time = time.time()
         
@@ -223,5 +223,4 @@ class ValidationPipeline:
             if prior_tavily_meter:
                 if getattr(self.search_mgr, "web_tool", None) and getattr(self.search_mgr.web_tool, "_tavily", None):
                     self.search_mgr.web_tool._tavily._meter = prior_tavily_meter
-
 

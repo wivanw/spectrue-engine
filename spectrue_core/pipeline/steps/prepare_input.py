@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.pipeline.contracts import INPUT_DOC_KEY, InputDoc
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
 
@@ -155,6 +156,13 @@ class PrepareInputStep:
 
             # Store input_text as well for fallback in result_assembly
             raw_input = ctx.get_extra("raw_fact", "") or (ctx.claims[0].get("text", "") if ctx.claims else "")
+            input_type = "url" if is_url_input(raw_input) else "text"
+            input_doc = InputDoc(
+                input_type=input_type,
+                raw_input=raw_input,
+                prepared_text=fact,
+                lang=ctx.lang,
+            )
 
             return (
                 ctx.set_extra("prepared_fact", fact)
@@ -163,6 +171,7 @@ class PrepareInputStep:
                 .set_extra("prepared_context", final_context)
                 .set_extra("prepared_sources", final_sources)
                 .set_extra("inline_sources", inline_sources_list)
+                .set_extra(INPUT_DOC_KEY, input_doc)
             )
 
         except Exception as e:

@@ -105,12 +105,15 @@ class DAGPipeline:
     mode: PipelineMode
     nodes: list[StepNode]
     max_parallel: int = 5
+    validate_mode_contract: bool = True
     _node_order: dict[str, int] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Validate DAG structure."""
         self._node_order = {node.name: idx for idx, node in enumerate(self.nodes)}
         self._validate_dag()
+        if self.validate_mode_contract:
+            self._validate_mode_contract()
 
     def _validate_dag(self) -> None:
         """Ensure no cycles and all dependencies exist."""
@@ -137,6 +140,29 @@ class DAGPipeline:
             raise ValueError(f"DAG has orphan steps with no dependencies: {orphan_list}")
         # Check for cycles using DFS
         self._check_cycles()
+
+    def _validate_mode_contract(self) -> None:
+        """Validate mode-specific step invariants."""
+        node_names = {n.name for n in self.nodes}
+
+        if self.mode.require_metering:
+            from spectrue_core.pipeline.steps.metering_setup import MeteringSetupStep
+
+            MeteringSetupStep.ensure_present(self.nodes)
+
+        judge_standard_present = "judge_standard" in node_names
+        judge_claims_present = "judge_claims" in node_names
+
+        if judge_standard_present and judge_claims_present:
+            raise ValueError(
+                "DAG cannot include both judge_standard and judge_claims steps."
+            )
+
+        if self.mode.name == "normal" and judge_claims_present:
+            raise ValueError("Normal mode DAG cannot include judge_claims.")
+
+        if self.mode.name == "deep" and judge_standard_present:
+            raise ValueError("Deep mode DAG cannot include judge_standard.")
 
     def _check_cycles(self) -> None:
         """Detect cycles in the dependency graph."""

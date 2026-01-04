@@ -128,16 +128,18 @@ class PipelineFactory:
         from spectrue_core.pipeline.dag import StepNode
         from spectrue_core.pipeline.steps import (
             ClaimGraphStep,
-            EvidenceFlowStep,
+            EvidenceCollectStep,
             ExtractClaimsStep,
+            JudgeStandardStep,
             MeteringSetupStep,
             OracleFlowStep,
             PrepareInputStep,
-            ResultAssemblyStep,
+            AssembleStandardResultStep,
             EvaluateSemanticGatingStep,
             SearchFlowStep,
             TargetSelectionStep,
             VerifyInlineSourcesStep,
+            CostSummaryStep,
         )
 
         return [
@@ -209,14 +211,31 @@ class PipelineFactory:
 
             # Evidence scoring (enable_global_scoring=True is default)
             StepNode(
-                step=EvidenceFlowStep(agent=self.agent, search_mgr=self.search_mgr),
+                step=EvidenceCollectStep(
+                    agent=self.agent,
+                    search_mgr=self.search_mgr,
+                    cluster_evidence=True,
+                    include_global_pack=True,
+                ),
                 depends_on=["search_flow"],
+            ),
+
+            # Standard judging
+            StepNode(
+                step=JudgeStandardStep(agent=self.agent, search_mgr=self.search_mgr),
+                depends_on=["evidence_collect"],
             ),
 
             # Final assembly
             StepNode(
-                step=ResultAssemblyStep(),
-                depends_on=["evidence_flow"],
+                step=AssembleStandardResultStep(),
+                depends_on=["judge_standard"],
+            ),
+
+            # Cost summary
+            StepNode(
+                step=CostSummaryStep(),
+                depends_on=["assemble_standard_result"],
             ),
         ]
 
@@ -225,13 +244,14 @@ class PipelineFactory:
         from spectrue_core.pipeline.dag import StepNode
         from spectrue_core.pipeline.steps import (
             ClaimGraphStep,
-            EvidenceFlowStep,
+            EvidenceCollectStep,
             ExtractClaimsStep,
             MeteringSetupStep,
             PrepareInputStep,
             SearchFlowStep,
             TargetSelectionStep,
             VerifyInlineSourcesStep,
+            CostSummaryStep,
         )
         from spectrue_core.pipeline.steps.deep_claim import (
             AssembleDeepResultStep,
@@ -300,10 +320,11 @@ class PipelineFactory:
             # Evidence collection ONLY (NO global scoring for deep mode!)
             # Deep mode uses per-claim JudgeClaimsStep instead of batch scoring
             StepNode(
-                step=EvidenceFlowStep(
+                step=EvidenceCollectStep(
                     agent=self.agent,
                     search_mgr=self.search_mgr,
-                    enable_global_scoring=False,  # <-- KEY: No batch LLM call
+                    cluster_evidence=False,
+                    include_global_pack=False,
                 ),
                 depends_on=["search_flow"],
             ),
@@ -313,7 +334,7 @@ class PipelineFactory:
             # Build ClaimFrame for each claim
             StepNode(
                 step=BuildClaimFramesStep(),
-                depends_on=["evidence_flow"],
+                depends_on=["evidence_collect"],
             ),
 
             # Summarize evidence per claim
@@ -334,6 +355,11 @@ class PipelineFactory:
             StepNode(
                 step=AssembleDeepResultStep(),
                 depends_on=["judge_claims"],
+            ),
+
+            StepNode(
+                step=CostSummaryStep(),
+                depends_on=["assemble_deep_result"],
             ),
 
             # NOTE: No ResultAssemblyStep fallback in deep mode!
