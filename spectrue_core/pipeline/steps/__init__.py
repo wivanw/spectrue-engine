@@ -23,7 +23,6 @@ from .verify_inline_sources import VerifyInlineSourcesStep
 from .claim_graph import ClaimGraphStep
 from .target_selection import TargetSelectionStep
 from .evaluate_semantic_gating import EvaluateSemanticGatingStep
-from .search_flow import SearchFlowStep
 from .retrieval import (
     AssembleRetrievalItemsStep,
     BuildQueriesStep,
@@ -32,7 +31,6 @@ from .retrieval import (
     WebSearchStep,
 )
 from .evidence_collect import EvidenceCollectStep
-from .evidence_flow import EvidenceFlowStep
 from .stance_annotate import StanceAnnotateStep
 from .cluster_evidence import ClusterEvidenceStep
 from .judge_standard import JudgeStandardStep
@@ -40,7 +38,6 @@ from .oracle_flow import OracleFlowStep
 from .result_assembly import AssembleStandardResultStep, ResultAssemblyStep
 from .extraction_result_assembly import ExtractionResultAssemblyStep
 from .cost_summary import CostSummaryStep
-# M119: Add invariant steps
 from .invariants import (
     AssertNonEmptyClaimsStep,
     AssertContractPresenceStep,
@@ -59,14 +56,12 @@ __all__ = [
     "ClaimGraphStep",
     "TargetSelectionStep",
     "EvaluateSemanticGatingStep",
-    "SearchFlowStep",
     "BuildQueriesStep",
     "WebSearchStep",
     "RerankStep",
     "FetchChunksStep",
     "AssembleRetrievalItemsStep",
     "EvidenceCollectStep",
-    "EvidenceFlowStep",
     "StanceAnnotateStep",
     "ClusterEvidenceStep",
     "JudgeStandardStep",
