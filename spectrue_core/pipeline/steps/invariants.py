@@ -401,6 +401,63 @@ class AssertStandardResultKeysStep:
 
 
 @dataclass
+class AssertCostNonZeroStep:
+    """Assert that cost credits are non-zero if API calls were made.
+
+    Metering invariant: if LLM or search calls occurred, credits must be > 0.
+    This prevents silent metering failures.
+
+    Raises:
+        PipelineViolation: If calls exist but credits == 0
+    """
+
+    name: str = "assert_cost_non_zero"
+
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
+        from spectrue_core.utils.trace import Trace
+
+        ledger = ctx.get_extra("ledger")
+        if ledger is None:
+            # No ledger = metering not enabled, skip check
+            return ctx
+
+        summary = ledger.to_summary_dict() if hasattr(ledger, "to_summary_dict") else {}
+        events = summary.get("events", [])
+        credits_used = summary.get("credits_used") or summary.get("total_credits") or 0
+
+        # Count API calls
+        llm_calls = sum(1 for e in events if e.get("type") in ("llm_call", "openai_completion"))
+        search_calls = sum(1 for e in events if e.get("type") in ("search_call", "tavily_search"))
+        extract_calls = sum(1 for e in events if e.get("type") in ("extract_call", "tavily_extract"))
+        total_calls = llm_calls + search_calls + extract_calls
+
+        if total_calls > 0 and float(credits_used) == 0:
+            Trace.event(
+                "metering.invariant_violation",
+                {
+                    "llm_calls": llm_calls,
+                    "search_calls": search_calls,
+                    "extract_calls": extract_calls,
+                    "credits_used": credits_used,
+                },
+            )
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="cost_nonzero_when_calls_exist",
+                expected="credits > 0",
+                actual=f"credits={credits_used}, calls={total_calls}",
+                details={
+                    "llm_calls": llm_calls,
+                    "search_calls": search_calls,
+                    "extract_calls": extract_calls,
+                    "mode": ctx.mode.name,
+                },
+            )
+
+        return ctx
+
+
+@dataclass
 class AssertRetrievalTraceStep:
     """Assert retrieval trace markers are present in context extras."""
 
