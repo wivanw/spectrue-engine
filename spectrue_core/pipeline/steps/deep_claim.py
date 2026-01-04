@@ -255,20 +255,11 @@ class AssembleDeepResultStep(Step):
             claim_results: list[dict[str, Any]] = []
             details_for_frontend: list[dict[str, Any]] = []
             claim_verdicts: list[dict[str, Any]] = []
+            
+            # Track all unique sources used across all claims for the global bibliography
+            global_sources_map: dict[str, dict[str, Any]] = {}
 
             from spectrue_core.utils.trust_utils import enrich_sources_with_trust
-
-            # Prepare global sources for report bibliography
-            raw_sources = ctx.sources or []
-            # Prefer using sources from evidence collection if available
-            collection = ctx.get_extra("evidence_collection")
-            if collection and hasattr(collection, "sources"):
-                raw_sources = collection.sources or raw_sources
-
-            # Enrich and deduplicate global sources
-            # We use a dict by URL to handle deduplication logic inside enrich/canonicalize if needed,
-            # but enrich_sources_with_trust expects a list.
-            global_sources = enrich_sources_with_trust(raw_sources)
 
             for frame in deep_ctx.claim_frames:
                 judge_output = deep_ctx.judge_outputs.get(frame.claim_id)
@@ -313,21 +304,30 @@ class AssembleDeepResultStep(Step):
                 for src_ref in sources_used:
                     ei = evidence_map.get(src_ref) or url_map.get(src_ref)
                     if ei:
-                        sources_list.append({
+                        s_obj = {
                             "url": ei.url,
                             "domain": ei.source_type or "web",
                             "title": ei.title,
                             "citation_text": ei.snippet,
-                        })
+                        }
+                        sources_list.append(s_obj)
+                        # Add to global map for bibliography
+                        if ei.url:
+                             global_sources_map[ei.url] = s_obj
 
                 if not sources_list and frame.evidence_items:
+                    # Fallback: if judge didn't cite specific sources, include all candidate evidence
+                    # This behavior is debatable for deep mode but preserves existing logic from M117
                     for ei in frame.evidence_items:
-                        sources_list.append({
+                        s_obj = {
                             "url": ei.url,
                             "domain": ei.source_type or "web",
                             "title": ei.title,
                             "citation_text": ei.snippet,
-                        })
+                        }
+                        sources_list.append(s_obj)
+                        if ei.url:
+                             global_sources_map[ei.url] = s_obj
 
                 sources_list = enrich_sources_with_trust(sources_list)
 
@@ -351,6 +351,10 @@ class AssembleDeepResultStep(Step):
                 })
 
             deep_ctx.claim_results = claim_results
+            
+            # Convert global map back to list and enrich
+            global_sources = list(global_sources_map.values())
+            global_sources = enrich_sources_with_trust(global_sources)
 
             verdict = {
                 "judge_mode": judge_mode,
