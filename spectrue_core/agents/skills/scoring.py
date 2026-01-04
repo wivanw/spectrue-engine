@@ -571,6 +571,11 @@ Return valid JSON now."""
         tasks = [score_with_semaphore(ci) for ci in claims_info]
         claim_verdicts = await asyncio.gather(*tasks)
 
+        for cv in claim_verdicts:
+            if cv.get("status") != "ok":
+                cv["rgba"] = None
+                cv["verdict_score"] = None
+
         # --- 4. AGGREGATE GLOBAL SCORES ---
         # Calculate global scores from per-claim RGBA
         # IMPORTANT: Skip claims with status=error (they have rgba=None)

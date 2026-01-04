@@ -108,8 +108,7 @@ class ClaimJudgeSkill:
                 "error": str(e),
             })
 
-            # Return degraded output on error
-            return self._fallback_output(frame, str(e))
+            raise RuntimeError(f"Claim judge failed: {e}") from e
 
     def _parse_response(
         self,
@@ -187,16 +186,6 @@ class ClaimJudgeSkill:
 
     def _fallback_output(self, frame: ClaimFrame, error: str) -> JudgeOutput:
         """
-        Create fallback output when LLM fails.
-        
-        Returns NEI verdict with low confidence.
+        Deprecated: fallback outputs are not permitted in deep mode.
         """
-        return JudgeOutput(
-            claim_id=frame.claim_id,
-            rgba=RGBAScore(r=0.0, g=0.5, b=0.5, a=0.1),
-            confidence=0.1,
-            verdict="NEI",
-            explanation=f"Unable to judge claim due to error: {error}",
-            sources_used=(),
-            missing_evidence=("Judge error - unable to analyze evidence",),
-        )
+        raise RuntimeError(f"Claim judge failed: {error}")

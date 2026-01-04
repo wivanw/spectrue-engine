@@ -255,18 +255,8 @@ class AssembleDeepResultStep(Step):
             claim_results: list[dict[str, Any]] = []
             details_for_frontend: list[dict[str, Any]] = []
             claim_verdicts: list[dict[str, Any]] = []
-            
-            # Prepare global sources for report bibliography (full search context)
-            raw_sources = ctx.sources or []
-            # Prefer using sources from evidence collection if available (post-clustering/enrichment)
-            collection = ctx.get_extra("evidence_collection")
-            if collection and hasattr(collection, "sources") and collection.sources:
-                raw_sources = collection.sources
 
             from spectrue_core.utils.trust_utils import enrich_sources_with_trust
-            
-            # Global sources list contains everything found by search, regardless of usage by claims
-            global_sources = enrich_sources_with_trust(raw_sources)
 
             for frame in deep_ctx.claim_frames:
                 judge_output = deep_ctx.judge_outputs.get(frame.claim_id)
@@ -353,7 +343,6 @@ class AssembleDeepResultStep(Step):
             verdict = {
                 "judge_mode": judge_mode,
                 "claim_verdicts": claim_verdicts,
-                "sources": global_sources,
             }
 
             final_result = {
@@ -364,13 +353,9 @@ class AssembleDeepResultStep(Step):
                 },
                 "details": details_for_frontend,
                 "claim_verdicts": claim_verdicts,
-                "sources": global_sources,
             }
 
-            Trace.event("assemble_deep_result.complete", {
-                "result_count": len(claim_results),
-                "source_count": len(global_sources),
-            })
+            Trace.event("assemble_deep_result.complete", {"result_count": len(claim_results)})
 
             judgments = Judgments(standard=None, deep=tuple(claim_results))
 

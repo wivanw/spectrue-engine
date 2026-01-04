@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.pipeline.contracts import CLAIMS_KEY, ClaimItem, Claims
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
 
@@ -46,6 +47,30 @@ class ExtractClaimsStep:
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Extract claims from fact."""
         try:
+            def build_claims_contract(
+                claims_list: list[dict[str, Any]],
+                anchor_id: str | None,
+            ) -> Claims:
+                items: list[ClaimItem] = []
+                for idx, claim in enumerate(claims_list):
+                    if not isinstance(claim, dict):
+                        continue
+                    cid = str(claim.get("id") or claim.get("claim_id") or f"c{idx + 1}")
+                    text = (claim.get("normalized_text") or claim.get("text") or "").strip()
+                    span_start = claim.get("span_start")
+                    span_end = claim.get("span_end")
+                    lang = claim.get("lang") or claim.get("language") or ctx.lang
+                    items.append(
+                        ClaimItem(
+                            id=cid,
+                            text=text,
+                            span_start=int(span_start) if isinstance(span_start, int) else None,
+                            span_end=int(span_end) if isinstance(span_end, int) else None,
+                            lang=str(lang) if lang else None,
+                        )
+                    )
+                return Claims(claims=tuple(items), anchor_claim_id=anchor_id)
+
             # Check if claims are preloaded (e.g., from deep mode first pass)
             preloaded_claims = ctx.get_extra("preloaded_claims")
             if preloaded_claims and isinstance(preloaded_claims, list) and len(preloaded_claims) > 0:
@@ -68,13 +93,15 @@ class ExtractClaimsStep:
                         "preloaded": True,
                     },
                 )
-                
-                return ctx.with_update(claims=claims).set_extra(
-                    "anchor_claim_id", anchor_claim_id
-                ).set_extra(
-                    "eligible_claims", claims
-                ).set_extra(
-                    "_extracted_claims", claims
+
+                claims_contract = build_claims_contract(claims, anchor_claim_id)
+
+                return (
+                    ctx.with_update(claims=claims)
+                    .set_extra("anchor_claim_id", anchor_claim_id)
+                    .set_extra("eligible_claims", claims)
+                    .set_extra("_extracted_claims", claims)
+                    .set_extra(CLAIMS_KEY, claims_contract)
                 )
             
             fact = ctx.get_extra("prepared_fact") or ctx.get_extra("raw_fact", "")
@@ -146,6 +173,8 @@ class ExtractClaimsStep:
                 },
             )
 
+            claims_contract = build_claims_contract(claims, anchor_claim_id)
+
             return (
                 ctx.with_update(claims=claims)
                 .set_extra("anchor_claim_id", anchor_claim_id)
@@ -154,6 +183,7 @@ class ExtractClaimsStep:
                 .set_extra("article_intent", str(intent))
                 .set_extra("fast_query", fast_query)
                 .set_extra("search_queries", [fast_query] if fast_query else [fact])
+                .set_extra(CLAIMS_KEY, claims_contract)
             )
 
         except Exception as e:

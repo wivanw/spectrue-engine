@@ -22,6 +22,8 @@ from spectrue_core.utils.trace import Trace, current_trace_id
 
 logger = logging.getLogger(__name__)
 
+METERING_SETUP_STEP_NAME = "metering_setup"
+
 
 @dataclass
 class MeteringSetupStep:
@@ -43,7 +45,13 @@ class MeteringSetupStep:
     config: Any  # SpectrueConfig
     agent: Any | None = None  # FactCheckerAgent
     search_mgr: Any | None = None  # SearchManager
-    name: str = "metering_setup"
+    name: str = METERING_SETUP_STEP_NAME
+
+    @classmethod
+    def ensure_present(cls, nodes: list[Any]) -> None:
+        names = {node.name for node in nodes}
+        if METERING_SETUP_STEP_NAME not in names:
+            raise ValueError("MeteringSetupStep is required but missing from the pipeline.")
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Initialize metering infrastructure."""

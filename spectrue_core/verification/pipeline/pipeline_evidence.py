@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 import logging
 
@@ -38,6 +38,7 @@ from spectrue_core.verification.scoring.rgba_aggregation import (
 )
 from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
 from spectrue_core.verification.claims.claim_selection import pick_ui_main_claim
+from spectrue_core.verification.evidence.evidence_pack import EvidencePack
 from spectrue_core.verification.search.search_policy import (
     resolve_profile_name,
     resolve_stance_pass_mode,
@@ -103,28 +104,32 @@ class EvidenceFlowInput:
     # Pipeline field removed - mode determined by score_mode parameter in run_evidence_flow()
 
 
-async def run_evidence_flow(
+@dataclass(frozen=True, slots=True)
+class EvidenceCollection:
+    """Output of evidence collection prior to judging."""
+
+    pack: EvidencePack
+    claims: list[dict[str, Any]]
+    sources: list[dict[str, Any]]
+    claim_text_map: dict[str, str]
+    anchor_claim: dict[str, Any] | None
+    anchor_claim_id: str | None
+    time_windows: dict[str, TimeWindow]
+    current_cost: float
+
+
+async def collect_evidence(
     *,
     agent,
     search_mgr,
     build_evidence_pack,
-    enrich_sources_with_trust,
     calibration_registry: CalibrationRegistry | None = None,
     inp: EvidenceFlowInput,
     claims: list[dict],
     sources: list[dict],
-    score_mode: str = "standard",  # "standard" (single LLM call) or "parallel" (per-claim)
-) -> dict:
-    """
-    Analysis + scoring: clustering, social verification, evidence pack, scoring, finalize.
-
-    Args:
-        score_mode: Scoring strategy - "standard" for single LLM call (normal mode),
-                   "parallel" for per-claim scoring (deep mode).
-
-    Matches existing pipeline behavior; expects sources/claims to be mutable dict shapes.
-    """
-
+    cluster_evidence: bool = True,
+) -> EvidenceCollection:
+    """Collect and structure evidence without invoking the judge."""
     if inp.progress_callback:
         await inp.progress_callback("ai_analysis")
 
@@ -187,7 +192,7 @@ async def run_evidence_flow(
             if not cid:
                 continue
             claim_text_map[str(cid)] = c.get("normalized_text") or c.get("text") or ""
-    if claims and sources:
+    if cluster_evidence and claims and sources:
         if inp.progress_callback:
             await inp.progress_callback("clustering_evidence")
         profile_name = resolve_profile_name(inp.search_type)
@@ -216,14 +221,14 @@ async def run_evidence_flow(
             validate_claims_language_consistency,
         )
         lang_valid, lang_mismatches = validate_claims_language_consistency(
-            claims, inp.content_lang, pipeline_mode=score_mode, min_confidence=0.7,
+            claims, inp.content_lang, pipeline_mode="collect", min_confidence=0.7,
         )
         if not lang_valid:
             Trace.event("pipeline.language_mismatch_ignored", {
                 "expected": inp.content_lang, "mismatches": lang_mismatches,
             })
 
-    # T7: Deterministic Ranking
+    # Deterministic ranking
     claims.sort(key=lambda c: (-c.get("importance", 0.0), c.get("text", "")))
 
     pack = build_evidence_pack(
@@ -236,6 +241,36 @@ async def run_evidence_flow(
         if inp.fact != inp.original_fact
         else None,
     )
+
+    return EvidenceCollection(
+        pack=pack,
+        claims=claims,
+        sources=sources,
+        claim_text_map=claim_text_map,
+        anchor_claim=anchor_claim,
+        anchor_claim_id=anchor_claim_id,
+        time_windows=time_windows,
+        current_cost=current_cost,
+    )
+
+
+async def score_evidence_collection(
+    *,
+    agent,
+    search_mgr,
+    enrich_sources_with_trust,
+    inp: EvidenceFlowInput,
+    collection: EvidenceCollection,
+    score_mode: str = "standard",
+) -> dict:
+    """Invoke judge on a pre-collected evidence pack."""
+    pack = collection.pack
+    claims = collection.claims
+    sources = collection.sources
+    anchor_claim = collection.anchor_claim
+    anchor_claim_id = collection.anchor_claim_id
+    time_windows = collection.time_windows
+    claim_text_map = collection.claim_text_map
 
     if inp.progress_callback:
         await inp.progress_callback("score_evidence")
@@ -256,7 +291,6 @@ async def run_evidence_flow(
 
     # Track judge mode for downstream logic
     result["judge_mode"] = "deep" if use_parallel_scoring else "standard"
-
 
     if str(result.get("status", "")).lower() == "error":
         result["status"] = "error"
@@ -314,13 +348,13 @@ async def run_evidence_flow(
     if isinstance(claim_verdicts, list):
         # Process all claim verdicts using extracted function
         explainability_score = result.get("explainability_score", -1.0)
-        
+
         verdict_state_by_claim, veracity_debug, conflict_detected, explainability_update = (
             process_claim_verdicts(
                 claim_verdicts, claims, pack, explainability_score
             )
         )
-        
+
         if explainability_update is not None:
             result["explainability_score"] = explainability_update
 
@@ -368,7 +402,7 @@ async def run_evidence_flow(
     except Exception as e:
         logger.warning("Anchor dedup failed (non-fatal): %s", e)
 
-    # Bayesian Scoring (extracted to bayesian_update.py, M119)
+    # Bayesian Scoring (extracted to bayesian_update.py)
     if inp.prior_belief:
         result["bayesian_trace"] = apply_bayesian_update(
             prior_belief=inp.prior_belief,
@@ -400,7 +434,7 @@ async def run_evidence_flow(
     if inp.progress_callback:
         await inp.progress_callback("finalizing")
 
-    result["cost"] = current_cost
+    result["cost"] = collection.current_cost
     result["text"] = inp.fact
     result["search_meta"] = search_mgr.get_search_meta()
     display_sources = pack.get("scored_sources")
@@ -442,12 +476,59 @@ async def run_evidence_flow(
     verified = result.get("verified_score", -1.0)
     # -1.0 is now a valid value meaning "unverified/unknown" - do not override
     if verified is None:
-        logger.warning("[Pipeline] ⚠️ Missing verified_score in result - using -1.0 (unverified)")
-        verified = -1.0
-        result["verified_score"] = verified
+        logger.warning(
+            "[Pipeline] ⚠️ Missing verified_score in result - using -1.0 (unverified)"
+        )
+        result["verified_score"] = -1.0
 
     # Preserve stitched claim-extraction text for audit/history.
     if inp.claim_extraction_text:
         result["claim_extraction_text"] = inp.claim_extraction_text
 
+    # Add baseline pricing policy snapshot for audit
+    result["aggregation_policy"] = _aggregation_policy(search_mgr)
+
     return result
+
+
+async def run_evidence_flow(
+    *,
+    agent,
+    search_mgr,
+    build_evidence_pack,
+    enrich_sources_with_trust,
+    calibration_registry: CalibrationRegistry | None = None,
+    inp: EvidenceFlowInput,
+    claims: list[dict],
+    sources: list[dict],
+    score_mode: str = "standard",  # "standard" (single LLM call) or "parallel" (per-claim)
+) -> dict:
+    """
+    Analysis + scoring: clustering, social verification, evidence pack, scoring, finalize.
+
+    Args:
+        score_mode: Scoring strategy - "standard" for single LLM call (normal mode),
+                   "parallel" for per-claim scoring (deep mode).
+
+    Matches existing pipeline behavior; expects sources/claims to be mutable dict shapes.
+    """
+
+    collection = await collect_evidence(
+        agent=agent,
+        search_mgr=search_mgr,
+        build_evidence_pack=build_evidence_pack,
+        calibration_registry=calibration_registry,
+        inp=inp,
+        claims=claims,
+        sources=sources,
+        cluster_evidence=True,
+    )
+
+    return await score_evidence_collection(
+        agent=agent,
+        search_mgr=search_mgr,
+        enrich_sources_with_trust=enrich_sources_with_trust,
+        inp=inp,
+        collection=collection,
+        score_mode=score_mode,
+    )

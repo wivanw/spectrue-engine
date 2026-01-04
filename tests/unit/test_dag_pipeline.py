@@ -75,7 +75,7 @@ class TestDAGPipelineValidation:
             StepNode(step=MockStep("step1"), depends_on=["nonexistent"]),
         ]
         with pytest.raises(ValueError, match="unknown step"):
-            DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+            DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
 
     def test_dag_detects_simple_cycle(self):
         nodes = [
@@ -83,7 +83,7 @@ class TestDAGPipelineValidation:
             StepNode(step=MockStep("step2"), depends_on=["step1"]),
         ]
         with pytest.raises(ValueError, match="Cycle"):
-            DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+            DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
 
     def test_dag_accepts_valid_dependencies(self):
         nodes = [
@@ -91,7 +91,7 @@ class TestDAGPipelineValidation:
             StepNode(step=MockStep("step2"), depends_on=["step1"]),
             StepNode(step=MockStep("step3"), depends_on=["step1", "step2"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
         assert len(dag.nodes) == 3
 
 
@@ -104,7 +104,7 @@ class TestDAGPipelineExecution:
     @pytest.mark.asyncio
     async def test_execute_single_step(self):
         nodes = [StepNode(step=MockStep("only_step"))]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
 
         ctx = PipelineContext(mode=NORMAL_MODE)
         result = await dag.run(ctx)
@@ -118,7 +118,7 @@ class TestDAGPipelineExecution:
             StepNode(step=MockStep("step2"), depends_on=["step1"]),
             StepNode(step=MockStep("step3"), depends_on=["step2"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
 
         ctx = PipelineContext(mode=NORMAL_MODE)
         result = await dag.run(ctx)
@@ -135,7 +135,7 @@ class TestDAGPipelineExecution:
             StepNode(step=MockStep("parallel2")),
             StepNode(step=MockStep("parallel3")),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
 
         ctx = PipelineContext(mode=NORMAL_MODE)
         result = await dag.run(ctx)
@@ -153,7 +153,7 @@ class TestDAGPipelineExecution:
             StepNode(step=FailingStep("failing"), depends_on=["before"], optional=True),
             StepNode(step=MockStep("after"), depends_on=["failing"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
 
         ctx = PipelineContext(mode=NORMAL_MODE)
         result = await dag.run(ctx)
@@ -169,7 +169,7 @@ class TestDAGPipelineExecution:
             StepNode(step=FailingStep("failing"), depends_on=["before"]),
             StepNode(step=MockStep("after"), depends_on=["failing"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
 
         ctx = PipelineContext(mode=NORMAL_MODE)
         with pytest.raises(PipelineExecutionError):
@@ -188,7 +188,7 @@ class TestTopologicalSort:
             StepNode(step=MockStep("a")),
             StepNode(step=MockStep("b"), depends_on=["a"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
         layers = dag._topological_sort()
 
         # Layer 0: a (no deps)
@@ -207,7 +207,7 @@ class TestTopologicalSort:
             StepNode(step=MockStep("c"), depends_on=["a"]),
             StepNode(step=MockStep("d"), depends_on=["b", "c"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes)
+        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
         layers = dag._topological_sort()
 
         # Layer 0: a

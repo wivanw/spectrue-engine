@@ -25,6 +25,19 @@ from dataclasses import dataclass
 from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.pipeline.contracts import (
+    CLAIMS_KEY,
+    EVIDENCE_INDEX_KEY,
+    INPUT_DOC_KEY,
+    JUDGMENTS_KEY,
+    ClaimItem,
+    Claims,
+    EvidenceIndex,
+    EvidenceItem,
+    EvidencePackContract,
+    InputDoc,
+    Judgments,
+)
 from spectrue_core.pipeline.errors import PipelineViolation
 
 
@@ -184,6 +197,113 @@ class AssertMeteringEnabledStep:
                 actual="trace is None",
                 details={"mode": ctx.mode.name},
             )
+
+        return ctx
+
+
+def _assert_instance(value: object, expected: type, key: str) -> None:
+    if not isinstance(value, expected):
+        raise PipelineViolation(
+            step_name="assert_contracts",
+            invariant="contract_type_mismatch",
+            expected=expected.__name__,
+            actual=type(value).__name__,
+            details={"key": key},
+        )
+
+
+def _assert_claims_contract(value: Claims) -> None:
+    for item in value.claims:
+        if not isinstance(item, ClaimItem):
+            raise PipelineViolation(
+                step_name="assert_contracts",
+                invariant="contract_claim_item_type",
+                expected="ClaimItem",
+                actual=type(item).__name__,
+                details={"claim_id": getattr(item, "id", None)},
+            )
+
+
+def _assert_evidence_pack(pack: EvidencePackContract) -> None:
+    for item in pack.items:
+        if not isinstance(item, EvidenceItem):
+            raise PipelineViolation(
+                step_name="assert_contracts",
+                invariant="contract_evidence_item_type",
+                expected="EvidenceItem",
+                actual=type(item).__name__,
+                details={"url": getattr(item, "url", None)},
+            )
+
+
+def _assert_evidence_index(value: EvidenceIndex) -> None:
+    if value.global_pack is not None:
+        _assert_evidence_pack(value.global_pack)
+    for pack in value.by_claim_id.values():
+        _assert_evidence_pack(pack)
+
+
+@dataclass
+class AssertContractPresenceStep:
+    """
+    Assert that required contract objects are present and correctly typed.
+
+    This enforces stable step boundaries with no implicit dict payloads.
+    """
+
+    required: tuple[str, ...] = (
+        INPUT_DOC_KEY,
+        CLAIMS_KEY,
+        EVIDENCE_INDEX_KEY,
+        JUDGMENTS_KEY,
+    )
+    name: str = "assert_contracts"
+
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
+        contract_map: dict[str, type] = {
+            INPUT_DOC_KEY: InputDoc,
+            CLAIMS_KEY: Claims,
+            EVIDENCE_INDEX_KEY: EvidenceIndex,
+            JUDGMENTS_KEY: Judgments,
+        }
+
+        for key in self.required:
+            value = ctx.get_extra(key)
+            if value is None:
+                raise PipelineViolation(
+                    step_name=self.name,
+                    invariant="contract_missing",
+                    expected=contract_map.get(key, object).__name__,
+                    actual="missing",
+                    details={"key": key},
+                )
+
+            expected = contract_map.get(key)
+            if expected:
+                _assert_instance(value, expected, key)
+
+            if key == CLAIMS_KEY:
+                _assert_claims_contract(value)
+            elif key == EVIDENCE_INDEX_KEY:
+                _assert_evidence_index(value)
+            elif key == JUDGMENTS_KEY and isinstance(value, Judgments):
+                if value.standard is not None and not isinstance(value.standard, dict):
+                    raise PipelineViolation(
+                        step_name=self.name,
+                        invariant="contract_judgments_standard_type",
+                        expected="dict",
+                        actual=type(value.standard).__name__,
+                        details={"key": key},
+                    )
+                for item in value.deep:
+                    if not isinstance(item, dict):
+                        raise PipelineViolation(
+                            step_name=self.name,
+                            invariant="contract_judgments_deep_type",
+                            expected="dict",
+                            actual=type(item).__name__,
+                            details={"key": key},
+                        )
 
         return ctx
 

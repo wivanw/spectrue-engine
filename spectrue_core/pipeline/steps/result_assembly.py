@@ -6,7 +6,7 @@
 # it under the terms of the GNU Affero General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
+#
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 
@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from spectrue_core.pipeline.contracts import CLAIMS_KEY, INPUT_DOC_KEY, Claims, InputDoc
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
@@ -22,76 +23,101 @@ from spectrue_core.utils.trace import Trace
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ResultAssemblyStep:
-    """Assemble final result payload."""
+def _build_claim_text_lookup(claims_contract: Claims | None) -> dict[str, str]:
+    if claims_contract is None:
+        return {}
+    lookup: dict[str, str] = {}
+    for claim in claims_contract.claims:
+        if claim.text:
+            lookup[str(claim.id)] = claim.text
+    return lookup
 
-    name: str = "result_assembly"
 
-    async def run(self, ctx: PipelineContext) -> PipelineContext:
-        """Assemble final result."""
-        try:
-            verdict = ctx.verdict or {}
-            # Sources: prefer verdict sources (often enriched), fallback to ctx.sources
-            sources = verdict.get("sources") or ctx.sources or []
-            ledger = ctx.get_extra("ledger")
+def _build_anchor_claim(
+    verdict: dict,
+    claims_contract: Claims | None,
+    claim_text_by_id: dict[str, str],
+    fallback_claims: list[dict],
+) -> dict | None:
+    anchor = verdict.get("anchor_claim")
+    if anchor:
+        return anchor
 
-            cost_summary = ledger.to_summary_dict() if ledger else None
-            analysis_mode = "deep" if ctx.mode.name == "deep" else "general"
+    anchor_id = claims_contract.anchor_claim_id if claims_contract else None
+    if anchor_id:
+        return {
+            "id": anchor_id,
+            "text": claim_text_by_id.get(anchor_id, ""),
+        }
 
-            final_result = {
-                "status": "ok",
-                "analysis_mode": analysis_mode,
-                "verified_score": verdict.get("verified_score", 0.0),
-                "explainability_score": verdict.get("explainability_score", 0.0),
-                "danger_score": verdict.get("danger_score", 0.0),
-                "context_score": verdict.get("context_score", 0.0),
-                "style_score": verdict.get("style_score", 0.0),
-                "confidence_score": verdict.get("confidence_score", 0.0),
-                "bias_score": verdict.get("style_score", 0.0), # Compat alias
-                "rgba": ctx.get_extra("rgba", [0.0, 0.0, 0.0, 0.5]),
-                "sources": sources,
-                "rationale": verdict.get("rationale", ""),
-                "analysis": verdict.get("analysis") or verdict.get("rationale", ""), # Legacy compat
-                "cost_summary": cost_summary,
-                "cost": verdict.get("cost", 0.0),
+    if fallback_claims:
+        c0 = fallback_claims[0]
+        if isinstance(c0, dict):
+            return {
+                "id": c0.get("id") or c0.get("claim_id") or "c1",
+                "text": (c0.get("normalized_text") or c0.get("text") or "").strip(),
             }
 
-            # --- Legacy/UI compatibility ---
-            # Older front-end expects:
-            #   - `text` : the main displayed text
-            #   - `details` : list of claim strings shown as chips
-            #   - `_extracted_claims` : raw extracted claims (debug/optional)
-            #   - `claim_verdicts` : per-claim scoring results
-            # Newer pipeline stores:
-            #   - `fact` / `original_fact` / `prepared_fact`
-            #   - `claim_verdicts` (in verdict)
-            # Provide legacy aliases to avoid breaking standard mode UI.
+    return None
 
-            # Text: prefer prepared_fact (extracted article text), fallback to fact/original_fact/input
-            prepared_fact = ctx.get_extra("prepared_fact") or ""
+
+@dataclass
+class AssembleStandardResultStep:
+    """Assemble standard-mode payload by mapping prior step outputs."""
+
+    name: str = "assemble_standard_result"
+
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
+        try:
+            verdict = ctx.verdict or {}
+            sources = verdict.get("sources") or ctx.sources or []
+            analysis_mode = "deep" if ctx.mode.name == "deep" else "general"
+
+            input_doc = ctx.get_extra(INPUT_DOC_KEY)
+            if not isinstance(input_doc, InputDoc):
+                input_doc = None
+
+            claims_contract = ctx.get_extra(CLAIMS_KEY)
+            if not isinstance(claims_contract, Claims):
+                claims_contract = None
+
+            prepared_text = (
+                input_doc.prepared_text
+                if input_doc
+                else ctx.get_extra("prepared_fact") or ""
+            )
             original_fact = ctx.get_extra("original_fact") or ctx.get_extra("fact") or ""
-            final_result["text"] = prepared_fact or original_fact or ctx.get_extra("input_text") or ""
-            final_result["fact"] = original_fact  # Keep for any code expecting this
+
+            rgba = verdict.get("rgba") or ctx.get_extra("rgba")
+
+            final_result = {
+                "status": verdict.get("status", "ok"),
+                "analysis_mode": analysis_mode,
+                "judge_mode": verdict.get("judge_mode", "standard"),
+                "rgba": rgba,
+                "sources": sources,
+                "rationale": verdict.get("rationale"),
+                "analysis": verdict.get("analysis") or verdict.get("rationale"),
+                "verified_score": verdict.get("verified_score"),
+                "explainability_score": verdict.get("explainability_score"),
+                "danger_score": verdict.get("danger_score"),
+                "context_score": verdict.get("context_score"),
+                "style_score": verdict.get("style_score"),
+                "confidence_score": verdict.get("confidence_score"),
+                "bias_score": verdict.get("style_score"),
+                "cost": verdict.get("cost"),
+            }
+
+            # Text: prefer prepared_text (extracted/cleaned), fallback to raw input.
+            final_result["text"] = prepared_text or original_fact or ctx.get_extra("input_text") or ""
+            final_result["fact"] = original_fact
             final_result["original_fact"] = original_fact
 
-            # Details: list of claim text strings for the UI chips
             claim_verdicts = verdict.get("claim_verdicts") or []
+            claim_text_by_id = _build_claim_text_lookup(claims_contract)
 
-            # Build mapping from extracted claims (ctx.claims) to enrich UI fields
-            claim_text_by_id: dict[str, str] = {}
-            for c in (ctx.claims or []):
-                if not isinstance(c, dict):
-                    continue
-                cid = c.get("id") or c.get("claim_id")
-                if not cid:
-                    continue
-                txt = (c.get("normalized_text") or c.get("text") or c.get("claim_text") or "").strip()
-                if txt:
-                    claim_text_by_id[str(cid)] = txt
-
-            # Enrich verdict claim entries with text if LLM didn't echo it (does NOT modify scores)
-            enriched_cvs = []
+            # Enrich verdict entries with claim text when missing.
+            enriched_verdicts = []
             for cv in claim_verdicts:
                 if not isinstance(cv, dict):
                     continue
@@ -101,51 +127,54 @@ class ResultAssemblyStep:
                     if fallback_txt:
                         cv = dict(cv)
                         cv["text"] = fallback_txt
-                enriched_cvs.append(cv)
+                enriched_verdicts.append(cv)
 
-            final_result["claim_verdicts"] = enriched_cvs
+            final_result["claim_verdicts"] = enriched_verdicts
 
-            # Details: prefer enriched verdicts; fallback to extracted claims list
-            details = [
-                (cv.get("text") or cv.get("claim_text") or cv.get("claim") or "").strip()
-                for cv in enriched_cvs
-                if isinstance(cv, dict) and (cv.get("text") or cv.get("claim_text") or cv.get("claim"))
-            ]
-            if not details:
-                details = list(claim_text_by_id.values())
+            details = []
+            for cv in enriched_verdicts:
+                if not isinstance(cv, dict):
+                    continue
+                text = (cv.get("text") or cv.get("claim_text") or cv.get("claim") or "").strip()
+                if not text:
+                    continue
+                details.append(
+                    {
+                        "text": text,
+                        "rgba": cv.get("rgba") or rgba,
+                        "rationale": cv.get("rationale") or verdict.get("rationale"),
+                        "sources": cv.get("sources") or sources,
+                    }
+                )
+
+            if not details and claims_contract:
+                details = [
+                    {"text": claim.text, "rgba": rgba, "rationale": verdict.get("rationale"), "sources": sources}
+                    for claim in claims_contract.claims
+                    if claim.text
+                ]
+
             final_result["details"] = details
 
-            # Extracted claims: raw claims list for debugging
             final_result["_extracted_claims"] = ctx.claims or []
 
-            # Anchor claim:
-            # - prefer verdict.anchor_claim if present
-            # - else ctx.extras.anchor_claim
-            # - else first extracted claim as a deterministic UI anchor (no scoring impact)
-            anchor = verdict.get("anchor_claim") or ctx.get_extra("anchor_claim")
-            if not anchor and (ctx.claims or []):
-                c0 = ctx.claims[0]
-                if isinstance(c0, dict):
-                    anchor = {
-                        "id": c0.get("id") or c0.get("claim_id") or "c1",
-                        "text": (c0.get("normalized_text") or c0.get("text") or "").strip(),
-                    }
+            anchor = _build_anchor_claim(
+                verdict, claims_contract, claim_text_by_id, ctx.claims or []
+            )
             if anchor:
                 final_result["anchor_claim"] = anchor
 
-            if not ledger:
-                logger.warning(f"[ResultAssemblyStep] Ledger not found in context. Cost summary will be empty/zero. Extras keys: {list(ctx.extras.keys())}")
-
-            if ctx.get_extra("oracle_hit"):
-                final_result["oracle_hit"] = True
-
-            # Debug trace: log all keys being sent to frontend
-            Trace.event("final_result.keys", {"keys": sorted(final_result.keys())})
-            Trace.event("result_assembly.completed", {"verified_score": final_result["verified_score"]})
+            Trace.event("result_assembly.completed", {"judge_mode": "standard"})
 
             return ctx.set_extra("final_result", final_result)
 
-
         except Exception as e:
-            logger.exception("[ResultAssemblyStep] Failed: %s", e)
+            logger.exception("[AssembleStandardResultStep] Failed: %s", e)
             raise PipelineExecutionError(self.name, str(e), cause=e) from e
+
+
+@dataclass
+class ResultAssemblyStep(AssembleStandardResultStep):
+    """Backward-compatible alias for standard result assembly."""
+
+    name: str = "result_assembly"
