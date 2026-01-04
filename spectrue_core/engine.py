@@ -227,98 +227,13 @@ class SpectrueEngine:
                 )
                 total_cost = fetch_cost + extraction_cost + verification_cost
 
-                # Deep mode: use details from pipeline if already built by AssembleDeepResultStep
-                # This preserves per-claim RGBA from JudgeClaimsStep
-                pipeline_details = verification_result.get("details")
-                if pipeline_details and isinstance(pipeline_details, list) and len(pipeline_details) > 0:
-                    # Pipeline already built details with per-claim RGBA - use them
-                    details = pipeline_details
-                    sources = verification_result.get("sources") or []
-                else:
-                    # Fallback: Build details from claim_verdicts (legacy path)
-                    details = []
-                    claim_verdicts = verification_result.get("claim_verdicts") or []
-                    sources = verification_result.get("sources") or []
-                    global_danger = verification_result.get("danger_score", 0.0) or 0.0
-                    global_style = verification_result.get("style_score", 1.0) or 1.0
-                    global_explain = (
-                        verification_result.get("explainability_score", 1.0) or 1.0
-                    )
+                deep_analysis = verification_result.get("deep_analysis")
+                if not isinstance(deep_analysis, dict):
+                    deep_analysis = {"claim_results": []}
 
-                    for claim_obj in extracted_claims:
-                        claim_id = claim_obj.get("id")
-                        claim_text = claim_obj.get("text", "").strip()
-                        if not claim_text:
-                            continue
-
-                        # Find verdict for this claim
-                        cv = next(
-                            (v for v in claim_verdicts if v.get("claim_id") == claim_id), {}
-                        )
-
-                        # Get per-claim sources: prefer enriched sources from cv, else filter
-                        # cv["sources"] includes trust badges and is properly filtered
-                        cv_sources = cv.get("sources")
-                        if isinstance(cv_sources, list) and cv_sources:
-                            claim_sources = cv_sources
-                        else:
-                            # Fallback: include claim-specific + global (claim_id=None) sources
-                            claim_sources = [
-                                s
-                                for s in sources
-                                if s.get("claim_id") == claim_id
-                                or s.get("claim_id") is None
-                            ]
-
-                        # Compute per-claim RGBA: [R=danger, G=verified, B=style, A=explainability]
-                        # If cv has rgba, use it; otherwise compute from verdict_score
-                        cv_rgba = cv.get("rgba")
-                        if isinstance(cv_rgba, list) and len(cv_rgba) >= 4:
-                            rgba = cv_rgba
-                        else:
-                            # Derive G from per-claim verdict_score
-                            g_score = cv.get("verdict_score")
-                            if not isinstance(g_score, (int, float)) or g_score < 0:
-                                g_score = (
-                                    verification_result.get("verified_score", 0.5) or 0.5
-                                )
-                            rgba = [
-                                float(global_danger),
-                                float(g_score),
-                                float(global_style),
-                                float(global_explain),
-                            ]
-
-                        # Rationale: prefer per-claim reason, fallback to verdict/state description
-                        rationale = cv.get("reason") or ""
-                        if not rationale:
-                            verdict_state = (
-                                cv.get("verdict_state") or cv.get("verdict") or ""
-                            )
-                            if verdict_state:
-                                rationale = f"Verdict: {verdict_state}"
-
-                        details.append(
-                            {
-                                "text": claim_text,
-                                "rgba": rgba,
-                                "rationale": rationale,
-                                "sources": claim_sources,
-                                "verified_score": cv.get("verdict_score")
-                                or verification_result.get("verified_score"),
-                                "danger_score": global_danger,
-                            }
-                        )
-
-                # Use verification result's aggregated scores
                 final = {
-                    "text": text,
-                    "verified_score": verification_result.get("verified_score", 0.0),
-                    "rgba": verification_result.get("rgba") or [0.0, 0.0, 0.0, 0.5],
-                    "average_rgba": verification_result.get("rgba")
-                    or [0.0, 0.0, 0.0, 0.5],
-                    "details": details,
-                    "sources": sources,
+                    "judge_mode": "deep",
+                    "deep_analysis": deep_analysis,
                     "cost": total_cost,
                     "cost_summary": verification_result.get("cost_summary")
                     or {
@@ -343,7 +258,7 @@ class SpectrueEngine:
                     {
                         "claims_count": len(extracted_claims),
                         "total_cost": total_cost,
-                        "verified_score": final["verified_score"],
+                        "claim_results": len(deep_analysis.get("claim_results", [])),
                     },
                 )
                 return final

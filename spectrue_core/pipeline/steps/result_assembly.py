@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import logging
+import math
+from decimal import Decimal
 from dataclasses import dataclass
 
 from spectrue_core.pipeline.contracts import CLAIMS_KEY, INPUT_DOC_KEY, Claims, InputDoc
@@ -40,8 +42,31 @@ def _build_anchor_claim(
     fallback_claims: list[dict],
 ) -> dict | None:
     anchor = verdict.get("anchor_claim")
-    if anchor:
-        return anchor
+    if isinstance(anchor, dict):
+        anchor_id = (
+            anchor.get("id")
+            or anchor.get("claim_id")
+            or (claims_contract.anchor_claim_id if claims_contract else None)
+        )
+        if not anchor_id and fallback_claims:
+            first = fallback_claims[0]
+            if isinstance(first, dict):
+                anchor_id = first.get("id") or first.get("claim_id")
+
+        anchor_text = anchor.get("text") or anchor.get("normalized_text")
+        if not anchor_text and anchor_id:
+            anchor_text = claim_text_by_id.get(str(anchor_id))
+
+        if anchor_id and not anchor_text and fallback_claims:
+            first = fallback_claims[0]
+            if isinstance(first, dict):
+                anchor_text = (first.get("normalized_text") or first.get("text") or "").strip()
+
+        if anchor_id and anchor_text:
+            normalized = dict(anchor)
+            normalized["id"] = str(anchor_id)
+            normalized["text"] = anchor_text
+            return normalized
 
     anchor_id = claims_contract.anchor_claim_id if claims_contract else None
     if anchor_id:
@@ -59,6 +84,46 @@ def _build_anchor_claim(
             }
 
     return None
+
+
+def _extract_credits(cost_summary: dict | None) -> int | None:
+    if not isinstance(cost_summary, dict):
+        return None
+    credits = cost_summary.get("credits_used")
+    if credits is None:
+        credits = cost_summary.get("total_credits")
+    if isinstance(credits, (int, float, Decimal)):
+        return int(math.ceil(float(credits)))
+    return None
+
+
+def _coerce_score(value: object, fallback: float) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return fallback
+
+
+def _build_rgba(verdict: dict, ctx: PipelineContext) -> list[float]:
+    rgba = verdict.get("rgba") or ctx.get_extra("rgba")
+    if (
+        isinstance(rgba, list)
+        and len(rgba) == 4
+        and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in rgba)
+    ):
+        return [float(x) for x in rgba]
+
+    danger = _coerce_score(verdict.get("danger_score"), -1.0)
+    verified = _coerce_score(verdict.get("verified_score"), -1.0)
+    style = verdict.get("style_score")
+    if not isinstance(style, (int, float)) or isinstance(style, bool):
+        style = verdict.get("context_score")
+    honesty = _coerce_score(style, -1.0)
+    explainability = verdict.get("explainability_score")
+    if not isinstance(explainability, (int, float)) or isinstance(explainability, bool):
+        explainability = verdict.get("confidence_score")
+    explainability_score = _coerce_score(explainability, -1.0)
+
+    return [danger, verified, honesty, explainability_score]
 
 
 @dataclass
@@ -88,7 +153,10 @@ class AssembleStandardResultStep:
             )
             original_fact = ctx.get_extra("original_fact") or ctx.get_extra("fact") or ""
 
-            rgba = verdict.get("rgba") or ctx.get_extra("rgba")
+            rgba = _build_rgba(verdict, ctx)
+            cost_summary = ctx.get_extra("cost_summary")
+            if not isinstance(cost_summary, dict):
+                cost_summary = None
 
             final_result = {
                 "status": verdict.get("status", "ok"),
@@ -107,6 +175,11 @@ class AssembleStandardResultStep:
                 "bias_score": verdict.get("style_score"),
                 "cost": verdict.get("cost"),
             }
+            if cost_summary is not None:
+                final_result["cost_summary"] = cost_summary
+                credits = _extract_credits(cost_summary)
+                if credits is not None:
+                    final_result["credits"] = credits
 
             # Text: prefer prepared_text (extracted/cleaned), fallback to raw input.
             final_result["text"] = prepared_text or original_fact or ctx.get_extra("input_text") or ""
@@ -128,8 +201,6 @@ class AssembleStandardResultStep:
                         cv = dict(cv)
                         cv["text"] = fallback_txt
                 enriched_verdicts.append(cv)
-
-            final_result["claim_verdicts"] = enriched_verdicts
 
             details = []
             for cv in enriched_verdicts:
@@ -163,6 +234,14 @@ class AssembleStandardResultStep:
             )
             if anchor:
                 final_result["anchor_claim"] = anchor
+
+            Trace.event(
+                "final_result.keys",
+                {
+                    "judge_mode": final_result.get("judge_mode", "standard"),
+                    "keys": sorted(final_result.keys()),
+                },
+            )
 
             Trace.event("result_assembly.completed", {"judge_mode": "standard"})
 

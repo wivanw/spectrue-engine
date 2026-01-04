@@ -37,6 +37,7 @@ from .invariants import (
     AssertContractPresenceStep,
     AssertSingleClaimStep,
     AssertSingleLanguageStep,
+    AssertStandardResultKeysStep,
 )
 
 __all__ = [
@@ -61,4 +62,5 @@ __all__ = [
     "AssertContractPresenceStep",
     "AssertSingleClaimStep",
     "AssertSingleLanguageStep",
+    "AssertStandardResultKeysStep",
 ]

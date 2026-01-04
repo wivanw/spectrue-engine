@@ -17,11 +17,17 @@ evaluated independently with its own ClaimFrame and JudgeOutput.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.agents.llm_client import LLMClient, is_schema_failure
+from spectrue_core.agents.llm_schemas import CLAIM_JUDGE_SCHEMA
 from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
+from spectrue_core.agents.skills.claim_judge_prompts import (
+    build_claim_judge_prompt,
+    build_claim_judge_system_prompt,
+)
 from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
 from spectrue_core.pipeline.contracts import JUDGMENTS_KEY, Judgments
 from spectrue_core.pipeline.core import PipelineContext, Step
@@ -48,6 +54,51 @@ class DeepClaimContext:
     judge_outputs: dict[str, JudgeOutput] = field(default_factory=dict)
     claim_results: list[dict[str, Any]] = field(default_factory=list)
     errors: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+_SCHEMA_MISSING_RE = re.compile(r"\$\.(?P<field>[A-Za-z0-9_\\[\\].]+): missing required field")
+
+
+def _root_cause(exc: Exception) -> Exception:
+    seen: set[int] = set()
+    current: Exception = exc
+    while True:
+        next_exc = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+        if not isinstance(next_exc, Exception):
+            return current
+        next_id = id(next_exc)
+        if next_id in seen:
+            return current
+        seen.add(next_id)
+        current = next_exc
+
+
+def _is_format_error(exc: Exception) -> bool:
+    if is_schema_failure(exc):
+        return True
+    msg = str(exc).lower()
+    return "json parse" in msg or "invalid json" in msg
+
+
+def _extract_missing_fields(message: str) -> list[str]:
+    if not message:
+        return []
+    return list({match.group("field") for match in _SCHEMA_MISSING_RE.finditer(message)})
+
+
+def _build_error_payload(
+    *,
+    error_type: str,
+    message: str,
+    missing_fields: list[str] | None = None,
+    repair_attempted: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"error_type": error_type, "message": message}
+    if missing_fields:
+        payload["missing_fields"] = missing_fields
+    if repair_attempted:
+        payload["repair_attempted"] = True
+    return payload
 
 
 class BuildClaimFramesStep(Step):
@@ -183,6 +234,33 @@ class JudgeClaimsStep(Step):
             # This is the user's interface language from the API request
             ui_locale = ctx.lang or "en"
 
+            async def _repair_claim_output(
+                frame: ClaimFrame,
+                summary: EvidenceSummary | None,
+            ) -> JudgeOutput:
+                base_prompt = build_claim_judge_prompt(frame, summary, ui_locale=ui_locale)
+                repair_prompt = (
+                    "Your previous response was invalid or missing required fields. "
+                    "Return ONLY valid JSON matching the schema with keys: "
+                    "claim_id, rgba{R,G,B,A}, confidence, verdict, explanation, "
+                    "sources_used, missing_evidence.\n\n"
+                    f"{base_prompt}"
+                )
+                repair_system = build_claim_judge_system_prompt(lang=ui_locale)
+                repair_system = f"{repair_system}\nReturn only JSON; no markdown or extra text."
+
+                response = await self._llm.call_json(
+                    model="gpt-5-nano",
+                    input=repair_prompt,
+                    instructions=repair_system,
+                    response_schema=CLAIM_JUDGE_SCHEMA,
+                    reasoning_effort="low",
+                    trace_kind="claim_judge.repair",
+                )
+
+                repaired = skill._parse_response(response, frame)
+                return skill._validate_sources_used(repaired, frame)
+
             # Process all claims in parallel
             async def judge_one(frame: ClaimFrame) -> tuple[str, JudgeOutput | None, dict[str, Any] | None]:
                 summary = deep_ctx.evidence_summaries.get(frame.claim_id)
@@ -199,10 +277,53 @@ class JudgeClaimsStep(Step):
                     output = await skill.judge(frame, summary, ui_locale=ui_locale)
                     return frame.claim_id, output, None
                 except Exception as e:
-                    return frame.claim_id, None, {
-                        "error_type": "llm_failed",
-                        "message": str(e),
-                    }
+                    root = _root_cause(e)
+                    message = str(root)
+                    missing_fields = _extract_missing_fields(message)
+
+                    if _is_format_error(root):
+                        Trace.event(
+                            "judge_claims.schema_mismatch",
+                            {
+                                "claim_id": frame.claim_id,
+                                "missing_fields": missing_fields,
+                                "error": message[:300],
+                            },
+                        )
+                        try:
+                            Trace.event(
+                                "judge_claims.repair_needed",
+                                {"claim_id": frame.claim_id, "missing_fields": missing_fields},
+                            )
+                            repaired = await _repair_claim_output(frame, summary)
+                            Trace.event(
+                                "judge_claims.repair_succeeded",
+                                {"claim_id": frame.claim_id},
+                            )
+                            return frame.claim_id, repaired, None
+                        except Exception as repair_error:
+                            repair_root = _root_cause(repair_error)
+                            repair_message = str(repair_root)
+                            repair_missing = _extract_missing_fields(repair_message) or missing_fields
+                            Trace.event(
+                                "judge_claims.repair_failed",
+                                {
+                                    "claim_id": frame.claim_id,
+                                    "error": repair_message[:300],
+                                },
+                            )
+                            return frame.claim_id, None, _build_error_payload(
+                                error_type="llm_failed",
+                                message=repair_message,
+                                missing_fields=repair_missing,
+                                repair_attempted=True,
+                            )
+
+                    return frame.claim_id, None, _build_error_payload(
+                        error_type="llm_failed",
+                        message=message,
+                        missing_fields=missing_fields,
+                    )
 
             tasks = [judge_one(frame) for frame in deep_ctx.claim_frames]
             results = await asyncio.gather(*tasks)
@@ -222,9 +343,18 @@ class JudgeClaimsStep(Step):
 
             Trace.event("judge_claims.complete", {
                 "output_count": len(outputs),
+                "error_count": len(errors),
                 "verdicts": {cid: out.verdict for cid, out in outputs.items()},
                 "ui_locale": ui_locale,
             })
+            Trace.event(
+                "deep.claim_judged_count",
+                {
+                    "count": len(deep_ctx.claim_frames),
+                    "ok": len(outputs),
+                    "error": len(errors),
+                },
+            )
 
             return ctx.set_extra("deep_claim_ctx", deep_ctx)
 
@@ -253,7 +383,6 @@ class AssembleDeepResultStep(Step):
             judge_mode = "deep"
 
             claim_results: list[dict[str, Any]] = []
-            details_for_frontend: list[dict[str, Any]] = []
             claim_verdicts: list[dict[str, Any]] = []
 
             from spectrue_core.utils.trust_utils import enrich_sources_with_trust
@@ -272,10 +401,6 @@ class AssembleDeepResultStep(Step):
                         "sources_used": [],
                         "error": error_payload,
                     })
-                    details_for_frontend.append({
-                        "text": frame.claim_text,
-                        "error_key": error_payload.get("error_type", "judge_failed"),
-                    })
                     continue
 
                 rgba = [
@@ -284,21 +409,14 @@ class AssembleDeepResultStep(Step):
                     judge_output.rgba.b,
                     judge_output.rgba.a,
                 ]
-                sources_used = list(judge_output.sources_used or [])
+                sources_used_refs = list(judge_output.sources_used or [])
 
-                claim_results.append({
-                    "claim_id": frame.claim_id,
-                    "status": "ok",
-                    "rgba": rgba,
-                    "explanation": judge_output.explanation,
-                    "sources_used": sources_used,
-                })
-
+                # Build full sources list with trust info FIRST
                 sources_list = []
                 evidence_map = {ei.evidence_id: ei for ei in frame.evidence_items}
                 url_map = {ei.url: ei for ei in frame.evidence_items if ei.url}
 
-                for src_ref in sources_used:
+                for src_ref in sources_used_refs:
                     ei = evidence_map.get(src_ref) or url_map.get(src_ref)
                     if ei:
                         sources_list.append({
@@ -317,15 +435,18 @@ class AssembleDeepResultStep(Step):
                             "citation_text": ei.snippet,
                         })
 
+                # Enrich with trust categories for proper tier badges
                 sources_list = enrich_sources_with_trust(sources_list)
 
-                details_for_frontend.append({
-                    "text": frame.claim_text,
+                # Include FULL source objects in claim_results (not just refs)
+                # This allows frontend to display proper tier badges
+                claim_results.append({
+                    "claim_id": frame.claim_id,
+                    "claim_text": frame.claim_text,
+                    "status": "ok",
                     "rgba": rgba,
-                    "rationale": judge_output.explanation or f"Verdict: {judge_output.verdict}",
-                    "sources": sources_list,
-                    "verified_score": judge_output.rgba.g,
-                    "danger_score": judge_output.rgba.r,
+                    "explanation": judge_output.explanation,
+                    "sources_used": sources_list,  # Full objects, not just refs
                 })
 
                 claim_verdicts.append({
@@ -351,11 +472,18 @@ class AssembleDeepResultStep(Step):
                 "deep_analysis": {
                     "claim_results": claim_results,
                 },
-                "details": details_for_frontend,
-                "claim_verdicts": claim_verdicts,
             }
+            if deep_ctx.claim_frames:
+                final_result["claims"] = [frame.claim_text for frame in deep_ctx.claim_frames]
 
             Trace.event("assemble_deep_result.complete", {"result_count": len(claim_results)})
+            Trace.event(
+                "final_result.keys",
+                {
+                    "judge_mode": final_result.get("judge_mode", "deep"),
+                    "keys": sorted(final_result.keys()),
+                },
+            )
 
             judgments = Judgments(standard=None, deep=tuple(claim_results))
 

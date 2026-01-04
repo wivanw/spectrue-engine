@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from decimal import Decimal
+import math
 
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
@@ -36,10 +38,18 @@ class CostSummaryStep:
                 return ctx.set_extra("cost_summary", None)
 
             summary = ledger.to_summary_dict()
+            credits_used = summary.get("credits_used")
+            if credits_used is None:
+                total_credits = summary.get("total_credits")
+                if isinstance(total_credits, (int, float, Decimal)):
+                    credits_used = int(math.ceil(float(total_credits)))
+                    summary["credits_used"] = credits_used
             final_result = ctx.get_extra("final_result")
             if isinstance(final_result, dict):
                 updated = dict(final_result)
                 updated["cost_summary"] = summary
+                if credits_used is not None and "credits" not in updated:
+                    updated["credits"] = credits_used
                 ctx = ctx.set_extra("final_result", updated)
 
             Trace.event(

@@ -36,6 +36,11 @@ async def test_deep_judge_error_returns_null_rgba():
 
     result_ctx = await AssembleDeepResultStep().run(ctx)
     final_result = result_ctx.get_extra("final_result")
+    claim_result = final_result["deep_analysis"]["claim_results"][0]
 
-    assert final_result["deep_analysis"]["claim_results"][0]["status"] == "error"
-    assert final_result["deep_analysis"]["claim_results"][0]["rgba"] is None
+    assert claim_result["status"] == "error"
+    assert claim_result["rgba"] is None
+    assert claim_result["explanation"] is None
+    assert claim_result["error"]["error_type"] == "llm_failed"
+    assert "deep_analysis" in final_result
+    assert "rgba" not in final_result
