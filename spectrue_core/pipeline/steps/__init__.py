@@ -24,8 +24,17 @@ from .claim_graph import ClaimGraphStep
 from .target_selection import TargetSelectionStep
 from .evaluate_semantic_gating import EvaluateSemanticGatingStep
 from .search_flow import SearchFlowStep
+from .retrieval import (
+    AssembleRetrievalItemsStep,
+    BuildQueriesStep,
+    FetchChunksStep,
+    RerankStep,
+    WebSearchStep,
+)
 from .evidence_collect import EvidenceCollectStep
 from .evidence_flow import EvidenceFlowStep
+from .stance_annotate import StanceAnnotateStep
+from .cluster_evidence import ClusterEvidenceStep
 from .judge_standard import JudgeStandardStep
 from .oracle_flow import OracleFlowStep
 from .result_assembly import AssembleStandardResultStep, ResultAssemblyStep
@@ -38,6 +47,8 @@ from .invariants import (
     AssertSingleClaimStep,
     AssertSingleLanguageStep,
     AssertStandardResultKeysStep,
+    AssertRetrievalTraceStep,
+    AssertDeepJudgingStep,
 )
 
 __all__ = [
@@ -49,8 +60,15 @@ __all__ = [
     "TargetSelectionStep",
     "EvaluateSemanticGatingStep",
     "SearchFlowStep",
+    "BuildQueriesStep",
+    "WebSearchStep",
+    "RerankStep",
+    "FetchChunksStep",
+    "AssembleRetrievalItemsStep",
     "EvidenceCollectStep",
     "EvidenceFlowStep",
+    "StanceAnnotateStep",
+    "ClusterEvidenceStep",
     "JudgeStandardStep",
     "OracleFlowStep",
     "AssembleStandardResultStep",
@@ -63,4 +81,6 @@ __all__ = [
     "AssertSingleClaimStep",
     "AssertSingleLanguageStep",
     "AssertStandardResultKeysStep",
+    "AssertRetrievalTraceStep",
+    "AssertDeepJudgingStep",
 ]

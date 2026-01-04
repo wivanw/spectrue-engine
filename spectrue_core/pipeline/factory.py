@@ -129,6 +129,8 @@ class PipelineFactory:
         from spectrue_core.pipeline.steps import (
             ClaimGraphStep,
             EvidenceCollectStep,
+            StanceAnnotateStep,
+            ClusterEvidenceStep,
             ExtractClaimsStep,
             JudgeStandardStep,
             MeteringSetupStep,
@@ -137,11 +139,23 @@ class PipelineFactory:
             AssembleStandardResultStep,
             EvaluateSemanticGatingStep,
             SearchFlowStep,
+            BuildQueriesStep,
+            WebSearchStep,
+            RerankStep,
+            FetchChunksStep,
+            AssembleRetrievalItemsStep,
             TargetSelectionStep,
             VerifyInlineSourcesStep,
             CostSummaryStep,
             AssertStandardResultKeysStep,
+            AssertRetrievalTraceStep,
         )
+
+        features = getattr(getattr(config, "runtime", None), "features", None)
+        use_retrieval_steps = bool(getattr(features, "retrieval_steps", False))
+        enable_fetch = bool(getattr(features, "fulltext_fetch", False))
+        enable_stance = bool(getattr(features, "stance_annotate", False))
+        enable_cluster = bool(getattr(features, "cluster_evidence", False))
 
         return [
             # Infrastructure
@@ -201,30 +215,102 @@ class PipelineFactory:
             ),
 
             # Search retrieval
-            StepNode(
-                step=SearchFlowStep(
-                    config=config,
-                    search_mgr=self.search_mgr,
-                    agent=self.agent,
-                ),
-                depends_on=["target_selection", "semantic_gating", "verify_inline_sources"],
+            *(
+                [
+                    StepNode(
+                        step=BuildQueriesStep(),
+                        depends_on=["target_selection", "semantic_gating", "verify_inline_sources"],
+                    ),
+                    StepNode(
+                        step=WebSearchStep(
+                            config=config,
+                            search_mgr=self.search_mgr,
+                            agent=self.agent,
+                        ),
+                        depends_on=["build_queries"],
+                    ),
+                    StepNode(
+                        step=RerankStep(),
+                        depends_on=["web_search"],
+                    ),
+                ]
+                + (
+                    [
+                        StepNode(
+                            step=FetchChunksStep(search_mgr=self.search_mgr),
+                            depends_on=["rerank_results"],
+                        )
+                    ]
+                    if enable_fetch
+                    else []
+                )
+                + [
+                    StepNode(
+                        step=AssembleRetrievalItemsStep(),
+                        depends_on=["fetch_chunks" if enable_fetch else "rerank_results"],
+                    ),
+                    StepNode(
+                        step=AssertRetrievalTraceStep(),
+                        depends_on=["assemble_retrieval_items"],
+                    ),
+                ]
+                if use_retrieval_steps
+                else [
+                    StepNode(
+                        step=SearchFlowStep(
+                            config=config,
+                            search_mgr=self.search_mgr,
+                            agent=self.agent,
+                        ),
+                        depends_on=["target_selection", "semantic_gating", "verify_inline_sources"],
+                    )
+                ]
             ),
 
-            # Evidence scoring (enable_global_scoring=True is default)
+            # Evidence collection (collect-only)
             StepNode(
                 step=EvidenceCollectStep(
                     agent=self.agent,
                     search_mgr=self.search_mgr,
-                    cluster_evidence=True,
                     include_global_pack=True,
                 ),
-                depends_on=["search_flow"],
+                depends_on=["assert_retrieval_trace" if use_retrieval_steps else "search_flow"],
+            ),
+
+            # Optional stance annotation
+            *(
+                [
+                    StepNode(
+                        step=StanceAnnotateStep(agent=self.agent),
+                        depends_on=["evidence_collect"],
+                        optional=True,
+                    )
+                ]
+                if enable_stance
+                else []
+            ),
+
+            # Optional clustering
+            *(
+                [
+                    StepNode(
+                        step=ClusterEvidenceStep(agent=self.agent),
+                        depends_on=["stance_annotate" if enable_stance else "evidence_collect"],
+                        optional=True,
+                    )
+                ]
+                if enable_cluster
+                else []
             ),
 
             # Standard judging
             StepNode(
                 step=JudgeStandardStep(agent=self.agent, search_mgr=self.search_mgr),
-                depends_on=["evidence_collect"],
+                depends_on=[
+                    "cluster_evidence"
+                    if enable_cluster
+                    else ("stance_annotate" if enable_stance else "evidence_collect")
+                ],
             ),
 
             # Final assembly
@@ -250,23 +336,40 @@ class PipelineFactory:
         from spectrue_core.pipeline.steps import (
             ClaimGraphStep,
             EvidenceCollectStep,
+            StanceAnnotateStep,
+            ClusterEvidenceStep,
             ExtractClaimsStep,
             MeteringSetupStep,
             PrepareInputStep,
             SearchFlowStep,
+            BuildQueriesStep,
+            WebSearchStep,
+            RerankStep,
+            FetchChunksStep,
+            AssembleRetrievalItemsStep,
             TargetSelectionStep,
             VerifyInlineSourcesStep,
             CostSummaryStep,
+            AssertRetrievalTraceStep,
+            AssertDeepJudgingStep,
         )
         from spectrue_core.pipeline.steps.deep_claim import (
             AssembleDeepResultStep,
             BuildClaimFramesStep,
             JudgeClaimsStep,
+            MarkJudgeUnavailableStep,
             SummarizeEvidenceStep,
         )
 
         # Get LLM client from agent
         llm_client = getattr(self.agent, "_llm", None) or getattr(self.agent, "llm", None)
+
+        features = getattr(getattr(config, "runtime", None), "features", None)
+        use_retrieval_steps = bool(getattr(features, "retrieval_steps", False))
+        enable_fetch = bool(getattr(features, "fulltext_fetch", False))
+        enable_stance = bool(getattr(features, "stance_annotate", False))
+        enable_cluster = bool(getattr(features, "cluster_evidence", False))
+        enable_summary = bool(getattr(features, "evidence_summarize", True))
 
         return [
             # Infrastructure
@@ -313,25 +416,92 @@ class PipelineFactory:
             ),
 
             # Search retrieval (advanced depth)
-            StepNode(
-                step=SearchFlowStep(
-                    config=config,
-                    search_mgr=self.search_mgr,
-                    agent=self.agent,
-                ),
-                depends_on=["target_selection", "verify_inline_sources"],
+            *(
+                [
+                    StepNode(
+                        step=BuildQueriesStep(),
+                        depends_on=["target_selection", "verify_inline_sources"],
+                    ),
+                    StepNode(
+                        step=WebSearchStep(
+                            config=config,
+                            search_mgr=self.search_mgr,
+                            agent=self.agent,
+                        ),
+                        depends_on=["build_queries"],
+                    ),
+                    StepNode(
+                        step=RerankStep(),
+                        depends_on=["web_search"],
+                    ),
+                ]
+                + (
+                    [
+                        StepNode(
+                            step=FetchChunksStep(search_mgr=self.search_mgr),
+                            depends_on=["rerank_results"],
+                        )
+                    ]
+                    if enable_fetch
+                    else []
+                )
+                + [
+                    StepNode(
+                        step=AssembleRetrievalItemsStep(),
+                        depends_on=["fetch_chunks" if enable_fetch else "rerank_results"],
+                    ),
+                    StepNode(
+                        step=AssertRetrievalTraceStep(),
+                        depends_on=["assemble_retrieval_items"],
+                    ),
+                ]
+                if use_retrieval_steps
+                else [
+                    StepNode(
+                        step=SearchFlowStep(
+                            config=config,
+                            search_mgr=self.search_mgr,
+                            agent=self.agent,
+                        ),
+                        depends_on=["target_selection", "verify_inline_sources"],
+                    )
+                ]
             ),
 
             # Evidence collection ONLY (NO global scoring for deep mode!)
-            # Deep mode uses per-claim JudgeClaimsStep instead of batch scoring
             StepNode(
                 step=EvidenceCollectStep(
                     agent=self.agent,
                     search_mgr=self.search_mgr,
-                    cluster_evidence=False,
                     include_global_pack=False,
                 ),
-                depends_on=["search_flow"],
+                depends_on=["assert_retrieval_trace" if use_retrieval_steps else "search_flow"],
+            ),
+
+            # Optional stance annotation
+            *(
+                [
+                    StepNode(
+                        step=StanceAnnotateStep(agent=self.agent),
+                        depends_on=["evidence_collect"],
+                        optional=True,
+                    )
+                ]
+                if enable_stance
+                else []
+            ),
+
+            # Optional clustering
+            *(
+                [
+                    StepNode(
+                        step=ClusterEvidenceStep(agent=self.agent),
+                        depends_on=["stance_annotate" if enable_stance else "evidence_collect"],
+                        optional=True,
+                    )
+                ]
+                if enable_cluster
+                else []
             ),
 
             # --- Per-Claim Judging (Deep Mode Only) ---
@@ -339,32 +509,56 @@ class PipelineFactory:
             # Build ClaimFrame for each claim
             StepNode(
                 step=BuildClaimFramesStep(),
-                depends_on=["evidence_collect"],
+                depends_on=[
+                    "cluster_evidence"
+                    if enable_cluster
+                    else ("stance_annotate" if enable_stance else "evidence_collect")
+                ],
             ),
 
-            # Summarize evidence per claim
-            StepNode(
-                step=SummarizeEvidenceStep(llm_client=llm_client) if llm_client else SummarizeEvidenceStep.__new__(SummarizeEvidenceStep),
-                depends_on=["build_claim_frames"],
-                optional=llm_client is None,
+            # Summarize evidence per claim (optional)
+            *(
+                [
+                    StepNode(
+                        step=SummarizeEvidenceStep(llm_client=llm_client),
+                        depends_on=["build_claim_frames"],
+                    )
+                ]
+                if llm_client and enable_summary
+                else []
             ),
 
             # Judge each claim independently (per-claim RGBA)
-            StepNode(
-                step=JudgeClaimsStep(llm_client=llm_client) if llm_client else JudgeClaimsStep.__new__(JudgeClaimsStep),
-                depends_on=["summarize_evidence"],
-                optional=llm_client is None,
+            *(
+                [
+                    StepNode(
+                        step=JudgeClaimsStep(llm_client=llm_client),
+                        depends_on=["summarize_evidence" if enable_summary else "build_claim_frames"],
+                    )
+                ]
+                if llm_client
+                else [
+                    StepNode(
+                        step=MarkJudgeUnavailableStep(reason="llm_client_missing"),
+                        depends_on=["build_claim_frames"],
+                    )
+                ]
             ),
 
             # Assemble deep result (per-claim verdicts, NO global RGBA)
             StepNode(
                 step=AssembleDeepResultStep(),
-                depends_on=["judge_claims"],
+                depends_on=["judge_claims" if llm_client else "judge_unavailable"],
+            ),
+
+            StepNode(
+                step=AssertDeepJudgingStep(),
+                depends_on=["assemble_deep_result"],
             ),
 
             StepNode(
                 step=CostSummaryStep(),
-                depends_on=["assemble_deep_result"],
+                depends_on=["assert_deep_judging"],
             ),
 
             # NOTE: No ResultAssemblyStep fallback in deep mode!

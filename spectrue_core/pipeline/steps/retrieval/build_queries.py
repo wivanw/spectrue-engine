@@ -1,0 +1,181 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2024-2025 Spectrue Contributors
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from typing import Any
+
+from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
+from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.pipeline.pipeline_queries import (
+    is_fuzzy_duplicate,
+    normalize_and_sanitize,
+    resolve_budgeted_max_queries,
+    select_diverse_queries,
+)
+from spectrue_core.verification.search.search_policy import (
+    default_search_policy,
+    resolve_profile_name,
+)
+
+
+def _claim_id_for(claim: dict[str, Any], idx: int) -> str:
+    raw = claim.get("id") or claim.get("claim_id")
+    if raw:
+        return str(raw)
+    return f"c{idx + 1}"
+
+
+def _fallback_fact(ctx: PipelineContext) -> str:
+    for key in ("prepared_fact", "clean_text", "input_text", "original_fact"):
+        val = ctx.get_extra(key)
+        if isinstance(val, str) and val.strip():
+            return val
+    return ""
+
+
+def _append_query(
+    queries: list[str],
+    candidate: str | None,
+) -> None:
+    if not candidate:
+        return
+    normalized = normalize_and_sanitize(candidate)
+    if not normalized:
+        return
+    if is_fuzzy_duplicate(normalized, queries, threshold=0.9):
+        return
+    queries.append(normalized)
+
+
+def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
+    queries: list[str] = []
+
+    for raw in claim.get("search_queries", []) or []:
+        _append_query(queries, raw if isinstance(raw, str) else None)
+        if len(queries) >= max_queries:
+            return queries
+
+    for candidate in claim.get("query_candidates", []) or []:
+        if not isinstance(candidate, dict):
+            continue
+        _append_query(queries, candidate.get("text"))
+        if len(queries) >= max_queries:
+            return queries
+
+    fallback = claim.get("normalized_text") or claim.get("text")
+    if fallback:
+        _append_query(queries, fallback)
+
+    return queries[:max_queries]
+
+
+@dataclass
+class BuildQueriesStep:
+    """Build a structured query plan without executing search."""
+
+    name: str = "build_queries"
+
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
+        claims = ctx.claims or []
+        claims_for_plan = ctx.get_extra("target_claims", claims) or []
+        mode = "deep" if ctx.mode.name == "deep" else "standard"
+
+        profile_name = resolve_profile_name(ctx.search_type)
+        policy = default_search_policy()
+        profile = policy.get_profile(profile_name)
+
+        max_queries = resolve_budgeted_max_queries(claims_for_plan, default_max=3)
+        fact_fallback = _fallback_fact(ctx)
+
+        global_queries = select_diverse_queries(
+            claims_for_plan,
+            max_queries=max_queries,
+            fact_fallback=fact_fallback,
+        )
+
+        per_claim_queries: dict[str, tuple[str, ...]] = {}
+        for idx, claim in enumerate(claims_for_plan):
+            if not isinstance(claim, dict):
+                continue
+            claim_id = _claim_id_for(claim, idx)
+            queries = _build_claim_queries(claim, max_queries=max_queries)
+            per_claim_queries[claim_id] = tuple(queries)
+        updated_claims: list[dict[str, Any]] = []
+        for idx, claim in enumerate(claims):
+            if not isinstance(claim, dict):
+                continue
+            claim_id = _claim_id_for(claim, idx)
+            queries = per_claim_queries.get(claim_id)
+            claim_copy = dict(claim)
+            if queries:
+                claim_copy["search_queries"] = list(queries)
+            updated_claims.append(claim_copy)
+
+        plan_id = uuid.uuid4().hex[:10]
+        plan = SearchPlan(
+            plan_id=plan_id,
+            mode=mode,
+            global_queries=tuple(global_queries),
+            per_claim_queries=per_claim_queries,
+            trace={
+                "profile": profile.name,
+                "max_results": profile.max_results,
+                "max_queries": max_queries,
+                "claims": len(claims_for_plan),
+            },
+        )
+
+        Trace.event(
+            "retrieval.plan",
+            {
+                "plan_id": plan_id,
+                "mode": mode,
+                "global_queries": len(global_queries),
+                "claims": len(claims_for_plan),
+                "per_claim_queries": len(per_claim_queries),
+            },
+        )
+
+        next_ctx = ctx
+        if updated_claims:
+            next_ctx = next_ctx.with_update(claims=updated_claims)
+            target_claims = ctx.get_extra("target_claims")
+            if isinstance(target_claims, list):
+                updated_targets: list[dict[str, Any]] = []
+                for idx, claim in enumerate(target_claims):
+                    if not isinstance(claim, dict):
+                        continue
+                    claim_id = _claim_id_for(claim, idx)
+                    queries = per_claim_queries.get(claim_id)
+                    claim_copy = dict(claim)
+                    if queries:
+                        claim_copy["search_queries"] = list(queries)
+                    updated_targets.append(claim_copy)
+                if updated_targets:
+                    next_ctx = next_ctx.set_extra("target_claims", updated_targets)
+
+        return (
+            next_ctx.set_extra(SEARCH_PLAN_KEY, plan)
+            .set_extra("search_queries", list(global_queries))
+            .set_extra(
+                "retrieval_plan_trace",
+                {
+                    "plan_id": plan_id,
+                    "global_queries": len(global_queries),
+                    "claims": len(claims_for_plan),
+                },
+            )
+        )

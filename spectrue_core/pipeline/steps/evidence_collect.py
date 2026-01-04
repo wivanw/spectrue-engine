@@ -18,9 +18,12 @@ from typing import Any
 
 from spectrue_core.pipeline.contracts import (
     EVIDENCE_INDEX_KEY,
+    RETRIEVAL_ITEMS_KEY,
+    SEARCH_PLAN_KEY,
     EvidenceIndex,
     EvidenceItem,
     EvidencePackContract,
+    RetrievalItem,
 )
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
@@ -57,7 +60,7 @@ def _build_evidence_items(raw_items: list[dict[str, Any]]) -> tuple[EvidenceItem
                 snippet=raw.get("snippet") or raw.get("content"),
                 quote=raw.get("quote"),
                 provider_score=raw.get("provider_score") or raw.get("score"),
-                sim=raw.get("sim"),
+                sim=raw.get("sim") if raw.get("sim") is not None else raw.get("similarity_score"),
                 stance=raw.get("stance"),
                 relevance=raw.get("relevance"),
                 tier=raw.get("tier") or raw.get("source_tier") or raw.get("evidence_tier"),
@@ -108,7 +111,6 @@ class EvidenceCollectStep:
 
     agent: Any  # FactCheckerAgent
     search_mgr: Any  # SearchManager
-    cluster_evidence: bool = True
     include_global_pack: bool = True
     name: str = "evidence_collect"
 
@@ -121,6 +123,34 @@ class EvidenceCollectStep:
             claims = ctx.claims
             sources = ctx.sources
             progress_callback = ctx.get_extra("progress_callback")
+
+            retrieval_items = ctx.get_extra(RETRIEVAL_ITEMS_KEY)
+            global_items: list[dict[str, Any]] = []
+            by_claim_items: dict[str, list[dict[str, Any]]] = {}
+
+            if isinstance(retrieval_items, dict):
+                raw_global = retrieval_items.get("global", [])
+                raw_by_claim = retrieval_items.get("by_claim", {})
+                for item in raw_global or []:
+                    if isinstance(item, RetrievalItem):
+                        global_items.append(item.to_payload())
+                    elif isinstance(item, dict):
+                        global_items.append(item)
+                if isinstance(raw_by_claim, dict):
+                    for claim_id, items in raw_by_claim.items():
+                        if not isinstance(items, (list, tuple)):
+                            continue
+                        by_claim_items[str(claim_id)] = []
+                        for item in items:
+                            if isinstance(item, RetrievalItem):
+                                by_claim_items[str(claim_id)].append(item.to_payload())
+                            elif isinstance(item, dict):
+                                by_claim_items[str(claim_id)].append(item)
+
+            if global_items or by_claim_items:
+                sources = global_items + [item for items in by_claim_items.values() for item in items]
+            else:
+                by_claim_items = _group_sources_by_claim(sources)
 
             inp = EvidenceFlowInput(
                 fact=ctx.get_extra("prepared_fact", ""),
@@ -142,10 +172,9 @@ class EvidenceCollectStep:
                 inp=inp,
                 claims=claims,
                 sources=sources,
-                cluster_evidence=self.cluster_evidence,
             )
 
-            evidence_by_claim = _group_sources_by_claim(collection.sources)
+            evidence_by_claim = by_claim_items or _group_sources_by_claim(collection.sources)
 
             pack_items = list(collection.pack.get("items", [])) if isinstance(collection.pack, dict) else []
             pack_contract = None
@@ -165,14 +194,35 @@ class EvidenceCollectStep:
                     trace=_build_trace(ctx, claim_id),
                 )
 
+            claim_ids = []
+            for claim in claims or []:
+                if not isinstance(claim, dict):
+                    continue
+                cid = claim.get("id") or claim.get("claim_id")
+                if cid:
+                    claim_ids.append(str(cid))
+            missing_claims = [cid for cid in claim_ids if cid not in by_claim_contract]
+
             evidence_index = EvidenceIndex(
                 by_claim_id=by_claim_contract,
                 global_pack=pack_contract,
+                stats={
+                    "claims_total": len(claim_ids),
+                    "claims_with_evidence": len(by_claim_contract),
+                    "missing_claims": len(missing_claims),
+                },
+                trace={
+                    "plan_id": getattr(ctx.get_extra(SEARCH_PLAN_KEY), "plan_id", None),
+                },
+                missing_claims=tuple(missing_claims),
             )
 
             Trace.event(
                 "evidence_collect.completed",
-                {"claims_with_evidence": len(evidence_by_claim)},
+                {
+                    "claims_with_evidence": len(by_claim_contract),
+                    "missing_claims": len(missing_claims),
+                },
             )
 
             execution_state = ctx.get_extra("execution_state")

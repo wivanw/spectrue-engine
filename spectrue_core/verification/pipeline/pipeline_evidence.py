@@ -127,7 +127,6 @@ async def collect_evidence(
     inp: EvidenceFlowInput,
     claims: list[dict],
     sources: list[dict],
-    cluster_evidence: bool = True,
 ) -> EvidenceCollection:
     """Collect and structure evidence without invoking the judge."""
     if inp.progress_callback:
@@ -182,7 +181,6 @@ async def collect_evidence(
             else:
                 label_evidence_timeliness(claim_sources, time_window=window)
 
-    clustered_results = None
     claim_text_map: dict[str, str] = {}
     if claims:
         for c in claims:
@@ -192,16 +190,6 @@ async def collect_evidence(
             if not cid:
                 continue
             claim_text_map[str(cid)] = c.get("normalized_text") or c.get("text") or ""
-    if cluster_evidence and claims and sources:
-        if inp.progress_callback:
-            await inp.progress_callback("clustering_evidence")
-        profile_name = resolve_profile_name(inp.search_type)
-        stance_pass_mode = resolve_stance_pass_mode(profile_name)
-        clustered_results = await agent.cluster_evidence(
-            claims,
-            sources,
-            stance_pass_mode=stance_pass_mode,
-        )
 
     anchor_claim = None
     anchor_claim_id = None
@@ -235,7 +223,7 @@ async def collect_evidence(
         fact=inp.original_fact,
         claims=claims,
         sources=sources,
-        search_results_clustered=clustered_results,
+        search_results_clustered=None,
         content_lang=inp.content_lang or inp.lang,
         article_context={"text_excerpt": inp.fact[:500]}
         if inp.fact != inp.original_fact
@@ -251,6 +239,60 @@ async def collect_evidence(
         anchor_claim_id=anchor_claim_id,
         time_windows=time_windows,
         current_cost=current_cost,
+    )
+
+
+async def annotate_evidence_stance(
+    *,
+    agent,
+    inp: EvidenceFlowInput,
+    claims: list[dict],
+    sources: list[dict],
+) -> list[dict]:
+    """Optional stance annotation using clustering skill output."""
+    if not claims or not sources:
+        return []
+    if inp.progress_callback:
+        await inp.progress_callback("stance_annotation")
+    profile_name = resolve_profile_name(inp.search_type)
+    stance_pass_mode = resolve_stance_pass_mode(profile_name)
+    return await agent.cluster_evidence(
+        claims,
+        sources,
+        stance_pass_mode=stance_pass_mode,
+    )
+
+
+def rebuild_evidence_pack(
+    *,
+    build_evidence_pack,
+    collection: EvidenceCollection,
+    clustered_results: list[dict] | None,
+    sources_override: list[dict] | None = None,
+    inp: EvidenceFlowInput,
+) -> EvidenceCollection:
+    """Rebuild EvidencePack using optional clustered results."""
+    sources = sources_override if sources_override is not None else collection.sources
+    pack = build_evidence_pack(
+        fact=inp.original_fact,
+        claims=collection.claims,
+        sources=sources,
+        search_results_clustered=clustered_results,
+        content_lang=inp.content_lang or inp.lang,
+        article_context={"text_excerpt": inp.fact[:500]}
+        if inp.fact != inp.original_fact
+        else None,
+    )
+
+    return EvidenceCollection(
+        pack=pack,
+        claims=collection.claims,
+        sources=sources,
+        claim_text_map=collection.claim_text_map,
+        anchor_claim=collection.anchor_claim,
+        anchor_claim_id=collection.anchor_claim_id,
+        time_windows=collection.time_windows,
+        current_cost=collection.current_cost,
     )
 
 
@@ -502,6 +544,7 @@ async def run_evidence_flow(
     claims: list[dict],
     sources: list[dict],
     score_mode: str = "standard",  # "standard" (single LLM call) or "parallel" (per-claim)
+    cluster_evidence: bool = True,
 ) -> dict:
     """
     Analysis + scoring: clustering, social verification, evidence pack, scoring, finalize.
@@ -521,8 +564,23 @@ async def run_evidence_flow(
         inp=inp,
         claims=claims,
         sources=sources,
-        cluster_evidence=True,
     )
+
+    if cluster_evidence:
+        clustered = await annotate_evidence_stance(
+            agent=agent,
+            inp=inp,
+            claims=claims,
+            sources=collection.sources,
+        )
+        if clustered:
+            collection = rebuild_evidence_pack(
+                build_evidence_pack=build_evidence_pack,
+                collection=collection,
+                clustered_results=clustered,
+                sources_override=clustered,
+                inp=inp,
+            )
 
     return await score_evidence_collection(
         agent=agent,

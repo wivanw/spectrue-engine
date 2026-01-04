@@ -400,6 +400,77 @@ class AssertStandardResultKeysStep:
         return ctx
 
 
+@dataclass
+class AssertRetrievalTraceStep:
+    """Assert retrieval trace markers are present in context extras."""
+
+    required: tuple[str, ...] = (
+        "retrieval_plan_trace",
+        "retrieval_search_trace",
+        "retrieval_rerank_trace",
+    )
+    name: str = "assert_retrieval_trace"
+
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
+        missing = [key for key in self.required if not ctx.get_extra(key)]
+        if missing:
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="retrieval_trace_missing",
+                expected=self.required,
+                actual=tuple(missing),
+                details={"mode": ctx.mode.name},
+            )
+        return ctx
+
+
+@dataclass
+class AssertDeepJudgingStep:
+    """Assert deep judging fan-out/fan-in invariants."""
+
+    name: str = "assert_deep_judging"
+
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
+        deep_ctx = ctx.get_extra("deep_claim_ctx")
+        if deep_ctx is None or not hasattr(deep_ctx, "claim_frames"):
+            return ctx
+
+        claim_frames = getattr(deep_ctx, "claim_frames", []) or []
+        expected = len(claim_frames)
+        outputs = getattr(deep_ctx, "judge_outputs", {}) or {}
+        errors = getattr(deep_ctx, "errors", {}) or {}
+        judged = len(outputs) + len(errors)
+
+        if expected and judged != expected:
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="deep_judged_count_mismatch",
+                expected=expected,
+                actual=judged,
+                details={"mode": ctx.mode.name},
+            )
+
+        final_result = ctx.get_extra("final_result")
+        claim_results = None
+        if isinstance(final_result, dict):
+            deep_analysis = final_result.get("deep_analysis")
+            if isinstance(deep_analysis, dict):
+                claim_results = deep_analysis.get("claim_results")
+
+        if isinstance(claim_results, list):
+            missing_ids = [idx for idx, item in enumerate(claim_results) if not item.get("claim_id")]
+            if missing_ids:
+                raise PipelineViolation(
+                    step_name=self.name,
+                    invariant="deep_claim_id_missing",
+                    expected="claim_id",
+                    actual=f"missing_in_{len(missing_ids)}",
+                    details={"indices": missing_ids[:5]},
+                )
+
+        return ctx
+
+
 def get_invariant_steps_for_mode(mode_name: str) -> list[Any]:
     """
     Get the standard invariant steps for a mode.
