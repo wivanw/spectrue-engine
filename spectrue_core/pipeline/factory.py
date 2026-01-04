@@ -150,11 +150,8 @@ class PipelineFactory:
             AssertRetrievalTraceStep,
         )
 
-        # Optional features (no more retrieval_steps flag - atomic steps always used)
-        features = getattr(getattr(config, "runtime", None), "features", None)
-        enable_fetch = bool(getattr(features, "fulltext_fetch", False))
-        enable_stance = bool(getattr(features, "stance_annotate", False))
-        enable_cluster = bool(getattr(features, "cluster_evidence", False))
+        # All steps now always included (no feature flags)
+        # Optional=True allows graceful failure without blocking pipeline
 
         return [
             # Infrastructure
@@ -184,6 +181,22 @@ class PipelineFactory:
                 depends_on=["extract_claims"],
             ),
 
+            # Semantic gating
+            StepNode(
+                step=EvaluateSemanticGatingStep(agent=self.agent),
+                depends_on=["extract_claims"],
+                optional=True,
+            ),
+
+            # Claim graph
+            StepNode(
+                step=ClaimGraphStep(
+                    claim_graph=self.claim_graph,
+                    runtime_config=config.runtime if hasattr(config, 'runtime') else None,
+                ),
+                depends_on=["extract_claims"],
+            ),
+
             # Oracle fast path (optional)
             StepNode(
                 step=OracleFlowStep(search_mgr=self.search_mgr),
@@ -191,32 +204,16 @@ class PipelineFactory:
                 optional=True,
             ),
 
-            # Claim graph (optional, parallel with oracle)
+            # Target selection (anchor-based for normal mode)
             StepNode(
-                step=ClaimGraphStep(
-                    claim_graph=self.claim_graph,
-                    runtime_config=config.runtime if hasattr(config, 'runtime') else None,
-                ),
-                depends_on=["extract_claims"],
-                optional=True,
+                step=TargetSelectionStep(process_all_claims=False),
+                depends_on=["claim_graph", "oracle_flow", "semantic_gating"],
             ),
 
-            # Target selection
-            StepNode(
-                step=TargetSelectionStep(),
-                depends_on=["claim_graph", "oracle_flow"],
-            ),
-
-            # Semantic Gating (filter candidates)
-            StepNode(
-                step=EvaluateSemanticGatingStep(agent=self.agent),
-                depends_on=["target_selection"],
-            ),
-
-            # Search retrieval (atomic steps - no more SearchFlowStep fallback)
+            # Search retrieval (atomic steps)
             StepNode(
                 step=BuildQueriesStep(),
-                depends_on=["target_selection", "semantic_gating", "verify_inline_sources"],
+                depends_on=["target_selection", "verify_inline_sources"],
             ),
             StepNode(
                 step=WebSearchStep(
@@ -230,20 +227,15 @@ class PipelineFactory:
                 step=RerankStep(),
                 depends_on=["web_search"],
             ),
-            *(
-                [
-                    StepNode(
-                        step=FetchChunksStep(search_mgr=self.search_mgr),
-                        depends_on=["rerank_results"],
-                        optional=True,
-                    )
-                ]
-                if enable_fetch
-                else []
+            # Fulltext fetch always included (improves quality)
+            StepNode(
+                step=FetchChunksStep(search_mgr=self.search_mgr),
+                depends_on=["rerank_results"],
+                optional=True,
             ),
             StepNode(
                 step=AssembleRetrievalItemsStep(),
-                depends_on=["fetch_chunks" if enable_fetch else "rerank_results"],
+                depends_on=["fetch_chunks"],
             ),
             StepNode(
                 step=AssertRetrievalTraceStep(),
@@ -260,40 +252,24 @@ class PipelineFactory:
                 depends_on=["assert_retrieval_trace"],
             ),
 
-            # Optional stance annotation
-            *(
-                [
-                    StepNode(
-                        step=StanceAnnotateStep(agent=self.agent),
-                        depends_on=["evidence_collect"],
-                        optional=True,
-                    )
-                ]
-                if enable_stance
-                else []
+            # Stance annotation always included (improves verdict quality)
+            StepNode(
+                step=StanceAnnotateStep(agent=self.agent),
+                depends_on=["evidence_collect"],
+                optional=True,
             ),
 
-            # Optional clustering
-            *(
-                [
-                    StepNode(
-                        step=ClusterEvidenceStep(agent=self.agent),
-                        depends_on=["stance_annotate" if enable_stance else "evidence_collect"],
-                        optional=True,
-                    )
-                ]
-                if enable_cluster
-                else []
+            # Clustering always included (improves source grouping)
+            StepNode(
+                step=ClusterEvidenceStep(agent=self.agent),
+                depends_on=["stance_annotate"],
+                optional=True,
             ),
 
             # Standard judging
             StepNode(
                 step=JudgeStandardStep(agent=self.agent, search_mgr=self.search_mgr),
-                depends_on=[
-                    "cluster_evidence"
-                    if enable_cluster
-                    else ("stance_annotate" if enable_stance else "evidence_collect")
-                ],
+                depends_on=["cluster_evidence"],
             ),
 
             # Final assembly
@@ -345,12 +321,8 @@ class PipelineFactory:
 
         # Get LLM client from agent
         llm_client = getattr(self.agent, "_llm", None) or getattr(self.agent, "llm", None)
-        # Optional features (no more retrieval_steps flag - atomic steps always used)
-        features = getattr(getattr(config, "runtime", None), "features", None)
-        enable_fetch = bool(getattr(features, "fulltext_fetch", False))
-        enable_stance = bool(getattr(features, "stance_annotate", False))
-        enable_cluster = bool(getattr(features, "cluster_evidence", False))
-        enable_summary = bool(getattr(features, "evidence_summarize", True))
+        # All steps now always included (no feature flags)
+        # Optional=True allows graceful failure without blocking pipeline
 
         return [
             # Infrastructure
@@ -390,13 +362,12 @@ class PipelineFactory:
             ),
 
             # Target selection (all claims for deep mode)
-            # M119: Mode logic via constructor param, not runtime check
             StepNode(
                 step=TargetSelectionStep(process_all_claims=True),
                 depends_on=["claim_graph"],
             ),
 
-            # Search retrieval (atomic steps - no more SearchFlowStep fallback)
+            # Search retrieval (atomic steps)
             StepNode(
                 step=BuildQueriesStep(),
                 depends_on=["target_selection", "verify_inline_sources"],
@@ -413,20 +384,15 @@ class PipelineFactory:
                 step=RerankStep(),
                 depends_on=["web_search"],
             ),
-            *(
-                [
-                    StepNode(
-                        step=FetchChunksStep(search_mgr=self.search_mgr),
-                        depends_on=["rerank_results"],
-                        optional=True,
-                    )
-                ]
-                if enable_fetch
-                else []
+            # Fulltext fetch always included
+            StepNode(
+                step=FetchChunksStep(search_mgr=self.search_mgr),
+                depends_on=["rerank_results"],
+                optional=True,
             ),
             StepNode(
                 step=AssembleRetrievalItemsStep(),
-                depends_on=["fetch_chunks" if enable_fetch else "rerank_results"],
+                depends_on=["fetch_chunks"],
             ),
             StepNode(
                 step=AssertRetrievalTraceStep(),
@@ -443,30 +409,18 @@ class PipelineFactory:
                 depends_on=["assert_retrieval_trace"],
             ),
 
-            # Optional stance annotation
-            *(
-                [
-                    StepNode(
-                        step=StanceAnnotateStep(agent=self.agent),
-                        depends_on=["evidence_collect"],
-                        optional=True,
-                    )
-                ]
-                if enable_stance
-                else []
+            # Stance annotation always included
+            StepNode(
+                step=StanceAnnotateStep(agent=self.agent),
+                depends_on=["evidence_collect"],
+                optional=True,
             ),
 
-            # Optional clustering
-            *(
-                [
-                    StepNode(
-                        step=ClusterEvidenceStep(agent=self.agent),
-                        depends_on=["stance_annotate" if enable_stance else "evidence_collect"],
-                        optional=True,
-                    )
-                ]
-                if enable_cluster
-                else []
+            # Clustering always included
+            StepNode(
+                step=ClusterEvidenceStep(agent=self.agent),
+                depends_on=["stance_annotate"],
+                optional=True,
             ),
 
             # --- Per-Claim Judging (Deep Mode Only) ---
@@ -474,14 +428,10 @@ class PipelineFactory:
             # Build ClaimFrame for each claim
             StepNode(
                 step=BuildClaimFramesStep(),
-                depends_on=[
-                    "cluster_evidence"
-                    if enable_cluster
-                    else ("stance_annotate" if enable_stance else "evidence_collect")
-                ],
+                depends_on=["cluster_evidence"],
             ),
 
-            # Summarize evidence per claim (optional)
+            # Summarize evidence per claim (always included if llm_client available)
             *(
                 [
                     StepNode(
@@ -489,7 +439,7 @@ class PipelineFactory:
                         depends_on=["build_claim_frames"],
                     )
                 ]
-                if llm_client and enable_summary
+                if llm_client
                 else []
             ),
 
@@ -498,7 +448,7 @@ class PipelineFactory:
                 [
                     StepNode(
                         step=JudgeClaimsStep(llm_client=llm_client),
-                        depends_on=["summarize_evidence" if enable_summary else "build_claim_frames"],
+                        depends_on=["summarize_evidence"],
                     )
                 ]
                 if llm_client
