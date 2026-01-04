@@ -362,6 +362,46 @@ class JudgeClaimsStep(Step):
             Trace.phase_end("judge_claims")
 
 
+class MarkJudgeUnavailableStep(Step):
+    """Populate deep claim errors when judge capability is unavailable."""
+
+    def __init__(self, reason: str = "judge_unavailable"):
+        self._reason = reason
+
+    @property
+    def name(self) -> str:
+        return "judge_unavailable"
+
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
+        Trace.phase_start("judge_unavailable")
+
+        try:
+            deep_ctx: DeepClaimContext = ctx.extras.get("deep_claim_ctx", DeepClaimContext())
+            if not deep_ctx.claim_frames:
+                return ctx.set_extra("deep_claim_ctx", deep_ctx)
+
+            errors = deep_ctx.errors or {}
+            for frame in deep_ctx.claim_frames:
+                if frame.claim_id in errors:
+                    continue
+                errors[frame.claim_id] = _build_error_payload(
+                    error_type="judge_unavailable",
+                    message=self._reason,
+                )
+
+            deep_ctx.errors = errors
+
+            Trace.event(
+                "judge_claims.unavailable",
+                {"reason": self._reason, "claims": len(deep_ctx.claim_frames)},
+            )
+
+            return ctx.set_extra("deep_claim_ctx", deep_ctx)
+
+        finally:
+            Trace.phase_end("judge_unavailable")
+
+
 class AssembleDeepResultStep(Step):
     """
     Step that assembles final deep analysis result.
@@ -397,6 +437,7 @@ class AssembleDeepResultStep(Step):
                         "claim_id": frame.claim_id,
                         "status": "error",
                         "rgba": None,
+                        "verdict_score": None,
                         "explanation": None,
                         "sources_used": [],
                         "error": error_payload,
@@ -409,6 +450,7 @@ class AssembleDeepResultStep(Step):
                     judge_output.rgba.b,
                     judge_output.rgba.a,
                 ]
+                verdict_score = rgba[1] if isinstance(rgba, list) and len(rgba) > 1 else None
                 sources_used_refs = list(judge_output.sources_used or [])
 
                 # Build full sources list with trust info FIRST
@@ -445,6 +487,7 @@ class AssembleDeepResultStep(Step):
                     "claim_text": frame.claim_text,
                     "status": "ok",
                     "rgba": rgba,
+                    "verdict_score": verdict_score,
                     "explanation": judge_output.explanation,
                     "sources_used": sources_list,  # Full objects, not just refs
                 })
@@ -453,6 +496,7 @@ class AssembleDeepResultStep(Step):
                     "claim_id": frame.claim_id,
                     "text": frame.claim_text,
                     "rgba": rgba,
+                    "verdict_score": verdict_score,
                     "verdict": judge_output.verdict,
                     "confidence": judge_output.confidence,
                     "explanation": judge_output.explanation,

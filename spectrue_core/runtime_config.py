@@ -99,10 +99,14 @@ class EngineFeatureFlags:
     fulltext_fetch: bool = False
 
     # Flags
+    retrieval_steps: bool = False
     coverage_chunking: bool = False
     log_redaction: bool = False
     trace_safe_payloads: bool = False
     clean_md_output: bool = True
+    stance_annotate: bool = False
+    cluster_evidence: bool = False
+    evidence_summarize: bool = True
 
 
 @dataclass(frozen=True)
@@ -417,12 +421,16 @@ class EngineRuntimeConfig:
             trace_enabled=not _parse_bool(os.getenv("SPECTRUE_TRACE_DISABLE"), default=False),
             fulltext_fetch=_parse_bool(os.getenv("SPECTRUE_FULLTEXT_FETCH"), default=False),
             # Feature Flags
+            retrieval_steps=_parse_bool(os.getenv("FEATURE_RETRIEVAL_STEPS"), default=False),
             coverage_chunking=_parse_bool(os.getenv("FEATURE_COVERAGE_CHUNKING"), default=False),
             log_redaction=_parse_bool(os.getenv("FEATURE_LOG_REDACTION"), default=False),
 
             trace_safe_payloads=_parse_bool(os.getenv("TRACE_SAFE_PAYLOADS"), default=False),
 
             clean_md_output=_parse_bool(os.getenv("FEATURE_CLEAN_MD_OUTPUT"), default=True),
+            stance_annotate=_parse_bool(os.getenv("FEATURE_STANCE_ANNOTATE"), default=False),
+            cluster_evidence=_parse_bool(os.getenv("FEATURE_CLUSTER_EVIDENCE"), default=False),
+            evidence_summarize=_parse_bool(os.getenv("FEATURE_EVIDENCE_SUMMARIZE"), default=True),
         )
 
         # Search knobs

@@ -50,7 +50,6 @@ class EvidenceFlowStep:
             collector = EvidenceCollectStep(
                 agent=self.agent,
                 search_mgr=self.search_mgr,
-                cluster_evidence=self.enable_global_scoring,
                 include_global_pack=self.enable_global_scoring,
             )
 

@@ -46,30 +46,51 @@ class SearchFlowStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Execute search retrieval."""
-        from spectrue_core.verification.pipeline.pipeline_search import (
-            SearchFlowInput,
-            SearchFlowState,
-            run_search_flow,
-        )
-
         try:
+            features = getattr(getattr(self.config, "runtime", None), "features", None)
+            use_retrieval_steps = bool(getattr(features, "retrieval_steps", False))
+            enable_fetch = bool(getattr(features, "fulltext_fetch", False))
+
+            if use_retrieval_steps:
+                from spectrue_core.pipeline.steps.retrieval import (
+                    AssembleRetrievalItemsStep,
+                    BuildQueriesStep,
+                    FetchChunksStep,
+                    RerankStep,
+                    WebSearchStep,
+                )
+
+                ctx = await BuildQueriesStep().run(ctx)
+                ctx = await WebSearchStep(
+                    config=self.config,
+                    search_mgr=self.search_mgr,
+                    agent=self.agent,
+                ).run(ctx)
+                ctx = await RerankStep().run(ctx)
+                if enable_fetch:
+                    ctx = await FetchChunksStep(search_mgr=self.search_mgr).run(ctx)
+                ctx = await AssembleRetrievalItemsStep().run(ctx)
+                return ctx
+
+            from spectrue_core.verification.pipeline.pipeline_search import (
+                SearchFlowInput,
+                SearchFlowState,
+                run_search_flow,
+            )
+
             target_claims = ctx.get_extra("target_claims", ctx.claims)
             inline_sources = ctx.get_extra("inline_sources", [])
-            search_candidates = ctx.get_extra("search_candidates", []) # Preferred alias
-            
-            # Prefer search_candidates. If empty, maybe fall back to target_claims?
-            # If both empty, skip.
+            search_candidates = ctx.get_extra("search_candidates", [])  # Preferred alias
+
             claims_to_search = search_candidates if search_candidates else target_claims
-            
+
             if not claims_to_search:
-                 Trace.event("search_flow.skipped", {"reason": "no_candidates"})
-                 return ctx
+                Trace.event("search_flow.skipped", {"reason": "no_candidates"})
+                return ctx
 
             progress_callback = ctx.get_extra("progress_callback")
 
-
             def can_add_search(model: str, search_type: str, max_cost: int | None) -> bool:
-                # Simple budget check
                 return True
 
             inp = SearchFlowInput(
