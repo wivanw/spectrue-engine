@@ -564,21 +564,3 @@ class PipelineFactory:
                 depends_on=["extract_claims"],
             ),
         ]
-
-    # Deprecated alias for backward compatibility
-    def build_dag(
-        self,
-        mode_name: str,
-        *,
-        config: Any,
-        pipeline: Any,
-    ) -> "DAGPipeline":
-        """
-        Deprecated: Use build() instead.
-
-        This method exists for backward compatibility during migration.
-        """
-        logger.warning(
-            "[PipelineFactory] build_dag() is deprecated, use build() instead"
-        )
-        return self.build(mode_name, config=config, pipeline=pipeline)
