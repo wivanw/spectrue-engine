@@ -140,6 +140,7 @@ class PipelineFactory:
             TargetSelectionStep,
             VerifyInlineSourcesStep,
             CostSummaryStep,
+            AssertStandardResultKeysStep,
         )
 
         return [
@@ -236,6 +237,10 @@ class PipelineFactory:
             StepNode(
                 step=CostSummaryStep(),
                 depends_on=["assemble_standard_result"],
+            ),
+            StepNode(
+                step=AssertStandardResultKeysStep(),
+                depends_on=["cost_summary"],
             ),
         ]
 

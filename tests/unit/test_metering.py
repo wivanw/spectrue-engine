@@ -114,3 +114,21 @@ def test_llm_embedding_usage_tokens() -> None:
     # credits = 0.000024 / 0.01 = 0.0024
     assert ledger.events[0].stage == "embed"
     assert ledger.events[0].cost_credits == Decimal("0.0024")
+
+
+def test_cost_summary_nonzero_when_usage_recorded() -> None:
+    ledger = CostLedger(run_id="run-usage")
+    llm_meter = LLMMeter(ledger=ledger, policy=_policy())
+    tavily_meter = TavilyMeter(ledger=ledger, policy=_policy())
+
+    llm_meter.record_completion(
+        model="gpt-5-nano",
+        stage="clean",
+        usage={"input_tokens": 200, "output_tokens": 300},
+        input_text="input",
+        output_text="output",
+    )
+    tavily_meter.record_search(credits_used=1)
+
+    summary = ledger.to_summary_dict()
+    assert summary["total_credits"] > Decimal("0")

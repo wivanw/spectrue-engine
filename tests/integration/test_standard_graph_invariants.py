@@ -14,7 +14,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.factory import PipelineFactory
+from spectrue_core.pipeline.mode import NORMAL_MODE
+from spectrue_core.pipeline.steps.result_assembly import AssembleStandardResultStep
 from spectrue_core.pipeline.steps.metering_setup import METERING_SETUP_STEP_NAME
 
 
@@ -38,3 +41,39 @@ def test_standard_graph_invariants(mock_config, pipeline_factory):
     assert METERING_SETUP_STEP_NAME in names
     assert "judge_standard" in names
     assert "judge_claims" not in names
+    assert "assert_standard_result_keys" in names
+
+
+@pytest.mark.asyncio
+async def test_standard_result_contract_fields():
+    verdict = {
+        "judge_mode": "standard",
+        "rgba": [0.1, 0.2, 0.3, 0.4],
+        "rationale": "Example rationale",
+        "sources": [{"url": "https://example.com", "title": "Example"}],
+        "anchor_claim": {"id": "c1", "text": "Example claim"},
+        "claim_verdicts": [
+            {
+                "claim_id": "c1",
+                "text": "Example claim",
+                "rgba": [0.1, 0.2, 0.3, 0.4],
+                "rationale": "Example rationale",
+            }
+        ],
+    }
+    ctx = PipelineContext(mode=NORMAL_MODE, claims=[{"id": "c1", "text": "Example claim"}])
+    ctx = ctx.with_update(verdict=verdict, sources=verdict["sources"])
+    ctx = ctx.set_extra("prepared_fact", "Prepared text")
+    ctx = ctx.set_extra("cost_summary", {"credits_used": 2})
+
+    result_ctx = await AssembleStandardResultStep().run(ctx)
+    final_result = result_ctx.get_extra("final_result")
+
+    assert final_result["judge_mode"] == "standard"
+    assert final_result["text"] == "Prepared text"
+    assert isinstance(final_result["details"], list)
+    assert final_result["anchor_claim"]["id"] == "c1"
+    assert final_result["rgba"] == [0.1, 0.2, 0.3, 0.4]
+    assert "deep_analysis" not in final_result
+    assert "cost_summary" in final_result
+    assert final_result.get("credits") == 2

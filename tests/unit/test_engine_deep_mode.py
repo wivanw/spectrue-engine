@@ -79,3 +79,6 @@ async def test_deep_mode_single_pipeline_run_multi_claims(mock_config):
 
     assert result["analysis_mode"] == "deep"
     assert result["claims"] == ["Claim 1", "Claim 2", "Claim 3"]
+    assert result["judge_mode"] == "deep"
+    assert "deep_analysis" in result
+    assert "verified_score" not in result

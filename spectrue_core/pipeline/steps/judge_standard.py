@@ -82,6 +82,14 @@ class JudgeStandardStep:
             )
 
             Trace.event(
+                "standard.article_judged",
+                {
+                    "count": 1,
+                    "claim_count": len(collection.claims),
+                },
+            )
+
+            Trace.event(
                 "judge_standard.completed",
                 {"verified_score": result.get("verified_score")},
             )

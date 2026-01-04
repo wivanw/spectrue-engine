@@ -308,6 +308,98 @@ class AssertContractPresenceStep:
         return ctx
 
 
+@dataclass
+class AssertStandardResultKeysStep:
+    """
+    Assert that standard-mode responses include legacy UI fields.
+
+    Ensures the standard payload shape is stable and excludes deep-only data.
+    """
+
+    required: tuple[str, ...] = ("text", "details", "anchor_claim", "rgba", "sources")
+    name: str = "assert_standard_result_keys"
+
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
+        final_result = ctx.get_extra("final_result")
+        if not isinstance(final_result, dict):
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="standard_result_missing",
+                expected="dict",
+                actual=type(final_result).__name__,
+                details={"mode": ctx.mode.name},
+            )
+
+        missing = [key for key in self.required if key not in final_result]
+        if missing:
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="standard_result_keys_missing",
+                expected=self.required,
+                actual=tuple(missing),
+                details={"mode": ctx.mode.name},
+            )
+
+        if "deep_analysis" in final_result:
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="standard_result_contains_deep_payload",
+                expected="deep_analysis absent",
+                actual="deep_analysis present",
+                details={"mode": ctx.mode.name},
+            )
+
+        if not (final_result.get("rationale") or final_result.get("analysis")):
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="standard_result_missing_rationale",
+                expected="rationale or analysis",
+                actual="missing",
+                details={"mode": ctx.mode.name},
+            )
+
+        if "cost_summary" not in final_result and "credits" not in final_result:
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="standard_result_missing_cost_summary",
+                expected="cost_summary or credits",
+                actual="missing",
+                details={"mode": ctx.mode.name},
+            )
+
+        rgba = final_result.get("rgba")
+        if not (isinstance(rgba, list) and len(rgba) == 4):
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="standard_result_invalid_rgba",
+                expected="list[4]",
+                actual=type(rgba).__name__,
+                details={"mode": ctx.mode.name, "length": len(rgba) if isinstance(rgba, list) else None},
+            )
+
+        details = final_result.get("details")
+        if not isinstance(details, list):
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="standard_result_invalid_details",
+                expected="list",
+                actual=type(details).__name__,
+                details={"mode": ctx.mode.name},
+            )
+
+        anchor = final_result.get("anchor_claim")
+        if not isinstance(anchor, dict) or not anchor.get("id") or "text" not in anchor:
+            raise PipelineViolation(
+                step_name=self.name,
+                invariant="standard_result_invalid_anchor",
+                expected="anchor_claim with id/text",
+                actual=anchor,
+                details={"mode": ctx.mode.name},
+            )
+
+        return ctx
+
+
 def get_invariant_steps_for_mode(mode_name: str) -> list[Any]:
     """
     Get the standard invariant steps for a mode.
