@@ -36,10 +36,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext, Step
+from spectrue_core.pipeline.constants import (
+    DAG_EXECUTION_STATE_KEY,
+    DAG_EXECUTION_SUMMARY_KEY,
+)
+from spectrue_core.pipeline.execution_state import (
+    DAGExecutionState,
+    LayerExecutionState,
+)
 from spectrue_core.pipeline.mode import PipelineMode
 from spectrue_core.utils.trace import Trace
 
@@ -96,47 +105,66 @@ class DAGPipeline:
     mode: PipelineMode
     nodes: list[StepNode]
     max_parallel: int = 5
+    _node_order: dict[str, int] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Validate DAG structure."""
+        self._node_order = {node.name: idx for idx, node in enumerate(self.nodes)}
         self._validate_dag()
 
     def _validate_dag(self) -> None:
         """Ensure no cycles and all dependencies exist."""
         node_names = {n.name for n in self.nodes}
+        node_map = {n.name: n for n in self.nodes}
+        dependents: dict[str, set[str]] = {name: set() for name in node_names}
         for node in self.nodes:
             for dep in node.depends_on:
+                if dep == node.name:
+                    raise ValueError(f"Step '{node.name}' cannot depend on itself")
                 if dep not in node_names:
                     raise ValueError(
                         f"Step '{node.name}' depends on unknown step '{dep}'"
                     )
+                dependents[dep].add(node.name)
+        has_edges = any(node.depends_on for node in self.nodes)
+        orphan_nodes = [
+            name
+            for name, node in node_map.items()
+            if not node.depends_on and not dependents.get(name)
+        ]
+        if has_edges and len(self.nodes) > 1 and orphan_nodes:
+            orphan_list = ", ".join(sorted(orphan_nodes, key=self._node_order.get))
+            raise ValueError(f"DAG has orphan steps with no dependencies: {orphan_list}")
         # Check for cycles using DFS
         self._check_cycles()
 
     def _check_cycles(self) -> None:
         """Detect cycles in the dependency graph."""
-        visited: set[str] = set()
-        rec_stack: set[str] = set()
         node_map = {n.name: n for n in self.nodes}
+        visited: set[str] = set()
+        stack: list[str] = []
+        stack_set: set[str] = set()
 
-        def dfs(name: str) -> bool:
+        def dfs(name: str) -> None:
             visited.add(name)
-            rec_stack.add(name)
+            stack.append(name)
+            stack_set.add(name)
             node = node_map.get(name)
             if node:
                 for dep in node.depends_on:
                     if dep not in visited:
-                        if dfs(dep):
-                            return True
-                    elif dep in rec_stack:
-                        return True
-            rec_stack.remove(name)
-            return False
+                        dfs(dep)
+                    elif dep in stack_set:
+                        cycle_start = stack.index(dep)
+                        cycle = stack[cycle_start:] + [dep]
+                        cycle_path = " -> ".join(cycle)
+                        raise ValueError(f"Cycle detected in DAG: {cycle_path}")
+            stack.pop()
+            stack_set.remove(name)
 
-        for node in self.nodes:
+        for node in sorted(self.nodes, key=lambda n: self._node_order.get(n.name, 0)):
             if node.name not in visited:
-                if dfs(node.name):
-                    raise ValueError(f"Cycle detected in DAG involving '{node.name}'")
+                dfs(node.name)
 
     def _topological_sort(self) -> list[list[StepNode]]:
         """
@@ -154,13 +182,21 @@ class DAGPipeline:
             # Find all nodes with in_degree 0
             ready = [name for name in remaining if in_degree[name] == 0]
             if not ready:
-                raise ValueError("Cycle detected - no ready nodes")
+                blocked = {
+                    name: sorted(node_map[name].depends_on)
+                    for name in sorted(remaining, key=self._node_order.get)
+                }
+                raise ValueError(
+                    "Cycle detected in DAG. Remaining nodes blocked by dependencies: "
+                    f"{blocked}"
+                )
 
-            layer = [node_map[name] for name in ready]
+            ready_sorted = sorted(ready, key=self._node_order.get)
+            layer = [node_map[name] for name in ready_sorted]
             layers.append(layer)
 
             # Remove ready nodes and update in_degrees
-            for name in ready:
+            for name in ready_sorted:
                 remaining.remove(name)
                 # Update in_degrees for dependent nodes
                 for other_name in remaining:
@@ -199,7 +235,25 @@ class DAGPipeline:
             )
 
         layers = self._topological_sort()
-        current_ctx = ctx
+        dag_state = DAGExecutionState(started_at=time.time())
+        layer_states: list[LayerExecutionState] = []
+        for layer_idx, layer in enumerate(layers):
+            layer_state = LayerExecutionState(
+                index=layer_idx,
+                steps=[node.name for node in layer],
+            )
+            layer_states.append(layer_state)
+            for node in layer:
+                dag_state.ensure_step(
+                    node.name,
+                    depends_on=node.depends_on,
+                    optional=node.optional,
+                    layer=layer_idx,
+                )
+        dag_state.layers = layer_states
+        dag_state.ordered_steps = [node.name for layer in layers for node in layer]
+
+        current_ctx = ctx.set_extra(DAG_EXECUTION_STATE_KEY, dag_state)
         completed_results: dict[str, PipelineContext] = {}
 
         for layer_idx, layer in enumerate(layers):
@@ -211,16 +265,26 @@ class DAGPipeline:
                         "steps": [n.name for n in layer],
                     },
                 )
+            layer_state = dag_state.layers[layer_idx]
+            layer_state.mark_started(timestamp=time.time())
 
             # Filter nodes that should run
             nodes_to_run = []
             for node in layer:
                 if node.skip_if and node.skip_if(current_ctx):
                     Trace.event("dag_step_skipped", {"step": node.name, "reason": "skip_if"})
+                    step_state = dag_state.ensure_step(
+                        node.name,
+                        depends_on=node.depends_on,
+                        optional=node.optional,
+                        layer=layer_idx,
+                    )
+                    step_state.mark_skipped(timestamp=time.time(), reason="skip_if")
                     continue
                 nodes_to_run.append(node)
 
             if not nodes_to_run:
+                layer_state.mark_completed(timestamp=time.time())
                 continue
 
             # Execute layer in parallel (with semaphore limit)
@@ -229,13 +293,28 @@ class DAGPipeline:
             async def run_node(node: StepNode) -> tuple[str, PipelineContext | Exception]:
                 async with semaphore:
                     try:
+                        step_state = dag_state.ensure_step(
+                            node.name,
+                            depends_on=node.depends_on,
+                            optional=node.optional,
+                            layer=layer_idx,
+                        )
+                        step_state.mark_running(timestamp=time.time())
                         if trace:
                             Trace.event("dag_step_start", {"step": node.name})
                         result = await node.step.run(current_ctx)
+                        step_state.mark_succeeded(timestamp=time.time())
                         if trace:
                             Trace.event("dag_step_end", {"step": node.name})
                         return node.name, result
                     except Exception as e:
+                        step_state = dag_state.ensure_step(
+                            node.name,
+                            depends_on=node.depends_on,
+                            optional=node.optional,
+                            layer=layer_idx,
+                        )
+                        step_state.mark_failed(timestamp=time.time(), error=e)
                         if trace:
                             Trace.event(
                                 "dag_step_error",
@@ -252,10 +331,14 @@ class DAGPipeline:
             )
 
             # Process results and merge contexts
-            for name, result in results:
+            results_by_name = {name: result for name, result in results}
+            merge_order = [node.name for node in nodes_to_run]
+            for name in merge_order:
+                result = results_by_name.get(name)
                 if isinstance(result, Exception):
                     raise result
-                completed_results[name] = result
+                if result is not None:
+                    completed_results[name] = result
 
             # Merge contexts from this layer
             # Properly merge extras from all parallel step results
@@ -263,19 +346,24 @@ class DAGPipeline:
             merged_claims = current_ctx.claims
             merged_sources = current_ctx.sources
             merged_verdict = current_ctx.verdict
+            merged_evidence = current_ctx.evidence
 
-            for name, result in results:
-                if not isinstance(result, Exception):
-                    # Merge extras additively
-                    if result.extras:
-                        merged_extras.update(result.extras)
-                    # Use latest non-empty values
-                    if result.claims:
-                        merged_claims = result.claims
-                    if result.sources:
-                        merged_sources = result.sources
-                    if result.verdict:
-                        merged_verdict = result.verdict
+            for name in merge_order:
+                result = results_by_name.get(name)
+                if isinstance(result, Exception) or result is None:
+                    continue
+                # Merge extras additively
+                if result.extras:
+                    merged_extras.update(result.extras)
+                # Use latest non-empty values deterministically
+                if result.claims:
+                    merged_claims = result.claims
+                if result.sources:
+                    merged_sources = result.sources
+                if result.verdict:
+                    merged_verdict = result.verdict
+                if result.evidence is not None:
+                    merged_evidence = result.evidence
 
             current_ctx = PipelineContext(
                 mode=current_ctx.mode,
@@ -285,15 +373,39 @@ class DAGPipeline:
                 gpt_model=current_ctx.gpt_model,
                 trace=current_ctx.trace,
                 sources=merged_sources,
-                evidence=current_ctx.evidence,
+                evidence=merged_evidence,
                 verdict=merged_verdict,
                 extras=merged_extras,
             )
+            layer_state.mark_completed(timestamp=time.time())
+
+        dag_state.completed_at = time.time()
+        dag_state_summary = dag_state.to_summary()
+        dag_state_dict = dag_state.to_dict()
+        current_ctx = current_ctx.set_extra(
+            DAG_EXECUTION_SUMMARY_KEY,
+            dag_state_summary,
+        ).set_extra(
+            DAG_EXECUTION_STATE_KEY,
+            dag_state_dict,
+        )
+        final_result = current_ctx.get_extra("final_result")
+        if isinstance(final_result, dict):
+            final_result = {
+                **final_result,
+                "dag_execution_summary": dag_state_summary,
+                "dag_execution_state": dag_state_dict,
+            }
+            current_ctx = current_ctx.set_extra("final_result", final_result)
 
         if trace:
             Trace.event(
                 "dag_pipeline_end",
-                {"mode": self.mode.name, "completed_steps": list(completed_results.keys())},
+                {
+                    "mode": self.mode.name,
+                    "completed_steps": list(completed_results.keys()),
+                    "execution_summary": dag_state_summary,
+                },
             )
 
         return current_ctx

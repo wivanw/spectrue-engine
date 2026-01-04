@@ -104,7 +104,7 @@ class ExtractBudgetParams:
     
     # Hard limits (safety bounds)
     min_extracts: int = 2
-    max_extracts: int = 12
+    max_extracts: int = 18
     
     # Quality signal weights (for EVOI computation)
     # w_quote = extra weight when source has quote
@@ -125,7 +125,7 @@ class QueryBudgetParams:
     - Current evidence sufficiency
     """
     # Base query count
-    base_queries: int = 2
+    base_queries: int = 3
     
     # Complexity thresholds
     high_complexity_threshold: float = 0.7
@@ -133,7 +133,7 @@ class QueryBudgetParams:
     
     # Hard limits
     min_queries: int = 1
-    max_queries: int = 4
+    max_queries: int = 6
 
 
 # -----------------------------------------------------------------------------

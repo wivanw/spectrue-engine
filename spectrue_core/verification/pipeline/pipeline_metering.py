@@ -169,24 +169,24 @@ def compute_budget_allocation(metadata: Any) -> BudgetAllocation:
     if worthiness >= 0.75:
         return BudgetAllocation(
             worthiness_tier="high",
-            max_queries=3,
-            max_docs=8,
-            max_escalations=2,
+            max_queries=5,
+            max_docs=12,
+            max_escalations=3,
             defer_allowed=False,
         )
     if worthiness <= 0.35:
         return BudgetAllocation(
             worthiness_tier="low",
-            max_queries=1,
-            max_docs=3,
-            max_escalations=0,
+            max_queries=2,
+            max_docs=5,
+            max_escalations=1,
             defer_allowed=True,
         )
     return BudgetAllocation(
         worthiness_tier="medium",
-        max_queries=2,
-        max_docs=5,
-        max_escalations=1,
+        max_queries=3,
+        max_docs=8,
+        max_escalations=2,
         defer_allowed=False,
     )
 

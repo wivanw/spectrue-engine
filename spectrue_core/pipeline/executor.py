@@ -39,6 +39,10 @@ from spectrue_core.pipeline import (
     PipelineViolation,
     get_mode,
 )
+from spectrue_core.pipeline.constants import (
+    DAG_EXECUTION_STATE_KEY,
+    DAG_EXECUTION_SUMMARY_KEY,
+)
 from spectrue_core.utils.trace import Trace
 
 
@@ -130,6 +134,11 @@ async def execute_pipeline(
         )
 
         # Convert context to result dict
+        final_result = result_ctx.get_extra("final_result")
+        if isinstance(final_result, dict):
+            result_payload = dict(final_result)
+            _attach_execution_metadata(result_payload, result_ctx)
+            return result_payload
         return _context_to_result(result_ctx)
 
     except PipelineViolation as e:
@@ -150,7 +159,7 @@ def _context_to_result(ctx: PipelineContext) -> dict[str, Any]:
     """Convert PipelineContext to result dict for API response."""
     verdict = ctx.verdict or {}
 
-    return {
+    result = {
         "sources": ctx.sources,
         "evidence": ctx.evidence,
         "verified_score": verdict.get("verified_score", 0.5),
@@ -161,9 +170,28 @@ def _context_to_result(ctx: PipelineContext) -> dict[str, Any]:
         "explainability_score": verdict.get("explainability_score", 0.5),
         "rationale": verdict.get("rationale", ""),
         "claim_verdicts": verdict.get("claim_verdicts", []),
-        "execution_state": ctx.get_extra("execution_state"),
-        "evidence_map": ctx.get_extra("evidence_map"),
     }
+    _attach_execution_metadata(result, ctx)
+    return result
+
+
+def _attach_execution_metadata(result: dict[str, Any], ctx: PipelineContext) -> None:
+    """Attach execution metadata without overwriting existing payload keys."""
+    execution_state = ctx.get_extra("execution_state")
+    if execution_state is not None and "execution_state" not in result:
+        result["execution_state"] = execution_state
+
+    evidence_map = ctx.get_extra("evidence_map")
+    if evidence_map is not None and "evidence_map" not in result:
+        result["evidence_map"] = evidence_map
+
+    dag_summary = ctx.get_extra(DAG_EXECUTION_SUMMARY_KEY)
+    if dag_summary is not None and "dag_execution_summary" not in result:
+        result["dag_execution_summary"] = dag_summary
+
+    dag_state = ctx.get_extra(DAG_EXECUTION_STATE_KEY)
+    if dag_state is not None and "dag_execution_state" not in result:
+        result["dag_execution_state"] = dag_state
 
 
 async def validate_claims_for_mode(

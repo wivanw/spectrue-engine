@@ -30,6 +30,10 @@ class TargetSelectionStep:
     Implements the critical gate that prevents per-claim search explosion.
     Only top-K key claims trigger Tavily searches.
 
+    Args:
+        process_all_claims: If True, all claims become targets (deep mode behavior).
+            If False, use Bayesian EVOI model to select targets (normal mode).
+
     Context Input:
         - extras: eligible_claims, graph_result, anchor_claim_id
         - mode (for budget_class derivation)
@@ -38,6 +42,7 @@ class TargetSelectionStep:
         - extras: target_claims, deferred_claims, evidence_sharing
     """
 
+    process_all_claims: bool = False  # Normal mode: False, Deep mode: True
     name: str = "target_selection"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
@@ -63,17 +68,18 @@ class TargetSelectionStep:
             anchor_for_selection = anchor_claim_id if ctx.mode.name == "normal" else None
 
             # DEEP MODE: Verify ALL claims (no target selection limits)
-            if ctx.mode.name == "deep":
-                # All claims are targets in deep mode
+            # M119: Mode logic moved to factory.py via process_all_claims constructor param
+            if self.process_all_claims:
+                # All claims are targets when process_all_claims=True
                 target_claims = list(eligible_claims)
                 deferred_claims = []
                 evidence_sharing = {}
-                target_reasons = {c.get("id"): "deep_mode_all_verified" for c in target_claims}
+                target_reasons = {c.get("id"): "process_all_claims" for c in target_claims}
 
                 Trace.event(
-                    "target_selection.deep_mode_all_claims",
+                    "target_selection.all_claims_targeted",
                     {
-                        "mode": ctx.mode.name,
+                        "process_all_claims": True,
                         "claims_count": len(target_claims),
                         "claim_ids": [c.get("id") for c in target_claims],
                     },

@@ -234,6 +234,10 @@ class AssembleDeepResultStep(Step):
 
         try:
             deep_ctx: DeepClaimContext = ctx.extras.get("deep_claim_ctx", DeepClaimContext())
+            
+            # Mode markers for deep analysis output
+            analysis_mode = "deep"
+            judge_mode = "deep"
 
             claim_results: list[ClaimResult] = []
 
@@ -268,7 +272,7 @@ class AssembleDeepResultStep(Step):
 
             # Build deep_analysis structure for direct inclusion in final_result
             deep_analysis = DeepAnalysisResult(
-                analysis_mode="deep",
+                analysis_mode=analysis_mode,
                 claim_results=tuple(claim_results),
             )
 
@@ -335,8 +339,9 @@ class AssembleDeepResultStep(Step):
                     if not isinstance(cv, dict):
                         continue
                     cid = cv.get("claim_id")
-                    if cid and cid in deep_ctx.judge_outputs:
-                        judge_out = deep_ctx.judge_outputs[cid]
+                    cid_str = str(cid) if cid else ""
+                    if cid_str and cid_str in deep_ctx.judge_outputs:
+                        judge_out = deep_ctx.judge_outputs[cid_str]
                         # Copy RGBA from judge_output to claim_verdict
                         # This is the canonical RGBA for deep mode
                         cv["rgba"] = [
@@ -423,10 +428,10 @@ class AssembleDeepResultStep(Step):
             
             final_result = {
                 **existing_final,
-                "analysis_mode": "deep",
-                "judge_mode": "deep",  # Explicit marker for UI
+                "analysis_mode": analysis_mode,
+                "judge_mode": judge_mode,  # Explicit marker for UI
                 "deep_analysis": {
-                    "analysis_mode": "deep",
+                    "analysis_mode": analysis_mode,
                     "claim_results": claim_results_serialized,
                 },
                 # For UI compatibility, populate 'details' with the claim verdicts
@@ -440,8 +445,26 @@ class AssembleDeepResultStep(Step):
                 # - verified_score (as global)
                 # These are ONLY valid in standard mode.
                 # Deep mode has per-claim RGBA in deep_analysis.claim_results[].judge_output.rgba
-                "cost": (ctx.verdict or {}).get("cost", 0.0),
             }
+            
+            # --- Cost Aggregation (Bug fix: deep mode was showing 0 credits) ---
+            # Get ledger from context and aggregate Tavily + LLM costs
+            ledger = ctx.get_extra("ledger")
+            if ledger:
+                cost_summary = ledger.get_summary().to_dict()
+                total_credits = float(cost_summary.get("total_credits") or 0.0)
+                final_result["cost"] = total_credits
+                final_result["cost_summary"] = cost_summary
+                final_result["credits_used"] = total_credits
+                final_result["credits_used_display"] = f"{total_credits:.2f}"
+                Trace.event("deep.cost_aggregated", {
+                    "total_credits": total_credits,
+                    "event_count": len(cost_summary.get("events", [])),
+                })
+            else:
+                # Fallback if no ledger (shouldn't happen in normal flow)
+                final_result["cost"] = 0.0
+                final_result["cost_summary"] = None
 
             Trace.event("assemble_deep_result.complete", {
                 "result_count": len(claim_results),

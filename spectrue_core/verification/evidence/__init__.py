@@ -31,6 +31,7 @@ from spectrue_core.verification.evidence_verdict_processing import (
     enrich_all_claim_verdicts,
     process_claim_verdicts,
 )
+from .bayesian_update import apply_bayesian_update
 
 __all__ = [
     "build_evidence_pack",
@@ -56,4 +57,5 @@ __all__ = [
     "CANONICAL_VERDICT_STATES",
     "enrich_all_claim_verdicts",
     "process_claim_verdicts",
+    "apply_bayesian_update",
 ]

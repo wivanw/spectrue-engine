@@ -181,11 +181,21 @@ class SearchPolicy:
 
 
 def resolve_profile_name(raw: str | None) -> str:
+    """
+    Map search type to policy profile name.
+    
+    Mapping:
+    - "deep", "advanced" → "deep" profile
+    - "main", "basic", None → "main" profile
+    """
     if not raw:
         return "main"
     normalized = str(raw).strip().lower()
-    if normalized in ("main", "deep"):
-        return normalized
+    # Map both "deep" and "advanced" to deep profile
+    if normalized in ("deep", "advanced"):
+        return "deep"
+    if normalized in ("main", "basic"):
+        return "main"
     return "main"
 
 

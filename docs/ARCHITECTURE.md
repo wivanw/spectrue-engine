@@ -132,6 +132,8 @@ A new composable pipeline architecture that decomposes `ValidationPipeline.execu
 | `PipelineContext` | Immutable threading context | `pipeline/core.py` |
 | `DAGPipeline` | Dependency-aware executor | `pipeline/dag.py` |
 | `StepNode` | Step with depends_on/optional | `pipeline/dag.py` |
+| `DAGExecutionState` | Step status/timing for DAG runs | `pipeline/execution_state.py` |
+| DAG metadata constants | Shared DAG keys/statuses | `pipeline/constants.py` |
 | `PipelineFactory` | Builds pipelines for modes | `pipeline/factory.py` |
 
 **Invariant Steps**: Gate checks that fail fast on invalid input
@@ -145,6 +147,10 @@ A new composable pipeline architecture that decomposes `ValidationPipeline.execu
 - `EvidenceFlowStep`, `OracleFlowStep`, `ResultAssemblyStep`
 
 **Migration**: Enable via `use_step_pipeline: true` feature flag.
+
+**Execution Visibility**: DAG runs record ordered layers and step-level status/timing.
+Summaries are emitted via trace events and attached to results as
+`dag_execution_summary` and `dag_execution_state` for debugging.
 
 ### Bayesian Claim Posterior Model
 
