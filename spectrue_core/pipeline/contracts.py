@@ -21,6 +21,9 @@ INPUT_DOC_KEY = "input_doc"
 CLAIMS_KEY = "claims_contract"
 EVIDENCE_INDEX_KEY = "evidence_index"
 JUDGMENTS_KEY = "judgments"
+STANDARD_JUDGMENT_KEY = "standard_judgment"
+DEEP_CLAIM_RESULTS_KEY = "deep_claim_results"
+FINAL_PAYLOAD_KEY = "final_payload"
 SEARCH_PLAN_KEY = "search_plan"
 RAW_SEARCH_RESULTS_KEY = "raw_search_results"
 RANKED_RESULTS_KEY = "ranked_results"
@@ -287,14 +290,176 @@ class EvidenceIndex:
 
 
 @dataclass(frozen=True, slots=True)
-class Judgments:
-    """Judgment outputs for standard or deep modes."""
+class StandardJudgment:
+    """Standard mode judgment output from article-level LLM judge.
 
-    standard: dict[str, Any] | None = None
-    deep: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    All scores are post-processed (penalties applied, tier caps enforced).
+    """
+
+    verdict: str
+    verdict_score: float
+    rgba: tuple[float, float, float, float]
+    rationale: str
+    analysis: str
+    details: tuple[str, ...] = field(default_factory=tuple)
+    trace: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
         return {
-            "standard": dict(self.standard) if self.standard else None,
-            "deep": [dict(item) for item in self.deep],
+            "verdict": self.verdict,
+            "verdict_score": self.verdict_score,
+            "rgba": list(self.rgba),
+            "rationale": self.rationale,
+            "analysis": self.analysis,
+            "details": list(self.details),
+            "trace": dict(self.trace),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DeepClaimResult:
+    """Per-claim judgment result for deep mode.
+
+    Contract:
+    - status="ok": rgba and verdict_score are populated
+    - status="error": rgba=None, verdict_score=None, error_reason populated
+    - NO fallback 0.5 scores — null on error
+    """
+
+    claim_id: str
+    status: Literal["ok", "error"]
+    verdict: str | None = None
+    verdict_score: float | None = None
+    rgba: tuple[float, float, float, float] | None = None
+    explanation: str | None = None
+    sources_used: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    error_reason: str | None = None
+    trace: dict[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "claim_id": self.claim_id,
+            "status": self.status,
+            "verdict": self.verdict,
+            "verdict_score": self.verdict_score,
+            "rgba": list(self.rgba) if self.rgba else None,
+            "explanation": self.explanation,
+            "sources_used": [dict(s) for s in self.sources_used],
+            "error_reason": self.error_reason,
+            "trace": dict(self.trace),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Judgments:
+    """Judgment outputs for standard or deep modes.
+
+    Mutually exclusive: either standard or deep is populated, not both.
+    """
+
+    standard: StandardJudgment | None = None
+    deep: tuple[DeepClaimResult, ...] = field(default_factory=tuple)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "standard": self.standard.to_payload() if self.standard else None,
+            "deep": [result.to_payload() for result in self.deep],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CostSummary:
+    """Cost breakdown from metering context."""
+
+    credits: float
+    llm_calls: int = 0
+    search_calls: int = 0
+    extract_calls: int = 0
+    breakdown: dict[str, float] = field(default_factory=dict)
+    trace: dict[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "credits": self.credits,
+            "llm_calls": self.llm_calls,
+            "search_calls": self.search_calls,
+            "extract_calls": self.extract_calls,
+            "breakdown": dict(self.breakdown),
+            "trace": dict(self.trace),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class StandardFinalPayload:
+    """Complete API response for standard mode.
+
+    Frontend expects these exact fields for backward compatibility.
+    """
+
+    text: str
+    rgba: tuple[float, float, float, float]
+    sources: tuple[dict[str, Any], ...]
+    rationale: str
+    analysis: str
+    details: tuple[str, ...] = field(default_factory=tuple)
+    anchor_claim: dict[str, Any] | None = None
+    cost_summary: CostSummary | None = None
+    credits: float = 0.0
+    trace: dict[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "text": self.text,
+            "rgba": list(self.rgba),
+            "sources": [dict(s) for s in self.sources],
+            "rationale": self.rationale,
+            "analysis": self.analysis,
+            "details": list(self.details),
+            "anchor_claim": dict(self.anchor_claim) if self.anchor_claim else None,
+            "cost_summary": self.cost_summary.to_payload() if self.cost_summary else None,
+            "credits": self.credits,
+            "trace": dict(self.trace),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DeepAnalysis:
+    """Container for deep mode per-claim results."""
+
+    claim_results: tuple[DeepClaimResult, ...] = field(default_factory=tuple)
+    judged_count: int = 0
+    error_count: int = 0
+    trace: dict[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "claim_results": [r.to_payload() for r in self.claim_results],
+            "judged_count": self.judged_count,
+            "error_count": self.error_count,
+            "trace": dict(self.trace),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DeepFinalPayload:
+    """Complete API response for deep mode.
+
+    No global RGBA — per-claim results only.
+    """
+
+    prepared_text: str
+    claims: tuple[dict[str, Any], ...]
+    deep_analysis: DeepAnalysis
+    cost_summary: CostSummary | None = None
+    credits: float = 0.0
+    trace: dict[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "prepared_text": self.prepared_text,
+            "claims": [dict(c) for c in self.claims],
+            "deep_analysis": self.deep_analysis.to_payload(),
+            "cost_summary": self.cost_summary.to_payload() if self.cost_summary else None,
+            "credits": self.credits,
+            "trace": dict(self.trace),
         }
