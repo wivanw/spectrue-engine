@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from spectrue_core.pipeline.contracts import GATES_KEY, GateDecision, Gates

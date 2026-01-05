@@ -129,6 +129,7 @@ class PipelineFactory:
         from spectrue_core.pipeline.steps import (
             ClaimGraphStep,
             EvidenceCollectStep,
+            EvidenceGatingStep,
             StanceAnnotateStep,
             ClusterEvidenceStep,
             ExtractClaimsStep,
@@ -248,14 +249,21 @@ class PipelineFactory:
                 depends_on=["assert_retrieval_trace"],
             ),
 
-            # Stance annotation always included (improves verdict quality)
+            # EVOI gating decision (after evidence collection, before expensive steps)
+            # Reads EvidenceIndex to compute p_need for stance/cluster
+            StepNode(
+                step=EvidenceGatingStep(),
+                depends_on=["evidence_collect"],
+            ),
+
+            # Stance annotation (controlled by EVOI gate)
             StepNode(
                 step=StanceAnnotateStep(agent=self.agent),
-                depends_on=["evidence_collect"],
+                depends_on=["evidence_gating"],
                 optional=True,
             ),
 
-            # Clustering always included (improves source grouping)
+            # Clustering (controlled by EVOI gate)
             StepNode(
                 step=ClusterEvidenceStep(agent=self.agent),
                 depends_on=["stance_annotate"],

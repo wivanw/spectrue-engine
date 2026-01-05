@@ -31,6 +31,7 @@ from .retrieval import (
     WebSearchStep,
 )
 from .evidence_collect import EvidenceCollectStep
+from .evidence_gating import EvidenceGatingStep
 from .stance_annotate import StanceAnnotateStep
 from .cluster_evidence import ClusterEvidenceStep
 from .judge_standard import JudgeStandardStep
@@ -63,6 +64,7 @@ __all__ = [
     "FetchChunksStep",
     "AssembleRetrievalItemsStep",
     "EvidenceCollectStep",
+    "EvidenceGatingStep",
     "StanceAnnotateStep",
     "ClusterEvidenceStep",
     "JudgeStandardStep",
