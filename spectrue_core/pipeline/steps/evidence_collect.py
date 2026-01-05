@@ -129,7 +129,7 @@ class EvidenceCollectStep:
             by_claim_items: dict[str, list[dict[str, Any]]] = {}
 
             if isinstance(retrieval_items, dict):
-                raw_global = retrieval_items.get("global", [])
+                raw_global = retrieval_items.get("global", []) if self.include_global_pack else []
                 raw_by_claim = retrieval_items.get("by_claim", {})
                 for item in raw_global or []:
                     if isinstance(item, RetrievalItem):
@@ -148,7 +148,12 @@ class EvidenceCollectStep:
                                 by_claim_items[str(claim_id)].append(item)
 
             if global_items or by_claim_items:
-                sources = global_items + [item for items in by_claim_items.values() for item in items]
+                flat_by_claim = [item for items in by_claim_items.values() for item in items]
+                if self.include_global_pack:
+                    sources = global_items + flat_by_claim
+                else:
+                    # Deep mode: ignore any global items (avoid cross-claim/global leakage)
+                    sources = flat_by_claim
             else:
                 by_claim_items = _group_sources_by_claim(sources)
 

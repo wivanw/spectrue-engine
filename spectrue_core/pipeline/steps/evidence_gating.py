@@ -49,7 +49,6 @@ logger = logging.getLogger(__name__)
 class StanceWeights:
     """Logistic regression weights for P(stance needed)."""
     intercept: float = -1.5
-    log_evidence: float = 0.4
     unlabeled_ratio: float = 0.8
     low_tier_ratio: float = 0.5
     log_claims: float = 0.3
@@ -60,7 +59,6 @@ class StanceWeights:
 class ClusterWeights:
     """Logistic regression weights for P(cluster needed)."""
     intercept: float = -2.0
-    log_evidence: float = 0.5
     log_claims: float = 0.6
 
 
@@ -97,27 +95,58 @@ VAR_MAX = 1.0 / 12.0
 
 def _compute_evidence_strength(item) -> float:
     """Compute evidence strength s_i ∈ (0.01, 0.99) from item scores.
-    
-    This is NOT a heuristic - it's a noise model combining
-    two normalized scores into a single belief strength.
+
+    This is a noise model combining two normalized signals into a single belief strength.
+    Missing signals default to 0.5 but SHOULD contribute less weight to the posterior
+    (handled by _compute_update_weight).
     """
     provider = item.provider_score if item.provider_score is not None else 0.5
     sim = item.sim if item.sim is not None else 0.5
-    
+
     s = W_PROVIDER * provider + W_SIM * sim
-    return max(0.01, min(0.99, s))
+    return max(0.01, min(0.99, float(s)))
+
+
+def _compute_update_weight(item) -> float:
+    """How much to trust this item's strength when updating the posterior.
+
+    If scores are missing, we down-weight the update to avoid 'default 0.5' washing out the posterior.
+    This is part of the measurement-noise model, not an 'if quote then...' heuristic.
+    """
+    has_provider = item.provider_score is not None
+    has_sim = item.sim is not None
+    if has_provider and has_sim:
+        return 1.0
+    if has_provider or has_sim:
+        return 0.6
+    return 0.2
 
 
 def _collect_all_items(evidence_index: EvidenceIndex) -> list:
-    """Collect all evidence items from index (by_claim + global)."""
-    items = []
-    
+    """Collect evidence items from index (by_claim + global), de-duplicated by URL.
+
+    Retrieval can surface the same URL in multiple packs (per-claim + global). For EVOI gating,
+    counting duplicates inflates 'amount of evidence' without adding information and makes cost/uncertainty wrong.
+    """
+    items: list = []
+    seen: set[str] = set()
+
+    def _push(it) -> None:
+        url = (getattr(it, "url", None) or "").strip()
+        key = url or f"__no_url__:{id(it)}"
+        if key in seen:
+            return
+        seen.add(key)
+        items.append(it)
+
     for pack in evidence_index.by_claim_id.values():
-        items.extend(pack.items)
-    
+        for it in getattr(pack, "items", ()) or ():
+            _push(it)
+
     if evidence_index.global_pack:
-        items.extend(evidence_index.global_pack.items)
-    
+        for it in getattr(evidence_index.global_pack, "items", ()) or ():
+            _push(it)
+
     return items
 
 
@@ -129,6 +158,7 @@ def compute_beta_uncertainty(evidence_index: EvidenceIndex) -> float:
     - Strong sources → increase alpha (belief in informativeness)
     - Weak sources → increase beta (belief in noise)
     - More evidence → lower variance → lower uncertainty
+    - Missing scores → down-weighted update (measurement noise model)
     
     Returns:
         Normalized uncertainty in [0, 1]
@@ -143,8 +173,9 @@ def compute_beta_uncertainty(evidence_index: EvidenceIndex) -> float:
     
     for item in items:
         s = _compute_evidence_strength(item)
-        alpha += s
-        beta += (1.0 - s)
+        w = _compute_update_weight(item)
+        alpha += w * s
+        beta += w * (1.0 - s)
     
     # Beta posterior variance
     var = (alpha * beta) / ((alpha + beta) ** 2 * (alpha + beta + 1))
@@ -288,7 +319,6 @@ def _compute_stance_gate(
     # Compute logit with feature contributions
     contributions = {
         "intercept": weights.intercept,
-        "log_evidence": weights.log_evidence * features["log_evidence"],
         "unlabeled": weights.unlabeled_ratio * features["unlabeled_ratio"],
         "low_tier": weights.low_tier_ratio * features["low_tier_ratio"],
         "log_claims": weights.log_claims * features["log_claims"],
@@ -342,7 +372,6 @@ def _compute_cluster_gate(
     
     contributions = {
         "intercept": weights.intercept,
-        "log_evidence": weights.log_evidence * features["log_evidence"],
         "log_claims": weights.log_claims * features["log_claims"],
     }
     
