@@ -69,51 +69,107 @@ DEFAULT_CLUSTER_WEIGHTS = ClusterWeights()
 
 
 # =============================================================================
-# UNCERTAINTY ESTIMATION
+# UNCERTAINTY ESTIMATION (PRE-STANCE SIGNALS ONLY)
 # =============================================================================
 
-def _compute_evidence_uncertainty(evidence_index: EvidenceIndex) -> float:
-    """Compute uncertainty from evidence stance distribution.
+def _compute_score_ambiguity(items: list) -> float:
+    """Compute ambiguity from evidence scores (not stance).
     
-    Returns entropy of support/refute/neutral distribution.
-    High entropy = high uncertainty = stance annotation more valuable.
+    High ambiguity = no clear "winners" among sources = stance more valuable.
+    Uses softmax entropy over provider_score + sim combination.
     """
-    n_support = 0
-    n_refute = 0
-    n_neutral = 0
+    if not items:
+        return 1.0  # Maximum ambiguity when no evidence
     
-    for pack in evidence_index.by_claim_id.values():
-        for item in pack.items:
-            stance = (item.stance or "").upper()
-            if stance == "SUPPORT":
-                n_support += 1
-            elif stance == "REFUTE":
-                n_refute += 1
-            else:
-                n_neutral += 1
+    scores = []
+    for item in items:
+        # Combine provider_score and similarity
+        provider = item.provider_score if item.provider_score else 0.5
+        sim = item.sim if item.sim else 0.5
+        combined = 0.6 * provider + 0.4 * sim
+        scores.append(combined)
     
-    total = n_support + n_refute + n_neutral
-    if total == 0:
-        return 1.0  # Maximum uncertainty when no evidence
+    if not scores or len(scores) < 2:
+        return 0.5  # Moderate ambiguity for single source
     
-    # Compute entropy (normalized to 0-1)
-    probs = [n_support / total, n_refute / total, n_neutral / total]
+    # Softmax to get probability distribution
+    max_score = max(scores)
+    exp_scores = [math.exp(s - max_score) for s in scores]
+    sum_exp = sum(exp_scores)
+    if sum_exp == 0:
+        return 1.0
+    
+    probs = [e / sum_exp for e in exp_scores]
+    
+    # Entropy of softmax distribution
     entropy = 0.0
     for p in probs:
         if p > 0:
             entropy -= p * math.log(p + 1e-10)
     
-    # Normalize by max entropy (log 3)
-    max_entropy = math.log(3)
-    return entropy / max_entropy
+    # Normalize by max entropy (log N)
+    max_entropy = math.log(len(probs))
+    return entropy / max_entropy if max_entropy > 0 else 0.0
+
+
+def _compute_tier_uncertainty(items: list) -> float:
+    """Compute uncertainty from tier distribution.
+    
+    More low-tier sources = higher uncertainty = stance more valuable.
+    """
+    if not items:
+        return 1.0
+    
+    n_high = sum(1 for item in items if (item.tier or "").upper() in {"A", "A'", "B"})
+    low_tier_ratio = 1.0 - (n_high / len(items))
+    return low_tier_ratio
+
+
+def _compute_pre_stance_uncertainty(evidence_index: EvidenceIndex) -> float:
+    """Compute uncertainty from PRE-STANCE signals only.
+    
+    Does NOT use item.stance (which would be circular).
+    Uses:
+    - Score ambiguity (no clear best sources)
+    - Tier distribution (more low-tier = higher uncertainty)
+    - Quote sparsity (fewer quotes = less grounding = higher uncertainty)
+    """
+    all_items = []
+    
+    # Collect from by_claim_id
+    for pack in evidence_index.by_claim_id.values():
+        all_items.extend(pack.items)
+    
+    # Collect from global_pack if available (standard mode)
+    if evidence_index.global_pack:
+        all_items.extend(evidence_index.global_pack.items)
+    
+    if not all_items:
+        return 1.0  # Maximum uncertainty when no evidence
+    
+    # Weighted combination of pre-stance uncertainty signals
+    score_ambiguity = _compute_score_ambiguity(all_items)
+    tier_uncertainty = _compute_tier_uncertainty(all_items)
+    
+    n_with_quote = sum(1 for item in all_items if item.quote)
+    quote_sparsity = 1.0 - (n_with_quote / len(all_items))
+    
+    # Combine signals (weights are calibratable priors)
+    uncertainty = (
+        0.4 * score_ambiguity +
+        0.35 * tier_uncertainty +
+        0.25 * quote_sparsity
+    )
+    
+    return uncertainty
 
 
 def _compute_delta_utility(uncertainty: float, base_utility: float = 0.05) -> float:
     """Compute expected utility improvement from running a step.
     
     Higher uncertainty = higher potential improvement.
+    k is a calibratable prior.
     """
-    # k * uncertainty where k is calibratable
     k = 0.15
     return base_utility + k * uncertainty
 
@@ -126,14 +182,26 @@ def _extract_evidence_features(
     evidence_index: EvidenceIndex,
     claims: list[dict[str, Any]],
 ) -> dict[str, float]:
-    """Extract features from EvidenceIndex (not raw sources)."""
+    """Extract features from EvidenceIndex (includes global_pack for standard mode)."""
     total_items = 0
     n_with_stance = 0
     n_high_tier = 0
     n_with_quote = 0
     
+    # Collect from by_claim_id
     for pack in evidence_index.by_claim_id.values():
         for item in pack.items:
+            total_items += 1
+            if item.stance:
+                n_with_stance += 1
+            if (item.tier or "").upper() in {"A", "A'", "B"}:
+                n_high_tier += 1
+            if item.quote:
+                n_with_quote += 1
+    
+    # Also collect from global_pack (standard mode)
+    if evidence_index.global_pack:
+        for item in evidence_index.global_pack.items:
             total_items += 1
             if item.stance:
                 n_with_stance += 1
@@ -354,8 +422,8 @@ class EvidenceGatingStep:
             # Extract features from EvidenceIndex
             features = _extract_evidence_features(evidence_index, claims)
             
-            # Compute uncertainty from evidence
-            uncertainty = _compute_evidence_uncertainty(evidence_index)
+            # Compute uncertainty from PRE-STANCE signals (not circular)
+            uncertainty = _compute_pre_stance_uncertainty(evidence_index)
             
             # Compute gates
             stance_gate = _compute_stance_gate(features, uncertainty, ctx)
