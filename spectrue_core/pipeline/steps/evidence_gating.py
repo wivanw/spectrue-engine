@@ -69,99 +69,88 @@ DEFAULT_CLUSTER_WEIGHTS = ClusterWeights()
 
 
 # =============================================================================
-# UNCERTAINTY ESTIMATION (PRE-STANCE SIGNALS ONLY)
+# BAYESIAN UNCERTAINTY (BETA-BERNOULLI MODEL)
 # =============================================================================
+# 
+# We estimate: θ = "probability that evidence is sufficiently informative"
+# 
+# Using Beta-Bernoulli with continuous noisy evidence:
+#   - Each EvidenceItem contributes strength s_i ∈ (0,1)
+#   - s_i = w_provider * provider_score + w_sim * sim
+#   - Posterior: Beta(alpha, beta) where:
+#     - alpha = alpha0 + Σ s_i
+#     - beta = beta0 + Σ (1 - s_i)
+#
+# Uncertainty = normalized variance of posterior
 
-def _compute_score_ambiguity(items: list) -> float:
-    """Compute ambiguity from evidence scores (not stance).
+# Evidence combination weights (policy priors, calibratable)
+W_PROVIDER = 0.6  # Weight for provider_score
+W_SIM = 0.4       # Weight for similarity score
+
+# Prior hyperparameters (uninformative)
+ALPHA0 = 1.0
+BETA0 = 1.0
+
+# Maximum variance for Beta(1,1)
+VAR_MAX = 1.0 / 12.0
+
+
+def _compute_evidence_strength(item) -> float:
+    """Compute evidence strength s_i ∈ (0.01, 0.99) from item scores.
     
-    High ambiguity = no clear "winners" among sources = stance more valuable.
-    Uses softmax entropy over provider_score + sim combination.
+    This is NOT a heuristic - it's a noise model combining
+    two normalized scores into a single belief strength.
     """
-    if not items:
-        return 1.0  # Maximum ambiguity when no evidence
+    provider = item.provider_score if item.provider_score is not None else 0.5
+    sim = item.sim if item.sim is not None else 0.5
     
-    scores = []
-    for item in items:
-        # Combine provider_score and similarity
-        provider = item.provider_score if item.provider_score else 0.5
-        sim = item.sim if item.sim else 0.5
-        combined = 0.6 * provider + 0.4 * sim
-        scores.append(combined)
-    
-    if not scores or len(scores) < 2:
-        return 0.5  # Moderate ambiguity for single source
-    
-    # Softmax to get probability distribution
-    max_score = max(scores)
-    exp_scores = [math.exp(s - max_score) for s in scores]
-    sum_exp = sum(exp_scores)
-    if sum_exp == 0:
-        return 1.0
-    
-    probs = [e / sum_exp for e in exp_scores]
-    
-    # Entropy of softmax distribution
-    entropy = 0.0
-    for p in probs:
-        if p > 0:
-            entropy -= p * math.log(p + 1e-10)
-    
-    # Normalize by max entropy (log N)
-    max_entropy = math.log(len(probs))
-    return entropy / max_entropy if max_entropy > 0 else 0.0
+    s = W_PROVIDER * provider + W_SIM * sim
+    return max(0.01, min(0.99, s))
 
 
-def _compute_tier_uncertainty(items: list) -> float:
-    """Compute uncertainty from tier distribution.
+def _collect_all_items(evidence_index: EvidenceIndex) -> list:
+    """Collect all evidence items from index (by_claim + global)."""
+    items = []
     
-    More low-tier sources = higher uncertainty = stance more valuable.
-    """
-    if not items:
-        return 1.0
-    
-    n_high = sum(1 for item in items if (item.tier or "").upper() in {"A", "A'", "B"})
-    low_tier_ratio = 1.0 - (n_high / len(items))
-    return low_tier_ratio
-
-
-def _compute_pre_stance_uncertainty(evidence_index: EvidenceIndex) -> float:
-    """Compute uncertainty from PRE-STANCE signals only.
-    
-    Does NOT use item.stance (which would be circular).
-    Uses:
-    - Score ambiguity (no clear best sources)
-    - Tier distribution (more low-tier = higher uncertainty)
-    - Quote sparsity (fewer quotes = less grounding = higher uncertainty)
-    """
-    all_items = []
-    
-    # Collect from by_claim_id
     for pack in evidence_index.by_claim_id.values():
-        all_items.extend(pack.items)
+        items.extend(pack.items)
     
-    # Collect from global_pack if available (standard mode)
     if evidence_index.global_pack:
-        all_items.extend(evidence_index.global_pack.items)
+        items.extend(evidence_index.global_pack.items)
     
-    if not all_items:
-        return 1.0  # Maximum uncertainty when no evidence
+    return items
+
+
+def compute_beta_uncertainty(evidence_index: EvidenceIndex) -> float:
+    """Compute uncertainty as normalized Beta posterior variance.
     
-    # Weighted combination of pre-stance uncertainty signals
-    score_ambiguity = _compute_score_ambiguity(all_items)
-    tier_uncertainty = _compute_tier_uncertainty(all_items)
+    This is proper Bayesian:
+    - Each evidence item contributes soft belief s_i
+    - Strong sources → increase alpha (belief in informativeness)
+    - Weak sources → increase beta (belief in noise)
+    - More evidence → lower variance → lower uncertainty
     
-    n_with_quote = sum(1 for item in all_items if item.quote)
-    quote_sparsity = 1.0 - (n_with_quote / len(all_items))
+    Returns:
+        Normalized uncertainty in [0, 1]
+    """
+    items = _collect_all_items(evidence_index)
     
-    # Combine signals (weights are calibratable priors)
-    uncertainty = (
-        0.4 * score_ambiguity +
-        0.35 * tier_uncertainty +
-        0.25 * quote_sparsity
-    )
+    if not items:
+        return 1.0  # Maximum uncertainty with no evidence
     
-    return uncertainty
+    alpha = ALPHA0
+    beta = BETA0
+    
+    for item in items:
+        s = _compute_evidence_strength(item)
+        alpha += s
+        beta += (1.0 - s)
+    
+    # Beta posterior variance
+    var = (alpha * beta) / ((alpha + beta) ** 2 * (alpha + beta + 1))
+    
+    # Normalize to [0, 1]
+    return var / VAR_MAX
 
 
 def _compute_delta_utility(uncertainty: float, base_utility: float = 0.05) -> float:
@@ -422,8 +411,8 @@ class EvidenceGatingStep:
             # Extract features from EvidenceIndex
             features = _extract_evidence_features(evidence_index, claims)
             
-            # Compute uncertainty from PRE-STANCE signals (not circular)
-            uncertainty = _compute_pre_stance_uncertainty(evidence_index)
+            # Compute uncertainty using Beta-Bernoulli posterior variance
+            uncertainty = compute_beta_uncertainty(evidence_index)
             
             # Compute gates
             stance_gate = _compute_stance_gate(features, uncertainty, ctx)
