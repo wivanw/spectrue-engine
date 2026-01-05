@@ -229,12 +229,27 @@ class EvidenceCollectStep:
             if execution_state is not None and hasattr(execution_state, "claim_states"):
                 ctx = ctx.set_extra("execution_states", execution_state.claim_states)
 
-            return (
-                ctx.with_update(sources=collection.sources, evidence=collection.pack)
-                .set_extra("evidence_collection", collection)
-                .set_extra("evidence_by_claim", evidence_by_claim)
-                .set_extra(EVIDENCE_INDEX_KEY, evidence_index)
-            )
+            # CRITICAL: Only populate ctx.evidence/ctx.sources for standard mode
+            # Deep mode must NOT have global evidence pollution
+            if self.include_global_pack:
+                # Standard mode: update ctx.evidence and ctx.sources with global pack
+                return (
+                    ctx.with_update(sources=collection.sources, evidence=collection.pack)
+                    .set_extra("evidence_collection", collection)
+                    .set_extra("evidence_by_claim", evidence_by_claim)
+                    .set_extra(EVIDENCE_INDEX_KEY, evidence_index)
+                )
+            else:
+                # Deep mode: only set EvidenceIndex, do NOT pollute ctx.evidence
+                Trace.event(
+                    "evidence_collect.deep_mode_no_global",
+                    {"claims_count": len(by_claim_contract)},
+                )
+                return (
+                    ctx.set_extra("evidence_collection", collection)
+                    .set_extra("evidence_by_claim", evidence_by_claim)
+                    .set_extra(EVIDENCE_INDEX_KEY, evidence_index)
+                )
 
         except Exception as e:
             logger.exception("[EvidenceCollectStep] Failed: %s", e)

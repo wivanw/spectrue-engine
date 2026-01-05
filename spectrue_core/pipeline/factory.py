@@ -154,41 +154,37 @@ class PipelineFactory:
         # Optional=True allows graceful failure without blocking pipeline
 
         return [
-            # Infrastructure
+            # ==================== INFRASTRUCTURE ====================
             StepNode(step=MeteringSetupStep(config=config, agent=self.agent, search_mgr=self.search_mgr)),
 
-            # Invariants
-            StepNode(
-                step=AssertNonEmptyClaimsStep(),
-                depends_on=["extract_claims"],
-            ),
-
-            # Input preparation
+            # ==================== INPUT PREPARATION ====================
             StepNode(
                 step=PrepareInputStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
                 depends_on=["metering_setup"],
             ),
 
-            # Claim extraction
+            # ==================== CLAIM EXTRACTION ====================
             StepNode(
                 step=ExtractClaimsStep(agent=self.agent),
                 depends_on=["prepare_input"],
             ),
 
-            # Inline source verification
+            # Post-extraction invariant
+            StepNode(
+                step=AssertNonEmptyClaimsStep(),
+                depends_on=["extract_claims"],
+            ),
+
+            # ==================== PARALLEL: INLINE + GATING + GRAPH ====================
             StepNode(
                 step=VerifyInlineSourcesStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
                 depends_on=["extract_claims"],
             ),
-
-            # Semantic gating
             StepNode(
                 step=EvaluateSemanticGatingStep(agent=self.agent),
                 depends_on=["extract_claims"],
                 optional=True,
             ),
-
-            # Claim graph
             StepNode(
                 step=ClaimGraphStep(
                     claim_graph=self.claim_graph,
@@ -325,34 +321,32 @@ class PipelineFactory:
         # Optional=True allows graceful failure without blocking pipeline
 
         return [
-            # Infrastructure
+            # ==================== INFRASTRUCTURE ====================
             StepNode(step=MeteringSetupStep(config=config, agent=self.agent, search_mgr=self.search_mgr)),
 
-            # Minimal invariants
-            StepNode(
-                step=AssertNonEmptyClaimsStep(),
-                depends_on=["extract_claims"],
-            ),
-
-            # Input preparation
+            # ==================== INPUT PREPARATION ====================
             StepNode(
                 step=PrepareInputStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
                 depends_on=["metering_setup"],
             ),
 
-            # Claim extraction
+            # ==================== CLAIM EXTRACTION ====================
             StepNode(
                 step=ExtractClaimsStep(agent=self.agent),
                 depends_on=["prepare_input"],
             ),
 
-            # Inline source verification
+            # Post-extraction invariant
+            StepNode(
+                step=AssertNonEmptyClaimsStep(),
+                depends_on=["extract_claims"],
+            ),
+
+            # ==================== PARALLEL: INLINE + GRAPH ====================
             StepNode(
                 step=VerifyInlineSourcesStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
                 depends_on=["extract_claims"],
             ),
-
-            # Claim graph (for clustering)
             StepNode(
                 step=ClaimGraphStep(
                     claim_graph=self.claim_graph,
@@ -361,7 +355,7 @@ class PipelineFactory:
                 depends_on=["extract_claims"],
             ),
 
-            # Target selection (all claims for deep mode)
+            # ==================== TARGET SELECTION (ALL CLAIMS) ====================
             StepNode(
                 step=TargetSelectionStep(process_all_claims=True),
                 depends_on=["claim_graph"],
