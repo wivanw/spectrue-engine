@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from spectrue_core.pipeline.contracts import GATES_KEY, Gates
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
@@ -42,7 +43,10 @@ def _group_sources_by_claim(sources: list[dict[str, Any]]) -> dict[str, list[dic
 
 @dataclass
 class ClusterEvidenceStep:
-    """Optional clustering to rebuild evidence pack with stances."""
+    """Optional clustering to rebuild evidence pack with stances.
+
+    Controlled by EVOI gating policy. Reads ctx.extras["gates"].
+    """
 
     agent: Any  # FactCheckerAgent
     name: str = "cluster_evidence"
@@ -50,6 +54,18 @@ class ClusterEvidenceStep:
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
             if ctx.get_extra("gating_rejected") or ctx.get_extra("oracle_hit"):
+                return ctx
+
+            # Check gate policy (EVOI decision from SemanticGatingStep)
+            gates: Gates | None = ctx.get_extra(GATES_KEY)
+            if gates is not None and not gates.is_cluster_enabled():
+                Trace.event(
+                    "cluster_evidence.skipped_by_gate",
+                    {
+                        "reasons": list(gates.cluster.reasons) if gates.cluster else [],
+                        "p_need": gates.cluster.p_need if gates.cluster else 0,
+                    },
+                )
                 return ctx
 
             collection = ctx.get_extra("evidence_collection")

@@ -179,13 +179,12 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     kinds = [c.kwargs.get("trace_kind") for c in calls]
     
     assert "claim_extraction" in kinds
-    # clustering might be skipped if only 1 claim and few sources? 
-    # Logic in _get_final_analysis: if claims and sources_list: await cluster_evidence
-    # We returned 5 sources.
-    assert "stance_clustering" in kinds, f"Kinds found: {kinds}. Logs:\n" + "\n".join(caplog.messages)
-    # In deep mode, score_evidence_parallel is used instead of score_evidence
-    # so "score_evidence" trace_kind may not appear (score_single_claim is used)
-    assert "stance_clustering" in kinds or "score_evidence" in kinds or "score_single_claim" in kinds, f"Kinds found: {kinds}. Logs:\n" + "\n".join(caplog.messages)
+    # M124: stance_clustering may be skipped by EVOI gating policy if expected_gain < threshold
+    # This is correct behavior - gating decides based on evidence signals
+    # The test should verify that either stance runs OR scoring runs (one or both)
+    has_stance = "stance_clustering" in kinds
+    has_scoring = "score_evidence" in kinds or "score_single_claim" in kinds
+    assert has_stance or has_scoring, f"Expected at least one of stance_clustering/score_evidence/score_single_claim. Kinds: {kinds}"
 
 
 @pytest.mark.asyncio

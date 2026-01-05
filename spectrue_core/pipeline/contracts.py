@@ -28,6 +28,57 @@ SEARCH_PLAN_KEY = "search_plan"
 RAW_SEARCH_RESULTS_KEY = "raw_search_results"
 RANKED_RESULTS_KEY = "ranked_results"
 RETRIEVAL_ITEMS_KEY = "retrieval_items"
+GATES_KEY = "gates"
+
+
+@dataclass(frozen=True, slots=True)
+class GateDecision:
+    """Decision on whether to enable an expensive analysis step.
+
+    Used for EVOI-based gating of stance/cluster steps.
+    """
+
+    enabled: bool
+    p_need: float  # Probability that step will change the verdict
+    expected_gain: float  # Expected utility improvement
+    expected_cost: float  # Cost in credits
+    threshold: float  # Decision threshold
+    reasons: tuple[str, ...] = ()  # Explanatory factors
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "p_need": self.p_need,
+            "expected_gain": self.expected_gain,
+            "expected_cost": self.expected_cost,
+            "threshold": self.threshold,
+            "reasons": list(self.reasons),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Gates:
+    """Collection of gate decisions for expensive analysis steps."""
+
+    stance: GateDecision | None = None
+    cluster: GateDecision | None = None
+    summary: GateDecision | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "stance": self.stance.to_payload() if self.stance else None,
+            "cluster": self.cluster.to_payload() if self.cluster else None,
+            "summary": self.summary.to_payload() if self.summary else None,
+        }
+
+    def is_stance_enabled(self) -> bool:
+        return self.stance is not None and self.stance.enabled
+
+    def is_cluster_enabled(self) -> bool:
+        return self.cluster is not None and self.cluster.enabled
+
+    def is_summary_enabled(self) -> bool:
+        return self.summary is not None and self.summary.enabled
 
 
 @dataclass(frozen=True, slots=True)
