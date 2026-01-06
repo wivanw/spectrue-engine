@@ -11,6 +11,7 @@ from spectrue_core.verification.evidence.evidence_pack import Claim, EvidencePac
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.agents.llm_router import LLMRouter
 from spectrue_core.agents.skills.claims import ClaimExtractionSkill
 from spectrue_core.agents.skills.clustering import ClusteringSkill
 from spectrue_core.agents.skills.scoring import ScoringSkill
@@ -35,10 +36,28 @@ class FactCheckerAgent:
         self.runtime = (config.runtime if config else None) or EngineRuntimeConfig.load_from_env()
         api_key = config.openai_api_key if config else None
 
-        self.llm_client = LLMClient(
+        # Create OpenAI client (Responses API)
+        openai_client = LLMClient(
             openai_api_key=api_key,
             default_timeout=float(self.runtime.llm.nano_timeout_sec),
             max_retries=3,
+        )
+
+        # Create DeepSeek client (Native API compatible with Chat Completions)
+        deepseek_client = None
+        if self.runtime.llm.deepseek_base_url and self.runtime.llm.deepseek_api_key:
+            deepseek_client = LLMClient(
+                openai_api_key=self.runtime.llm.deepseek_api_key,
+                base_url=self.runtime.llm.deepseek_base_url,
+                default_timeout=float(self.runtime.llm.cluster_timeout_sec),
+                max_retries=3,
+            )
+
+        # Create router that directs models to appropriate clients
+        self.llm_client = LLMRouter(
+            openai_client=openai_client,
+            chat_client=deepseek_client,
+            chat_model_names=list(self.runtime.llm.deepseek_model_names) if deepseek_client else [],
         )
 
         # Expose LLM client for pipeline steps
@@ -188,9 +207,18 @@ Output JSON: {{ "is_relevant": true/false, "reason": "..." }}
             article_excerpt: First ~500 chars of article for context
             
         Returns:
-            dict with 'is_relevant', 'is_primary', 'reason' keys
+            dict with 'is_relevant', 'is_primary', 'reason', 'verification_skipped' keys
         """
         from spectrue_core.utils.trace import Trace
+
+        # Short-circuit: if inline source verification is disabled
+        if not self.runtime.llm.enable_inline_source_verification:
+            return {
+                "is_relevant": True,
+                "is_primary": False,
+                "reason": "inline_verification_disabled",
+                "verification_skipped": True,
+            }
 
         if not claims or not inline_source:
             return {"is_relevant": False, "is_primary": False, "reason": "empty_input"}
@@ -204,42 +232,38 @@ Output JSON: {{ "is_relevant": true/false, "reason": "..." }}
             f"- {c.get('text', '')}" for c in claims[:5]
         ])
 
-        # Detect "X said/announced" pattern for auto-primary rule
-        # If claim mentions someone saying something and URL is their platform, it's primary
-        prompt = f"""Analyze if this source URL is relevant as PRIMARY EVIDENCE for the claims.
+        # Simplified prompt without if/then rules
+        prompt = f"""Analyze if this source URL is a PRIMARY SOURCE for the claims.
 
-Article Excerpt (for context):
+Article Excerpt:
 "{article_excerpt[:500]}"
 
-Extracted Claims:
+Claims:
 {claims_text}
 
-Inline Source Found:
+Source:
 - URL: {url}
 - Domain: {domain}
-- Anchor text: "{anchor}"
+- Anchor: "{anchor}"
 
-Task:
-1. Determine if this source is RELEVANT to any of the claims
-2. Determine if this is a PRIMARY SOURCE (the original source being quoted/referenced)
+Evaluate:
+1. Is this source RELEVANT to any claim?
+2. Is this source PRIMARY (the original issuer of the information) or SECONDARY (coverage/reporting about it)?
 
-Rules for PRIMARY source detection:
-- If a claim says "X announced/said/posted" and the URL is X's official platform (their official site, social media), it's PRIMARY
-- If the URL is the original document/statement being cited, it's PRIMARY
-- News articles about a topic are NOT primary (they are secondary coverage)
-- Social media of the article author is NOT primary (it's just metadata)
+A PRIMARY source is where the information originated (official statement, original document, author's own platform).
+A SECONDARY source reports or discusses information from elsewhere.
 
-Output JSON: {{ "is_relevant": true/false, "is_primary": true/false, "reason": "brief explanation" }}
+Output JSON: {{ "is_relevant": true/false, "is_primary": true/false, "reason": "one sentence explanation" }}
 """
 
         try:
             result = await self.llm_client.call_json(
-                model="gpt-5-nano",
+                model=self.runtime.llm.model_inline_source_verification,
                 input=prompt,
-                instructions="You are a source relevance analyzer for fact-checking.",
+                instructions="You are a source classification assistant. Distinguish primary sources (original issuers) from secondary coverage.",
                 reasoning_effort="low",
                 timeout=10.0,
-                trace_kind="inline_source_verification"
+                trace_kind="inline_source_verification",
             )
 
             is_relevant = bool(result.get("is_relevant", False))
@@ -251,13 +275,12 @@ Output JSON: {{ "is_relevant": true/false, "is_primary": true/false, "reason": "
                 "domain": domain,
                 "is_relevant": is_relevant,
                 "is_primary": is_primary,
-                "reason": reason  # Full reason for debugging
+                "reason": reason
             })
 
             if is_primary:
                 logger.debug("[Agent] Inline source PRIMARY: %s", domain)
             elif not is_relevant:
-                # Full reason available in trace, keep console clean
                 logger.debug("[Agent] Inline source rejected: %s - %s", domain, reason[:60])
 
             return {

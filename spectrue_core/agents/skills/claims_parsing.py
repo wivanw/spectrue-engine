@@ -34,6 +34,7 @@ SEARCH_INTENTS = [
     "quote_attribution",
     "prediction_opinion",
     "viral_rumor",
+    "forecast",
 ]
 
 ARTICLE_INTENTS = ["news", "evergreen", "official", "opinion", "prediction"]

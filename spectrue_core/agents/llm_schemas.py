@@ -253,39 +253,29 @@ QUERY_GENERATION_SCHEMA: dict[str, Any] = {
 
 CLAIM_EXTRACTION_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "additionalProperties": False,
-    "required": ["article_intent", "claims"],
+    "additionalProperties": True,  # Allow extra fields (strict=False in API)
+    "required": ["claims"],  # Only claims required, article_intent can default to "unknown"
     "properties": {
         "article_intent": {"type": "string", "enum": ARTICLE_INTENTS},
         "claims": {
             "type": "array",
             "items": {
                 "type": "object",
-                "additionalProperties": False,
+                "additionalProperties": True,  # Allow extra fields (strict=False in API)
                 "required": [
+                    # Core claim fields (must have)
                     "text",
                     "normalized_text",
-                    "type",
                     "claim_category",
-                    "satire_likelihood",
-                    "topic_group",
-                    "topic_key",
-                    "importance",
-                    "check_worthiness",
                     "harm_potential",
+                    # Orchestration fields (must have for routing)
                     "verification_target",
                     "claim_role",
-                    "structure",
-                    "search_locale_plan",
-                    "retrieval_policy",
-                    "metadata_confidence",
-                    "search_strategy",
-                    "query_candidates",
-                    "search_method",
-                    "search_queries",
-                    "evidence_req",
-                    "evidence_need",
-                    "check_oracle",
+                    # The rest are optional - fail-soft with defaults applied downstream:
+                    # type, satire_likelihood, topic_group, topic_key, importance, check_worthiness,
+                    # structure, search_locale_plan, retrieval_policy, metadata_confidence,
+                    # search_strategy, query_candidates, search_method, search_queries,
+                    # evidence_req, evidence_need, check_oracle
                 ],
                 "properties": {
                     "text": {"type": "string", "minLength": 1},
@@ -383,6 +373,129 @@ CLAIM_EXTRACTION_SCHEMA: dict[str, Any] = {
     },
 }
 
+
+CORE_CLAIM_DESCRIPTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["claims"],
+    "properties": {
+        "article_intent": {"type": "string", "enum": ARTICLE_INTENTS},
+        "claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["text", "normalized_text"],
+                "properties": {
+                    "text": {"type": "string", "minLength": 1},
+                    "normalized_text": {"type": "string", "minLength": 1},
+                },
+            },
+        },
+    },
+}
+
+CLAIM_ENRICHMENT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    # Relaxed requirements for enrichment failures
+    "required": [
+        "claim_category",
+        "harm_potential",
+        "verification_target",
+        "claim_role",
+    ],
+    "properties": {
+        "claim_category": {"type": "string", "enum": CLAIM_CATEGORY_VALUES},
+        "satire_likelihood": {"type": "number", "minimum": 0, "maximum": 1},
+        "topic_group": {"type": "string", "enum": TOPIC_GROUPS},
+        "topic_key": {"type": "string"},
+        "importance": {"type": "number", "minimum": 0, "maximum": 1},
+        "check_worthiness": {"type": "number", "minimum": 0, "maximum": 1},
+        "harm_potential": {"type": "integer", "minimum": 1, "maximum": 5},
+        "verification_target": {
+            "type": "string",
+            "enum": VERIFICATION_TARGET_VALUES,
+        },
+        "claim_role": {"type": "string", "enum": CLAIM_ROLE_VALUES},
+        "structure": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["type"],  # Only type is required, rest have defaults
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": CLAIM_STRUCTURE_TYPE_VALUES,
+                },
+                "premises": {"type": "array", "items": {"type": "string"}},
+                "conclusion": {"type": "string"},
+                "dependencies": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "search_locale_plan": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["primary", "fallback"],
+            "properties": {
+                "primary": {"type": "string"},
+                "fallback": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "retrieval_policy": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["channels_allowed"],
+            "properties": {
+                "channels_allowed": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": EVIDENCE_CHANNEL_VALUES},
+                },
+            },
+        },
+        "metadata_confidence": {
+            "type": "string",
+            "enum": METADATA_CONFIDENCE_VALUES,
+        },
+        "search_strategy": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["intent", "reasoning", "best_language"],
+            "properties": {
+                "intent": {"type": "string", "enum": SEARCH_INTENTS},
+                "reasoning": {"type": "string"},
+                "best_language": {"type": "string"},
+            },
+        },
+        "query_candidates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["text", "role", "score"],
+                "properties": {
+                    "text": {"type": "string"},
+                    "role": {"type": "string"},
+                    "score": {"type": "number", "minimum": 0, "maximum": 1},
+                },
+            },
+        },
+        "search_method": {"type": "string", "enum": SEARCH_METHOD_VALUES},
+        "search_queries": {"type": "array", "items": {"type": "string"}},
+        "evidence_req": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["needs_primary", "needs_2_independent"],
+            "properties": {
+                "needs_primary": {"type": "boolean"},
+                "needs_2_independent": {"type": "boolean"},
+            },
+        },
+        "evidence_need": {"type": "string", "enum": EVIDENCE_NEED_VALUES},
+        "check_oracle": {"type": "boolean"},
+    },
+}
+
+
 EDGE_TYPING_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -411,7 +524,6 @@ EDGE_TYPING_SCHEMA: dict[str, Any] = {
         },
     },
 }
-
 
 # Per-Claim Judging schemas (deep analysis mode)
 
@@ -538,6 +650,8 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "analysis": ANALYSIS_RESPONSE_SCHEMA,
     "query_generation": QUERY_GENERATION_SCHEMA,
     "claim_extraction": CLAIM_EXTRACTION_SCHEMA,
+    "core_claim_extraction": CORE_CLAIM_DESCRIPTION_SCHEMA,
+    "claim_enrichment": CLAIM_ENRICHMENT_SCHEMA,
     "edge_typing": EDGE_TYPING_SCHEMA,
     "evidence_summarizer": EVIDENCE_SUMMARIZER_SCHEMA,
     "claim_judge": CLAIM_JUDGE_SCHEMA,

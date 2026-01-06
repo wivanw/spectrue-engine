@@ -13,11 +13,12 @@ from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 import re
-from spectrue_core.agents.llm_client import is_schema_failure
+from spectrue_core.agents.llm_schemas import CORE_CLAIM_DESCRIPTION_SCHEMA, CLAIM_ENRICHMENT_SCHEMA
 from .claims_prompts import (
-    build_claim_strategist_instructions,
-    build_claim_strategist_prompt,
+    build_core_extraction_prompt,
+    build_metadata_enrichment_prompt,
 )
+import asyncio
 from .claims_parsing import (
     SEARCH_INTENTS,
     TOPIC_GROUPS,
@@ -30,13 +31,13 @@ from .claims_parsing import (
 from .schema_logger import (
     validate_claim_response,
     log_claim_field_defaults,
-    log_schema_mismatch,
 )
 
 # Import schema module for structured claims
 from spectrue_core.schema import (
     ClaimStructureType,
 )
+from spectrue_core.models import DEFAULT_MODEL_OPENAI_NANO
 
 # Import claim metadata types
 from spectrue_core.schema.claim_metadata import (
@@ -50,14 +51,81 @@ from spectrue_core.agents.skills.claim_metadata_parser import (
     default_channels as default_channels_v1,
 )
 from spectrue_core.runtime_config import ContentBudgetConfig
-from spectrue_core.agents.llm_schemas import CLAIM_EXTRACTION_SCHEMA
+
+# Whitelist of allowed enrichment fields (everything else is dropped)
+ENRICHMENT_ALLOWED_FIELDS = {
+    "claim_category", "harm_potential", "verification_target", "claim_role",
+    "satire_likelihood", "topic_group", "topic_key", "importance", "check_worthiness",
+    "structure", "search_locale_plan", "retrieval_policy", "metadata_confidence",
+    "search_strategy", "query_candidates", "search_method", "search_queries",
+    "evidence_req", "evidence_need", "check_oracle",
+}
+
+
+def sanitize_enrichment_response(data: dict) -> dict:
+    """
+    Sanitize LLM enrichment response before schema validation.
+    
+    This is a deterministic normalization, not a heuristic:
+    1. Whitelist fields (drop unknown like premises_2, type_order)
+    2. Add defaults for optional nested fields (dependencies, evidence_gaps)
+    3. Merge numbered variants (premises_2 → premises)
+    """
+    if not isinstance(data, dict):
+        return {}
+    
+    # Step 1: Whitelist top-level fields
+    sanitized = {k: v for k, v in data.items() if k in ENRICHMENT_ALLOWED_FIELDS}
+    
+    # Step 2: Sanitize nested 'structure' object
+    if "structure" in sanitized and isinstance(sanitized["structure"], dict):
+        struct = sanitized["structure"]
+        
+        # Merge premises_N → premises
+        premises = struct.get("premises", [])
+        if not isinstance(premises, list):
+            premises = []
+        for key in list(struct.keys()):
+            if key.startswith("premises_") and isinstance(struct[key], list):
+                premises.extend(struct[key])
+                del struct[key]
+        struct["premises"] = premises
+        
+        # Default empty arrays for optional fields
+        if "dependencies" not in struct:
+            struct["dependencies"] = []
+        if "conclusion" not in struct and not struct.get("conclusion"):
+            struct["conclusion"] = ""
+        
+        # Drop unknown structure fields
+        allowed_struct_fields = {"type", "premises", "conclusion", "dependencies"}
+        struct_sanitized = {k: v for k, v in struct.items() if k in allowed_struct_fields}
+        sanitized["structure"] = struct_sanitized
+    
+    # Step 3: Sanitize evidence_req - add defaults
+    if "evidence_req" in sanitized and isinstance(sanitized["evidence_req"], dict):
+        ev_req = sanitized["evidence_req"]
+        if "evidence_gaps" not in ev_req:
+            ev_req["evidence_gaps"] = []
+        # Drop unknown fields in evidence_req
+        allowed_ev_fields = {"needs_primary", "needs_2_independent", "evidence_gaps"}
+        sanitized["evidence_req"] = {k: v for k, v in ev_req.items() if k in allowed_ev_fields}
+    
+    # Step 4: Sanitize retrieval_policy
+    if "retrieval_policy" in sanitized and isinstance(sanitized["retrieval_policy"], dict):
+        rp = sanitized["retrieval_policy"]
+        allowed_rp_fields = {"channels_allowed"}
+        sanitized["retrieval_policy"] = {k: v for k, v in rp.items() if k in allowed_rp_fields}
+    
+    return sanitized
+
 
 class ClaimExtractionSkill(BaseSkill):
 
     # M73.5: Dynamic timeout constants
-    BASE_TIMEOUT_SEC = 35.0     # Minimum timeout
-    TIMEOUT_PER_1K_CHARS = 2.0  # Additional seconds per 1000 chars
-    MAX_TIMEOUT_SEC = 75.0      # Maximum timeout cap
+    BASE_TIMEOUT_SEC = 60.0     # Minimum timeout (Increased for DeepSeek)
+    TIMEOUT_PER_1K_CHARS = 3.0  # Additional seconds per 1000 chars
+    MAX_TIMEOUT_SEC = 120.0     # Maximum timeout cap
 
     def __init__(self, config, llm_client):
         super().__init__(config, llm_client)
@@ -103,9 +171,10 @@ class ClaimExtractionSkill(BaseSkill):
     ) -> tuple[list[Claim], bool, ArticleIntent, str]:
         """
         Extract atomic verifiable claims from article text with chunked, deterministic coverage.
-
-        Returns:
-            tuple of (claims, should_check_oracle, article_intent, stitched_text)
+        
+        Refactored to 2-stage pipeline (M120):
+        1. Core Extraction: Fetch bare claims (text + normalized) from chunks.
+        2. Metadata Enrichment: Fan-out parallel processing for classification & strategy.
         """
         text = (text or "").strip()
         if not text:
@@ -117,262 +186,301 @@ class ClaimExtractionSkill(BaseSkill):
             return [], False, "news", stitched_text
 
         all_claims: list[Claim] = []
-        should_check_oracle_agg = False
-        article_intent_agg: ArticleIntent = "news"
-
-        async def _extract_from_chunk(chunk: TextChunk, idx_offset: int) -> tuple[list[Claim], bool, ArticleIntent]:
-            lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
-            topics_str = ", ".join(TOPIC_GROUPS)
-            intents_str = ", ".join(SEARCH_INTENTS)
-
-            instructions = build_claim_strategist_instructions(
-                intents_str=intents_str,
-                topics_str=topics_str,
-                lang_name=lang_name,
-            )
-            prompt = build_claim_strategist_prompt(text_excerpt=chunk.text, max_claims=max_claims)
-            cache_key = f"claim_strategist_v6_{lang}"
-            dynamic_timeout = self._calculate_timeout(len(chunk.text))
-            logger.debug(
-                "[Claims] Chunk input: %d chars, timeout: %.1f sec, start=%d end=%d",
-                len(chunk.text),
-                dynamic_timeout,
-                chunk.char_start,
-                chunk.char_end,
-            )
-
-            Trace.event_full(
-                "claim_extraction.prompt_full",
-                {
-                    "chunk_start": chunk.char_start,
-                    "chunk_end": chunk.char_end,
-                    "chunk_len": len(chunk.text),
-                    "prompt": prompt,
-                    "instructions": instructions,
-                },
-            )
-
-            result = await self.llm_client.call_json(
-                model="gpt-5-nano",
-                input=prompt,
-                instructions=instructions,
-                response_schema=CLAIM_EXTRACTION_SCHEMA,
-                reasoning_effort="low",
-                cache_key=cache_key,
-                timeout=dynamic_timeout,
-                trace_kind="claim_extraction",
-            )
-
-            raw_claims = result.get("claims", [])
-            chunk_claims: list[Claim] = []
-
-            raw_intent = normalize_article_intent(result.get("article_intent", "news"))
-            _article_intent: ArticleIntent = raw_intent  # type: ignore  # noqa: F841
-
-            for idx, rc in enumerate(raw_claims):
-                if not isinstance(rc, dict) or not rc.get("text"):
+        
+        try:
+            # --- Stage 1: Core Extraction ---
+            core_tasks = []
+            for chunk in chunks:
+                core_tasks.append(self._extract_core_from_chunk(chunk))
+            
+            core_results = await asyncio.gather(*core_tasks, return_exceptions=True)
+            
+            # Flatten and filter results
+            valid_core_claims: list[tuple[dict, str]] = [] # (claim_dict, chunk_text_context)
+            
+            for i, res in enumerate(core_results):
+                if isinstance(res, Exception):
+                    logger.error("[Claims] Core extraction failed for chunk %d: %s", i, res)
                     continue
+                
+                chunk_claims, chunk_intent = res # Expecting (list[dict], intent)
+                # We ignore intent from core step for now, or aggregate it? 
+                # Actually core prompt doesn't ask for intent in my new prompt!
+                # Let's stick to the prompt design: just claims.
+                
+                chunk_text = chunks[i].text
+                for c in chunk_claims:
+                    valid_core_claims.append((c, chunk_text))
+            
+            if not valid_core_claims:
+                logger.warning("[Claims] No core claims extracted. Using fallback.")
+                fallback_text = text[:300] + "..." if len(text) > 300 else text
+                return [
+                    Claim(
+                        id="c1",
+                        text=fallback_text,
+                        normalized_text=fallback_text,
+                        type="core",
+                        topic_group="Other",
+                        topic_key="General",
+                        importance=1.0,
+                        check_worthiness=0.5,
+                        evidence_requirement=EvidenceRequirement(
+                            needs_primary_source=False,
+                            needs_independent_2x=True
+                        ),
+                        search_queries=[],
+                        query_candidates=[],
+                        metadata=None,
+                    )
+                ], False, "news", stitched_text
 
-                # Validate and log schema mismatches
-                claim_id = f"c{idx_offset+idx+1}"
-                defaults_used, invalid_fields = validate_claim_response(rc, claim_id)
-
-                if defaults_used or invalid_fields:
-                    log_claim_field_defaults(
+            # --- Stage 2: Enrichment (with rate limiting) ---
+            MAX_CONCURRENT_ENRICHMENTS = 5
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_ENRICHMENTS)
+            
+            async def rate_limited_enrich(claim_id: str, core_data: dict, context_text: str, lang: str):
+                async with semaphore:
+                    return await self._enrich_claim(
                         claim_id=claim_id,
-                        defaults_used=defaults_used,
-                        claim_text=rc.get("text"),
+                        core_data=core_data,
+                        context_text=context_text,
+                        lang=lang
                     )
-                    if invalid_fields:
-                        log_schema_mismatch(
-                            skill_name="claim_extraction",
-                            item_id=claim_id,
-                            missing_fields=[],
-                            invalid_fields=invalid_fields,
-                            received_keys=list(rc.keys()),
-                        )
-
-                req_raw = rc.get("evidence_req", {})
-                req = EvidenceRequirement(
-                    needs_primary_source=bool(req_raw.get("needs_primary")),
-                    needs_independent_2x=bool(req_raw.get("needs_2_independent")),
-                    needs_quote_verification=bool(req_raw.get("needs_quote")),
-                    is_time_sensitive=bool(req_raw.get("needs_recent")),
-                )
-
-                normalized = rc.get("normalized_text", "") or rc.get("text", "")
-                topic = normalize_topic_group(rc.get("topic_group", "Other") or "Other")
-                topic_key = rc.get("topic_key") or topic
-
-                worthiness = rc.get("check_worthiness")
-                if worthiness is None:
-                    worthiness = rc.get("importance", 0.5)
-                worthiness = clamp_float(worthiness, default=0.5, lo=0.0, hi=1.0)
-
-                harm_potential = clamp_int(rc.get("harm_potential", 1), default=1, lo=1, hi=5)
-                claim_category = normalize_claim_category(rc.get("claim_category", "FACTUAL"))
-                satire_likelihood = clamp_float(rc.get("satire_likelihood", 0.0), default=0.0, lo=0.0, hi=1.0)
-
-                metadata = self._parse_claim_metadata(rc, lang, harm_potential, claim_category, satire_likelihood)
-                strategy = rc.get("search_strategy", {})
-
-                structure = self._parse_claim_structure(
-                    rc,
-                    fallback_conclusion=normalized or rc.get("text", ""),
-                )
-                claim_role = (
-                    metadata.claim_role.value
-                    if metadata
-                    else str(rc.get("claim_role", "core")).lower()
-                )
-
-                search_queries = rc.get("search_queries", [])
-                query_candidates = rc.get("query_candidates", [])
-                should_skip_search = (
-                    satire_likelihood >= 0.8
-                    or claim_category == "SATIRE"
-                    or metadata.should_skip_search
-                )
-                if should_skip_search:
-                    search_queries = []
-                    query_candidates = []
-                    reason = "satire" if satire_likelihood >= 0.8 else f"target={metadata.verification_target.value}"
-                    logger.debug("[Orchestration] Skip search (%s): %s", reason, normalized[:50])
-
-                c = Claim(
-                    id=f"c{idx_offset+idx+1}",
-                    text=rc.get("text", ""),
-                    language=lang,  # Store claim language for localization
-                    type=rc.get("type", "core"),  # type: ignore
-                    importance=float(rc.get("importance", 0.5)),
-                    evidence_requirement=req,
-                    search_queries=search_queries,
-                    check_oracle=bool(rc.get("check_oracle", False)),
-                    normalized_text=normalized,
-                    topic_group=topic,
-                    check_worthiness=worthiness,
-                    topic_key=topic_key,
-                    query_candidates=query_candidates,
-                    search_method=rc.get("search_method", "general_search"),
-                    evidence_need=rc.get("evidence_need", "unknown"),
-                    anchor=self._locate_anchor(
-                        rc.get("text", ""),
-                        normalized_text=normalized,
-                        chunks=chunks,
-                        full_text=text,
-                    ),
-                    harm_potential=harm_potential,
-                    claim_category=claim_category,
-                    satire_likelihood=satire_likelihood,
-                    metadata=metadata,
-                    claim_role=claim_role,
-                    structure=structure,
-                    verification_target=(
-                        metadata.verification_target.value
-                        if metadata
-                        else str(rc.get("verification_target", "reality")).lower()
-                    ),
-                    role=claim_role,
-                    temporality=rc.get("temporality"),
-                    locale_plan=rc.get("locale_plan")
-                    or (
-                        {
-                            "ui_locale": lang,
-                            "content_lang": lang,
-                            "context_lang": lang,
-                            "primary": metadata.search_locale_plan.primary,
-                            "fallbacks": metadata.search_locale_plan.fallback,
-                            "justification": "derived from claim metadata",
-                        }
-                        if metadata
-                        else None
-                    ),
-                    metadata_confidence=metadata.metadata_confidence.value if metadata else "medium",
-                    priority_score=rc.get("priority_score"),
-                    centrality=rc.get("centrality"),
-                    tension=rc.get("tension"),
-                )
-
-                if strategy:
-                    intent = strategy.get("intent", "?")
-                    reasoning = strategy.get("reasoning", "")[:50]
-                    logger.debug(
-                        "[Strategist] Claim %d: intent=%s, harm=%d, category=%s | %s",
-                        idx + 1,
-                        intent,
-                        harm_potential,
-                        claim_category,
-                        reasoning,
+            
+            enrich_tasks = []
+            
+            for idx, (core_claim, context_text) in enumerate(valid_core_claims):
+                claim_id = f"c{idx+1}"
+                enrich_tasks.append(
+                    rate_limited_enrich(
+                        claim_id=claim_id,
+                        core_data=core_claim,
+                        context_text=context_text,
+                        lang=lang
                     )
+                )
 
-                chunk_claims.append(c)
+            enrich_results = await asyncio.gather(*enrich_tasks, return_exceptions=True)
+            
+            enriched_claims: list[Claim] = []
+            should_check_oracle_agg = False
+            
+            for res in enrich_results:
+                if isinstance(res, Exception):
+                    logger.error("[Claims] Enrichment failed: %s", res)
+                    continue
+                if res:
+                    enriched_claims.append(res)
+                    if res.get("check_oracle"):
+                        should_check_oracle_agg = True
 
-            return chunk_claims, *self._should_check_oracle(chunk_claims, raw_intent)
+            # Dedupe and Sort
+            final_claims = self._dedupe_claims(enriched_claims)
+            final_claims.sort(key=lambda x: x.get("harm_potential", 1), reverse=True)
+            
+            # Tracing
+            self._trace_extracted_claims(final_claims)
+            self._trace_metadata_distribution(final_claims)
+            
+            return final_claims, should_check_oracle_agg, "news", stitched_text
+        
+        except Exception as e:
+            logger.exception("[M120] Critical failure in split claim extraction: %s", e)
+            raise
+
+    async def _extract_core_from_chunk(self, chunk: TextChunk) -> tuple[list[dict], ArticleIntent]:
+        """
+        Stage 1: Core claim extraction using DeepSeek (temp=0).
+        Only extracts text, normalized_text.
+        """
+        prompt = build_core_extraction_prompt(text_excerpt=chunk.text)
+        
+        # We assume 1-2 attempts is enough for this simpler task
+        result = await self.llm_client.call_json(
+            model=self.runtime.llm.model_claim_extraction, # DeepSeek
+            input=prompt,
+            response_schema=CORE_CLAIM_DESCRIPTION_SCHEMA,
+            reasoning_effort="low",
+            cache_key=f"core_extract_v1_{hash(chunk.text)}",
+            timeout=self._calculate_timeout(len(chunk.text)),
+            trace_kind="claim_extraction_core",
+            temperature=0.0, # Strict determinism
+        )
+        
+        claims = result.get("claims", [])
+        intent = normalize_article_intent(result.get("article_intent", "news"))
+        return claims, intent
+
+    async def _enrich_claim(self, claim_id: str, core_data: dict, context_text: str, lang: str) -> Claim | None:
+        """
+        Stage 2: Metadata enrichment using Nano.
+        """
+        claim_text = core_data.get("text", "")
+        if not claim_text:
+            return None
+            
+        lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
+        topics_str = ", ".join(TOPIC_GROUPS)
+        intents_str = ", ".join(SEARCH_INTENTS)
+        
+        prompt = build_metadata_enrichment_prompt(
+            claim_text=claim_text,
+            article_context_sm=context_text, # Using full chunk as context
+            intents_str=intents_str,
+            topics_str=topics_str,
+            lang_name=lang_name
+        )
+        
+        # NOTE: Using simple instructions for enrichment, not the full claim_strategist ones
+        # The full prompt already contains all necessary context
+        instructions = "You are enriching metadata for a single claim. Output only the JSON object with the enrichment fields. Do NOT wrap in claims[] array."
 
         try:
-            idx_offset = 0
-            seen_norm: set[str] = set()
-            for chunk in chunks:
-                chunk_claims, chunk_should_oracle, chunk_intent = await _extract_from_chunk(
-                    chunk, idx_offset=idx_offset
-                )
-                for c in chunk_claims:
-                    norm_key = (c.get("normalized_text") or c.get("text") or "").strip().lower()
-                    if norm_key and norm_key in seen_norm:
-                        continue
-                    seen_norm.add(norm_key)
-                    all_claims.append(c)
-                idx_offset += len(chunk_claims)
-                should_check_oracle_agg = should_check_oracle_agg or chunk_should_oracle
-                article_intent_agg = chunk_intent
-
-            all_claims = self._dedupe_claims(all_claims)
-            all_claims.sort(key=lambda x: x.get("harm_potential", 1), reverse=True)
-
-            satire_count = sum(
-                1 for c in all_claims if c.get("satire_likelihood", 0) >= 0.8 or c.get("claim_category") == "SATIRE"
+            # Using Nano for enrichment to save cost
+            result = await self.llm_client.call_json(
+                model=DEFAULT_MODEL_OPENAI_NANO,
+                input=prompt,
+                instructions=instructions,
+                response_schema=CLAIM_ENRICHMENT_SCHEMA,
+                reasoning_effort="low",
+                cache_key=f"enrich_v1_{hash(claim_text)}",
+                timeout=45.0, # Nano is faster usually
+                trace_kind="claim_enrichment",
+                temperature=0.0, # Keep steady
             )
-            if satire_count > 0:
-                logger.debug("[M78] Detected %d satire/hyperbolic claims", satire_count)
-
-            topics_found = [c.get("topic_key", "?") for c in all_claims]
-            logger.debug(
-                "[Claims] Extracted %d claims (after dedup/sort). Topics keys: %s", len(all_claims), topics_found
-            )
-
-            check_oracle = any(c.get("check_oracle", False) for c in all_claims)
-            should_check_oracle_agg = should_check_oracle_agg or check_oracle
-
-            logger.debug("[Claims] Article intent: %s (check_oracle=%s)", article_intent_agg, should_check_oracle_agg)
-            self._trace_extracted_claims(all_claims)
-            self._trace_metadata_distribution(all_claims)
-
-            return all_claims, should_check_oracle_agg, article_intent_agg, stitched_text
-
         except Exception as e:
-            if is_schema_failure(e):
-                logger.exception("[M48] Claim extraction schema failure: %s", e)
-                raise
-            logger.warning("[M48] Claim extraction failed: %s. Using fallback.", e)
-            fallback_text = text[:300] + "..." if len(text) > 300 else text
-            return [
-                Claim(
-                    id="c1",
-                    text=fallback_text,
-                    normalized_text=fallback_text,
-                    type="core",
-                    topic_group="Other",
-                    topic_key="General",
-                    importance=1.0,
-                    check_worthiness=0.5,
-                    evidence_requirement=EvidenceRequirement(
-                        needs_primary_source=False,
-                        needs_independent_2x=True
-                    ),
-                    search_queries=[],
-                    query_candidates=[],
-                )
-            ], False, "news", stitched_text
+            logger.warning("Enrichment failed for %s: %s", claim_id, e)
+            # Return minimal claim if meaningful
+            result = {}
+
+        # Fallback: unwrap if LLM returned {"claims": [...]} or {"article_intent": ...}
+        if "claims" in result and isinstance(result.get("claims"), list):
+            claims_list = result["claims"]
+            if claims_list:
+                result = claims_list[0]  # Take first claim's enrichment
+                logger.debug("[Claims] Unwrapped claims[] wrapper for %s", claim_id)
+            else:
+                result = {}
+        # Also strip unexpected wrapper fields
+        result.pop("article_intent", None)
+        result.pop("text", None)
+        result.pop("normalized_text", None)
+
+        # Sanitize enrichment response (whitelist, defaults, merge)
+        result = sanitize_enrichment_response(result)
+
+        # Merge core data + enriched data
+        merged = {**core_data, **result}
+        
+        # Validate defaults
+        defaults_used, invalid_fields = validate_claim_response(merged, claim_id)
+        if defaults_used or invalid_fields:
+             log_claim_field_defaults(
+                 claim_id=claim_id,
+                 defaults_used=defaults_used,
+                 claim_text=claim_text
+             )
+        
+        req_raw = merged.get("evidence_req", {})
+        req = EvidenceRequirement(
+            needs_primary_source=bool(req_raw.get("needs_primary")),
+            needs_independent_2x=bool(req_raw.get("needs_2_independent")),
+            needs_quote_verification=bool(req_raw.get("needs_quote")),
+            is_time_sensitive=bool(req_raw.get("needs_recent")),
+        )
+
+        normalized = merged.get("normalized_text") or claim_text
+        topic = normalize_topic_group(merged.get("topic_group", "Other") or "Other")
+        topic_key = merged.get("topic_key") or topic
+
+        worthiness = merged.get("check_worthiness")
+        if worthiness is None:
+            worthiness = merged.get("importance", 0.5)
+        worthiness = clamp_float(worthiness, default=0.5, lo=0.0, hi=1.0)
+
+        harm_potential = clamp_int(merged.get("harm_potential", 1), default=1, lo=1, hi=5)
+        claim_category = normalize_claim_category(merged.get("claim_category", "FACTUAL"))
+        satire_likelihood = clamp_float(merged.get("satire_likelihood", 0.0), default=0.0, lo=0.0, hi=1.0)
+
+        metadata = self._parse_claim_metadata(merged, lang, harm_potential, claim_category, satire_likelihood)
+        
+        structure = self._parse_claim_structure(
+            merged,
+            fallback_conclusion=normalized,
+        )
+        
+        claim_role = (
+            metadata.claim_role.value
+            if metadata
+            else str(merged.get("claim_role", "core")).lower()
+        )
+
+        search_queries = merged.get("search_queries", [])
+        query_candidates = merged.get("query_candidates", [])
+        should_skip_search = (
+            satire_likelihood >= 0.8
+            or claim_category == "SATIRE"
+            or metadata.should_skip_search
+        )
+        if should_skip_search:
+            search_queries = []
+            query_candidates = []
+        
+        # Anchor fallback
+        anchor = self._locate_anchor_in_text(context_text, [claim_text, normalized])
+        if not anchor:
+             anchor = {
+                "chunk_id": "unknown", 
+                "char_start": 0, 
+                "char_end": len(claim_text), 
+                "section_path": []
+            }
+
+        c = Claim(
+            id=claim_id,
+            text=claim_text,
+            language=lang,
+            type=merged.get("type", "core"),
+            importance=float(merged.get("importance", 0.5)),
+            evidence_requirement=req,
+            search_queries=search_queries,
+            check_oracle=bool(merged.get("check_oracle", False)),
+            normalized_text=normalized,
+            topic_group=topic,
+            check_worthiness=worthiness,
+            topic_key=topic_key,
+            query_candidates=query_candidates,
+            search_method=merged.get("search_method", "general_search"),
+            evidence_need=merged.get("evidence_need", "unknown"),
+            anchor=anchor,
+            harm_potential=harm_potential,
+            claim_category=claim_category,
+            satire_likelihood=satire_likelihood,
+            metadata=metadata,
+            claim_role=claim_role,
+            structure=structure,
+            verification_target=(
+                metadata.verification_target.value
+                if metadata
+                else str(merged.get("verification_target", "reality")).lower()
+            ),
+            role=claim_role,
+            temporality=merged.get("temporality"),
+            locale_plan=merged.get("locale_plan") or ({
+                    "ui_locale": lang,
+                    "content_lang": lang,
+                    "context_lang": lang,
+                    "primary": metadata.search_locale_plan.primary,
+                    "fallbacks": metadata.search_locale_plan.fallback,
+                    "justification": "derived"
+                } if metadata else None),
+            metadata_confidence=metadata.metadata_confidence.value if metadata else "medium",
+            priority_score=merged.get("priority_score"),
+            centrality=merged.get("centrality"),
+            tension=merged.get("tension"),
+        )
+        return c
 
     def _trace_extracted_claims(self, claims: list[Claim]) -> None:
         """

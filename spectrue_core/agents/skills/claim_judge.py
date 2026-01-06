@@ -80,11 +80,14 @@ class ClaimJudgeSkill:
 
         try:
             # Call LLM with structured output
+            # Switched to deepseek-chat for efficient RGBA scoring
             response = await self.llm.call_structured(
                 user_prompt=user_prompt,
                 system_prompt=system_prompt,
                 schema=CLAIM_JUDGE_SCHEMA,
                 schema_name="claim_judge",
+                model="deepseek-chat",
+                temperature=0,
             )
 
             # Parse response into JudgeOutput (no modifications)

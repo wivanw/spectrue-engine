@@ -56,6 +56,33 @@ async def verify_inline_sources(
     if progress_callback:
         await progress_callback("verifying_sources")
 
+    # Check if inline source verification is disabled via feature flag
+    runtime = getattr(agent, "runtime", None)
+    enable_verification = True
+    if runtime and hasattr(runtime, "llm"):
+        enable_verification = getattr(runtime.llm, "enable_inline_source_verification", True)
+
+    # If verification disabled, mark all sources as verification_skipped
+    if not enable_verification:
+        verified_inline_sources = []
+        for src in inline_sources:
+            src["is_primary"] = False
+            src["is_relevant"] = True
+            src["verification_skipped"] = True
+            verified_inline_sources.append(src)
+
+        Trace.event(
+            "pipeline.inline_sources_verified",
+            {
+                "total": len(inline_sources),
+                "passed": len(verified_inline_sources),
+                "primary": 0,
+                "verification_skipped": True,
+            },
+        )
+        logger.debug("[Pipeline] Inline source verification disabled, marking %d sources as skipped", len(verified_inline_sources))
+        return verified_inline_sources
+
     article_excerpt = fact[:500] if fact else ""
     verified_inline_sources = []
 
@@ -70,11 +97,13 @@ async def verify_inline_sources(
             logger.warning("[Pipeline] Inline source verification failed: %s", result)
             src["is_primary"] = False
             src["is_relevant"] = True
+            src["verification_skipped"] = True  # Mark as skipped due to error
             verified_inline_sources.append(src)
             continue
 
         is_relevant = result.get("is_relevant", True)
         is_primary = result.get("is_primary", False)
+        verification_skipped = result.get("verification_skipped", False)
 
         if not is_relevant:
             logger.debug("[Pipeline] Inline source rejected: %s", src.get("domain"))
@@ -82,6 +111,8 @@ async def verify_inline_sources(
 
         src["is_primary"] = is_primary
         src["is_relevant"] = True
+        if verification_skipped:
+            src["verification_skipped"] = True
         if is_primary:
             src["is_trusted"] = True
         verified_inline_sources.append(src)
@@ -98,17 +129,21 @@ async def verify_inline_sources(
                 verified_inline_sources,
                 budget_context="inline",  # Use separate budget from claim verification
             )
+        
+        skipped_count = len([s for s in verified_inline_sources if s.get("verification_skipped")])
         Trace.event(
             "pipeline.inline_sources_verified",
             {
                 "total": len(inline_sources),
                 "passed": len(verified_inline_sources),
                 "primary": len([s for s in verified_inline_sources if s.get("is_primary")]),
+                "verification_skipped": skipped_count > 0,
+                "skipped_count": skipped_count,
             },
         )
 
-        # Fetch content for primary inline sources
-        primary_sources = [s for s in verified_inline_sources if s.get("is_primary")]
+        # Fetch content for primary inline sources (only if verification was done)
+        primary_sources = [s for s in verified_inline_sources if s.get("is_primary") and not s.get("verification_skipped")]
         if primary_sources and search_mgr and content_budget_config:
             for src in primary_sources[:2]:  # Limit to 2 primary sources
                 url = src.get("url", "")

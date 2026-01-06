@@ -20,6 +20,11 @@ from spectrue_core.constants import (
     DEFAULT_PRIMARY_LOCALE,
     DEFAULT_RELATIVE_WINDOW_DAYS,
 )
+from spectrue_core.models import (
+    DEFAULT_MODEL_CLAIM_EXTRACTION,
+    DEFAULT_MODEL_CLUSTERING_STANCE,
+    DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION,
+)
 
 def _parse_bool(raw: Any, *, default: bool) -> bool:
     if raw is None:
@@ -120,16 +125,24 @@ class EngineDebugFlags:
 
 @dataclass(frozen=True)
 class EngineLLMConfig:
-    timeout_sec: float = 60.0
+    timeout_sec: float = 90.0
     concurrency: int = 6
-    nano_timeout_sec: float = 20.0
-    nano_max_output_tokens: int = 700  # increased for topics field
-    max_output_tokens_general: int = 900
-    max_output_tokens_lite: int = 500
-    max_output_tokens_deep: int = 1100
-
+    nano_timeout_sec: float = 90.0
     # Responses API configuration
-    cluster_timeout_sec: float = 90.0
+    cluster_timeout_sec: float = 120.0
+
+    # DeepSeek API configuration (Native)
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_api_key: str = ""
+    deepseek_model_names: tuple[str, ...] = ()
+
+    # Model assignments for pipeline steps
+    model_claim_extraction: str = DEFAULT_MODEL_CLAIM_EXTRACTION
+    model_inline_source_verification: str = DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION
+    model_clustering_stance: str = DEFAULT_MODEL_CLUSTERING_STANCE
+
+    # Feature flags for optional pipeline steps
+    enable_inline_source_verification: bool = True
 
 
 @dataclass(frozen=True)
@@ -397,18 +410,7 @@ class EngineRuntimeConfig:
         llm_conc = _parse_int(os.getenv("OPENAI_CONCURRENCY"), default=6, min_v=1, max_v=16)
 
         # Query generation (nano) should be tighter than general analysis.
-        nano_timeout = _parse_float(os.getenv("SPECTRUE_NANO_TIMEOUT"), default=20.0, min_v=5.0, max_v=30.0)
-        nano_max_out = _parse_int(os.getenv("SPECTRUE_NANO_MAX_OUTPUT_TOKENS"), default=700, min_v=120, max_v=1000)
-
-        max_out_general = _parse_int(
-            os.getenv("SPECTRUE_LLM_MAX_OUTPUT_TOKENS_GENERAL"), default=900, min_v=200, max_v=4000
-        )
-        max_out_lite = _parse_int(
-            os.getenv("SPECTRUE_LLM_MAX_OUTPUT_TOKENS_LITE"), default=500, min_v=200, max_v=4000
-        )
-        max_out_deep = _parse_int(
-            os.getenv("SPECTRUE_LLM_MAX_OUTPUT_TOKENS_DEEP"), default=1100, min_v=200, max_v=4000
-        )
+        nano_timeout = _parse_float(os.getenv("SPECTRUE_NANO_TIMEOUT"), default=60.0, min_v=5.0, max_v=120.0)
 
         debug = EngineDebugFlags(
             engine_debug=_parse_bool(os.getenv("SPECTRUE_ENGINE_DEBUG"), default=False),
@@ -523,14 +525,37 @@ class EngineRuntimeConfig:
             ),
         )
 
+        # Model assignments (can be overridden via ENV)
+        model_claim_extraction = (os.getenv("MODEL_CLAIM_EXTRACTION") or DEFAULT_MODEL_CLAIM_EXTRACTION).strip()
+        model_inline_source_verification = (os.getenv("MODEL_INLINE_SOURCE_VERIFICATION") or DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION).strip()
+        model_clustering_stance = (os.getenv("MODEL_CLUSTERING_STANCE") or DEFAULT_MODEL_CLUSTERING_STANCE).strip()
+
+        enable_inline_source_verification = _parse_bool(
+            os.getenv("FEATURE_INLINE_SOURCE_VERIFICATION"), default=True
+        )
+
+        # DeepSeek configuration
+        deepseek_base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip()
+        deepseek_api_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
+        deepseek_model_names_env = (os.getenv("DEEPSEEK_MODEL_NAMES") or "").strip()
+        if deepseek_model_names_env:
+            deepseek_model_names = tuple(
+                name.strip() for name in deepseek_model_names_env.split(",") if name.strip()
+            )
+        else:
+            deepseek_model_names = ()
+
         llm = EngineLLMConfig(
             timeout_sec=float(llm_timeout),
             concurrency=int(llm_conc),
             nano_timeout_sec=float(nano_timeout),
-            nano_max_output_tokens=int(nano_max_out),
-            max_output_tokens_general=int(max_out_general),
-            max_output_tokens_lite=int(max_out_lite),
-            max_output_tokens_deep=int(max_out_deep),
+            deepseek_base_url=deepseek_base_url,
+            deepseek_api_key=deepseek_api_key,
+            deepseek_model_names=deepseek_model_names,
+            model_claim_extraction=model_claim_extraction,
+            model_inline_source_verification=model_inline_source_verification,
+            model_clustering_stance=model_clustering_stance,
+            enable_inline_source_verification=enable_inline_source_verification,
         )
 
         # ClaimGraph configuration (always enabled, no feature flag)
@@ -623,11 +648,15 @@ class EngineRuntimeConfig:
                 "timeout_sec": float(self.llm.timeout_sec),
                 "concurrency": int(self.llm.concurrency),
                 "nano_timeout_sec": float(self.llm.nano_timeout_sec),
-                "nano_max_output_tokens": int(self.llm.nano_max_output_tokens),
-                "max_output_tokens_general": int(self.llm.max_output_tokens_general),
-                "max_output_tokens_lite": int(self.llm.max_output_tokens_lite),
-                "max_output_tokens_deep": int(self.llm.max_output_tokens_deep),
                 "cluster_timeout_sec": float(self.llm.cluster_timeout_sec),
+                # DeepSeek configuration
+                "deepseek_base_url": self.llm.deepseek_base_url,
+                "deepseek_api_key_set": bool(self.llm.deepseek_api_key),
+                "deepseek_model_names": list(self.llm.deepseek_model_names),
+                "model_claim_extraction": self.llm.model_claim_extraction,
+                "model_inline_source_verification": self.llm.model_inline_source_verification,
+                "model_clustering_stance": self.llm.model_clustering_stance,
+                "enable_inline_source_verification": bool(self.llm.enable_inline_source_verification),
             },
             "search": {
                 "google_cse_cost": int(self.search.google_cse_cost),

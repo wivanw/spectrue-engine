@@ -29,20 +29,33 @@ class TestM62ClaimExtraction:
     @pytest.mark.asyncio
     async def test_extract_claims_with_new_fields(self, skill, mock_llm_client):
         """Claims should include normalized_text, topic_group, check_worthiness."""
-        mock_llm_client.call_json.return_value = {
+        
+        # M120: Mocking 2-stage pipeline (Core -> Enrichment)
+        core_response = {
             "claims": [{
-                "text": "He announced the new tariffs.",
-                "normalized_text": "Donald Trump announced new tariffs on China on December 19, 2025.",
-                "type": "core",
-                "importance": 0.9,
-                "check_worthiness": 0.85,
-                "topic_group": "Economy",
-                "search_queries": ["Trump tariffs China", "Trump China tariffs December 2025"],
-                "check_oracle": False
-            }]
+                 "text": "He announced the new tariffs.",
+                 "normalized_text": "Donald Trump announced new tariffs on China on December 19, 2025."
+            }],
+            "article_intent": "news"
         }
         
-        # extract_claims returns 3-tuple now
+        enrichment_response = {
+            # Meta-fields added to core
+            "type": "core",
+            "importance": 0.9,
+            "check_worthiness": 0.85,
+            "topic_group": "Economy",
+            "search_queries": ["Trump tariffs China", "Trump China tariffs December 2025"],
+            "check_oracle": False,
+            "claim_category": "FACTUAL",
+            "harm_potential": 1,
+            "verification_target": "reality",
+            "claim_role": "thesis"
+        }
+        
+        mock_llm_client.call_json.side_effect = [core_response, enrichment_response]
+        
+        # extract_claims returns 4-tuple now
         claims, should_check_oracle, article_intent, _ = await skill.extract_claims("Some article text", lang="en")
         
         assert len(claims) == 1
@@ -56,16 +69,24 @@ class TestM62ClaimExtraction:
     @pytest.mark.asyncio
     async def test_topic_group_validation(self, skill, mock_llm_client):
         """Invalid topic_group should fallback to 'Other'."""
-        mock_llm_client.call_json.return_value = {
-            "claims": [{
-                "text": "Test",
-                "topic_group": "InvalidTopic",  # Not in TOPIC_GROUPS
-                "importance": 0.5,
-                "search_queries": ["test"]
-            }]
+        
+        core_response = {
+            "claims": [{"text": "Test", "normalized_text": "Test claim normalized"}]
         }
         
-        # extract_claims returns 3-tuple now
+        enrichment_response = {
+            "topic_group": "InvalidTopic",  # Not in TOPIC_GROUPS
+            "importance": 0.5,
+            "search_queries": ["test"],
+            "claim_category": "FACTUAL",
+            "harm_potential": 1,
+            "verification_target": "reality",
+            "claim_role": "thesis"
+        }
+        
+        mock_llm_client.call_json.side_effect = [core_response, enrichment_response]
+        
+        # extract_claims returns 4-tuple now
         claims, _, _, _ = await skill.extract_claims("Text", lang="en")
         
         assert claims[0]["topic_group"] == "Other"
@@ -73,16 +94,24 @@ class TestM62ClaimExtraction:
     @pytest.mark.asyncio
     async def test_check_worthiness_fallback(self, skill, mock_llm_client):
         """If check_worthiness missing, derive from importance."""
-        mock_llm_client.call_json.return_value = {
-            "claims": [{
-                "text": "Test",
-                "importance": 0.7,
-                # check_worthiness not provided
-                "search_queries": ["test"]
-            }]
+        
+        core_response = {
+            "claims": [{"text": "Test", "normalized_text": "Test claim normalized"}]
         }
         
-        # extract_claims returns 3-tuple now
+        enrichment_response = {
+            "importance": 0.7,
+            # check_worthiness not provided
+            "search_queries": ["test"],
+            "claim_category": "FACTUAL",
+            "harm_potential": 1,
+            "verification_target": "reality",
+            "claim_role": "thesis"
+        }
+
+        mock_llm_client.call_json.side_effect = [core_response, enrichment_response]
+        
+        # extract_claims returns 4-tuple now
         claims, _, _, _ = await skill.extract_claims("Text", lang="en")
         
         # Should fallback to importance

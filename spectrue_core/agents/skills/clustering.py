@@ -115,13 +115,14 @@ class ClusteringSkill(BaseSkill):
 
                 try:
                     result = await self.llm_client.call_json(
-                        model="gpt-5-nano",
+                        model=self.runtime.llm.model_clustering_stance,
                         input=prompt,
                         instructions=instructions,
                         reasoning_effort="low",
                         cache_key=f"{batch_cache_key}_{batch_suffix}",
                         timeout=cluster_timeout,
                         trace_kind="stance_clustering",
+                        temperature=0,  # Deterministic JSON output
                     )
                     batch_matrix = result.get("matrix", [])
                     # Add to total matrix

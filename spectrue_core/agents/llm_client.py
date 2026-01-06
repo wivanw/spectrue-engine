@@ -16,6 +16,7 @@ This module provides a simplified interface for making LLM calls with:
 - JSON output with automatic parsing
 - Retry logic with graceful degradation
 - Trace event logging
+- Support for OpenAI-compatible local endpoints (vLLM, TGI) via Chat Completions API
 """
 
 from __future__ import annotations
@@ -209,6 +210,7 @@ class LLMClient:
         self,
         *,
         openai_api_key: str | None = None,
+        base_url: str | None = None,
         default_timeout: float = 60.0,  # Increased from 30.0 for complex tasks
         max_retries: int = 3,
         cache_retention: CacheRetention = "in_memory", # Fix default
@@ -219,17 +221,355 @@ class LLMClient:
         
         Args:
             openai_api_key: OpenAI API key (uses OPENAI_API_KEY env var if not provided)
+            base_url: Optional base URL for OpenAI-compatible endpoints (vLLM, TGI).
+                      When set, uses Chat Completions API instead of Responses API.
             default_timeout: Default timeout for API calls in seconds
             max_retries: Maximum retry attempts on failure
             cache_retention: Prompt cache retention ("in_memory" or "24h")
         """
         # Disable internal retries so we control them explicitly
-        self.client = AsyncOpenAI(api_key=openai_api_key, max_retries=0)
+        client_kwargs: dict[str, Any] = {"max_retries": 0}
+        if openai_api_key:
+            client_kwargs["api_key"] = openai_api_key
+        elif base_url:
+            # Local endpoints may not require auth, but OpenAI SDK requires api_key
+            # Use a dummy key for local servers
+            client_kwargs["api_key"] = "local-no-key"
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        self.client = AsyncOpenAI(**client_kwargs)
+        self.base_url = base_url  # Track if using local endpoint
+        self._use_chat_completions = base_url is not None  # Local endpoints use Chat Completions API
         self.default_timeout = default_timeout
         self.max_retries = max_retries
         self.cache_retention = cache_retention
         self._sem = asyncio.Semaphore(8)  # Concurrency limit
         self._meter = meter
+
+    def _model_supports_structured_outputs(self, model: str) -> bool:
+        """Check if model supports OpenAI Structured Outputs (json_schema mode)."""
+        # OpenAI models that support structured outputs
+        # See: https://platform.openai.com/docs/guides/structured-outputs
+        supported_prefixes = (
+            "gpt-5",      # All GPT-5 variants
+            "gpt-4o",     # GPT-4o and mini
+            "gpt-4-turbo",
+            "o1",         # o1 models
+            "o3",         # o3 models
+        )
+        # DeepSeek and local models don't support structured outputs
+        unsupported_prefixes = ("deepseek", "llama", "mistral", "qwen")
+        
+        model_lower = model.lower()
+        if any(model_lower.startswith(p) for p in unsupported_prefixes):
+            return False
+        if any(model_lower.startswith(p) for p in supported_prefixes):
+            return True
+        # Default: try structured outputs for unknown OpenAI models
+        return self.base_url is None  # Only for official OpenAI API
+
+    async def _call_chat_completions(
+        self,
+        *,
+        model: str,
+        input: str,  # noqa: A002
+        instructions: str | None = None,
+        json_output: bool = False,
+        response_schema: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        temperature: float | None = None,
+        max_output_tokens: int | None = None,
+        trace_kind: str = "llm_call",
+        stage: str | None = None,
+    ) -> dict:
+        """
+        Execute LLM call using Chat Completions API for local endpoints.
+        
+        Does NOT send Responses-specific params (reasoning_effort, cache_key, etc.)
+        that local endpoints (vLLM, TGI) do not support.
+        """
+        import hashlib
+        import time
+
+        effective_timeout = timeout or self.default_timeout
+        json_output_requested = json_output or response_schema is not None
+
+        # Build messages for Chat Completions API
+        messages: list[dict[str, str]] = []
+        if instructions:
+            messages.append({"role": "system", "content": instructions})
+        messages.append({"role": "user", "content": input})
+
+        # Build params - only standard Chat Completions fields
+        params: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "timeout": effective_timeout,
+        }
+
+        if temperature is not None:
+            params["temperature"] = temperature
+
+        if max_output_tokens:
+            params["max_tokens"] = max_output_tokens  # Chat Completions uses max_tokens
+
+        # JSON mode or Structured Outputs
+        if json_output_requested:
+            if response_schema and self._model_supports_structured_outputs(model):
+                # Use OpenAI Structured Outputs with strict schema enforcement
+                params["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": trace_kind.replace(".", "_") if trace_kind else "response",
+                        "schema": response_schema,
+                        "strict": True,
+                    }
+                }
+            else:
+                # Fallback to simple JSON mode
+                params["response_format"] = {"type": "json_object"}
+
+        # Payload hash for tracing
+        payload_str = (instructions or "") + "||" + input
+        payload_hash = hashlib.md5(payload_str.encode()).hexdigest()
+
+        est_input_tokens = int(len(input.split()) * 1.3)
+        est_instr_tokens = int(len((instructions or "").split()) * 1.3)
+
+        Trace.event(f"{trace_kind}.prompt", {
+            "model": model,
+            "input_chars": len(input),
+            "instructions_chars": len(instructions or ""),
+            "est_input_tokens": est_input_tokens,
+            "est_instr_tokens": est_instr_tokens,
+            "payload_hash": payload_hash,
+            "json_output": json_output_requested,
+            "response_schema": bool(response_schema),
+            "api_mode": "chat_completions",
+            "base_url": self.base_url,
+            "input_text": input[:10000],
+            "instructions_text": (instructions or "")[:5000],
+        })
+
+        last_error: Exception | None = None
+
+        for attempt in range(self.max_retries):
+            start_time = time.time()
+            try:
+                async with self._sem:
+                    if attempt > 0:
+                        await asyncio.sleep(0.5 * attempt)
+                        logger.debug("[LLMClient] Chat Completions retry %d/%d for %s", attempt + 1, self.max_retries, model)
+
+                    response = await self.client.chat.completions.create(**params)
+
+                latency_ms = int((time.time() - start_time) * 1000)
+
+                # Extract content from Chat Completions response
+                if not response.choices:
+                    raise ValueError("Empty response from LLM (no choices)")
+
+                choice = response.choices[0]
+                content = choice.message.content or ""
+
+                if not content.strip():
+                    finish_reason = choice.finish_reason
+                    if finish_reason == "length":
+                        raise ValueError("Response truncated (max_tokens reached)")
+                    raise ValueError("Empty response from LLM")
+
+                # Parse JSON if requested
+                parsed = None
+                if json_output_requested:
+                    try:
+                        parsed = json.loads(content)
+                    except json.JSONDecodeError as e:
+                        logger.warning("[LLMClient] Chat Completions JSON parse failed: %s", e)
+                        Trace.event(
+                            f"{trace_kind}.json_parse_error",
+                            {
+                                "model": model,
+                                "error": str(e),
+                                "content_head": content[:500],
+                                "payload_hash": payload_hash,
+                                "api_mode": "chat_completions",
+                            },
+                        )
+                        # Try to extract JSON from markdown code block
+                        if "```json" in content:
+                            try:
+                                json_block = content.split("```json")[1].split("```")[0]
+                                parsed = json.loads(json_block.strip())
+                            except (IndexError, json.JSONDecodeError):
+                                pass
+                        # Try to find first { and extract JSON (for reasoning models with thinking tokens)
+                        if parsed is None:
+                            first_brace = content.find("{")
+                            if first_brace != -1:
+                                try:
+                                    json_candidate = content[first_brace:]
+                                    parsed = json.loads(json_candidate)
+                                    Trace.event(
+                                        f"{trace_kind}.json_recovered_from_prefix",
+                                        {
+                                            "model": model,
+                                            "prefix_stripped": content[:first_brace][:100],
+                                            "payload_hash": payload_hash,
+                                            "api_mode": "chat_completions",
+                                        },
+                                    )
+                                except json.JSONDecodeError:
+                                    pass
+                        if parsed is None:
+                            raise ValueError(f"LLM JSON parse failed: {e}") from e
+
+                    # Validate against schema if provided
+                    if response_schema and parsed is not None:
+                        schema_errors = _validate_schema(parsed, response_schema)
+                        if schema_errors:
+                            logger.warning("[LLMClient] Schema validation failed: %s errors", len(schema_errors))
+                            Trace.event(
+                                f"{trace_kind}.schema_validation_error",
+                                {
+                                    "model": model,
+                                    "errors": schema_errors[:10],
+                                    "api_mode": "chat_completions",
+                                    "payload_hash": payload_hash,
+                                },
+                            )
+                            # Schema repair retry: ask model to fix the JSON
+                            repair_prompt = (
+                                "Your JSON output has schema errors. Fix them and return ONLY the corrected JSON.\n\n"
+                                f"ERRORS:\n" + "\n".join(f"- {e}" for e in schema_errors[:10]) + "\n\n"
+                                f"YOUR JSON (fix it):\n{content}\n\n"
+                                "Return ONLY the fixed JSON. No explanation. Start with {{"
+                            )
+                            try:
+                                repair_messages = [{"role": "user", "content": repair_prompt}]
+                                repair_params = {
+                                    "model": model,
+                                    "messages": repair_messages,
+                                    "timeout": effective_timeout,
+                                    "response_format": {"type": "json_object"},
+                                }
+                                if temperature is not None:
+                                    repair_params["temperature"] = temperature
+                                
+                                Trace.event(f"{trace_kind}.schema_repair_attempt", {
+                                    "model": model,
+                                    "errors_count": len(schema_errors),
+                                    "payload_hash": payload_hash,
+                                })
+                                
+                                repair_response = await self.client.chat.completions.create(**repair_params)
+                                repair_content = repair_response.choices[0].message.content or ""
+                                
+                                # Try to parse repaired JSON
+                                repaired_parsed = None
+                                try:
+                                    repaired_parsed = json.loads(repair_content)
+                                except json.JSONDecodeError:
+                                    # Try prefix extraction
+                                    first_brace = repair_content.find("{")
+                                    if first_brace != -1:
+                                        try:
+                                            repaired_parsed = json.loads(repair_content[first_brace:])
+                                        except json.JSONDecodeError:
+                                            pass
+                                
+                                if repaired_parsed is not None:
+                                    # Validate repaired output
+                                    repair_errors = _validate_schema(repaired_parsed, response_schema)
+                                    if not repair_errors:
+                                        Trace.event(f"{trace_kind}.schema_repair_success", {
+                                            "model": model,
+                                            "payload_hash": payload_hash,
+                                        })
+                                        parsed = repaired_parsed
+                                        content = repair_content
+                                    else:
+                                        Trace.event(f"{trace_kind}.schema_repair_failed", {
+                                            "model": model,
+                                            "remaining_errors": repair_errors[:5],
+                                            "payload_hash": payload_hash,
+                                        })
+                                        raise ValueError(f"LLM schema validation failed after repair: {repair_errors[0]}")
+                                else:
+                                    raise ValueError(f"LLM schema repair returned invalid JSON")
+                            except Exception as repair_exc:
+                                logger.warning("[LLMClient] Schema repair failed: %s", repair_exc)
+                                Trace.event(f"{trace_kind}.schema_repair_exception", {
+                                    "model": model,
+                                    "error": str(repair_exc)[:200],
+                                    "payload_hash": payload_hash,
+                                })
+                                raise ValueError(f"LLM schema validation failed: {schema_errors[0]}") from repair_exc
+
+                # Extract usage info
+                usage = None
+                if response.usage:
+                    usage = {
+                        "input_tokens": response.usage.prompt_tokens,
+                        "output_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens,
+                        "cached_tokens": 0,  # Chat Completions doesn't have caching
+                        "latency_ms": latency_ms,
+                    }
+                else:
+                    usage = {"latency_ms": latency_ms}
+
+                result = {
+                    "content": content,
+                    "parsed": parsed,
+                    "model": response.model if hasattr(response, "model") else model,
+                    "cache_status": "NONE",  # No caching for local endpoints
+                    "usage": usage,
+                }
+
+                # Metering
+                meter = self._meter or get_current_llm_meter()
+                if meter:
+                    try:
+                        event = meter.record_completion(
+                            model=model,
+                            stage=stage or trace_kind,
+                            usage=usage,
+                            input_text=input,
+                            output_text=content,
+                            instructions=instructions,
+                        )
+                        Trace.event("llm.metering.recorded", {
+                            "stage": stage or trace_kind,
+                            "cost_credits": str(event.cost_credits),
+                            "api_mode": "chat_completions",
+                        })
+                    except Exception as exc:
+                        logger.warning("[LLMClient] Metering failed: %s", exc)
+
+                Trace.event(f"{trace_kind}.response", {
+                    "model": model,
+                    "content_chars": len(content),
+                    "cache_status": "NONE",
+                    "attempt": attempt + 1,
+                    "payload_hash": payload_hash,
+                    "api_mode": "chat_completions",
+                    "response_text": content[:15000],
+                })
+
+                return result
+
+            except Exception as e:
+                last_error = e
+                logger.warning("[LLMClient] Chat Completions attempt %d failed: %s", attempt + 1, e)
+                Trace.event(f"{trace_kind}.error", {
+                    "model": model,
+                    "attempt": attempt + 1,
+                    "error": str(e)[:200],
+                    "payload_hash": payload_hash,
+                    "api_mode": "chat_completions",
+                })
+
+        raise ValueError(f"LLM call failed after {self.max_retries} attempts: {last_error}")
 
     async def call(
         self,
@@ -242,21 +582,25 @@ class LLMClient:
         reasoning_effort: ReasoningEffort = "low",
         cache_key: str | None = None,
         timeout: float | None = None,
+        temperature: float | None = None,
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
         stage: str | None = None,
     ) -> dict:
         """
-        Execute LLM call using Responses API.
+        Execute LLM call using Responses API (OpenAI) or Chat Completions API (local).
+        
+        When base_url is set (local endpoint), uses Chat Completions API and ignores
+        Responses-specific parameters (reasoning_effort, cache_key, instructions as separate field).
         
         Args:
-            model: Model to use (e.g., "gpt-5-nano", "gpt-5-mini")
+            model: Model to use (e.g., "gpt-5-nano", "qwen3-base-14b")
             input: The main input/prompt content
-            instructions: System instructions (cached if cache_key provided)
+            instructions: System instructions (cached if cache_key provided for OpenAI)
             json_output: If True, request JSON output and parse response
-            response_schema: Optional JSON schema for strict structured output
-            reasoning_effort: Reasoning effort level (low/medium/high)
-            cache_key: Optional key for prompt caching (reduces tokens)
+            response_schema: Optional JSON schema for structured output
+            reasoning_effort: Reasoning effort level (low/medium/high) - OpenAI only
+            cache_key: Optional key for prompt caching - OpenAI only
             timeout: Request timeout in seconds (uses default if not specified)
             max_output_tokens: Maximum number of tokens to generate
             trace_kind: Event kind for tracing
@@ -272,16 +616,40 @@ class LLMClient:
         Raises:
             ValueError: If response is empty after all retries
         """
+        # Route to Chat Completions API for local endpoints
+        if self._use_chat_completions:
+            return await self._call_chat_completions(
+                model=model,
+                input=input,
+                instructions=instructions,
+                json_output=json_output,
+                response_schema=response_schema,
+                timeout=timeout,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                trace_kind=trace_kind,
+                stage=stage,
+            )
+
         effective_timeout = timeout or self.default_timeout
 
         json_output_requested = json_output or response_schema is not None
 
-        # Build API params
+        # Build API params for Responses API (OpenAI)
         params: dict = {
             "model": model,
             "input": input,
             "timeout": effective_timeout,
         }
+
+        if temperature is not None:
+            # Skip temperature for models that don't support it in Responses API
+            # Based on empirical testing: gpt-5-nano, gpt-5, gpt-5.2, and O-series models reject temperature
+            skip_temp_models = model.startswith("o") or model.startswith("gpt-5")
+            if skip_temp_models:
+                logger.debug("[LLMClient] Temperature ignored for model %s (not supported)", model)
+            else:
+                params["temperature"] = temperature
 
         if instructions:
             params["instructions"] = instructions
@@ -295,11 +663,13 @@ class LLMClient:
                 schema_name = response_schema.get("title") if isinstance(response_schema, dict) else None
                 if not schema_name:
                     schema_name = "structured_output"
+                # Note: strict=False because our schemas have optional fields
+                # (strict=True requires ALL properties to be in required)
                 params["text"] = {
                     "format": {
                         "type": "json_schema",
                         "name": schema_name,
-                        "strict": True,
+                        "strict": False,
                         "schema": response_schema,
                     }
                 }
@@ -404,6 +774,23 @@ class LLMClient:
                                     f"{trace_kind}.json_markdown_recovery_failed",
                                     {"model": model, "error": str(md_e), "payload_hash": payload_hash},
                                 )
+                        # Try to find first { and extract JSON (for models with thinking tokens)
+                        if parsed is None:
+                            first_brace = content.find("{")
+                            if first_brace != -1:
+                                try:
+                                    json_candidate = content[first_brace:]
+                                    parsed = json.loads(json_candidate)
+                                    Trace.event(
+                                        f"{trace_kind}.json_recovered_from_prefix",
+                                        {
+                                            "model": model,
+                                            "prefix_stripped": content[:first_brace][:100],
+                                            "payload_hash": payload_hash,
+                                        },
+                                    )
+                                except json.JSONDecodeError:
+                                    pass
                         if parsed is None:
                             raise ValueError(f"LLM JSON parse failed: {e}") from e
 
@@ -534,6 +921,7 @@ class LLMClient:
         reasoning_effort: ReasoningEffort = "low",
         cache_key: str | None = None,
         timeout: float | None = None,
+        temperature: float | None = None,
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
     ) -> dict:
@@ -551,6 +939,7 @@ class LLMClient:
             reasoning_effort=reasoning_effort,
             cache_key=cache_key,
             timeout=timeout,
+            temperature=temperature,
             max_output_tokens=max_output_tokens,
             trace_kind=trace_kind,
         )
@@ -568,6 +957,7 @@ class LLMClient:
         timeout: float | None = None,
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
+        temperature: float | None = None,
     ) -> dict:
         """
         Structured output call with JSON schema.
@@ -581,6 +971,7 @@ class LLMClient:
             schema: JSON schema for structured output
             schema_name: Name for the schema
             model: Model to use (default: gpt-5-nano)
+            temperature: Optional temperature for sampling (0 = deterministic)
             
         Returns:
             Parsed JSON response matching the schema
@@ -599,6 +990,7 @@ class LLMClient:
             timeout=timeout,
             max_output_tokens=max_output_tokens,
             trace_kind=trace_kind,
+            temperature=temperature,
         )
 
     async def close(self) -> None:

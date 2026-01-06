@@ -21,6 +21,16 @@
       "usd_per_input_token": 0.00000025,
       "usd_per_output_token": 0.000002,
       "usd_per_reasoning_token": null
+    },
+    "deepseek-chat": {
+      "usd_per_input_token": 0.00000014,
+      "usd_per_output_token": 0.00000028,
+      "usd_per_reasoning_token": null
+    },
+    "deepseek-reasoner": {
+      "usd_per_input_token": 0.00000055,
+      "usd_per_output_token": 0.00000219,
+      "usd_per_reasoning_token": 0.00000219
     }
   }
 }

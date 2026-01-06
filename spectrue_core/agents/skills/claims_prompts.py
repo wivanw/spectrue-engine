@@ -11,7 +11,9 @@ from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPEN
 
 
 def build_claim_strategist_instructions(*, intents_str: str, topics_str: str, lang_name: str) -> str:
-    return f"""You are an expert Fact-Checking Search Strategist.
+    return f"""**OUTPUT RULE: Output ONLY valid JSON. No prose. No prefixes. No markdown. Start with {{**
+
+You are an expert Fact-Checking Search Strategist.
 Your goal is to extract verifiable claims AND develop optimal SEARCH STRATEGIES for each.
 
 ## NEGATIVE CONSTRAINTS (CRITICAL):
@@ -552,4 +554,61 @@ ARTICLE:
 {text_excerpt}
 
 Return structured ClaimUnits in JSON format.
+"""
+
+def build_core_extraction_prompt(*, text_excerpt: str) -> str:
+    return f"""Tasks:
+1. Analyze the article text below.
+2. Extract ALL distinct, atomic, check-worthy factual assertions (claims).
+   - Do NOT limit the number of claims. Extract everything that matters.
+   - Separate compound sentences into individual atomic claims.
+3. For each claim, provide:
+   - "text": The exact substring from the article (original language).
+   - "normalized_text": A clear, standalone English summary of the claim for search/veracity checking.
+
+ARTICLE:
+{text_excerpt}
+
+Return JSON with list of claims.
+"""
+
+
+def build_metadata_enrichment_prompt(*, claim_text: str, article_context_sm: str, intents_str: str, topics_str: str, lang_name: str) -> str:
+    # article_context_sm should be a smaller/summarized version or just the full chunk if it fits.
+    # We will use the full chunk for now as we want deep context.
+    return f"""**CRITICAL OUTPUT RULES:**
+1. Output ONLY a single JSON object with enrichment fields.
+2. Do NOT wrap in {{"claims": [...]}} or {{"article_intent": ...}}.
+3. Do NOT include "text" or "normalized_text" fields - those are already known.
+4. Start your response with {{ and end with }}.
+
+You are enriching metadata for ONE specific claim that was already extracted.
+
+CLAIM TO ENRICH: "{claim_text}"
+
+ARTICLE CONTEXT:
+{article_context_sm}
+
+**Required fields in your JSON response:**
+- claim_category: "FACTUAL" | "OPINION" | "SATIRE" | "HYPERBOLIC"
+- harm_potential: 1-5 (1=low, 5=critical)
+- verification_target: "reality" | "attribution" | "existence" | "none"
+- claim_role: "core" | "thesis" | "support" | "background" | "context"
+- satire_likelihood: 0.0-1.0
+- topic_group: one of [{topics_str}]
+- topic_key: specific topic within group
+- importance: 0.0-1.0
+- check_worthiness: 0.0-1.0
+- structure: {{"type": "empirical_numeric"|"event"|"causal"|"attribution"|"definition"|"policy_plan"|"forecast"|"meta_scientific"|"other", "premises": [], "conclusion": "...", "dependencies": []}}
+- search_locale_plan: {{"primary": "{lang_name[:2].lower()}", "fallback": ["en"]}}
+- retrieval_policy: {{"channels_allowed": [...]}} where ONLY these values are allowed: "authoritative", "reputable_news", "local_media", "social", "low_reliability_web" (NOT "academic"!)
+- metadata_confidence: "low" | "medium" | "high"
+- search_strategy: {{"intent": "scientific_fact"|"breaking_news"|..., "reasoning": "...", "best_language": "..."}}
+- query_candidates: [{{"text": "...", "role": "CORE", "score": 1.0}}]
+- search_method: "general_search" | "news" | "academic" (NOTE: "academic" is valid HERE, not in channels_allowed)
+- search_queries: ["query1", "query2"]
+- evidence_req: {{"needs_primary": true/false, "needs_2_independent": true/false}}
+- check_oracle: true/false
+
+Output the JSON object now (no markdown, no wrapper):
 """
