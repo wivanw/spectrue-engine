@@ -14,7 +14,6 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 import re
 from spectrue_core.agents.llm_schemas import (
-    CORE_CLAIM_DESCRIPTION_SCHEMA,
     CLAIM_RETRIEVAL_SCHEMA,
     VERIFIABLE_CORE_CLAIM_SCHEMA,  # M125
 )
