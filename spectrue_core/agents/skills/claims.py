@@ -24,7 +24,6 @@ from .claims_prompts import (
 import asyncio
 from .claims_parsing import (
     SEARCH_INTENTS,
-    TOPIC_GROUPS,
     clamp_float,
     clamp_int,
     normalize_article_intent,
