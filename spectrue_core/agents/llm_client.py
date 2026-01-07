@@ -440,7 +440,7 @@ class LLMClient:
                             # Schema repair retry: ask model to fix the JSON
                             repair_prompt = (
                                 "Your JSON output has schema errors. Fix them and return ONLY the corrected JSON.\n\n"
-                                f"ERRORS:\n" + "\n".join(f"- {e}" for e in schema_errors[:10]) + "\n\n"
+                                "ERRORS:\n" + "\n".join(f"- {e}" for e in schema_errors[:10]) + "\n\n"
                                 f"YOUR JSON (fix it):\n{content}\n\n"
                                 "Return ONLY the fixed JSON. No explanation. Start with {{"
                             )
@@ -495,7 +495,7 @@ class LLMClient:
                                         })
                                         raise ValueError(f"LLM schema validation failed after repair: {repair_errors[0]}")
                                 else:
-                                    raise ValueError(f"LLM schema repair returned invalid JSON")
+                                    raise ValueError("LLM schema repair returned invalid JSON")
                             except Exception as repair_exc:
                                 logger.warning("[LLMClient] Schema repair failed: %s", repair_exc)
                                 Trace.event(f"{trace_kind}.schema_repair_exception", {

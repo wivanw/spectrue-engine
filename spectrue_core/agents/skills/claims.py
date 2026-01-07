@@ -357,8 +357,7 @@ class ClaimExtractionSkill(BaseSkill):
         if not chunks:
             return [], False, "news", stitched_text
 
-        all_claims: list[Claim] = []
-        
+
         try:
             # --- Stage 1: Core Extraction ---
             core_tasks = []

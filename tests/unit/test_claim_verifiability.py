@@ -11,8 +11,6 @@
 M125: Tests for validate_core_claim() - verifiability contract enforcement.
 """
 
-import pytest
-
 from spectrue_core.agents.skills.claims import (
     validate_core_claim,
     ExtractionStats,

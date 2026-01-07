@@ -257,7 +257,7 @@ class TestInlineSourceVerificationFeatureFlag:
     @pytest.mark.asyncio
     async def test_verify_inline_source_returns_skipped_when_disabled(self):
         """When enable_inline_source_verification=False, should return verification_skipped."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         # Create mock agent with disabled verification
         mock_runtime = MagicMock()
