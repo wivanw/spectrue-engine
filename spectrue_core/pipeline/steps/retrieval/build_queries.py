@@ -29,6 +29,10 @@ from spectrue_core.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )
+from spectrue_core.verification.search.search_escalation import (
+    build_query_variants,
+    trace_query_variants,
+)
 
 
 def _claim_id_for(claim: dict[str, Any], idx: int) -> str:
@@ -142,6 +146,13 @@ class BuildQueriesStep:
             claim_copy = dict(claim)
             if queries:
                 claim_copy["search_queries"] = list(queries)
+            
+            # M126: Add query variants for escalation ladder
+            variants = build_query_variants(claim)
+            if variants:
+                claim_copy["query_variants"] = [v.to_dict() for v in variants]
+                trace_query_variants(claim_id, variants)
+            
             updated_claims.append(claim_copy)
 
         plan_id = uuid.uuid4().hex[:10]

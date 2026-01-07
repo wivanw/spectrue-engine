@@ -52,6 +52,22 @@ from spectrue_core.schema.claim_metadata import EvidenceChannel
 from spectrue_core.verification.search.source_utils import canonicalize_sources, extract_domain
 from spectrue_core.verification.search.retrieval_eval import evaluate_retrieval_confidence
 from spectrue_core.verification.orchestration.stop_decision import EVStopParams, evaluate_stop_decision
+from spectrue_core.verification.search.search_escalation import (
+    build_query_variants,
+    select_topic_from_claim,
+    compute_retrieval_outcome,
+    should_stop_escalation,
+    get_escalation_ladder,
+    compute_escalation_reason_codes,
+    trace_query_variants,
+    trace_topic_selected,
+    trace_escalation_pass,
+    trace_search_stop,
+    trace_search_summary,
+    EscalationConfig,
+    QueryVariant,
+    RetrievalOutcome,
+)
 
 if TYPE_CHECKING:
     from spectrue_core.verification.search.search_mgr import SearchManager
@@ -183,10 +199,12 @@ class PhaseRunner:
         evidence: dict[str, list[dict]] = {c.get("id"): [] for c in claims}
 
         if self.use_retrieval_loop:
-            return await self._run_claims_with_loop(
+            evidence = await self._run_claims_with_loop(
                 claims=claims,
                 execution_plan=execution_plan,
             )
+            self._emit_claim_trace_summaries(execution_plan)
+            return evidence
 
         dependency_layers = self._get_dependency_layers(claims)
 
@@ -316,7 +334,13 @@ class PhaseRunner:
                                 "reason": sufficiency.reason,
                             })
 
+        self._emit_claim_trace_summaries(execution_plan)
         return evidence
+
+    def _emit_claim_trace_summaries(self, execution_plan: ExecutionPlan) -> None:
+        summaries = self.execution_state.build_trace_summaries(plan=execution_plan)
+        for summary in summaries:
+            Trace.event("claim.trace.summary", summary)
 
     async def _run_claims_with_loop(
         self,
@@ -885,14 +909,204 @@ class PhaseRunner:
                 )
 
     def _select_claim_query(self, claim: Claim) -> str:
+        """Select query for claim search, with deterministic fallback."""
+        import re
+        
+        query_source = "claim_search_queries"
         queries = claim.get("search_queries", [])
+        
         if not queries:
             candidates = claim.get("query_candidates", [])
             if candidates:
                 queries = [c.get("text") for c in candidates if c.get("text")]
-        if not queries:
-            queries = [claim.get("normalized_text", "") or claim.get("text", "")]
-        return queries[0] if queries else ""
+                query_source = "phase_candidates"
+        
+        if queries:
+            query = queries[0]
+        else:
+            # Deterministic keyword extraction fallback (NO normalized_text)
+            claim_text = claim.get("text", "")
+            query = self._extract_keywords_fallback(claim_text)
+            query_source = "keyword_fallback" if query != claim_text[:80] else "text_truncate"
+        
+        # Trace event for debugging query selection
+        Trace.event("search.query.selected", {
+            "claim_id": claim.get("id", "unknown"),
+            "query": query[:100] if query else "",
+            "query_source": query_source,
+            "topic": claim.get("search_method", "news"),
+        })
+        
+        return query if query else ""
+    
+    def _extract_keywords_fallback(self, text: str, max_tokens: int = 6) -> str:
+        """Extract keyword query from text (deterministic, language-agnostic)."""
+        import re
+        if not text:
+            return ""
+        lowered = text.lower()
+        cleaned = re.sub(r"[^\w\s]", " ", lowered, flags=re.UNICODE)
+        tokens = cleaned.split()
+        unique_tokens: list[str] = []
+        seen: set[str] = set()
+        for t in tokens:
+            if len(t) >= 3 and t not in seen:
+                unique_tokens.append(t)
+                seen.add(t)
+            if len(unique_tokens) >= max_tokens:
+                break
+        if unique_tokens:
+            return " ".join(unique_tokens)
+        return text[:80].rstrip(".,!?;")
+
+    async def _run_escalation_ladder(
+        self,
+        claim: Claim,
+        phase: Phase | None,
+        escalation_config: EscalationConfig | None = None,
+    ) -> tuple[list[dict], RetrievalOutcome, int, int, bool]:
+        """
+        M126: Run multi-pass escalation ladder for a claim.
+        
+        Tries query variants with escalating parameters until evidence found
+        or ladder exhausted.
+        
+        Args:
+            claim: The claim to search for
+            phase: Phase configuration (for locale/channels)
+            escalation_config: Optional escalation thresholds
+            
+        Returns:
+            (sources, final_outcome, passes_executed, tavily_calls, domains_relaxed)
+        """
+        claim_id = claim.get("id", "unknown")
+        config = escalation_config or EscalationConfig()
+        
+        # Build query variants from structured claim fields
+        query_variants = build_query_variants(claim, config)
+        if not query_variants:
+            # Fallback to legacy query selection if no variants
+            fallback_query = self._select_claim_query(claim)
+            if fallback_query:
+                query_variants = [QueryVariant(
+                    query_id="Q_fallback",
+                    text=fallback_query,
+                    strategy="legacy_fallback",
+                )]
+        
+        trace_query_variants(claim_id, query_variants)
+        
+        if not query_variants:
+            return [], RetrievalOutcome(0, 0.0, 0, 0), 0, 0, False
+        
+        # Build query lookup
+        query_by_id: dict[str, str] = {v.query_id: v.text for v in query_variants}
+        
+        # Get topic from structured fields
+        topic, topic_reasons = select_topic_from_claim(claim)
+        trace_topic_selected(claim_id, topic, topic_reasons)
+        
+        # Get escalation ladder
+        ladder = get_escalation_ladder()
+        
+        all_sources: list[dict] = []
+        passes_executed = 0
+        tavily_calls = 0
+        domains_relaxed = False
+        cumulative_outcome = RetrievalOutcome(0, 0.0, 0, 0)
+        reason_codes: list[str] = ["initial"]
+        
+        for pass_config in ladder:
+            passes_executed += 1
+            pass_sources: list[dict] = []
+            
+            for query_id in pass_config.query_ids:
+                query_text = query_by_id.get(query_id)
+                if not query_text:
+                    continue
+                
+                # Determine include_domains
+                include_domains: list[str] | None = None
+                if not pass_config.include_domains_relaxed:
+                    chan_set = set(phase.channels or []) if phase else set()
+                    if chan_set and chan_set.issubset({EvidenceChannel.AUTHORITATIVE, EvidenceChannel.REPUTABLE_NEWS}):
+                        include_domains = get_trusted_domains_by_lang(phase.locale or "en") if phase else None
+                else:
+                    domains_relaxed = True
+                
+                # Execute search
+                if hasattr(self.search_mgr, "search_phase"):
+                    raw_result = await self.search_mgr.search_phase(
+                        query_text,
+                        topic=pass_config.topic or topic,
+                        depth=pass_config.search_depth,
+                        max_results=pass_config.max_results,
+                        include_domains=include_domains,
+                    )
+                else:
+                    raw_result = await self.search_mgr.search_unified(
+                        query=query_text,
+                        topic=pass_config.topic or topic,
+                        intent=pass_config.search_depth,
+                    )
+                
+                tavily_calls += 1
+                
+                # Parse result
+                sources: list[dict]
+                if isinstance(raw_result, tuple) and len(raw_result) == 2:
+                    _, sources = raw_result
+                elif isinstance(raw_result, list):
+                    sources = raw_result
+                else:
+                    sources = []
+                
+                sources = canonicalize_sources(sources)
+                pass_sources.extend(sources)
+                all_sources.extend(sources)
+                
+                # Compute outcome
+                outcome = compute_retrieval_outcome(all_sources)
+                
+                # Log escalation event
+                trace_escalation_pass(
+                    claim_id=claim_id,
+                    pass_config=pass_config,
+                    query_id=query_id,
+                    reason_codes=reason_codes,
+                    outcome=outcome,
+                    include_domains_count=len(include_domains) if include_domains else 0,
+                )
+                
+                # Check early stop
+                should_stop, stop_reason = should_stop_escalation(outcome, config)
+                if should_stop:
+                    trace_search_stop(claim_id, pass_config.pass_id, stop_reason, outcome)
+                    trace_search_summary(
+                        claim_id=claim_id,
+                        passes_executed=passes_executed,
+                        tavily_calls=tavily_calls,
+                        final_outcome=outcome,
+                        domains_relaxed=domains_relaxed,
+                    )
+                    return all_sources, outcome, passes_executed, tavily_calls, domains_relaxed
+            
+            # Compute reason codes for next pass
+            pass_outcome = compute_retrieval_outcome(pass_sources)
+            reason_codes = compute_escalation_reason_codes(pass_outcome)
+            cumulative_outcome = compute_retrieval_outcome(all_sources)
+        
+        # Ladder exhausted
+        final_outcome = compute_retrieval_outcome(all_sources)
+        trace_search_summary(
+            claim_id=claim_id,
+            passes_executed=passes_executed,
+            tavily_calls=tavily_calls,
+            final_outcome=final_outcome,
+            domains_relaxed=domains_relaxed,
+        )
+        return all_sources, final_outcome, passes_executed, tavily_calls, domains_relaxed
+
 
     async def _search_by_phase(
         self,
@@ -914,17 +1128,10 @@ class PhaseRunner:
         if not query:
             return []
 
-        # Determine topic (news vs general) from claim's search_method when available.
-        # Fall back to a conservative default mapping for backward compatibility.
-        topic = "general"
-        claim_method = claim.get("search_method", "")
-        if claim_method in ("news", "general_search"):
-            topic = "news" if claim_method == "news" else "general"
-        else:
-            if phase:
-                topic = "general" if phase.search_depth == "advanced" else "news"
-            else:
-                topic = "news"
+        # M126: Topic selection from structured claim fields (not text heuristics)
+        topic, topic_reasons = select_topic_from_claim(claim)
+        claim_id = claim.get("id", "unknown")
+        trace_topic_selected(claim_id, topic, topic_reasons)
 
         # Map phase search depth to Tavily depth.
         depth = "advanced" if phase and phase.search_depth == "advanced" else "basic"
@@ -987,7 +1194,8 @@ class PhaseRunner:
                 if hasattr(x, "value"):
                     allowed.add(str(x.value))
                 else:
-                    allowed.add(str(x))
+                    raw = str(x)
+                    allowed.add(raw.strip().lower().replace("-", "_").replace(" ", "_"))
 
             filtered: list[dict] = []
             for src in normalized:
