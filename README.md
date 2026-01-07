@@ -48,6 +48,7 @@
 - Resource Accounting: `docs/RESOURCE_ACCOUNTING.md`
 - Trace Debugging: `docs/TRACE_GUIDE.md`
 - Media Explainer: `docs/MEDIA_EXPLAINER.md`
+- Scoring Calibration: `docs/CALIBRATION.md`
 
 ## 🔄 Verification Pipeline
 
@@ -230,6 +231,7 @@ See [docs/RESOURCE_ACCOUNTING.md](docs/RESOURCE_ACCOUNTING.md) for full semantic
 |-----|---------|----------|
 | `OPENAI_API_KEY` | LLM analysis (GPT-5) | Yes |
 | `TAVILY_API_KEY` | Web search | Yes |
+| `DEEPSEEK_API_KEY` | Deep reasoning (optional) | Optional |
 | `GOOGLE_FACT_CHECK_KEY` | Oracle fact-check | Optional |
 
 ## 🚀 Installation
@@ -329,6 +331,7 @@ spectrue_core/
 │   └── skills/            # Modular skills
 │       ├── claims.py      # Claim extraction + metadata
 │       ├── clustering.py  # Stance clustering
+│       ├── coverage_skeleton.py # Coverage skeleton extraction
 │       ├── scoring.py     # Evidence scoring
 │       └── relevance.py   # Semantic gating
 │
@@ -355,7 +358,10 @@ spectrue_core/
 │   ├── rgba_aggregation.py# Weighted RGBA
 │   ├── evidence.py        # Evidence pack builder
 │   ├── evidence_pack.py   # Data structures
-│   └── search_mgr.py      # Search orchestration
+│   ├── search_mgr.py      # Search orchestration
+│   └── search/            # Search Logic
+│       ├── search_escalation.py  # Escalation policy
+│       └── search_policy_adapter.py # Policy enforcement
 │
 ├── graph/                 # ClaimGraph
 │   ├── claim_graph.py     # Build pipeline orchestration
@@ -388,7 +394,7 @@ export GOOGLE_FACT_CHECK_KEY="..."  # For Oracle
 export SPECTRUE_ENGINE_DEBUG=true   # Enable debug logging
 
 # Feature Flags
-export MAX_CONCURRENT_SEARCHES=3         # Parallel search limit
+export SPECTRUE_MAX_CONCURRENT_SEARCHES=3    # Parallel search limit
 
 # Trace Configuration
 export TRACE_SAFE_PAYLOADS=false   # Sanitize logs (default: false)

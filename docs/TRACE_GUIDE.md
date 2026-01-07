@@ -5,8 +5,12 @@ Spectrue Engine emits a structured JSONL trace for every run.
 ## Key events to look at
 
 - `claims.extracted` / `claims.normalized`: how many claims were produced and their metadata.
+- `claims.skeleton.*`: coverage skeleton extraction events (parsing, coverage warnings, conversion stats).
+- `claims.dropped`: rejected non-verifiable claims with reason codes.
 - `target_selection.completed`: which claims were chosen for retrieval (targets) vs deferred.
 - `retrieval.search.*` and `tavily.extract.*`: external calls and their cost impact.
+- `search.escalation`: escalation ladder progress (passes A/B/C/D) and topic selection.
+- `search.stop`: early stopping reasons (quality gates, budget caps).
 - `evidence.items.summary`: stance distribution (SUPPORT/REFUTE/CONTEXT) per claim.
 - `score_evidence.response`: LLM scoring output per claim.
 - `verdict.*`: deterministic post-processing and final per-claim verdict.

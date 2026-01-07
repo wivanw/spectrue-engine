@@ -242,6 +242,139 @@ Inline sources often have lower quote hit-rates, so their Bayesian prior shouldn
 
 ---
 
+### Search Escalation Policy [B]
+
+**Status:** Engineering Heuristic
+
+Multi-pass Tavily search with evidence-driven escalation and early stopping:
+
+```python
+# 4-pass ladder with escalating cost
+Pass A: basic, k=3, Q1/Q2        # Cheap
+Pass B: basic, k=6, Q2/Q3        # Expand
+Pass C: advanced, k=6, Q1/Q2     # Deep
+Pass D: basic, k=6, relax_domains # Last resort
+
+# Stop conditions (RETRIEVAL-ONLY signals)
+should_stop = (
+    usable_snippets >= min_usable_snippets AND
+    best_relevance >= min_relevance_threshold
+)
+```
+
+**Query Variants (deterministic from claim fields):**
+
+| Variant | Strategy | Composition |
+|---------|----------|-------------|
+| Q1 | anchor_tight | entities + seed_terms[:4] + date_anchor |
+| Q2 | anchor_medium | entities + seed_terms[:4] (no date) |
+| Q3 | broad | entities[:2] + seed_terms[:2] |
+
+**Topic Selection (from falsifiability):**
+
+| falsifiable_by | time_anchor | Topic |
+|----------------|-------------|-------|
+| reputable_news, official_statement | any | news |
+| dataset, scientific_publication | explicit_date, range | news |
+| dataset, scientific_publication | unknown | general |
+| other | any | news (default) |
+
+**Code location:** `spectrue_core/verification/search/search_escalation.py`
+
+> ⚠️ **Epistemological Note:** This is an **engineering decision** based on empirical
+> observation of Tavily API behavior. The escalation thresholds are tuned for
+> cost/quality balance, not derived from theory.
+
+---
+
+### Coverage Skeleton Extraction [B]
+
+**Status:** Engineering Heuristic
+
+Two-phase claim extraction to ensure comprehensive coverage:
+
+**Phase 1: Skeleton Extraction**
+```
+Text → LLM → CoverageSkeleton {
+    events: [SkeletonEvent],      # Subject + verb + time/location
+    measurements: [SkeletonMeasurement],  # Metric + quantity
+    quotes: [SkeletonQuote],      # Speaker + quote_text
+    policies: [SkeletonPolicy]    # Subject + action
+}
+```
+
+**Phase 2: Coverage Validation**
+```python
+# Regex-based detection (language-agnostic for numbers/dates)
+detected_times = extract_time_mentions_count(text)
+detected_numbers = extract_number_mentions_count(text)
+detected_quotes = detect_quote_spans_count(text)
+
+# Validation with tolerance
+ok, reason_codes = validate_skeleton_coverage(
+    skeleton, analysis, tolerance=0.5
+)
+# reason_codes: ["low_time_coverage:1/5", "low_quote_coverage:0/2"]
+```
+
+**Phase 3: Skeleton → Claims**
+```python
+# Per-type converters with validation
+results, emitted, dropped = skeleton_to_claims(skeleton)
+# dropped claims logged with reason_codes
+```
+
+**Code location:** `spectrue_core/agents/skills/coverage_skeleton.py`
+
+> ⚠️ **Epistemological Note:** The tolerance threshold (0.5) and regex patterns are
+> **engineering choices** tuned for precision/recall balance. Quote detection pattern
+> supports multiple quotation styles (ASCII, curly, guillemets, German).
+
+---
+
+### Claim Verifiability Validation [B]
+
+**Status:** Engineering Heuristic (Deterministic Rules)
+
+Structural validation enforcing verifiable claims without numeric caps:
+
+```python
+def validate_core_claim(claim: dict) -> tuple[bool, list[str]]:
+    reason_codes = []
+    
+    # Structural checks
+    if not claim.get("claim_text"): 
+        reason_codes.append("empty_claim_text")
+    if not claim.get("subject_entities"):
+        reason_codes.append("missing_subject_entities")
+    if len(claim.get("retrieval_seed_terms", [])) < 3:
+        reason_codes.append("insufficient_retrieval_seed_terms")
+    
+    # Falsifiability check
+    falsifiability = claim.get("falsifiability", {})
+    if not falsifiability.get("is_falsifiable"):
+        reason_codes.append("not_falsifiable")
+    
+    # Time anchor check (with exemptions)
+    predicate_type = claim.get("predicate_type", "other")
+    if predicate_type not in TIME_ANCHOR_EXEMPT_PREDICATES:
+        time_anchor = claim.get("time_anchor", {})
+        if time_anchor.get("type") == "unknown":
+            reason_codes.append("unknown_time_anchor")
+    
+    return len(reason_codes) == 0, reason_codes
+
+# Exempt predicates (verifiable without explicit time)
+TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence"}
+```
+
+**Code location:** `spectrue_core/agents/skills/claims.py`
+
+> ⚠️ **Epistemological Note:** These are **structural rules**, not truth heuristics.
+> A claim passing validation is retrievable and scorable, not necessarily true.
+
+---
+
 ## Research Grounding
 
 ### Directly Used Concepts
@@ -297,7 +430,7 @@ Inline sources often have lower quote hit-rates, so their Bayesian prior shouldn
 
 ### TierDominantAggregation
 
-**Status:** DEPRECATED (M104)
+**Status:** DEPRECATED
 
 Replaced by Bayesian Scoring. See `spectrue_core.scoring.belief`.
 

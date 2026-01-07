@@ -85,11 +85,44 @@ config = SpectrueConfig(
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| **Core API Keys** | | |
 | `OPENAI_API_KEY` | OpenAI API key | Required |
 | `TAVILY_API_KEY` | Tavily search API key | Required |
 | `GOOGLE_FACT_CHECK_KEY` | Google Fact Check API key | Optional |
-| `SPECTRUE_MAX_CONCURRENT_SEARCHES` | Max parallel searches | `3` |
-| `TRACE_SAFE_PAYLOADS` | Sanitize trace logs | `false` |
+| `DEEPSEEK_API_KEY` | DeepSeek API key (for heavy reasoning) | Optional |
+| **Engine Control** | | |
+| `SPECTRUE_MAX_CONCURRENT_SEARCHES` | Max parallel searches (PhaseRunner) | `3` |
+| `SPECTRUE_LOCALE_PRIMARY` | Default analysis language | `en` |
+| `SPECTRUE_LOCALE_FALLBACKS` | Secondary languages (CSV) | `uk` |
+| `SPECTRUE_ENGINE_DEBUG` | Enable debug logging | `false` |
+| **LLM & Models** | | |
+| `OPENAI_CONCURRENCY` | LLM client max concurrency | `6` |
+| `OPENAI_TIMEOUT` | Main LLM timeout (seconds) | `60.0` |
+| `DEEPSEEK_BASE_URL` | DeepSeek API Base URL | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL_NAMES` | CSV of models routing to DeepSeek | `(empty)` |
+| `MODEL_CLAIM_EXTRACTION` | Override model for extraction | `gpt-4o` |
+| `MODEL_INLINE_SOURCE_VERIFICATION` | Override model for inline checks | `gpt-5-nano` |
+| `MODEL_CLUSTERING_STANCE` | Override model for clustering | `gpt-4o-mini` |
+| **Search Configuration** | | |
+| `TAVILY_CONCURRENCY` | Max Tavily API concurrency | `5` |
+| `SPECTRUE_TAVILY_EXCLUDE_DOMAINS` | Domains to ignore in search (CSV) | `(empty)` |
+| `SPECTRUE_TAVILY_INCLUDE_RAW_CONTENT` | Fetch full pages (`true`, `false`, `auto`) | `auto` |
+| `SPECTRUE_GOOGLE_CSE_COST` | Cost per Google search (credits) | `0` |
+| **Claim Graph (Advanced)** | | |
+| `CLAIM_GRAPH_TOP_K` | Number of claims to select | `12` |
+| `CLAIM_GRAPH_K_SIM` | Candidate generation neighbors | `10` |
+| `CLAIM_GRAPH_STRUCTURAL_ENABLED` | Enable structural boosting | `true` |
+| `CLAIM_GRAPH_TENSION_ENABLED` | Enable tension detection | `true` |
+| **Content Budget** | | |
+| `CONTENT_BUDGET_MAX_DEFAULT_CHARS` | Max chars to process | `120000` |
+| `CONTENT_BUDGET_BLOCK_MIN_CHARS` | Min chars for text block | `30` |
+| **Feature Flags** | | |
+| `FEATURE_RETRIEVAL_STEPS` | Enable fine-grained retrieval steps | `false` |
+| `FEATURE_COVERAGE_CHUNKING` | Enable large-text chunking | `false` |
+| `FEATURE_INLINE_SOURCE_VERIFICATION` | Enable inline source checking | `true` |
+| **Trace & Safety** | | |
+| `TRACE_SAFE_PAYLOADS` | Sanitize PII/sensitive data in traces | `false` |
+| `TRACE_MAX_HEAD_CHARS` | Truncation limit for trace logs | `120` |
 
 ---
 

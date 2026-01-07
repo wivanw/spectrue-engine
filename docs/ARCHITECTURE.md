@@ -210,6 +210,111 @@ Total: 2 pipeline runs
 - `ExtractClaimsStep` skips extraction when claims pre-exist
 - ~50% cost reduction, ~40% latency reduction
 
+### Coverage Skeleton Extraction
+
+Two-phase claim extraction for comprehensive coverage:
+
+**Phase 1: Skeleton Extraction**
+- Extract events, measurements, quotes, policies with `raw_span`
+- Regex-based coverage analyzers (time mentions, number mentions, quote spans)
+- Coverage validation with tolerance threshold
+
+**Phase 2: Skeleton → Claims**
+- Convert skeleton items to claim-compatible dicts
+- Per-type converters with basic validation
+- `skeleton_item_id` traceability for debugging
+
+**Key Components:**
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| `SkeletonEvent` | Event with entities, verb, time/location | `agents/skills/coverage_skeleton.py` |
+| `SkeletonMeasurement` | Metric with quantity mentions | `agents/skills/coverage_skeleton.py` |
+| `SkeletonQuote` | Quote with speaker entities | `agents/skills/coverage_skeleton.py` |
+| `SkeletonPolicy` | Policy/regulation with action | `agents/skills/coverage_skeleton.py` |
+| `skeleton_to_claims()` | Converter function | `agents/skills/coverage_skeleton.py` |
+| `validate_skeleton_coverage()` | Coverage validation | `agents/skills/coverage_skeleton.py` |
+
+**Trace Events:**
+- `claims.skeleton.created` — skeleton item counts
+- `claims.coverage.warning` — low coverage detected
+- `claims.skeleton.to_claims` — conversion stats
+
+### Search Escalation Policy
+
+Multi-pass Tavily search with evidence-driven escalation:
+
+```
+Pass A (cheap): basic depth, 3 results, Q1/Q2
+    ↓ (if insufficient)
+Pass B (expand): basic depth, 6 results, Q2/Q3
+    ↓ (if insufficient)
+Pass C (deep): advanced depth, 6 results, Q1/Q2
+    ↓ (if insufficient)
+Pass D (relax): basic depth, 6 results, no domain restriction
+```
+
+**Query Variants (Q1/Q2/Q3):**
+- Q1 (anchor_tight): entities + seed terms + date anchor
+- Q2 (anchor_medium): entities + seed terms (no date)
+- Q3 (broad): fewer terms for wider recall
+
+**Topic Selection:**
+- `falsifiable_by` in {reputable_news, official_statement} → "news"
+- `falsifiable_by` in {dataset, scientific_publication} + explicit date → "news"
+- Default → "news" (better for domain allowlists)
+
+**Key Components:**
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| `QueryVariant` | Deterministic query from claim fields | `verification/search/search_escalation.py` |
+| `EscalationPass` | Pass config (depth, results, domain relaxation) | `verification/search/search_escalation.py` |
+| `RetrievalOutcome` | Observable quality signals | `verification/search/search_escalation.py` |
+| `build_query_variants()` | Build Q1/Q2/Q3 from claim | `verification/search/search_escalation.py` |
+| `select_topic_from_claim()` | Topic selection from falsifiability | `verification/search/search_escalation.py` |
+
+**Trace Events:**
+- `search.topic.selected` — topic and reason codes
+- `search.escalation` — pass executed with params and outcome
+- `search.stop` — early stop reason
+- `search.summary` — end-of-retrieval summary
+
+### Claim Verifiability Contract
+
+Deterministic validation enforcing verifiable claims:
+
+**Required Fields:**
+- `claim_text` — non-empty
+- `subject_entities` — at least 1
+- `retrieval_seed_terms` — at least 3
+- `falsifiability.is_falsifiable` — must be true
+- `time_anchor` — required for event/measurement (exempt: quote, policy, ranking)
+
+**Validation Function:**
+```python
+ok, reason_codes = validate_core_claim(claim)
+# reason_codes: ['not_falsifiable', 'missing_subject_entities', ...]
+```
+
+**Time Anchor Exempt Predicates:**
+- `quote` — verifiable via source attribution
+- `policy` — verifiable via public records
+- `ranking` — verifiable via latest data
+- `existence` — verifiable by finding the entity
+
+**Key Components:**
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| `validate_core_claim()` | Deterministic validation | `agents/skills/claims.py` |
+| `ExtractionStats` | Track extracted/dropped/emitted | `agents/skills/claims.py` |
+| `TIME_ANCHOR_EXEMPT_PREDICATES` | Predicates not requiring time anchor | `agents/skills/claims.py` |
+
+**Trace Events:**
+- `claim.dropped` — claim failed validation with reason codes
+- `claims.extraction_stats` — extraction/drop/emit counts
+
 ### SpectrueEngine
 
 Entry point for external consumers. Provides simple `analyze_text()` API.
@@ -387,7 +492,9 @@ spectrue_core/
 │   ├── fact_checker_agent.py
 │   ├── skills/
 │   │   ├── base_skill.py     # Skill base class
-│   │   ├── claims.py         # Claim extraction
+│   │   ├── claims.py         # Claim extraction + validation
+│   │   ├── claims_prompts.py # Claim extraction prompts
+│   │   ├── coverage_skeleton.py  # Coverage skeleton extraction
 │   │   ├── claim_metadata_parser.py  # Claim metadata parsing helpers
 │   │   ├── clustering.py     # Source-claim mapping
 │   │   ├── scoring.py        # RGBA scoring
@@ -435,7 +542,10 @@ spectrue_core/
 │   ├── rgba_aggregation.py   # Weighted aggregation
 │   ├── evidence.py           # EvidencePack builder
 │   ├── evidence_pack.py      # TypedDicts
-│   └── search_mgr.py         # Search orchestration
+│   ├── search_mgr.py         # Search orchestration
+│   └── search/
+│       ├── search_escalation.py   # Search escalation policy
+│       └── search_policy_adapter.py  # Policy enforcement
 │
 ├── graph/
 │   ├── claim_graph.py        # ClaimGraph builder

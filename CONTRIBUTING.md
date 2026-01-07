@@ -93,8 +93,8 @@ Ensure all tests pass before submitting your PR.
 
 ```bash
 pytest tests/unit tests/test_*.py \
-  tests/integration/test_m80_orchestration.py \
-  tests/integration/test_m81_calibration.py \
+  tests/integration/test_orchestration_flow.py \
+  tests/integration/test_calibration_integration.py \
   tests/integration/test_verification_pipeline.py
 ```
 

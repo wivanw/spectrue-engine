@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-01-08
+
 ### Added
 - M127: Coverage Skeleton Extraction
   - `coverage_skeleton.py` with dataclasses for skeleton items (event, measurement, quote, policy)
