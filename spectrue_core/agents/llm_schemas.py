@@ -793,6 +793,123 @@ CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
 }
 
 
+# M127: Coverage Skeleton Schema
+# Phase-1 extraction: all events/measurements/quotes/policies with raw_span
+COVERAGE_SKELETON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["events", "measurements", "quotes", "policies"],
+    "properties": {
+        "events": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["id", "subject_entities", "verb_phrase", "raw_span"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "subject_entities": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
+                    "verb_phrase": {"type": "string", "minLength": 3},
+                    "time_anchor": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "value": {"type": "string"},
+                        },
+                    },
+                    "location_anchor": {"type": "string"},
+                    "raw_span": {"type": "string", "minLength": 10},
+                },
+            },
+        },
+        "measurements": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["id", "subject_entities", "metric", "quantity_mentions", "raw_span"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "subject_entities": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
+                    "metric": {"type": "string", "minLength": 2},
+                    "quantity_mentions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["value"],
+                            "properties": {
+                                "value": {"type": "string"},
+                                "unit": {"type": "string"},
+                            },
+                        },
+                        "minItems": 1,
+                    },
+                    "time_anchor": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "value": {"type": "string"},
+                        },
+                    },
+                    "raw_span": {"type": "string", "minLength": 10},
+                },
+            },
+        },
+        "quotes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["id", "speaker_entities", "quote_text", "raw_span"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "speaker_entities": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
+                    "quote_text": {"type": "string", "minLength": 5},
+                    "raw_span": {"type": "string", "minLength": 10},
+                },
+            },
+        },
+        "policies": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["id", "subject_entities", "policy_action", "raw_span"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "subject_entities": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
+                    "policy_action": {"type": "string", "minLength": 5},
+                    "time_anchor": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "value": {"type": "string"},
+                        },
+                    },
+                    "raw_span": {"type": "string", "minLength": 10},
+                },
+            },
+        },
+    },
+}
+
+
 SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "score_evidence": SCORING_RESPONSE_SCHEMA,
     "score_evidence_structured": SCORE_EVIDENCE_STRUCTURED_SCHEMA,
@@ -800,7 +917,8 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "query_generation": QUERY_GENERATION_SCHEMA,
     "claim_extraction": CLAIM_EXTRACTION_SCHEMA,
     "core_claim_extraction": CORE_CLAIM_DESCRIPTION_SCHEMA,
-    "verifiable_core_claim": VERIFIABLE_CORE_CLAIM_SCHEMA,  # M125
+    "verifiable_core_claim": VERIFIABLE_CORE_CLAIM_SCHEMA,
+    "coverage_skeleton": COVERAGE_SKELETON_SCHEMA,  # M127
     "claim_retrieval_plan": CLAIM_RETRIEVAL_SCHEMA,
     "claim_enrichment": CLAIM_RETRIEVAL_SCHEMA,
     "edge_typing": EDGE_TYPING_SCHEMA,

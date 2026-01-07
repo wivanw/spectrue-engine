@@ -732,3 +732,114 @@ def build_metadata_enrichment_prompt(
         topics_str=topics_str,
         lang_name=lang_name,
     )
+
+
+def build_skeleton_extraction_prompt(*, text_excerpt: str) -> str:
+    """
+    M127: Coverage Skeleton extraction prompt.
+    
+    Phase-1: Extract ALL events/measurements/quotes/policies with raw_span.
+    No filtering at this stage - aim for complete coverage.
+    """
+    return f"""**OUTPUT RULE: Output ONLY valid JSON. No prose. No prefixes. No markdown. Start with {{**
+
+You are extracting a **COVERAGE SKELETON** from text - identifying ALL factual elements.
+
+## YOUR TASK
+
+Extract EVERY verifiable element into one of four categories:
+1. **Events**: Things that happened (actions, changes, occurrences)
+2. **Measurements**: Numbers, statistics, quantities with metrics
+3. **Quotes**: Statements attributed to specific speakers
+4. **Policies**: Rules, regulations, decisions by authorities
+
+## CRITICAL: COMPLETE COVERAGE
+
+Your goal is **100% recall** - capture EVERYTHING, not just "main" claims.
+- If there is a number in the text → there should be a measurement
+- If someone said something → there should be a quote
+- If something happened → there should be an event
+- If a rule/policy is mentioned → there should be a policy
+
+## REQUIRED FIELDS
+
+For EVERY item you extract, include:
+- **id**: Unique identifier (evt_1, msr_1, qot_1, pol_1)
+- **subject_entities**: List of entity names involved
+- **raw_span**: EXACT substring from the input (for anchoring)
+
+### Events Schema
+{{
+  "id": "evt_1",
+  "subject_entities": ["Entity1", "Entity2"],
+  "verb_phrase": "announced partnership with",
+  "time_anchor": {{"type": "explicit_date", "value": "January 2025"}},
+  "location_anchor": "New York",
+  "raw_span": "Entity1 announced partnership with Entity2 in New York in January 2025"
+}}
+
+### Measurements Schema  
+{{
+  "id": "msr_1",
+  "subject_entities": ["Company"],
+  "metric": "revenue",
+  "quantity_mentions": [{{"value": "5.2", "unit": "billion dollars"}}],
+  "time_anchor": {{"type": "explicit_date", "value": "Q4 2024"}},
+  "raw_span": "Company reported revenue of $5.2 billion in Q4 2024"
+}}
+
+### Quotes Schema
+{{
+  "id": "qot_1",
+  "speaker_entities": ["CEO Name"],
+  "quote_text": "We expect continued growth",
+  "raw_span": "CEO Name said \"We expect continued growth\""
+}}
+
+### Policies Schema
+{{
+  "id": "pol_1",
+  "subject_entities": ["European Union"],
+  "policy_action": "requires all cars to have emergency braking",
+  "time_anchor": {{"type": "explicit_date", "value": "2025"}},
+  "raw_span": "The EU requires all new cars to have emergency braking from 2025"
+}}
+
+## TIME_ANCHOR TYPES
+- "explicit_date": YYYY, MM-YYYY, DD-MM-YYYY, "Q4 2024", "January 2025"
+- "range": "between 2020 and 2023", "from January to March"
+- "relative": "yesterday", "last week", "recently"
+- "unknown": No time reference found (use null for value)
+
+## OUTPUT FORMAT
+
+```json
+{{
+  "events": [
+    {{"id": "evt_1", "subject_entities": [...], "verb_phrase": "...", "time_anchor": {...}, "location_anchor": "...", "raw_span": "..."}}
+  ],
+  "measurements": [
+    {{"id": "msr_1", "subject_entities": [...], "metric": "...", "quantity_mentions": [...], "time_anchor": {...}, "raw_span": "..."}}
+  ],
+  "quotes": [
+    {{"id": "qot_1", "speaker_entities": [...], "quote_text": "...", "raw_span": "..."}}
+  ],
+  "policies": [
+    {{"id": "pol_1", "subject_entities": [...], "policy_action": "...", "time_anchor": {...}, "raw_span": "..."}}
+  ]
+}}
+```
+
+## EXTRACTION RULES
+
+1. **One element per item**: Don't combine multiple facts into one
+2. **Raw span precision**: The raw_span must be an EXACT substring from input
+3. **Entity canonicalization**: Use full proper names ("Elon Musk" not "he")
+4. **Numbers → Measurements**: ANY numeric value should create a measurement
+5. **Speeches → Quotes**: ANY attributed statement should create a quote
+
+ARTICLE:
+{text_excerpt}
+
+Return JSON with all extracted skeleton items (empty arrays are OK for unused categories).
+"""
