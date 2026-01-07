@@ -910,8 +910,6 @@ class PhaseRunner:
 
     def _select_claim_query(self, claim: Claim) -> str:
         """Select query for claim search, with deterministic fallback."""
-        import re
-        
         query_source = "claim_search_queries"
         queries = claim.get("search_queries", [])
         
@@ -1013,7 +1011,6 @@ class PhaseRunner:
         passes_executed = 0
         tavily_calls = 0
         domains_relaxed = False
-        cumulative_outcome = RetrievalOutcome(0, 0.0, 0, 0)
         reason_codes: list[str] = ["initial"]
         
         for pass_config in ladder:
@@ -1094,7 +1091,6 @@ class PhaseRunner:
             # Compute reason codes for next pass (with config for consistent thresholds)
             pass_outcome = compute_retrieval_outcome(pass_sources, config)
             reason_codes = compute_escalation_reason_codes(pass_outcome, config)
-            cumulative_outcome = compute_retrieval_outcome(all_sources, config)
         
         # Ladder exhausted
         final_outcome = compute_retrieval_outcome(all_sources, config)

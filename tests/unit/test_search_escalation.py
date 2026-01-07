@@ -23,7 +23,6 @@ from spectrue_core.verification.search.search_escalation import (
     should_stop_escalation,
     get_escalation_ladder,
     compute_escalation_reason_codes,
-    DEFAULT_ESCALATION_CONFIG,
     _deduplicate_tokens,
 )
 
