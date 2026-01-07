@@ -166,8 +166,8 @@ class TestDefaultTopicIsNews:
         assert kwargs.get("topic") == "news"
 
     @pytest.mark.asyncio
-    async def test_topic_general_only_when_explicit(self):
-        """Topic is 'general' only when explicitly set to 'general_search'."""
+    async def test_topic_selection_ignores_search_method(self):
+        """Topic selection relies on structured claim fields, ignoring legacy search_method."""
         search_mgr = MagicMock()
         search_mgr.search_phase = AsyncMock(return_value=(None, []))
         
@@ -185,7 +185,7 @@ class TestDefaultTopicIsNews:
         
         call_args = search_mgr.search_phase.call_args
         _, kwargs = call_args
-        assert kwargs.get("topic") == "general"
+        assert kwargs.get("topic") == "news"
 
 
 class TestRegressionGoldenScenario:

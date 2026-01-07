@@ -172,7 +172,7 @@ class TestRuntimeConfigDeepSeek:
 
         assert config.deepseek_base_url == "https://api.deepseek.com"
         assert config.deepseek_api_key == ""
-        assert config.model_claim_extraction == "gpt-5-nano"
+        assert config.model_claim_extraction == "deepseek-chat"
         assert config.model_inline_source_verification == "gpt-5-nano"
         assert config.model_clustering_stance == "gpt-5-nano"
         assert config.enable_inline_source_verification is True

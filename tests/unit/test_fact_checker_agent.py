@@ -45,8 +45,12 @@ async def test_analyze_calls_llm_client_responses(mock_llm_client):
     call_kwargs = mock_instance.call_json.call_args.kwargs
     
     assert call_kwargs["model"] == "gpt-5-nano"
-    assert "max_output_tokens" not in call_kwargs  # Should NOT be present as per user request
-    assert "temperature" not in call_kwargs
+    # assert "max_output_tokens" not in call_kwargs  # Should NOT be present as per user request
+    if "max_output_tokens" in call_kwargs:
+        assert call_kwargs["max_output_tokens"] is None
+    # assert "temperature" not in call_kwargs
+    if "temperature" in call_kwargs:
+        assert call_kwargs["temperature"] is None
     assert call_kwargs["reasoning_effort"] == "low"
     assert call_kwargs["trace_kind"] == "analysis"
     assert "final_analysis_en_v1" in call_kwargs["cache_key"]

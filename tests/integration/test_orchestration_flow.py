@@ -141,6 +141,11 @@ async def test_horoscope_claims_get_none_target(claim_skill, mock_llm_client):
                 "metadata_confidence": "high",
                 "query_candidates": [],  # No queries for predictions
                 "search_queries": [],
+                # Validation fields
+                "subject_entities": ["Aries", "Stars"],
+                "retrieval_seed_terms": ["aries", "horoscope", "finance"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "existence",
             },
             {
                 "text": "Меркурій у ретрограді може спричинити помилки",
@@ -160,6 +165,11 @@ async def test_horoscope_claims_get_none_target(claim_skill, mock_llm_client):
                 "metadata_confidence": "high",
                 "query_candidates": [],
                 "search_queries": [],
+                # Validation fields
+                "subject_entities": ["Mercury", "Retrograde"],
+                "retrieval_seed_terms": ["mercury", "retrograde", "finance"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "existence",
             },
         ],
     }
@@ -212,6 +222,11 @@ async def test_horoscope_claims_skip_search(claim_skill, mock_llm_client):
                 "verification_target": "none",
                 "claim_role": "context",
                 "metadata_confidence": "high",
+                # Validation fields
+                "subject_entities": ["Reward"],
+                "retrieval_seed_terms": ["unexpected", "monetary", "reward"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "existence",
             },
         ],
     }
@@ -232,12 +247,9 @@ async def test_horoscope_claims_skip_search(claim_skill, mock_llm_client):
 async def test_mixed_article_correct_targets(claim_skill, mock_llm_client):
     """
     T9+: Mixed article should have different verification_targets per claim type.
-    
-    - Factual claims (e.g., "Ukrainian forces recaptured Tokmak") → reality
-    - Predictions (e.g., "Russia will likely intensify attacks") → none
-    - Attribution (e.g., "John Smith predicts...") → attribution or reality
     """
-    mock_llm_client.call_json.return_value = {
+    # Define responses
+    core_response = {
         "article_intent": "news",
         "claims": [
             {
@@ -245,59 +257,83 @@ async def test_mixed_article_correct_targets(claim_skill, mock_llm_client):
                 "normalized_text": "Ukrainian forces recaptured Tokmak in Zaporizhzhia region",
                 "type": "core",
                 "claim_category": "FACTUAL",
-                "topic_group": "War",
-                "importance": 0.95,
-                "check_worthiness": 0.95,
-                "harm_potential": 3,
                 "verification_target": "reality",
-                "claim_role": "core",
-                "search_locale_plan": {"primary": "en", "fallback": ["uk"]},
-                "retrieval_policy": {"channels_allowed": ["authoritative", "reputable_news"]},
-                "metadata_confidence": "high",
-                "query_candidates": [
-                    {"text": "Tokmak recaptured Ukraine December 2025", "role": "CORE", "score": 1.0}
-                ],
-                "search_queries": ["Tokmak recaptured Ukraine"],
+                # Validation
+                "subject_entities": ["Tokmak", "Ukraine"],
+                "retrieval_seed_terms": ["tokmak", "recaptured", "ukraine"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "event",
+                 "time_anchor": {"type": "date", "date": "2025-12-01"},
             },
             {
                 "text": "Russia will likely intensify attacks in January 2025",
                 "normalized_text": "Analyst John Smith predicts Russia will intensify attacks in January",
                 "type": "attribution",
                 "claim_category": "OPINION",
-                "topic_group": "War",
-                "importance": 0.5,
-                "check_worthiness": 0.2,
-                "harm_potential": 2,
-                "verification_target": "none",  # Prediction, not verifiable
-                "claim_role": "context",
-                "search_locale_plan": {"primary": "en", "fallback": []},
-                "retrieval_policy": {"channels_allowed": []},
-                "metadata_confidence": "high",
-                "query_candidates": [],
-                "search_queries": [],
+                "verification_target": "none",
+                # Validation
+                "subject_entities": ["Russia"],
+                "retrieval_seed_terms": ["russia", "attacks", "january"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "existence",
             },
             {
                 "text": "Tomorrow's weather in Kyiv will be cloudy with -5°C",
                 "normalized_text": "Weather forecast: Kyiv tomorrow cloudy, -5°C",
                 "type": "numeric",
                 "claim_category": "FACTUAL",
-                "topic_group": "Other",
-                "importance": 0.3,
-                "check_worthiness": 0.4,
-                "harm_potential": 1,
-                # Weather forecast = "existence" - can verify the forecast exists
                 "verification_target": "existence",
-                "claim_role": "support",
-                "search_locale_plan": {"primary": "uk", "fallback": ["en"]},
-                "retrieval_policy": {"channels_allowed": ["authoritative"]},
-                "metadata_confidence": "medium",
-                "query_candidates": [
-                    {"text": "Kyiv weather forecast December 22 2025", "role": "CORE", "score": 0.6}
-                ],
-                "search_queries": ["Kyiv weather forecast"],
+                # Validation
+                "subject_entities": ["Kyiv"],
+                "retrieval_seed_terms": ["kyiv", "weather", "forecast"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "existence",
             },
         ],
     }
+
+    async def side_effect(*args, **kwargs):
+        kind = kwargs.get("trace_kind")
+        prompt = kwargs.get("input", "")
+        
+        if kind == "claim_extraction_core":
+            return core_response
+            
+        if kind == "claim_retrieval_plan":
+            # Return specific enrichment based on text in prompt
+            # Use longer substrings to avoid matching context
+            if "recaptured the city of Tokmak" in prompt:
+                return {
+                    "verification_target": "reality",
+                     "claim_role": "core",
+                     "search_queries": ["Tokmak query"],
+                     "search_locale_plan": {"primary": "en", "fallback": []},
+                     "retrieval_policy": {"channels_allowed": ["authoritative"]},
+                     "metadata_confidence": "high",
+                }
+            elif "Russia will likely intensify" in prompt:
+                return {
+                    "verification_target": "none",
+                    "claim_role": "context",
+                    "search_queries": [],
+                     "search_locale_plan": {"primary": "en", "fallback": []},
+                     "retrieval_policy": {"channels_allowed": []},
+                     "metadata_confidence": "high",
+                }
+            elif "Tomorrow's weather" in prompt:
+                 return {
+                    "verification_target": "existence",
+                    "claim_role": "support",
+                    "search_queries": ["Weather query"],
+                     "search_locale_plan": {"primary": "uk", "fallback": []},
+                     "retrieval_policy": {"channels_allowed": ["authoritative"]},
+                     "metadata_confidence": "medium",
+                }
+            return {}
+            
+        return {}
+
+    mock_llm_client.call_json.side_effect = side_effect
     
     claims, check_oracle, article_intent, _ = await claim_skill.extract_claims(
         MIXED_ARTICLE,
@@ -342,6 +378,12 @@ async def test_metadata_fallback_defaults(claim_skill, mock_llm_client):
                 "importance": 0.7,
                 "check_worthiness": 0.7,
                 "harm_potential": 2,
+                "harm_potential": 2,
+                # Validation fields
+                "subject_entities": ["Claim"],
+                "retrieval_seed_terms": ["some", "claim", "text"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "existence",
             },
         ],
     }
@@ -383,6 +425,13 @@ async def test_high_harm_gets_authoritative_only(claim_skill, mock_llm_client):
                 # LLM omits retrieval_policy
                 "verification_target": "reality",
                 "claim_role": "core",
+                "verification_target": "reality",
+                "claim_role": "core",
+                # Validation fields
+                "subject_entities": ["Kerosene", "Cancer"],
+                "retrieval_seed_terms": ["drinking", "kerosene", "cures", "cancer"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "existence",
             },
         ],
     }

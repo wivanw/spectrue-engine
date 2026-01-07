@@ -33,8 +33,15 @@ def mock_config():
     config.runtime.tunables.langdetect_min_prob = 0.8
     config.runtime.tunables.max_claims_deep = 2
     
+    # Validation fix: Set default locale
+    config.runtime.locale = "en"
+    
     # Ensure nested objects are also Mocks
     config.runtime.features.trace_enabled = False
+    
+    # Fix for httpx.URL validation (must be str)
+    config.runtime.llm.deepseek_base_url = "https://api.deepseek.com"
+    
     return config
 
 @pytest.mark.asyncio
@@ -87,7 +94,12 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
             "importance": 1.0,
             "check_worthiness": 0.8,
             "topic_group": "Science",
-            "search_queries": ["sky blue", "why is sky blue", "небо синє"]
+            "search_queries": ["sky blue", "why is sky blue", "небо синє"],
+            # Validation fields
+            "subject_entities": ["Sky"],
+            "retrieval_seed_terms": ["sky", "blue", "weather"],
+            "falsifiability": {"is_falsifiable": True},
+            "predicate_type": "existence"
         }]
     }
     
@@ -136,7 +148,7 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     # Side effect to return different responses based on trace_kind or order
     async def side_effect(*args, **kwargs):
         kind = kwargs.get("trace_kind")
-        if kind == "claim_extraction":
+        if kind == "claim_extraction_core":
             return claim_resp
         elif kind == "stance_clustering":
             return cluster_resp
@@ -178,7 +190,7 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     calls = verifier.agent.llm_client.call_json.call_args_list
     kinds = [c.kwargs.get("trace_kind") for c in calls]
     
-    assert "claim_extraction" in kinds
+    assert "claim_extraction_core" in kinds
     # M124: stance_clustering may be skipped by EVOI gating policy if expected_gain < threshold
     # This is correct behavior - gating decides based on evidence signals
     # The test should verify that either stance runs OR scoring runs (one or both)
@@ -250,6 +262,12 @@ async def test_causal_dependency_penalty_applied(mock_config):
                     "dependencies": [],
                 },
                 "search_queries": ["vaccination rates decline"],
+                # Validation fields
+                "subject_entities": ["Vaccination"],
+                "retrieval_seed_terms": ["vaccination", "rates", "decline"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "event",
+                "time_anchor": {"type": "year", "year": "2024"},
             },
             {
                 "text": "Measles cases increased because vaccination rates declined.",
@@ -266,6 +284,12 @@ async def test_causal_dependency_penalty_applied(mock_config):
                     "dependencies": ["c1"],
                 },
                 "search_queries": ["measles cases increased"],
+                # Validation fields
+                "subject_entities": ["Measles", "Vaccination"],
+                "retrieval_seed_terms": ["measles", "cases", "increased"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "causal",
+                "time_anchor": {"type": "year", "year": "2024"},
             },
         ]
     }
@@ -301,7 +325,7 @@ async def test_causal_dependency_penalty_applied(mock_config):
 
     async def side_effect(*args, **kwargs):
         kind = kwargs.get("trace_kind")
-        if kind == "claim_extraction":
+        if kind == "claim_extraction_core":
             return claim_resp
         if kind == "stance_clustering":
             return cluster_resp

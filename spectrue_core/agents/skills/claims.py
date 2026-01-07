@@ -375,6 +375,7 @@ class ClaimExtractionSkill(BaseSkill):
             
             # Flatten and filter results
             valid_core_claims: list[tuple[dict, str]] = []  # (claim_dict, chunk_text_context)
+            overall_intent: ArticleIntent = "news"
             
             for i, res in enumerate(core_results):
                 if isinstance(res, Exception):
@@ -383,6 +384,9 @@ class ClaimExtractionSkill(BaseSkill):
                 
                 # M125: Unpack 3-tuple (claims, intent, stats)
                 chunk_claims, chunk_intent, chunk_stats = res
+                
+                if i == 0:
+                    overall_intent = chunk_intent
                 
                 # Aggregate stats
                 aggregated_stats.claims_extracted_total += chunk_stats.claims_extracted_total
@@ -471,7 +475,7 @@ class ClaimExtractionSkill(BaseSkill):
             self._trace_extracted_claims(final_claims)
             self._trace_metadata_distribution(final_claims)
             
-            return final_claims, should_check_oracle_agg, "news", stitched_text
+            return final_claims, should_check_oracle_agg, overall_intent, stitched_text
         
         except Exception as e:
             logger.exception("[M120] Critical failure in split claim extraction: %s", e)

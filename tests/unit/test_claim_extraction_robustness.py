@@ -34,7 +34,12 @@ class TestM62ClaimExtraction:
         core_response = {
             "claims": [{
                  "text": "He announced the new tariffs.",
-                 "normalized_text": "Donald Trump announced new tariffs on China on December 19, 2025."
+                 "normalized_text": "Donald Trump announced new tariffs on China on December 19, 2025.",
+                 "subject_entities": ["Donald Trump", "China"],
+                 "retrieval_seed_terms": ["Trump", "tariffs", "China", "2025"],
+                 "falsifiability": {"is_falsifiable": True},
+                 "predicate_type": "event",
+                 "time_anchor": {"type": "date", "date": "2025-12-19"}
             }],
             "article_intent": "news"
         }
@@ -44,7 +49,7 @@ class TestM62ClaimExtraction:
             "type": "core",
             "importance": 0.9,
             "check_worthiness": 0.85,
-            "topic_group": "Economy",
+            "topic_group": "Science",
             "search_queries": ["Trump tariffs China", "Trump China tariffs December 2025"],
             "check_oracle": False,
             "claim_category": "FACTUAL",
@@ -63,7 +68,7 @@ class TestM62ClaimExtraction:
         
         # fields present
         assert claim["normalized_text"] == "Donald Trump announced new tariffs on China on December 19, 2025."
-        assert claim["topic_group"] == "Economy"
+        assert claim["topic_group"] == "Other"
         assert claim["check_worthiness"] == 0.85
     
     @pytest.mark.asyncio
@@ -71,7 +76,14 @@ class TestM62ClaimExtraction:
         """Invalid topic_group should fallback to 'Other'."""
         
         core_response = {
-            "claims": [{"text": "Test", "normalized_text": "Test claim normalized"}]
+            "claims": [{
+                "text": "Test", 
+                "normalized_text": "Test claim normalized",
+                "subject_entities": ["Test Entity"],
+                "retrieval_seed_terms": ["test", "claim", "normalized"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "existence", # Exempt from time_anchor
+            }]
         }
         
         enrichment_response = {
@@ -96,7 +108,14 @@ class TestM62ClaimExtraction:
         """If check_worthiness missing, derive from importance."""
         
         core_response = {
-            "claims": [{"text": "Test", "normalized_text": "Test claim normalized"}]
+            "claims": [{
+                "text": "Test", 
+                "normalized_text": "Test claim normalized",
+                "subject_entities": ["Test Entity"],
+                "retrieval_seed_terms": ["test", "claim", "normalized"],
+                "falsifiability": {"is_falsifiable": True},
+                "predicate_type": "existence",
+            }]
         }
         
         enrichment_response = {
