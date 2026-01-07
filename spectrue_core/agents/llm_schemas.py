@@ -512,18 +512,19 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                             },
                         },
                     },
-                    # Evidence expectations
+                    # Evidence expectations (optional, relaxed schema)
                     "expected_evidence": {
                         "type": "object",
-                        "additionalProperties": False,
+                        "additionalProperties": True,  # Allow extra fields
                         "properties": {
                             "evidence_kind": {
                                 "type": "string",
-                                "enum": EVIDENCE_KIND_VALUES,
+                                # Removed enum - LLM generates varied values
                             },
                             "likely_sources": {
                                 "type": "array",
-                                "items": {"type": "string", "enum": LIKELY_SOURCES_VALUES},
+                                # Removed enum - LLM generates free-form source types
+                                "items": {"type": "string"},
                             },
                         },
                     },
