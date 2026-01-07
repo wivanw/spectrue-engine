@@ -61,13 +61,32 @@ def _append_query(
 
 
 def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
+    """
+    Build search queries from claim data.
+    
+    M125: Prioritizes retrieval_seed_terms over search_queries and query_candidates.
+    Seed terms are joined into a keyword query (not full sentences).
+    """
     queries: list[str] = []
 
+    # M125: Priority 1 - retrieval_seed_terms (joined as keyword query)
+    seed_terms = claim.get("retrieval_seed_terms")
+    if seed_terms and isinstance(seed_terms, list):
+        valid_terms = [t for t in seed_terms if isinstance(t, str) and len(t) >= 2]
+        if len(valid_terms) >= 3:
+            # Join first 6 seed terms into a keyword query
+            keyword_query = " ".join(valid_terms[:6])
+            _append_query(queries, keyword_query)
+            if len(queries) >= max_queries:
+                return queries
+
+    # Priority 2 - search_queries (from enrichment)
     for raw in claim.get("search_queries", []) or []:
         _append_query(queries, raw if isinstance(raw, str) else None)
         if len(queries) >= max_queries:
             return queries
 
+    # Priority 3 - query_candidates
     for candidate in claim.get("query_candidates", []) or []:
         if not isinstance(candidate, dict):
             continue
@@ -75,6 +94,7 @@ def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
         if len(queries) >= max_queries:
             return queries
 
+    # Priority 4 - fallback to normalized_text/text
     fallback = claim.get("normalized_text") or claim.get("text")
     if fallback:
         _append_query(queries, fallback)

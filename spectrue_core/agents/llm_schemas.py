@@ -272,9 +272,9 @@ CLAIM_EXTRACTION_SCHEMA: dict[str, Any] = {
                     "verification_target",
                     "claim_role",
                     # The rest are optional - fail-soft with defaults applied downstream:
-                    # type, satire_likelihood, topic_group, topic_key, importance, check_worthiness,
+                    # type, satire_likelihood, importance, check_worthiness,
                     # structure, search_locale_plan, retrieval_policy, metadata_confidence,
-                    # search_strategy, query_candidates, search_method, search_queries,
+                    # query_candidates, search_method, search_queries,
                     # evidence_req, evidence_need, check_oracle
                 ],
                 "properties": {
@@ -283,8 +283,6 @@ CLAIM_EXTRACTION_SCHEMA: dict[str, Any] = {
                     "type": {"type": "string"},
                     "claim_category": {"type": "string", "enum": CLAIM_CATEGORY_VALUES},
                     "satire_likelihood": {"type": "number", "minimum": 0, "maximum": 1},
-                    "topic_group": {"type": "string", "enum": TOPIC_GROUPS},
-                    "topic_key": {"type": "string"},
                     "importance": {"type": "number", "minimum": 0, "maximum": 1},
                     "check_worthiness": {"type": "number", "minimum": 0, "maximum": 1},
                     "harm_potential": {"type": "integer", "minimum": 1, "maximum": 5},
@@ -330,16 +328,6 @@ CLAIM_EXTRACTION_SCHEMA: dict[str, Any] = {
                     "metadata_confidence": {
                         "type": "string",
                         "enum": METADATA_CONFIDENCE_VALUES,
-                    },
-                    "search_strategy": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["intent", "reasoning", "best_language"],
-                        "properties": {
-                            "intent": {"type": "string", "enum": SEARCH_INTENTS},
-                            "reasoning": {"type": "string"},
-                            "best_language": {"type": "string"},
-                        },
                     },
                     "query_candidates": {
                         "type": "array",
@@ -395,7 +383,172 @@ CORE_CLAIM_DESCRIPTION_SCHEMA: dict[str, Any] = {
     },
 }
 
-CLAIM_ENRICHMENT_SCHEMA: dict[str, Any] = {
+
+# M125: Verifiable Core Claim Schema
+# Enforces verifiability-first contract: every claim must have anchors for search/match/score
+PREDICATE_TYPE_VALUES = [
+    "event",           # Something happened at a point in time
+    "measurement",     # Numeric fact with units
+    "policy",          # Official decision/regulation
+    "quote",           # Someone said something specific
+    "ranking",         # Comparative position (A > B)
+    "causal",          # X caused Y
+    "existence",       # Entity/document exists with anchors
+    "other",           # Fallback for edge cases
+]
+
+TIME_ANCHOR_TYPE_VALUES = [
+    "explicit_date",   # "January 5, 2025"
+    "range",           # "between 2020 and 2023"
+    "relative",        # "last week", "yesterday"
+    "unknown",         # No time reference found
+]
+
+FALSIFIABLE_BY_VALUES = [
+    "public_records",        # Government databases, court records
+    "scientific_publication", # Peer-reviewed studies, preprints
+    "official_statement",    # Press releases, official announcements
+    "reputable_news",        # Major news outlets
+    "dataset",               # Statistical databases (WHO, Statista, etc.)
+    "other",                 # Other verifiable sources
+]
+
+EVIDENCE_KIND_VALUES = [
+    "primary_source",   # Original document/statement
+    "secondary_source", # News coverage, analysis
+    "both",             # Either would work
+]
+
+LIKELY_SOURCES_VALUES = [
+    "authoritative",    # Government, official bodies
+    "reputable_news",   # Major news outlets
+    "dataset",          # Statistical databases
+    "local_media",      # Regional news sources
+]
+
+VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["claims"],
+    "properties": {
+        "article_intent": {"type": "string", "enum": ARTICLE_INTENTS},
+        "claims": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "claim_text",
+                    "normalized_text",
+                    "subject_entities",
+                    "predicate_type",
+                    "time_anchor",
+                    "falsifiability",
+                    "retrieval_seed_terms",
+                ],
+                "properties": {
+                    # Core claim text
+                    "claim_text": {
+                        "type": "string",
+                        "minLength": 10,
+                        "maxLength": 500,
+                        "description": "Single atomic proposition from the article (exact substring)",
+                    },
+                    "normalized_text": {
+                        "type": "string",
+                        "minLength": 10,
+                        "maxLength": 300,
+                        "description": "Self-sufficient English version for search queries",
+                    },
+                    # Entity anchors (required for searchability)
+                    "subject_entities": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "minItems": 1,
+                        "maxItems": 5,
+                        "description": "Canonical entity names (person, org, place) - required for search",
+                    },
+                    # Predicate classification
+                    "predicate_type": {
+                        "type": "string",
+                        "enum": PREDICATE_TYPE_VALUES,
+                        "description": "Type of factual assertion for routing and scoring",
+                    },
+                    # Temporal anchor
+                    "time_anchor": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["type", "value"],
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "enum": TIME_ANCHOR_TYPE_VALUES,
+                            },
+                            "value": {
+                                "type": "string",
+                                "description": "Time reference as extracted or 'unknown'",
+                            },
+                        },
+                    },
+                    # Location anchor (optional but encouraged)
+                    "location_anchor": {
+                        "type": "string",
+                        "description": "Geographic context (city, country, region) or 'unknown'",
+                    },
+                    # Falsifiability contract
+                    "falsifiability": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["is_falsifiable", "falsifiable_by"],
+                        "properties": {
+                            "is_falsifiable": {
+                                "type": "boolean",
+                                "description": "True if claim can be proven true/false with evidence",
+                            },
+                            "falsifiable_by": {
+                                "type": "string",
+                                "enum": FALSIFIABLE_BY_VALUES,
+                                "description": "What type of evidence could verify/refute this claim",
+                            },
+                        },
+                    },
+                    # Evidence expectations
+                    "expected_evidence": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "evidence_kind": {
+                                "type": "string",
+                                "enum": EVIDENCE_KIND_VALUES,
+                            },
+                            "likely_sources": {
+                                "type": "array",
+                                "items": {"type": "string", "enum": LIKELY_SOURCES_VALUES},
+                            },
+                        },
+                    },
+                    # Retrieval keywords (NOT full sentences)
+                    "retrieval_seed_terms": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 2, "maxLength": 40},
+                        "minItems": 3,
+                        "maxItems": 10,
+                        "description": "Keywords for search, derived from entities + key noun phrases",
+                    },
+                    # Importance score (kept but not sole gate)
+                    "importance": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Claim importance for prioritization (not filtering)",
+                    },
+                },
+            },
+        },
+    },
+}
+
+CLAIM_RETRIEVAL_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     # Relaxed requirements for enrichment failures
@@ -408,8 +561,6 @@ CLAIM_ENRICHMENT_SCHEMA: dict[str, Any] = {
     "properties": {
         "claim_category": {"type": "string", "enum": CLAIM_CATEGORY_VALUES},
         "satire_likelihood": {"type": "number", "minimum": 0, "maximum": 1},
-        "topic_group": {"type": "string", "enum": TOPIC_GROUPS},
-        "topic_key": {"type": "string"},
         "importance": {"type": "number", "minimum": 0, "maximum": 1},
         "check_worthiness": {"type": "number", "minimum": 0, "maximum": 1},
         "harm_potential": {"type": "integer", "minimum": 1, "maximum": 5},
@@ -456,16 +607,6 @@ CLAIM_ENRICHMENT_SCHEMA: dict[str, Any] = {
             "type": "string",
             "enum": METADATA_CONFIDENCE_VALUES,
         },
-        "search_strategy": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["intent", "reasoning", "best_language"],
-            "properties": {
-                "intent": {"type": "string", "enum": SEARCH_INTENTS},
-                "reasoning": {"type": "string"},
-                "best_language": {"type": "string"},
-            },
-        },
         "query_candidates": {
             "type": "array",
             "items": {
@@ -480,7 +621,12 @@ CLAIM_ENRICHMENT_SCHEMA: dict[str, Any] = {
             },
         },
         "search_method": {"type": "string", "enum": SEARCH_METHOD_VALUES},
-        "search_queries": {"type": "array", "items": {"type": "string"}},
+        "search_queries": {
+            "type": "array",
+            "items": {"type": "string", "maxLength": 80},
+            "minItems": 1,
+            "maxItems": 5,
+        },
         "evidence_req": {
             "type": "object",
             "additionalProperties": False,
@@ -494,6 +640,8 @@ CLAIM_ENRICHMENT_SCHEMA: dict[str, Any] = {
         "check_oracle": {"type": "boolean"},
     },
 }
+
+CLAIM_ENRICHMENT_SCHEMA = CLAIM_RETRIEVAL_SCHEMA
 
 
 EDGE_TYPING_SCHEMA: dict[str, Any] = {
@@ -651,7 +799,9 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "query_generation": QUERY_GENERATION_SCHEMA,
     "claim_extraction": CLAIM_EXTRACTION_SCHEMA,
     "core_claim_extraction": CORE_CLAIM_DESCRIPTION_SCHEMA,
-    "claim_enrichment": CLAIM_ENRICHMENT_SCHEMA,
+    "verifiable_core_claim": VERIFIABLE_CORE_CLAIM_SCHEMA,  # M125
+    "claim_retrieval_plan": CLAIM_RETRIEVAL_SCHEMA,
+    "claim_enrichment": CLAIM_RETRIEVAL_SCHEMA,
     "edge_typing": EDGE_TYPING_SCHEMA,
     "evidence_summarizer": EVIDENCE_SUMMARIZER_SCHEMA,
     "claim_judge": CLAIM_JUDGE_SCHEMA,
@@ -660,4 +810,3 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
 
 def get_schema(name: str) -> dict[str, Any]:
     return SCHEMA_REGISTRY[name]
-

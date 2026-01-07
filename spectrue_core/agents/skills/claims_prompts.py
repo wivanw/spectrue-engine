@@ -403,7 +403,7 @@ You MUST respond in valid JSON.
 """
 
 
-def build_claim_strategist_prompt(*, text_excerpt: str, max_claims: int) -> str:
+def build_claim_strategist_prompt(text_excerpt: str) -> str:
     return f"""Tasks:
 1. Analyze the article text below.
 2. Extract ALL distinct, atomic, check-worthy factual assertions (claims).
@@ -454,7 +454,6 @@ Time zone references are NOT location claims!
   "claims": [
     {{
       "id": "c1",
-      "domain": "sports|science|politics|health|finance|news|other",
       "claim_type": "event|attribution|numeric|definition|timeline|other",
       "claim_role": "thesis|support|background|example|hedge|counterclaim",
       "structure": {{
@@ -557,37 +556,143 @@ Return structured ClaimUnits in JSON format.
 """
 
 def build_core_extraction_prompt(*, text_excerpt: str) -> str:
-    return f"""Tasks:
-1. Analyze the article text below.
-2. Extract ALL distinct, atomic, check-worthy factual assertions (claims).
-   - Do NOT limit the number of claims. Extract everything that matters.
-   - Separate compound sentences into individual atomic claims.
-3. For each claim, provide:
-   - "text": The exact substring from the article (original language).
-   - "normalized_text": A clear, standalone English summary of the claim for search/veracity checking.
+    """
+    M125: Verifiability-first core extraction prompt.
+    Enforces structural anchors and filters out non-verifiable content.
+    """
+    return f"""**OUTPUT RULE: Output ONLY valid JSON. No prose. No prefixes. No markdown. Start with {{**
+
+You are extracting **externally verifiable factual propositions** from text.
+
+## VERIFIABILITY CONTRACT (CRITICAL)
+
+A claim is verifiable if and only if it has:
+1. **Subject entities**: At least one named entity (person, organization, place, product)
+2. **Time anchor**: When it happened/was stated (date, year, relative time)
+3. **Falsifiability**: The claim can be proven TRUE or FALSE using external evidence
+
+## REQUIRED FIELDS FOR EACH CLAIM
+
+For every claim you extract, provide:
+
+1. **claim_text**: Exact substring from the article (original language)
+2. **normalized_text**: Self-sufficient English summary for search
+3. **subject_entities**: List of canonical entity names (1-5 items, REQUIRED)
+   - Example: ["Elon Musk", "Tesla", "SEC"]
+4. **predicate_type**: One of: "event", "measurement", "policy", "quote", "ranking", "causal", "existence", "other"
+5. **time_anchor**: Object with {{"type": "explicit_date"|"range"|"relative"|"unknown", "value": "<extracted or unknown>"}}
+6. **location_anchor**: Geographic context or "unknown"
+7. **falsifiability**: Object with:
+   - is_falsifiable: boolean (MUST be true for claims you emit)
+   - falsifiable_by: one of "public_records", "scientific_publication", "official_statement", "reputable_news", "dataset", "other"
+8. **expected_evidence**: Object with {{"evidence_kind": "primary_source"|"secondary_source"|"both", "likely_sources": [...]}}
+9. **retrieval_seed_terms**: Array of 3-10 KEYWORDS (not sentences!) derived from entities + key noun phrases
+   - GOOD: ["Tesla", "SEC", "fraud", "settlement", "2024"]
+   - BAD: ["Tesla was sued by the SEC for fraud in 2024"]
+10. **importance**: Float 0.0-1.0 for prioritization
+
+## DO NOT EMIT (drop silently)
+
+❌ **Opinions without facts**: "This is an encouraging sign", "The policy is terrible"
+❌ **Meta-statements**: "There is insufficient evidence", "This does not prove anything"
+❌ **Rhetorical summaries**: "In conclusion, X is important"
+❌ **Unanchored generalizations**: "People tend to..." (no entity, no time)
+❌ **Predictions/forecasts**: "X will happen", "Expected to increase"
+❌ **Subjective evaluations**: "X is the best", "Y is undervalued" (without metric)
+
+## TRANSFORM OR DROP
+
+If you encounter vague content, either:
+1. **Transform** into a verifiable claim by finding anchors:
+   - VAGUE: "Unemployment has increased"
+   - VERIFIABLE: "US unemployment rate rose to 4.3% in July 2024" (with entities, time, measurement)
+2. **Drop** if no anchors can be extracted from context
+
+## EXISTENCE/EVALUATION HANDLING
+
+Do NOT emit generic "existence" claims like "X exists" or "Y is good".
+Instead, transform into:
+- **Event claims**: "X was founded in 2010 in California"
+- **Measurement claims**: "X has 500 employees as of Q4 2024"
+
+If you cannot provide entity + time anchors, do NOT emit the claim.
+
+## OUTPUT FORMAT
+
+```json
+{{
+  "article_intent": "news|opinion|official|prediction",
+  "claims": [
+    {{
+      "claim_text": "Original language exact quote",
+      "normalized_text": "Self-sufficient English version",
+      "subject_entities": ["Entity1", "Entity2"],
+      "predicate_type": "event",
+      "time_anchor": {{"type": "explicit_date", "value": "January 5, 2025"}},
+      "location_anchor": "Washington, DC",
+      "falsifiability": {{
+        "is_falsifiable": true,
+        "falsifiable_by": "reputable_news"
+      }},
+      "expected_evidence": {{
+        "evidence_kind": "secondary_source",
+        "likely_sources": ["reputable_news", "authoritative"]
+      }},
+      "retrieval_seed_terms": ["Entity1", "Entity2", "key", "terms", "here"],
+      "importance": 0.85
+    }}
+  ]
+}}
+```
+
+## QUALITY OVER QUANTITY
+
+Extract ALL important verifiable claims, but ONLY those that pass the verifiability contract.
+It is better to extract 3 high-quality verifiable claims than 10 weak/vague claims.
 
 ARTICLE:
 {text_excerpt}
 
-Return JSON with list of claims.
+Return JSON with list of verifiable claims only (or empty array if none found).
 """
 
 
-def build_metadata_enrichment_prompt(*, claim_text: str, article_context_sm: str, intents_str: str, topics_str: str, lang_name: str) -> str:
+def build_retrieval_planning_prompt(
+    claim_text: str,
+    article_context_sm: str,
+    lang_name: str,
+) -> str:
     # article_context_sm should be a smaller/summarized version or just the full chunk if it fits.
     # We will use the full chunk for now as we want deep context.
     return f"""**CRITICAL OUTPUT RULES:**
-1. Output ONLY a single JSON object with enrichment fields.
+1. Output ONLY a single JSON object with retrieval-planning fields.
 2. Do NOT wrap in {{"claims": [...]}} or {{"article_intent": ...}}.
 3. Do NOT include "text" or "normalized_text" fields - those are already known.
 4. Start your response with {{ and end with }}.
 
-You are enriching metadata for ONE specific claim that was already extracted.
+You are planning retrieval metadata for ONE specific claim that was already extracted.
 
-CLAIM TO ENRICH: "{claim_text}"
+CLAIM TO PLAN: "{claim_text}"
 
 ARTICLE CONTEXT:
 {article_context_sm}
+
+**CRITICAL: search_queries FORMAT REQUIREMENTS:**
+- MUST be a non-empty array with 1-5 keyword queries
+- Each query: 2-8 words, MAX 80 characters
+- Format: keyword phrases ONLY (NOT full sentences)
+- NO trailing periods or punctuation
+- Prefer "news" as search_method unless content is evergreen/academic
+
+**GOOD search_queries examples:**
+- ["Ukraine military offensive Kherson", "Zelenskyy statement troops"]
+- ["COVID vaccine efficacy Pfizer study"]
+- ["Tesla stock price Q4 2025"]
+
+**BAD search_queries examples (DO NOT USE):**
+- ["The president announced new policy yesterday."] (full sentence, has period)
+- ["What is the effectiveness of vaccines?"] (question format)
+- [] (empty array, NEVER do this)
 
 **Required fields in your JSON response:**
 - claim_category: "FACTUAL" | "OPINION" | "SATIRE" | "HYPERBOLIC"
@@ -595,20 +700,35 @@ ARTICLE CONTEXT:
 - verification_target: "reality" | "attribution" | "existence" | "none"
 - claim_role: "core" | "thesis" | "support" | "background" | "context"
 - satire_likelihood: 0.0-1.0
-- topic_group: one of [{topics_str}]
-- topic_key: specific topic within group
 - importance: 0.0-1.0
 - check_worthiness: 0.0-1.0
 - structure: {{"type": "empirical_numeric"|"event"|"causal"|"attribution"|"definition"|"policy_plan"|"forecast"|"meta_scientific"|"other", "premises": [], "conclusion": "...", "dependencies": []}}
 - search_locale_plan: {{"primary": "{lang_name[:2].lower()}", "fallback": ["en"]}}
 - retrieval_policy: {{"channels_allowed": [...]}} where ONLY these values are allowed: "authoritative", "reputable_news", "local_media", "social", "low_reliability_web" (NOT "academic"!)
 - metadata_confidence: "low" | "medium" | "high"
-- search_strategy: {{"intent": "scientific_fact"|"breaking_news"|..., "reasoning": "...", "best_language": "..."}}
 - query_candidates: [{{"text": "...", "role": "CORE", "score": 1.0}}]
-- search_method: "general_search" | "news" | "academic" (NOTE: "academic" is valid HERE, not in channels_allowed)
-- search_queries: ["query1", "query2"]
+- search_method: "news" | "general_search" | "academic" (DEFAULT to "news" for recent events)
+- search_queries: ["keyword query 1", "keyword query 2"] (REQUIRED, non-empty, 2-8 words each)
 - evidence_req: {{"needs_primary": true/false, "needs_2_independent": true/false}}
+- evidence_need: "empirical_study" | "guideline" | "official_stats" | "expert_opinion" | "anecdotal" | "news_report" | "unknown"
 - check_oracle: true/false
 
 Output the JSON object now (no markdown, no wrapper):
 """
+
+
+def build_metadata_enrichment_prompt(
+    *,
+    claim_text: str,
+    article_context_sm: str,
+    intents_str: str,
+    topics_str: str,
+    lang_name: str,
+) -> str:
+    return build_retrieval_planning_prompt(
+        claim_text=claim_text,
+        article_context_sm=article_context_sm,
+        intents_str=intents_str,
+        topics_str=topics_str,
+        lang_name=lang_name,
+    )

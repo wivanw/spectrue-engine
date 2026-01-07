@@ -13,10 +13,14 @@ from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 import re
-from spectrue_core.agents.llm_schemas import CORE_CLAIM_DESCRIPTION_SCHEMA, CLAIM_ENRICHMENT_SCHEMA
+from spectrue_core.agents.llm_schemas import (
+    CORE_CLAIM_DESCRIPTION_SCHEMA,
+    CLAIM_RETRIEVAL_SCHEMA,
+    VERIFIABLE_CORE_CLAIM_SCHEMA,  # M125
+)
 from .claims_prompts import (
     build_core_extraction_prompt,
-    build_metadata_enrichment_prompt,
+    build_retrieval_planning_prompt,
 )
 import asyncio
 from .claims_parsing import (
@@ -52,30 +56,179 @@ from spectrue_core.agents.skills.claim_metadata_parser import (
 )
 from spectrue_core.runtime_config import ContentBudgetConfig
 
-# Whitelist of allowed enrichment fields (everything else is dropped)
-ENRICHMENT_ALLOWED_FIELDS = {
+# Whitelist of allowed retrieval-planning fields (everything else is dropped)
+RETRIEVAL_ALLOWED_FIELDS = {
     "claim_category", "harm_potential", "verification_target", "claim_role",
-    "satire_likelihood", "topic_group", "topic_key", "importance", "check_worthiness",
+    "satire_likelihood", "importance", "check_worthiness",
     "structure", "search_locale_plan", "retrieval_policy", "metadata_confidence",
-    "search_strategy", "query_candidates", "search_method", "search_queries",
+    "query_candidates", "search_method", "search_queries",
     "evidence_req", "evidence_need", "check_oracle",
 }
 
+POST_EVIDENCE_ALLOWED_FIELDS: set[str] = set()
 
-def sanitize_enrichment_response(data: dict) -> dict:
+
+# M125: Predicate types that don't require explicit time anchors
+TIME_ANCHOR_EXEMPT_PREDICATES = {"policy", "ranking", "existence"}
+
+
+def validate_core_claim(claim: dict) -> tuple[bool, list[str]]:
     """
-    Sanitize LLM enrichment response before schema validation.
+    M125: Deterministic validation for verifiable claims.
+    
+    Validates structural requirements:
+    - claim_text non-empty, <= 240 chars (or use claim_text/text field)
+    - subject_entities with minItems >= 1
+    - retrieval_seed_terms length between 3 and 10
+    - falsifiability.is_falsifiable == True
+    - time_anchor.type != "unknown" OR predicate_type in {policy, ranking, existence}
+    
+    Returns:
+        (ok: bool, reason_codes: list[str])
+    """
+    reason_codes: list[str] = []
+    
+    # Get claim text (support both claim_text and text field names)
+    claim_text = claim.get("claim_text") or claim.get("text") or ""
+    
+    # 1. Claim text validation
+    if not claim_text:
+        reason_codes.append("empty_claim_text")
+    elif len(claim_text) > 500:
+        reason_codes.append("claim_text_too_long")
+    
+    # 2. Subject entities validation
+    entities = claim.get("subject_entities")
+    if not entities or not isinstance(entities, list) or len(entities) < 1:
+        reason_codes.append("missing_subject_entities")
+    else:
+        # Check for non-empty entities
+        valid_entities = [e for e in entities if isinstance(e, str) and e.strip()]
+        if len(valid_entities) < 1:
+            reason_codes.append("invalid_subject_entities")
+    
+    # 3. Retrieval seed terms validation
+    seed_terms = claim.get("retrieval_seed_terms")
+    if not seed_terms or not isinstance(seed_terms, list):
+        reason_codes.append("missing_retrieval_seed_terms")
+    else:
+        valid_terms = [t for t in seed_terms if isinstance(t, str) and len(t) >= 2]
+        if len(valid_terms) < 3:
+            reason_codes.append("insufficient_retrieval_seed_terms")
+        elif len(valid_terms) > 10:
+            reason_codes.append("too_many_retrieval_seed_terms")
+    
+    # 4. Falsifiability validation
+    falsifiability = claim.get("falsifiability")
+    if not falsifiability or not isinstance(falsifiability, dict):
+        reason_codes.append("missing_falsifiability")
+    else:
+        is_falsifiable = falsifiability.get("is_falsifiable")
+        if is_falsifiable is not True:
+            reason_codes.append("not_falsifiable")
+    
+    # 5. Time anchor validation (with predicate exemption)
+    predicate_type = claim.get("predicate_type", "other")
+    time_anchor = claim.get("time_anchor")
+    
+    if predicate_type not in TIME_ANCHOR_EXEMPT_PREDICATES:
+        if not time_anchor or not isinstance(time_anchor, dict):
+            reason_codes.append("missing_time_anchor")
+        else:
+            anchor_type = time_anchor.get("type", "unknown")
+            if anchor_type == "unknown":
+                reason_codes.append("unknown_time_anchor")
+    
+    ok = len(reason_codes) == 0
+    return ok, reason_codes
+
+
+class ExtractionStats:
+    """
+    M125: Track extraction statistics for observability.
+    """
+    def __init__(self):
+        self.claims_extracted_total = 0
+        self.claims_dropped_nonverifiable = 0
+        self.claims_emitted_targets = 0
+        self.drop_reason_counts: dict[str, int] = {}
+    
+    def record_drop(self, reason_codes: list[str]) -> None:
+        self.claims_dropped_nonverifiable += 1
+        for reason in reason_codes:
+            self.drop_reason_counts[reason] = self.drop_reason_counts.get(reason, 0) + 1
+    
+    def record_emit(self) -> None:
+        self.claims_emitted_targets += 1
+    
+    def to_trace_dict(self) -> dict:
+        return {
+            "claims_extracted_total": self.claims_extracted_total,
+            "claims_dropped_nonverifiable": self.claims_dropped_nonverifiable,
+            "claims_emitted_targets": self.claims_emitted_targets,
+            "drop_reason_counts": self.drop_reason_counts,
+        }
+
+
+def extract_keywords_deterministic(text: str, max_tokens: int = 6) -> str:
+    """
+    Extract keyword query from claim text (deterministic, language-agnostic).
+    
+    Used as fallback when LLM returns empty search_queries.
+    This is structural repair, not semantic heuristics.
+    
+    Algorithm:
+    1. Lowercase
+    2. Drop punctuation
+    3. Drop tokens with length < 3
+    4. Keep first N unique tokens
+    5. Join with spaces
+    6. If empty, return truncated original text
+    """
+    if not text:
+        return ""
+    
+    # Lowercase
+    lowered = text.lower()
+    
+    # Drop punctuation (keep Unicode word chars and spaces)
+    cleaned = re.sub(r"[^\w\s]", " ", lowered, flags=re.UNICODE)
+    
+    # Tokenize
+    tokens = cleaned.split()
+    
+    # Filter short tokens and keep unique
+    unique_tokens: list[str] = []
+    seen: set[str] = set()
+    for t in tokens:
+        if len(t) >= 3 and t not in seen:
+            unique_tokens.append(t)
+            seen.add(t)
+        if len(unique_tokens) >= max_tokens:
+            break
+    
+    if unique_tokens:
+        return " ".join(unique_tokens)
+    
+    # Ultimate fallback: truncate original text
+    return text[:80].rstrip(".,!?;")
+
+
+def sanitize_retrieval_response(data: dict, claim_text: str = "") -> dict:
+    """
+    Sanitize LLM retrieval-planning response before schema validation.
     
     This is a deterministic normalization, not a heuristic:
     1. Whitelist fields (drop unknown like premises_2, type_order)
     2. Add defaults for optional nested fields (dependencies, evidence_gaps)
     3. Merge numbered variants (premises_2 → premises)
+    4. Repair empty search_queries with keyword extraction from claim_text
     """
     if not isinstance(data, dict):
         return {}
     
     # Step 1: Whitelist top-level fields
-    sanitized = {k: v for k, v in data.items() if k in ENRICHMENT_ALLOWED_FIELDS}
+    sanitized = {k: v for k, v in data.items() if k in RETRIEVAL_ALLOWED_FIELDS}
     
     # Step 2: Sanitize nested 'structure' object
     if "structure" in sanitized and isinstance(sanitized["structure"], dict):
@@ -117,7 +270,29 @@ def sanitize_enrichment_response(data: dict) -> dict:
         allowed_rp_fields = {"channels_allowed"}
         sanitized["retrieval_policy"] = {k: v for k, v in rp.items() if k in allowed_rp_fields}
     
+    # Step 5: Repair empty search_queries using keyword extraction
+    queries = sanitized.get("search_queries", [])
+    if not queries or not isinstance(queries, list):
+        # Generate fallback query from claim text
+        if claim_text:
+            fallback_query = extract_keywords_deterministic(claim_text)
+            if fallback_query:
+                sanitized["search_queries"] = [fallback_query]
+                Trace.event("retrieval.search_queries.repaired", {
+                    "original_count": 0,
+                    "repaired_query": fallback_query[:80],
+                })
+    
     return sanitized
+
+
+def sanitize_post_evidence_response(data: dict) -> dict:
+    """
+    Sanitize post-evidence enrichment response before schema validation.
+    """
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if k in POST_EVIDENCE_ALLOWED_FIELDS}
 
 
 class ClaimExtractionSkill(BaseSkill):
@@ -195,22 +370,35 @@ class ClaimExtractionSkill(BaseSkill):
             
             core_results = await asyncio.gather(*core_tasks, return_exceptions=True)
             
+            # M125: Aggregate extraction statistics
+            aggregated_stats = ExtractionStats()
+            
             # Flatten and filter results
-            valid_core_claims: list[tuple[dict, str]] = [] # (claim_dict, chunk_text_context)
+            valid_core_claims: list[tuple[dict, str]] = []  # (claim_dict, chunk_text_context)
             
             for i, res in enumerate(core_results):
                 if isinstance(res, Exception):
                     logger.error("[Claims] Core extraction failed for chunk %d: %s", i, res)
                     continue
                 
-                chunk_claims, chunk_intent = res # Expecting (list[dict], intent)
-                # We ignore intent from core step for now, or aggregate it? 
-                # Actually core prompt doesn't ask for intent in my new prompt!
-                # Let's stick to the prompt design: just claims.
+                # M125: Unpack 3-tuple (claims, intent, stats)
+                chunk_claims, chunk_intent, chunk_stats = res
+                
+                # Aggregate stats
+                aggregated_stats.claims_extracted_total += chunk_stats.claims_extracted_total
+                aggregated_stats.claims_dropped_nonverifiable += chunk_stats.claims_dropped_nonverifiable
+                aggregated_stats.claims_emitted_targets += chunk_stats.claims_emitted_targets
+                for reason, count in chunk_stats.drop_reason_counts.items():
+                    aggregated_stats.drop_reason_counts[reason] = (
+                        aggregated_stats.drop_reason_counts.get(reason, 0) + count
+                    )
                 
                 chunk_text = chunks[i].text
                 for c in chunk_claims:
                     valid_core_claims.append((c, chunk_text))
+            
+            # M125: Emit aggregated extraction stats
+            Trace.event("claim_extraction.stats", aggregated_stats.to_trace_dict())
             
             if not valid_core_claims:
                 logger.warning("[Claims] No core claims extracted. Using fallback.")
@@ -289,52 +477,92 @@ class ClaimExtractionSkill(BaseSkill):
             logger.exception("[M120] Critical failure in split claim extraction: %s", e)
             raise
 
-    async def _extract_core_from_chunk(self, chunk: TextChunk) -> tuple[list[dict], ArticleIntent]:
+    async def _extract_core_from_chunk(self, chunk: TextChunk) -> tuple[list[dict], ArticleIntent, ExtractionStats]:
         """
         Stage 1: Core claim extraction using DeepSeek (temp=0).
-        Only extracts text, normalized_text.
+        
+        M125: Uses VERIFIABLE_CORE_CLAIM_SCHEMA and validates each claim.
+        Drops non-verifiable claims with trace events.
+        
+        Returns:
+            (valid_claims, article_intent, extraction_stats)
         """
+        stats = ExtractionStats()
         prompt = build_core_extraction_prompt(text_excerpt=chunk.text)
         
         # We assume 1-2 attempts is enough for this simpler task
         result = await self.llm_client.call_json(
-            model=self.runtime.llm.model_claim_extraction, # DeepSeek
+            model=self.runtime.llm.model_claim_extraction,  # DeepSeek
             input=prompt,
-            response_schema=CORE_CLAIM_DESCRIPTION_SCHEMA,
+            response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,  # M125: verifiable schema
             reasoning_effort="low",
-            cache_key=f"core_extract_v1_{hash(chunk.text)}",
+            cache_key=f"core_extract_v2_{hash(chunk.text)}",  # v2 for new schema
             timeout=self._calculate_timeout(len(chunk.text)),
             trace_kind="claim_extraction_core",
-            temperature=0.0, # Strict determinism
+            temperature=0.0,  # Strict determinism
         )
         
-        claims = result.get("claims", [])
+        raw_claims = result.get("claims", [])
+        stats.claims_extracted_total = len(raw_claims)
+        
+        valid_claims: list[dict] = []
+        
+        for idx, claim in enumerate(raw_claims):
+            if not isinstance(claim, dict):
+                continue
+            
+            # M125: Deterministic validation
+            ok, reason_codes = validate_core_claim(claim)
+            
+            if ok:
+                # Normalize field names for compatibility
+                # New schema uses "claim_text", old code expects "text"
+                if "claim_text" in claim and "text" not in claim:
+                    claim["text"] = claim["claim_text"]
+                
+                valid_claims.append(claim)
+                stats.record_emit()
+            else:
+                stats.record_drop(reason_codes)
+                
+                # Emit trace event for dropped claim
+                claim_preview = (claim.get("claim_text") or claim.get("text") or "")[:100]
+                Trace.event("claim.dropped", {
+                    "temp_id": f"drop_{idx}",
+                    "reason_codes": reason_codes,
+                    "claim_preview": claim_preview,
+                    "predicate_type": claim.get("predicate_type", "unknown"),
+                })
+                logger.debug(
+                    "[M125] Dropped claim: reasons=%s, preview=%s",
+                    reason_codes, claim_preview[:50]
+                )
+        
         intent = normalize_article_intent(result.get("article_intent", "news"))
-        return claims, intent
+        return valid_claims, intent, stats
 
     async def _enrich_claim(self, claim_id: str, core_data: dict, context_text: str, lang: str) -> Claim | None:
         """
-        Stage 2: Metadata enrichment using Nano.
+        Stage 2: Retrieval planning using Nano.
         """
         claim_text = core_data.get("text", "")
         if not claim_text:
             return None
             
         lang_name = SUPPORTED_LANGUAGES.get(lang.lower(), "English")
-        topics_str = ", ".join(TOPIC_GROUPS)
-        intents_str = ", ".join(SEARCH_INTENTS)
         
-        prompt = build_metadata_enrichment_prompt(
+        prompt = build_retrieval_planning_prompt(
             claim_text=claim_text,
-            article_context_sm=context_text, # Using full chunk as context
-            intents_str=intents_str,
-            topics_str=topics_str,
+            article_context_sm=context_text,
             lang_name=lang_name
         )
         
         # NOTE: Using simple instructions for enrichment, not the full claim_strategist ones
         # The full prompt already contains all necessary context
-        instructions = "You are enriching metadata for a single claim. Output only the JSON object with the enrichment fields. Do NOT wrap in claims[] array."
+        instructions = (
+            "You are producing retrieval-planning metadata for a single claim. "
+            "Output only the JSON object with the required fields. Do NOT wrap in claims[] array."
+        )
 
         try:
             # Using Nano for enrichment to save cost
@@ -342,11 +570,11 @@ class ClaimExtractionSkill(BaseSkill):
                 model=DEFAULT_MODEL_OPENAI_NANO,
                 input=prompt,
                 instructions=instructions,
-                response_schema=CLAIM_ENRICHMENT_SCHEMA,
+                response_schema=CLAIM_RETRIEVAL_SCHEMA,
                 reasoning_effort="low",
-                cache_key=f"enrich_v1_{hash(claim_text)}",
+                cache_key=f"retrieval_plan_v1_{hash(claim_text)}",
                 timeout=45.0, # Nano is faster usually
-                trace_kind="claim_enrichment",
+                trace_kind="claim_retrieval_plan",
                 temperature=0.0, # Keep steady
             )
         except Exception as e:
@@ -367,8 +595,8 @@ class ClaimExtractionSkill(BaseSkill):
         result.pop("text", None)
         result.pop("normalized_text", None)
 
-        # Sanitize enrichment response (whitelist, defaults, merge)
-        result = sanitize_enrichment_response(result)
+        # Sanitize enrichment response (whitelist, defaults, merge, repair empty queries)
+        result = sanitize_retrieval_response(result, claim_text=claim_text)
 
         # Merge core data + enriched data
         merged = {**core_data, **result}
@@ -392,7 +620,7 @@ class ClaimExtractionSkill(BaseSkill):
 
         normalized = merged.get("normalized_text") or claim_text
         topic = normalize_topic_group(merged.get("topic_group", "Other") or "Other")
-        topic_key = merged.get("topic_key") or topic
+        topic_key = merged.get("topic_key") or claim_id or topic
 
         worthiness = merged.get("check_worthiness")
         if worthiness is None:
@@ -476,9 +704,6 @@ class ClaimExtractionSkill(BaseSkill):
                     "justification": "derived"
                 } if metadata else None),
             metadata_confidence=metadata.metadata_confidence.value if metadata else "medium",
-            priority_score=merged.get("priority_score"),
-            centrality=merged.get("centrality"),
-            tension=merged.get("tension"),
         )
         return c
 
@@ -589,6 +814,28 @@ class ClaimExtractionSkill(BaseSkill):
             claim_category=claim_category,
             satire_likelihood=satire_likelihood,
         )
+
+    async def enrich_claims_post_evidence(
+        self,
+        claims: list[Claim],
+        *,
+        lang: str = "en",
+        evidence_by_claim: dict[str, list[dict]] | None = None,
+    ) -> list[Claim]:
+        """
+        Optional post-evidence enrichment stage.
+        """
+        if not POST_EVIDENCE_ALLOWED_FIELDS:
+            Trace.event(
+                "claim_enrichment.skipped",
+                {
+                    "reason": "no_post_evidence_fields",
+                    "claims": len(claims or []),
+                },
+            )
+            return claims
+
+        return claims
 
     def _parse_claim_structure(
         self,
