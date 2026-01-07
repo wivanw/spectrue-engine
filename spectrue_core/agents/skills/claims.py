@@ -66,7 +66,11 @@ POST_EVIDENCE_ALLOWED_FIELDS: set[str] = set()
 
 
 # M125: Predicate types that don't require explicit time anchors
-TIME_ANCHOR_EXEMPT_PREDICATES = {"policy", "ranking", "existence"}
+# - quote: verifiable via source attribution (who said it)
+# - policy: verifiable via official records
+# - ranking: verifiable via current datasets
+# - existence: verifiable via document/entity lookup
+TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence"}
 
 
 def validate_core_claim(claim: dict) -> tuple[bool, list[str]]:

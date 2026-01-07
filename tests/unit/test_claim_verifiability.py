@@ -92,6 +92,23 @@ class TestValidateCoreClaimAccept:
         assert ok is True
         assert reason_codes == []
 
+    def test_accept_quote_claim_with_unknown_time_anchor(self):
+        """Quote claims don't require explicit time anchors - verifiable via source attribution."""
+        claim = {
+            "claim_text": "The CEO stated that the company will expand internationally.",
+            "subject_entities": ["CEO", "company"],
+            "predicate_type": "quote",
+            "time_anchor": {"type": "unknown", "value": "unknown"},
+            "falsifiability": {
+                "is_falsifiable": True,
+                "falsifiable_by": "official_statement",
+            },
+            "retrieval_seed_terms": ["CEO", "stated", "expand", "internationally"],
+        }
+        ok, reason_codes = validate_core_claim(claim)
+        assert ok is True, f"Quote claim should be accepted even with unknown time anchor: {reason_codes}"
+        assert reason_codes == []
+
 
 class TestValidateCoreClaimReject:
     """Test cases where claims should be rejected (invalid)."""
@@ -253,6 +270,7 @@ class TestTimeAnchorExemptPredicates:
     """Test that TIME_ANCHOR_EXEMPT_PREDICATES contains expected values."""
 
     def test_exempt_predicates_defined(self):
+        assert "quote" in TIME_ANCHOR_EXEMPT_PREDICATES
         assert "policy" in TIME_ANCHOR_EXEMPT_PREDICATES
         assert "ranking" in TIME_ANCHOR_EXEMPT_PREDICATES
         assert "existence" in TIME_ANCHOR_EXEMPT_PREDICATES
