@@ -562,3 +562,346 @@ def parse_skeleton_response(data: dict[str, Any]) -> CoverageSkeleton:
         quotes=quotes,
         policies=policies,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Skeleton → Claims Conversion
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class SkeletonClaimResult:
+    """Result of converting a skeleton item to a claim-compatible dict."""
+    
+    claim_id: str
+    """Generated claim ID (e.g., 'c1')."""
+    
+    skeleton_item_id: str
+    """Original skeleton item ID (e.g., 'evt_1', 'msr_1')."""
+    
+    skeleton_type: str
+    """Type of skeleton item: 'event', 'measurement', 'quote', 'policy'."""
+    
+    claim_data: dict[str, Any]
+    """Claim-compatible dict for downstream enrichment."""
+    
+    is_valid: bool
+    """Whether the claim passes basic validation."""
+    
+    drop_reason_codes: list[str]
+    """Reason codes if claim is dropped."""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "claim_id": self.claim_id,
+            "skeleton_item_id": self.skeleton_item_id,
+            "skeleton_type": self.skeleton_type,
+            "is_valid": self.is_valid,
+            "drop_reason_codes": self.drop_reason_codes,
+        }
+
+
+def _skeleton_event_to_claim(
+    event: SkeletonEvent,
+    claim_id: str,
+) -> SkeletonClaimResult:
+    """Convert a skeleton event to a claim-compatible dict."""
+    reason_codes: list[str] = []
+    
+    # Validate required fields
+    if not event.subject_entities:
+        reason_codes.append("missing_subject_entities")
+    if not event.raw_span or len(event.raw_span) < 10:
+        reason_codes.append("raw_span_too_short")
+    if not event.verb_phrase:
+        reason_codes.append("missing_verb_phrase")
+    
+    # Build retrieval seed terms from entities + verb phrase
+    seed_terms = list(event.subject_entities)
+    if event.verb_phrase:
+        # Extract key words from verb phrase
+        verb_words = [w for w in event.verb_phrase.split() if len(w) >= 3]
+        seed_terms.extend(verb_words[:3])
+    if event.location_anchor and event.location_anchor != "unknown":
+        seed_terms.append(event.location_anchor)
+    
+    # Ensure minimum seed terms
+    if len(seed_terms) < 3:
+        reason_codes.append("insufficient_retrieval_seed_terms")
+    
+    # Build normalized text from raw_span
+    normalized = event.raw_span
+    
+    claim_data = {
+        "claim_text": event.raw_span,
+        "text": event.raw_span,  # Compatibility
+        "normalized_text": normalized,
+        "subject_entities": event.subject_entities,
+        "predicate_type": "event",
+        "time_anchor": event.time_anchor or {"type": "unknown", "value": "unknown"},
+        "location_anchor": event.location_anchor or "unknown",
+        "falsifiability": {
+            "is_falsifiable": True,
+            "falsifiable_by": "reputable_news",
+        },
+        "retrieval_seed_terms": seed_terms[:10],
+        "skeleton_item_id": event.id,
+        "importance": 0.7,
+    }
+    
+    return SkeletonClaimResult(
+        claim_id=claim_id,
+        skeleton_item_id=event.id,
+        skeleton_type="event",
+        claim_data=claim_data,
+        is_valid=len(reason_codes) == 0,
+        drop_reason_codes=reason_codes,
+    )
+
+
+def _skeleton_measurement_to_claim(
+    measurement: SkeletonMeasurement,
+    claim_id: str,
+) -> SkeletonClaimResult:
+    """Convert a skeleton measurement to a claim-compatible dict."""
+    reason_codes: list[str] = []
+    
+    # Validate required fields
+    if not measurement.subject_entities:
+        reason_codes.append("missing_subject_entities")
+    if not measurement.raw_span or len(measurement.raw_span) < 10:
+        reason_codes.append("raw_span_too_short")
+    if not measurement.quantity_mentions:
+        reason_codes.append("missing_quantity")
+    
+    # Build retrieval seed terms
+    seed_terms = list(measurement.subject_entities)
+    if measurement.metric:
+        seed_terms.append(measurement.metric)
+    for q in measurement.quantity_mentions:
+        if q.value:
+            seed_terms.append(q.value)
+        if q.unit:
+            seed_terms.append(q.unit)
+    
+    if len(seed_terms) < 3:
+        reason_codes.append("insufficient_retrieval_seed_terms")
+    
+    claim_data = {
+        "claim_text": measurement.raw_span,
+        "text": measurement.raw_span,
+        "normalized_text": measurement.raw_span,
+        "subject_entities": measurement.subject_entities,
+        "predicate_type": "measurement",
+        "time_anchor": measurement.time_anchor or {"type": "unknown", "value": "unknown"},
+        "location_anchor": "unknown",
+        "falsifiability": {
+            "is_falsifiable": True,
+            "falsifiable_by": "dataset",
+        },
+        "retrieval_seed_terms": seed_terms[:10],
+        "skeleton_item_id": measurement.id,
+        "importance": 0.8,
+    }
+    
+    return SkeletonClaimResult(
+        claim_id=claim_id,
+        skeleton_item_id=measurement.id,
+        skeleton_type="measurement",
+        claim_data=claim_data,
+        is_valid=len(reason_codes) == 0,
+        drop_reason_codes=reason_codes,
+    )
+
+
+def _skeleton_quote_to_claim(
+    quote: SkeletonQuote,
+    claim_id: str,
+) -> SkeletonClaimResult:
+    """Convert a skeleton quote to a claim-compatible dict."""
+    reason_codes: list[str] = []
+    
+    # Validate required fields
+    if not quote.speaker_entities:
+        reason_codes.append("missing_speaker_entities")
+    if not quote.raw_span or len(quote.raw_span) < 10:
+        reason_codes.append("raw_span_too_short")
+    if not quote.quote_text:
+        reason_codes.append("missing_quote_text")
+    
+    # Build retrieval seed terms
+    seed_terms = list(quote.speaker_entities)
+    # Extract key words from quote text
+    quote_words = [w for w in quote.quote_text.split() if len(w) >= 4]
+    seed_terms.extend(quote_words[:5])
+    
+    if len(seed_terms) < 3:
+        reason_codes.append("insufficient_retrieval_seed_terms")
+    
+    claim_data = {
+        "claim_text": quote.raw_span,
+        "text": quote.raw_span,
+        "normalized_text": quote.raw_span,
+        "subject_entities": quote.speaker_entities,
+        "predicate_type": "quote",
+        # Quote claims don't require time_anchor (exempt)
+        "time_anchor": {"type": "unknown", "value": "unknown"},
+        "location_anchor": "unknown",
+        "falsifiability": {
+            "is_falsifiable": True,
+            "falsifiable_by": "official_statement",
+        },
+        "retrieval_seed_terms": seed_terms[:10],
+        "skeleton_item_id": quote.id,
+        "importance": 0.6,
+    }
+    
+    return SkeletonClaimResult(
+        claim_id=claim_id,
+        skeleton_item_id=quote.id,
+        skeleton_type="quote",
+        claim_data=claim_data,
+        is_valid=len(reason_codes) == 0,
+        drop_reason_codes=reason_codes,
+    )
+
+
+def _skeleton_policy_to_claim(
+    policy: SkeletonPolicy,
+    claim_id: str,
+) -> SkeletonClaimResult:
+    """Convert a skeleton policy to a claim-compatible dict."""
+    reason_codes: list[str] = []
+    
+    # Validate required fields
+    if not policy.subject_entities:
+        reason_codes.append("missing_subject_entities")
+    if not policy.raw_span or len(policy.raw_span) < 10:
+        reason_codes.append("raw_span_too_short")
+    if not policy.policy_action:
+        reason_codes.append("missing_policy_action")
+    
+    # Build retrieval seed terms
+    seed_terms = list(policy.subject_entities)
+    # Extract key words from policy action
+    action_words = [w for w in policy.policy_action.split() if len(w) >= 4]
+    seed_terms.extend(action_words[:4])
+    
+    if len(seed_terms) < 3:
+        reason_codes.append("insufficient_retrieval_seed_terms")
+    
+    claim_data = {
+        "claim_text": policy.raw_span,
+        "text": policy.raw_span,
+        "normalized_text": policy.raw_span,
+        "subject_entities": policy.subject_entities,
+        "predicate_type": "policy",
+        # Policy claims don't require time_anchor (exempt)
+        "time_anchor": policy.time_anchor or {"type": "unknown", "value": "unknown"},
+        "location_anchor": "unknown",
+        "falsifiability": {
+            "is_falsifiable": True,
+            "falsifiable_by": "public_records",
+        },
+        "retrieval_seed_terms": seed_terms[:10],
+        "skeleton_item_id": policy.id,
+        "importance": 0.75,
+    }
+    
+    return SkeletonClaimResult(
+        claim_id=claim_id,
+        skeleton_item_id=policy.id,
+        skeleton_type="policy",
+        claim_data=claim_data,
+        is_valid=len(reason_codes) == 0,
+        drop_reason_codes=reason_codes,
+    )
+
+
+def skeleton_to_claims(
+    skeleton: CoverageSkeleton,
+    start_claim_id: int = 1,
+) -> tuple[list[SkeletonClaimResult], int, int]:
+    """
+    Convert skeleton items to claim-compatible dicts.
+    
+    Args:
+        skeleton: The coverage skeleton to convert
+        start_claim_id: Starting claim ID number (default 1)
+    
+    Returns:
+        (results, emitted_count, dropped_count)
+    """
+    results: list[SkeletonClaimResult] = []
+    claim_num = start_claim_id
+    emitted = 0
+    dropped = 0
+    
+    # Convert events
+    for event in skeleton.events:
+        result = _skeleton_event_to_claim(event, f"c{claim_num}")
+        results.append(result)
+        claim_num += 1
+        if result.is_valid:
+            emitted += 1
+        else:
+            dropped += 1
+            Trace.event("claim.dropped", {
+                "skeleton_item_id": result.skeleton_item_id,
+                "skeleton_type": result.skeleton_type,
+                "reason_codes": result.drop_reason_codes,
+            })
+    
+    # Convert measurements
+    for measurement in skeleton.measurements:
+        result = _skeleton_measurement_to_claim(measurement, f"c{claim_num}")
+        results.append(result)
+        claim_num += 1
+        if result.is_valid:
+            emitted += 1
+        else:
+            dropped += 1
+            Trace.event("claim.dropped", {
+                "skeleton_item_id": result.skeleton_item_id,
+                "skeleton_type": result.skeleton_type,
+                "reason_codes": result.drop_reason_codes,
+            })
+    
+    # Convert quotes
+    for quote in skeleton.quotes:
+        result = _skeleton_quote_to_claim(quote, f"c{claim_num}")
+        results.append(result)
+        claim_num += 1
+        if result.is_valid:
+            emitted += 1
+        else:
+            dropped += 1
+            Trace.event("claim.dropped", {
+                "skeleton_item_id": result.skeleton_item_id,
+                "skeleton_type": result.skeleton_type,
+                "reason_codes": result.drop_reason_codes,
+            })
+    
+    # Convert policies
+    for policy in skeleton.policies:
+        result = _skeleton_policy_to_claim(policy, f"c{claim_num}")
+        results.append(result)
+        claim_num += 1
+        if result.is_valid:
+            emitted += 1
+        else:
+            dropped += 1
+            Trace.event("claim.dropped", {
+                "skeleton_item_id": result.skeleton_item_id,
+                "skeleton_type": result.skeleton_type,
+                "reason_codes": result.drop_reason_codes,
+            })
+    
+    # Emit summary trace
+    trace_skeleton_to_claims(
+        skeleton_count=skeleton.total_items(),
+        claims_emitted=emitted,
+        claims_dropped=dropped,
+    )
+    
+    return results, emitted, dropped

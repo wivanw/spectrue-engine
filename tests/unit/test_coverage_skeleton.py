@@ -20,10 +20,12 @@ Tests:
 from spectrue_core.agents.skills.coverage_skeleton import (
     SkeletonEvent,
     SkeletonMeasurement,
+    SkeletonQuote,
     SkeletonPolicy,
     QuantityMention,
     CoverageSkeleton,
     CoverageAnalysis,
+    SkeletonClaimResult,
     extract_time_mentions_count,
     extract_time_mentions,
     extract_number_mentions_count,
@@ -31,6 +33,7 @@ from spectrue_core.agents.skills.coverage_skeleton import (
     analyze_text_coverage,
     validate_skeleton_coverage,
     parse_skeleton_response,
+    skeleton_to_claims,
 )
 
 
@@ -329,3 +332,168 @@ class TestSkeletonDataclasses:
         assert d["id"] == "evt_1"
         assert d["subject_entities"] == ["Tesla"]
         assert d["location_anchor"] == "Palo Alto"
+
+
+class TestSkeletonToClaims:
+    """Test skeleton to claims conversion."""
+
+    def test_convert_valid_event(self):
+        """Valid event should convert to valid claim."""
+        skeleton = CoverageSkeleton(
+            events=[SkeletonEvent(
+                id="evt_1",
+                subject_entities=["Tesla", "SpaceX"],
+                verb_phrase="announced partnership",
+                time_anchor={"type": "explicit_date", "value": "2024"},
+                location_anchor="California",
+                raw_span="Tesla and SpaceX announced partnership in California in 2024",
+            )],
+            measurements=[],
+            quotes=[],
+            policies=[],
+        )
+        results, emitted, dropped = skeleton_to_claims(skeleton)
+        
+        assert len(results) == 1
+        assert emitted == 1
+        assert dropped == 0
+        assert results[0].is_valid is True
+        assert results[0].skeleton_type == "event"
+        assert results[0].claim_data["predicate_type"] == "event"
+        assert "skeleton_item_id" in results[0].claim_data
+        assert results[0].claim_data["skeleton_item_id"] == "evt_1"
+
+    def test_convert_valid_measurement(self):
+        """Valid measurement should convert to valid claim."""
+        skeleton = CoverageSkeleton(
+            events=[],
+            measurements=[SkeletonMeasurement(
+                id="msr_1",
+                subject_entities=["Apple"],
+                metric="revenue",
+                quantity_mentions=[QuantityMention(value="100", unit="billion")],
+                time_anchor={"type": "explicit_date", "value": "Q4 2024"},
+                raw_span="Apple reported revenue of $100 billion in Q4 2024",
+            )],
+            quotes=[],
+            policies=[],
+        )
+        results, emitted, dropped = skeleton_to_claims(skeleton)
+        
+        assert len(results) == 1
+        assert emitted == 1
+        assert dropped == 0
+        assert results[0].claim_data["predicate_type"] == "measurement"
+
+    def test_convert_valid_quote(self):
+        """Valid quote should convert to valid claim."""
+        skeleton = CoverageSkeleton(
+            events=[],
+            measurements=[],
+            quotes=[SkeletonQuote(
+                id="qot_1",
+                speaker_entities=["Elon Musk"],
+                quote_text="We will go to Mars within five years",
+                raw_span='Elon Musk said "We will go to Mars within five years"',
+            )],
+            policies=[],
+        )
+        results, emitted, dropped = skeleton_to_claims(skeleton)
+        
+        assert len(results) == 1
+        assert emitted == 1
+        assert dropped == 0
+        assert results[0].claim_data["predicate_type"] == "quote"
+        # Quote should have unknown time_anchor (exempt)
+        assert results[0].claim_data["time_anchor"]["type"] == "unknown"
+
+    def test_convert_valid_policy(self):
+        """Valid policy should convert to valid claim."""
+        skeleton = CoverageSkeleton(
+            events=[],
+            measurements=[],
+            quotes=[],
+            policies=[SkeletonPolicy(
+                id="pol_1",
+                subject_entities=["European Union"],
+                policy_action="requires emergency braking systems",
+                time_anchor={"type": "explicit_date", "value": "2025"},
+                raw_span="The EU requires emergency braking systems from 2025",
+            )],
+        )
+        results, emitted, dropped = skeleton_to_claims(skeleton)
+        
+        assert len(results) == 1
+        assert emitted == 1
+        assert dropped == 0
+        assert results[0].claim_data["predicate_type"] == "policy"
+
+    def test_invalid_event_missing_entities(self):
+        """Event without entities should be dropped."""
+        skeleton = CoverageSkeleton(
+            events=[SkeletonEvent(
+                id="evt_1",
+                subject_entities=[],  # Missing!
+                verb_phrase="happened",
+                time_anchor=None,
+                location_anchor=None,
+                raw_span="Something happened somewhere",
+            )],
+            measurements=[],
+            quotes=[],
+            policies=[],
+        )
+        results, emitted, dropped = skeleton_to_claims(skeleton)
+        
+        assert len(results) == 1
+        assert emitted == 0
+        assert dropped == 1
+        assert results[0].is_valid is False
+        assert "missing_subject_entities" in results[0].drop_reason_codes
+
+    def test_mixed_valid_and_invalid(self):
+        """Should correctly count valid and invalid items."""
+        skeleton = CoverageSkeleton(
+            events=[
+                SkeletonEvent(
+                    id="evt_1",
+                    subject_entities=["Valid Corp"],
+                    verb_phrase="announced results",
+                    time_anchor={"type": "relative", "value": "today"},
+                    location_anchor=None,
+                    raw_span="Valid Corp announced results today with positive outlook",
+                ),
+                SkeletonEvent(
+                    id="evt_2",
+                    subject_entities=[],  # Invalid - no entities
+                    verb_phrase="",
+                    time_anchor=None,
+                    location_anchor=None,
+                    raw_span="short",  # Too short
+                ),
+            ],
+            measurements=[],
+            quotes=[],
+            policies=[],
+        )
+        results, emitted, dropped = skeleton_to_claims(skeleton)
+        
+        assert len(results) == 2
+        assert emitted == 1
+        assert dropped == 1
+
+    def test_claim_id_sequence(self):
+        """Claims should have sequential IDs."""
+        skeleton = CoverageSkeleton(
+            events=[
+                SkeletonEvent("evt_1", ["A"], "verb phrase one", None, None, "Entity A did something"),
+                SkeletonEvent("evt_2", ["B"], "verb phrase two", None, None, "Entity B did something else"),
+            ],
+            measurements=[],
+            quotes=[],
+            policies=[],
+        )
+        results, _, _ = skeleton_to_claims(skeleton, start_claim_id=1)
+        
+        assert results[0].claim_id == "c1"
+        assert results[1].claim_id == "c2"
