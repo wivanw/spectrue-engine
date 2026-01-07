@@ -85,6 +85,19 @@ class FactCheckerAgent:
         """Extract claims with article intent for Oracle triggering."""
         return await self.claims_skill.extract_claims(text, lang=lang, max_claims=max_claims)
 
+    async def enrich_claims_post_evidence(
+        self,
+        claims: list[Claim],
+        *,
+        lang: str = "en",
+        evidence_by_claim: dict[str, list[dict]] | None = None,
+    ) -> list[Claim]:
+        return await self.claims_skill.enrich_claims_post_evidence(
+            claims,
+            lang=lang,
+            evidence_by_claim=evidence_by_claim,
+        )
+
     async def cluster_evidence(
         self,
         claims: list[Claim],

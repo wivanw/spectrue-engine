@@ -153,7 +153,6 @@ def validate_claim_response(
         "harm_potential": (int, 1),
         "satire_likelihood": (float, 0.0),
         "claim_category": (str, "FACTUAL"),
-        "topic_group": (str, "Other"),
         "verification_target": (str, "reality"),
         "claim_role": (str, "core"),
         "metadata_confidence": (str, "medium"),
@@ -175,9 +174,6 @@ def validate_claim_response(
             invalid_fields[field] = f"expected str, got {type(val).__name__}"
 
     # Check nested objects
-    if not isinstance(raw_claim.get("search_strategy"), dict):
-        defaults_used["search_strategy"] = {}
-
     if not isinstance(raw_claim.get("evidence_req"), dict):
         defaults_used["evidence_req"] = {"needs_primary": False, "needs_2_independent": False}
 
@@ -261,4 +257,3 @@ def _truncate_dict(d: dict | None, max_keys: int = 10) -> dict | None:
         else:
             result[k] = v
     return result
-

@@ -42,11 +42,30 @@ class ExtractClaimsStep:
     """
 
     agent: Any  # FactCheckerAgent
+    stage: str = "retrieval_planning"
     name: str = "extract_claims"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Extract claims from fact."""
         try:
+            if self.stage == "post_evidence":
+                claims = ctx.claims or []
+                if not claims:
+                    return ctx
+                evidence_by_claim = ctx.get_extra("evidence_by_claim")
+                if hasattr(self.agent, "enrich_claims_post_evidence"):
+                    enriched = await self.agent.enrich_claims_post_evidence(
+                        claims,
+                        lang=ctx.lang,
+                        evidence_by_claim=evidence_by_claim,
+                    )
+                    Trace.event(
+                        "claim_enrichment.completed",
+                        {"claims": len(enriched or [])},
+                    )
+                    return ctx.with_update(claims=enriched)
+                return ctx
+
             def build_claims_contract(
                 claims_list: list[dict[str, Any]],
                 anchor_id: str | None,

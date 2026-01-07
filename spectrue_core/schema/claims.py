@@ -347,7 +347,7 @@ class ClaimUnit(SchemaModel):
     """Unique claim ID, e.g., "c1"."""
 
     domain: ClaimDomain = ClaimDomain.OTHER
-    """High-level domain: news, science, politics, etc."""
+    """Legacy: domain classification (not used for routing)."""
 
     claim_type: ClaimType = ClaimType.OTHER
     """Type of claim: event, attribution, numeric, etc."""
@@ -406,10 +406,10 @@ class ClaimUnit(SchemaModel):
     """Legacy: self-sufficient text with context. Prefer structured fields."""
 
     topic_group: str = "Other"
-    """Legacy: topic category."""
+    """Legacy: topic category (derived when missing)."""
 
     topic_key: str = ""
-    """Legacy: specific entity tag for round-robin."""
+    """Legacy: topic key (derived when missing)."""
 
     def get_fact_assertions(self) -> list[Assertion]:
         """Get only FACT assertions (for strict verification)."""

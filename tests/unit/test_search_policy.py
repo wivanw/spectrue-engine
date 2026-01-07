@@ -9,8 +9,8 @@
 
 
 
-from spectrue_core.schema.claim_metadata import ClaimMetadata
-from spectrue_core.verification.orchestration.execution_plan import BudgetClass
+from spectrue_core.schema.claim_metadata import ClaimMetadata, EvidenceChannel, RetrievalPolicy
+from spectrue_core.verification.orchestration.execution_plan import BudgetClass, ExecutionPlan, Phase
 from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
 from spectrue_core.verification.search.search_policy import (
     default_search_policy,
@@ -18,6 +18,7 @@ from spectrue_core.verification.search.search_policy import (
     SearchPolicyProfile,
 )
 from spectrue_core.verification.search.search_policy_adapter import (
+    apply_claim_retrieval_policy,
     apply_search_policy_to_plan,
     budget_class_for_profile,
 )
@@ -209,6 +210,68 @@ class TestSearchPolicyIntegration:
         assert budget_class == BudgetClass.MINIMAL
         assert profile.max_hops == 1
         assert profile.max_results == 3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# apply_claim_retrieval_policy() Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestClaimRetrievalPolicy:
+    """Tests for per-claim retrieval policy mapping and handling."""
+
+    def _make_plan(self) -> ExecutionPlan:
+        phase = Phase(
+            phase_id="A",
+            locale="en",
+            channels=[
+                EvidenceChannel.AUTHORITATIVE,
+                EvidenceChannel.REPUTABLE_NEWS,
+                EvidenceChannel.SOCIAL,
+            ],
+            search_depth="basic",
+            max_results=3,
+        )
+        return ExecutionPlan(
+            claim_phases={"c1": [phase]},
+            budget_class=BudgetClass.STANDARD,
+        )
+
+    def test_maps_string_channels_case_insensitive(self):
+        plan = self._make_plan()
+        claim = {
+            "id": "c1",
+            "metadata": ClaimMetadata(
+                retrieval_policy=RetrievalPolicy(
+                    channels_allowed=["Authoritative", "REPUTABLE_NEWS"]
+                )
+            ),
+        }
+
+        updated = apply_claim_retrieval_policy(plan, claims=[claim])
+        channels = updated.get_phases("c1")[0].channels
+
+        assert channels == [
+            EvidenceChannel.AUTHORITATIVE,
+            EvidenceChannel.REPUTABLE_NEWS,
+        ]
+
+    def test_unknown_tokens_do_not_clear_channels(self):
+        plan = self._make_plan()
+        original = list(plan.get_phases("c1")[0].channels)
+        claim = {
+            "id": "c1",
+            "metadata": ClaimMetadata(
+                retrieval_policy=RetrievalPolicy(
+                    channels_allowed=["unknown_token", "also_bad"]
+                )
+            ),
+        }
+
+        updated = apply_claim_retrieval_policy(plan, claims=[claim])
+        channels = updated.get_phases("c1")[0].channels
+
+        assert channels == original
 
 
 # Keep original test for backward compatibility

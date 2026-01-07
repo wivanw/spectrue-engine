@@ -385,7 +385,13 @@ def select_verification_targets(
     for c in claims:
         if not isinstance(c, dict):
             continue
-        cluster_id = str(c.get("cluster_id") or c.get("topic_key") or "default")
+        cluster_id = str(
+            c.get("cluster_id")
+            or c.get("topic_key")
+            or c.get("id")
+            or c.get("claim_id")
+            or "default"
+        )
         cluster_sizes[cluster_id] = cluster_sizes.get(cluster_id, 0) + 1
     centrality_map: dict[str, float] = {}
     if graph_result and getattr(graph_result, "all_ranked", None):
@@ -497,7 +503,13 @@ def select_verification_targets(
 
     for i, claim in enumerate(ordered_claims):
         claim_id = str(claim.get("id") or claim.get("claim_id") or "c1")
-        cluster_id = str(claim.get("cluster_id") or claim.get("topic_key") or "default")
+        cluster_id = str(
+            claim.get("cluster_id")
+            or claim.get("topic_key")
+            or claim.get("id")
+            or claim.get("claim_id")
+            or "default"
+        )
 
         if i < max_targets:
             # This claim gets actual search

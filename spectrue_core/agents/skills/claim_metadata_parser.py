@@ -31,6 +31,10 @@ from spectrue_core.schema.claim_metadata import (
 )
 
 
+def _normalize_channel_token(token: str) -> str:
+    return token.strip().lower().replace("-", "_").replace(" ", "_")
+
+
 def default_channels(
     *,
     harm_potential: int,
@@ -133,7 +137,7 @@ def parse_claim_metadata(
         channels: list[EvidenceChannel] = []
         for c in (channels_raw or []):
             try:
-                cc = str(c)
+                cc = _normalize_channel_token(str(c))
                 if cc == "low_reliability":
                     cc = EvidenceChannel.LOW_RELIABILITY.value
                 channels.append(EvidenceChannel(cc))

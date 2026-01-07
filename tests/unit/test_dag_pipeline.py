@@ -216,3 +216,82 @@ class TestTopologicalSort:
         assert len(layers) == 3
         layer1_names = {n.name for n in layers[1]}
         assert layer1_names == {"b", "c"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests: Factory DAG Structure (Regression Tests for M119)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestFactoryDAGStructure:
+    """Regression tests for DAG structure differences between modes."""
+
+    def _make_factory(self):
+        """Create a minimal factory for testing DAG structure."""
+        from unittest.mock import MagicMock
+        from spectrue_core.pipeline.factory import PipelineFactory
+
+        search_mgr = MagicMock()
+        agent = MagicMock()
+        agent._llm = MagicMock()  # Provide llm_client for deep mode
+        return PipelineFactory(search_mgr=search_mgr, agent=agent, claim_graph=MagicMock())
+
+    def _make_config(self):
+        """Create a minimal config for testing."""
+        from unittest.mock import MagicMock
+        config = MagicMock()
+        config.runtime = MagicMock()
+        return config
+
+    def test_deep_mode_has_no_claim_graph_node(self):
+        """Deep mode DAG should NOT contain a claim_graph node."""
+        from unittest.mock import patch
+        
+        factory = self._make_factory()
+        config = self._make_config()
+
+        with patch("spectrue_core.utils.trace.Trace"):
+            nodes = factory._build_deep_dag_nodes(config)
+
+        node_names = {n.name for n in nodes}
+        assert "claim_graph" not in node_names, "Deep mode should not have claim_graph node"
+
+    def test_deep_mode_target_selection_depends_on_extract_claims(self):
+        """Deep mode target_selection should depend on extract_claims, not claim_graph."""
+        from unittest.mock import patch
+        
+        factory = self._make_factory()
+        config = self._make_config()
+
+        with patch("spectrue_core.utils.trace.Trace"):
+            nodes = factory._build_deep_dag_nodes(config)
+
+        target_selection_node = next((n for n in nodes if n.name == "target_selection"), None)
+        assert target_selection_node is not None, "target_selection node should exist"
+        assert "extract_claims" in target_selection_node.depends_on, \
+            "target_selection should depend on extract_claims in deep mode"
+        assert "claim_graph" not in target_selection_node.depends_on, \
+            "target_selection should NOT depend on claim_graph in deep mode"
+
+    def test_normal_mode_still_has_claim_graph_node(self):
+        """Normal mode DAG should still contain claim_graph node."""
+        factory = self._make_factory()
+        config = self._make_config()
+
+        nodes = factory._build_normal_dag_nodes(config)
+
+        node_names = {n.name for n in nodes}
+        assert "claim_graph" in node_names, "Normal mode should have claim_graph node"
+
+    def test_normal_mode_target_selection_depends_on_claim_graph(self):
+        """Normal mode target_selection should depend on claim_graph."""
+        factory = self._make_factory()
+        config = self._make_config()
+
+        nodes = factory._build_normal_dag_nodes(config)
+
+        target_selection_node = next((n for n in nodes if n.name == "target_selection"), None)
+        assert target_selection_node is not None, "target_selection node should exist"
+        assert "claim_graph" in target_selection_node.depends_on, \
+            "target_selection should depend on claim_graph in normal mode"
+

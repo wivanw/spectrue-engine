@@ -18,6 +18,7 @@ from spectrue_core.constants import (
 )
 from spectrue_core.schema.claim_metadata import EvidenceChannel, SearchLocalePlan, UsePolicy
 from spectrue_core.schema.signals import LocaleDecision
+from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.orchestration.execution_plan import BudgetClass, ExecutionPlan, Phase
 from spectrue_core.verification.search.search_policy import LocalePolicy, SearchPolicyProfile
 
@@ -150,6 +151,43 @@ def budget_class_for_profile(profile: SearchPolicyProfile) -> BudgetClass:
     return BudgetClass.STANDARD
 
 
+def _normalize_channel_token(token: str) -> str:
+    return token.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _map_allowed_channels(raw_allowed: list[object] | None) -> tuple[list[str], list[EvidenceChannel]]:
+    if not raw_allowed:
+        return [], []
+
+    raw_tokens: list[str] = []
+    mapped: list[EvidenceChannel] = []
+    for token in raw_allowed:
+        if isinstance(token, EvidenceChannel):
+            raw_tokens.append(token.value)
+            mapped.append(token)
+            continue
+
+        text = str(token)
+        raw_tokens.append(text)
+        normalized = _normalize_channel_token(text)
+        if normalized == "low_reliability":
+            normalized = EvidenceChannel.LOW_RELIABILITY.value
+        try:
+            mapped.append(EvidenceChannel(normalized))
+        except ValueError:
+            continue
+
+    seen: set[EvidenceChannel] = set()
+    deduped: list[EvidenceChannel] = []
+    for channel in mapped:
+        if channel in seen:
+            continue
+        seen.add(channel)
+        deduped.append(channel)
+
+    return raw_tokens, deduped
+
+
 def apply_search_policy_to_plan(
     plan: ExecutionPlan,
     *,
@@ -190,23 +228,59 @@ def apply_claim_retrieval_policy(plan: ExecutionPlan, *, claims: list[dict]) -> 
         metadata = claim.get("metadata") if claim else None
         retrieval_policy = getattr(metadata, "retrieval_policy", None) if metadata else None
 
-        allowed = None
-        use_policy_by_channel = None
-        if retrieval_policy:
-            allowed = getattr(retrieval_policy, "channels_allowed", None)
-            use_policy_by_channel = getattr(retrieval_policy, "use_policy_by_channel", None)
-
-        if not allowed:
+        if retrieval_policy is None:
             continue
 
-        allowed_set = set(allowed)
+        allowed = None
+        use_policy_by_channel = None
+        allowed = getattr(retrieval_policy, "channels_allowed", None)
+        use_policy_by_channel = getattr(retrieval_policy, "use_policy_by_channel", None)
+
+        raw_tokens, mapped = _map_allowed_channels(list(allowed or []))
+        if not mapped:
+            for phase in phases:
+                before = [c.value if hasattr(c, "value") else str(c) for c in phase.channels]
+                Trace.event(
+                    "search.policy.applied",
+                    {
+                        "claim_id": claim_id,
+                        "phase_id": phase.phase_id,
+                        "before_channels": before,
+                        "after_channels": list(before),
+                        "allowed_raw": raw_tokens,
+                        "allowed_mapped": [],
+                    },
+                )
+            continue
+
+        allowed_set = set(mapped)
+        next_phases: list[Phase] = []
         for phase in phases:
+            before = [c.value if hasattr(c, "value") else str(c) for c in phase.channels]
             phase.channels = [c for c in phase.channels if c in allowed_set]
             if use_policy_by_channel:
                 phase.use_policy_by_channel = {
                     c.value: use_policy_by_channel.get(c.value, UsePolicy.LEAD_ONLY)
                     for c in phase.channels
                 }
+
+            after = [c.value if hasattr(c, "value") else str(c) for c in phase.channels]
+            Trace.event(
+                "search.policy.applied",
+                {
+                    "claim_id": claim_id,
+                    "phase_id": phase.phase_id,
+                    "before_channels": before,
+                    "after_channels": after,
+                    "allowed_raw": raw_tokens,
+                    "allowed_mapped": [c.value for c in mapped],
+                },
+            )
+
+            if phase.channels:
+                next_phases.append(phase)
+
+        plan.claim_phases[claim_id] = next_phases
 
     return plan
 
@@ -281,4 +355,3 @@ def apply_pipeline_profile_to_plan(
             plan.claim_phases[claim_id] = plan.claim_phases[claim_id][:max_depth]
 
     return plan
-

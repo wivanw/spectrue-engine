@@ -248,12 +248,21 @@ class PipelineFactory:
                 ),
                 depends_on=["assert_retrieval_trace"],
             ),
+            StepNode(
+                step=ExtractClaimsStep(
+                    agent=self.agent,
+                    stage="post_evidence",
+                    name="enrich_claims_post_evidence",
+                ),
+                depends_on=["evidence_collect"],
+                optional=True,
+            ),
 
             # EVOI gating decision (after evidence collection, before expensive steps)
             # Reads EvidenceIndex to compute p_need for stance/cluster
             StepNode(
                 step=EvidenceGatingStep(),
-                depends_on=["evidence_collect"],
+                depends_on=["enrich_claims_post_evidence"],
             ),
 
             # Stance annotation (controlled by EVOI gate)
@@ -297,7 +306,7 @@ class PipelineFactory:
         """Build DAG nodes for deep mode with per-claim judging."""
         from spectrue_core.pipeline.dag import StepNode
         from spectrue_core.pipeline.steps import (
-            ClaimGraphStep,
+            # NOTE: ClaimGraphStep NOT imported for deep mode - not needed with process_all_claims=True
             EvidenceCollectStep,
             StanceAnnotateStep,
             ClusterEvidenceStep,
@@ -322,6 +331,12 @@ class PipelineFactory:
             MarkJudgeUnavailableStep,
             SummarizeEvidenceStep,
         )
+        from spectrue_core.utils.trace import Trace
+
+        # Trace: deep mode skips claim graph (all claims are processed)
+        Trace.event("pipeline.deep_mode.claim_graph.disabled", {
+            "reason": "process_all_claims_true",
+        })
 
         # Get LLM client from agent
         llm_client = getattr(self.agent, "_llm", None) or getattr(self.agent, "llm", None)
@@ -350,23 +365,18 @@ class PipelineFactory:
                 depends_on=["extract_claims"],
             ),
 
-            # ==================== PARALLEL: INLINE + GRAPH ====================
+            # ==================== PARALLEL: INLINE SOURCES (NO CLAIM GRAPH IN DEEP MODE) ====================
             StepNode(
                 step=VerifyInlineSourcesStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
                 depends_on=["extract_claims"],
             ),
-            StepNode(
-                step=ClaimGraphStep(
-                    claim_graph=self.claim_graph,
-                    runtime_config=config.runtime if hasattr(config, 'runtime') else None,
-                ),
-                depends_on=["extract_claims"],
-            ),
+            # NOTE: ClaimGraphStep removed - deep mode processes ALL claims (process_all_claims=True)
+            # Graph-based pruning is unnecessary when we verify everything.
 
             # ==================== TARGET SELECTION (ALL CLAIMS) ====================
             StepNode(
                 step=TargetSelectionStep(process_all_claims=True),
-                depends_on=["claim_graph"],
+                depends_on=["extract_claims"],  # Direct dependency, no claim_graph
             ),
 
             # Search retrieval (atomic steps)
@@ -410,11 +420,20 @@ class PipelineFactory:
                 ),
                 depends_on=["assert_retrieval_trace"],
             ),
+            StepNode(
+                step=ExtractClaimsStep(
+                    agent=self.agent,
+                    stage="post_evidence",
+                    name="enrich_claims_post_evidence",
+                ),
+                depends_on=["evidence_collect"],
+                optional=True,
+            ),
 
             # Stance annotation always included
             StepNode(
                 step=StanceAnnotateStep(agent=self.agent),
-                depends_on=["evidence_collect"],
+                depends_on=["enrich_claims_post_evidence"],
                 optional=True,
             ),
 

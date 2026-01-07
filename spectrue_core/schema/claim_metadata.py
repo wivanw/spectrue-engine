@@ -162,6 +162,10 @@ class MetadataConfidence(str, Enum):
     """High confidence. Trust metadata for full routing."""
 
 
+def _normalize_channel_token(token: str) -> str:
+    return token.strip().lower().replace("-", "_").replace(" ", "_")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Data Classes
 # ─────────────────────────────────────────────────────────────────────────────
@@ -413,9 +417,10 @@ class ClaimMetadata:
             for c in channels_raw:
                 try:
                     # Backward compat: old payloads used "low_reliability"
-                    if c == "low_reliability":
-                        c = EvidenceChannel.LOW_RELIABILITY.value
-                    channels.append(EvidenceChannel(c))
+                    cc = _normalize_channel_token(str(c))
+                    if cc == "low_reliability":
+                        cc = EvidenceChannel.LOW_RELIABILITY.value
+                    channels.append(EvidenceChannel(cc))
                 except ValueError:
                     pass
 

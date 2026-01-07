@@ -466,6 +466,67 @@ class ClaimExecutionState:
             "error": self.error,
         }
 
+    def build_trace_summary(
+        self,
+        *,
+        phases: list["Phase"] | None = None,
+        llm_calls_count: int = 0,
+    ) -> dict[str, Any]:
+        """
+        Build a per-claim summary for trace logging.
+        """
+        phases_executed = list(self.phases_completed)
+        channels_used: list[str] = []
+
+        phase_map = {p.phase_id: p for p in (phases or [])}
+        for phase_id in phases_executed:
+            phase = phase_map.get(phase_id)
+            if not phase:
+                continue
+            for channel in phase.channels or []:
+                value = channel.value if hasattr(channel, "value") else str(channel)
+                if value not in channels_used:
+                    channels_used.append(value)
+
+        if not channels_used:
+            for hop in self.hops:
+                hop_channels = getattr(hop, "channels", None)
+                if not hop_channels:
+                    continue
+                for channel in hop_channels:
+                    value = channel.value if hasattr(channel, "value") else str(channel)
+                    if value not in channels_used:
+                        channels_used.append(value)
+
+        total_results = 0
+        tavily_calls = 0
+        for hop in self.hops:
+            tavily_calls += 1
+            if hasattr(hop, "results"):
+                total_results += len(getattr(hop, "results") or [])
+                continue
+            if hasattr(hop, "results_count"):
+                try:
+                    total_results += int(getattr(hop, "results_count") or 0)
+                except (TypeError, ValueError):
+                    pass
+                continue
+            if hasattr(hop, "to_dict"):
+                hop_dict = hop.to_dict()
+                try:
+                    total_results += int(hop_dict.get("results_count") or 0)
+                except (TypeError, ValueError):
+                    pass
+
+        return {
+            "claim_id": self.claim_id,
+            "llm_calls_count": int(llm_calls_count),
+            "tavily_calls_count": int(tavily_calls),
+            "total_search_results": int(total_results),
+            "phases_executed": phases_executed,
+            "channels_used": channels_used,
+        }
+
 
 @dataclass
 class ExecutionState:
@@ -503,3 +564,19 @@ class ExecutionState:
             claim_id: state.to_dict()
             for claim_id, state in self.claim_states.items()
         }
+
+    def build_trace_summaries(
+        self,
+        *,
+        plan: "ExecutionPlan",
+        llm_calls_by_claim: dict[str, int] | None = None,
+    ) -> list[dict[str, Any]]:
+        summaries: list[dict[str, Any]] = []
+        for claim_id, state in self.claim_states.items():
+            summaries.append(
+                state.build_trace_summary(
+                    phases=plan.get_phases(claim_id),
+                    llm_calls_count=(llm_calls_by_claim or {}).get(claim_id, 0),
+                )
+            )
+        return summaries

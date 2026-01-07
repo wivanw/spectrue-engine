@@ -335,6 +335,11 @@ async def run_search_flow(
                         state.final_context += "\n" + src["content"]
 
             total_sources = sum(len(s) for s in phase_evidence.values())
+            execution_state_payload = runner.execution_state.to_dict()
+            execution_state_payload["claim_trace_summaries"] = runner.execution_state.build_trace_summaries(
+                plan=execution_plan
+            )
+
             Trace.event(
                 "orchestration.completed",
                 {
@@ -342,11 +347,11 @@ async def run_search_flow(
                     "claims_with_evidence": len(
                         [c for c in phase_evidence if phase_evidence[c]]
                     ),
-                    "execution_state": runner.execution_state.to_dict(),
+                    "execution_state": execution_state_payload,
                 },
             )
 
-            state.execution_state = runner.execution_state.to_dict()
+            state.execution_state = execution_state_payload
             logger.debug(
                 "PhaseRunner completed: %d sources from %d claims",
                 total_sources,
