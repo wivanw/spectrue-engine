@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- M127: Coverage Skeleton Extraction
+  - `coverage_skeleton.py` with dataclasses for skeleton items (event, measurement, quote, policy)
+  - Regex-based coverage analyzers (time mentions, number mentions, quote spans)
+  - `skeleton_to_claims()` converter with `skeleton_item_id` traceability
+  - Coverage validation with tolerance threshold
+  - Trace events: `claims.skeleton.created`, `claims.coverage.warning`, `claims.skeleton.to_claims`
+  - `COVERAGE_SKELETON_SCHEMA` for Phase-1 LLM extraction
+- M126: Search Escalation Policy
+  - Multi-pass Tavily search with query variants (Q1/Q2/Q3: anchor_tight, anchor_medium, broad)
+  - 4-pass escalation ladder (A→B→C→D) with observable stop conditions
+  - Topic selection from structured claim fields (`falsifiable_by`, `time_anchor`)
+  - Trace events: `search.topic.selected`, `search.pass.executed`, `search.escalation.summary`
+- M125: Claim Verifiability Contract
+  - `VERIFIABLE_CORE_CLAIM_SCHEMA` with required fields for search/match/scoring
+  - `validate_core_claim()` deterministic validation (no numeric caps, no text heuristics)
+  - Extraction stats: `claims_extracted_total`, `claims_dropped_nonverifiable`, `claims_emitted`
+  - Time anchor exemptions for quote/policy/ranking predicates
+- M124: Search Policy Cost Control
+  - Per-claim source category policy enforcement
+  - String-to-channel mapping helper with safe fallback
+  - Per-claim trace summaries with LLM/search usage
+  - Retrieval-planning vs post-evidence enrichment split
+- M123: Retrieval Flow Modularization
+  - Decomposed retrieval steps: BuildQueriesStep, WebSearchStep, RerankStep, FetchChunksStep
+  - Collect-only evidence packaging (no hidden LLM/clustering)
+  - StanceAnnotateStep, ClusterEvidenceStep as optional steps
+  - Per-claim judging contracts with explicit error payloads
+- M122: DAG Mode Separation
+  - Standard vs Deep graph separation in pipeline factory
+  - EvidenceCollectStep refactor (no judging during collection)
+  - JudgeStandardStep with `standard.article_judged` trace
+  - Deep mode per-claim results with no fallback RGBA
+  - Metering wired to LLM and search clients
+- M121: DAG Graph Separation
+  - Pipeline contracts: InputDoc, Claims, EvidenceIndex, Judgments
+  - EvidenceCollectStep, JudgeStandardStep, JudgeClaimsStep
+  - Standard and Deep response contracts
+  - Graph-level step validation and metering enforcement
+- M120: DAG Architecture Restructure
+  - Deterministic topological ordering with execution layers
+  - Step execution state tracking (timestamps, errors)
+  - Orphan-node detection and cycle error messages
+  - DAG execution summary trace events
+- M119: Core Logic Modularization
+  - Extracted `bayesian_update.py`, `evidence_scoring.py`, `evidence_explainability.py`, `evidence_stance.py`
+  - `run_evidence_flow()` with explicit `score_mode` parameter
+  - Mode-agnostic steps (`enable_global_scoring`, `process_all_claims`)
+  - All mode logic centralized in `factory.py`
 - M112: Learned Scoring Calibration
   - `CalibrationRegistry` and `CalibrationModel` for calibrated scoring models
   - Logistic scoring for search relevance and evidence likeness
