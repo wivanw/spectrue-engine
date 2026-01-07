@@ -378,7 +378,6 @@ async def test_metadata_fallback_defaults(claim_skill, mock_llm_client):
                 "importance": 0.7,
                 "check_worthiness": 0.7,
                 "harm_potential": 2,
-                "harm_potential": 2,
                 # Validation fields
                 "subject_entities": ["Claim"],
                 "retrieval_seed_terms": ["some", "claim", "text"],
@@ -423,8 +422,6 @@ async def test_high_harm_gets_authoritative_only(claim_skill, mock_llm_client):
                 "check_worthiness": 0.99,
                 "harm_potential": 5,  # Critical harm - medical misinformation
                 # LLM omits retrieval_policy
-                "verification_target": "reality",
-                "claim_role": "core",
                 "verification_target": "reality",
                 "claim_role": "core",
                 # Validation fields
