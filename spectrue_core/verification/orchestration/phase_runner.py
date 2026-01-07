@@ -1065,8 +1065,8 @@ class PhaseRunner:
                 pass_sources.extend(sources)
                 all_sources.extend(sources)
                 
-                # Compute outcome
-                outcome = compute_retrieval_outcome(all_sources)
+                # Compute outcome (with config for consistent thresholds)
+                outcome = compute_retrieval_outcome(all_sources, config)
                 
                 # Log escalation event
                 trace_escalation_pass(
@@ -1075,7 +1075,7 @@ class PhaseRunner:
                     query_id=query_id,
                     reason_codes=reason_codes,
                     outcome=outcome,
-                    include_domains_count=len(include_domains) if include_domains else 0,
+                    include_domains_count=len(include_domains) if include_domains else None,
                 )
                 
                 # Check early stop
@@ -1091,13 +1091,13 @@ class PhaseRunner:
                     )
                     return all_sources, outcome, passes_executed, tavily_calls, domains_relaxed
             
-            # Compute reason codes for next pass
-            pass_outcome = compute_retrieval_outcome(pass_sources)
-            reason_codes = compute_escalation_reason_codes(pass_outcome)
-            cumulative_outcome = compute_retrieval_outcome(all_sources)
+            # Compute reason codes for next pass (with config for consistent thresholds)
+            pass_outcome = compute_retrieval_outcome(pass_sources, config)
+            reason_codes = compute_escalation_reason_codes(pass_outcome, config)
+            cumulative_outcome = compute_retrieval_outcome(all_sources, config)
         
         # Ladder exhausted
-        final_outcome = compute_retrieval_outcome(all_sources)
+        final_outcome = compute_retrieval_outcome(all_sources, config)
         trace_search_summary(
             claim_id=claim_id,
             passes_executed=passes_executed,

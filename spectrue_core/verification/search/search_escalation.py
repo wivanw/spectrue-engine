@@ -19,8 +19,16 @@ Start cheap, expand only when observable quality signals indicate need.
 Key components:
 - QueryVariant: Deterministic query variants from claim fields (Q1/Q2/Q3)
 - EscalationPass: Multi-pass search with escalating parameters (A→B→C→D)
-- RetrievalOutcome: Observable quality signals for stop decisions
+- RetrievalOutcome: Observable RETRIEVAL-ONLY signals (no post-match fields)
 - Topic selection from structured claim fields (no text heuristics)
+
+IMPORTANT: RetrievalOutcome uses ONLY signals available from raw Tavily results:
+- sources_count: number of results
+- best_relevance: Tavily's relevance/score field
+- usable_snippets_count: results with non-trivial snippet text
+
+Do NOT include post-match signals like quote_matches/stance - those are set by
+matcher/judge and not available at retrieval time.
 """
 
 from __future__ import annotations
@@ -38,7 +46,10 @@ from spectrue_core.utils.trace import Trace
 
 @dataclass
 class EscalationConfig:
-    """Configuration for escalation thresholds."""
+    """Configuration for escalation thresholds.
+    
+    All magic numbers live here for traceability.
+    """
 
     min_relevance_threshold: float = 0.2
     """Minimum relevance score to consider evidence usable."""
@@ -49,11 +60,19 @@ class EscalationConfig:
     max_query_length: int = 80
     """Maximum length for query variants."""
 
+    min_snippet_chars: int = 50
+    """Minimum characters for a snippet to be considered usable."""
+
+    max_token_length: int = 30
+    """Maximum characters for a single token (filter out garbage)."""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "min_relevance_threshold": self.min_relevance_threshold,
             "min_usable_snippets": self.min_usable_snippets,
             "max_query_length": self.max_query_length,
+            "min_snippet_chars": self.min_snippet_chars,
+            "max_token_length": self.max_token_length,
         }
 
 
@@ -86,39 +105,109 @@ class QueryVariant:
         }
 
 
-def _extract_top_entities(claim: dict[str, Any], max_count: int = 3) -> list[str]:
+def _normalize_token(token: str) -> str:
+    """Normalize a token: lowercase, strip whitespace."""
+    return token.strip().lower()
+
+
+def _is_valid_token(token: str, max_length: int = 30) -> bool:
+    """Check if token is valid (not empty, not too long, not too short)."""
+    if not token or len(token) < 2:
+        return False
+    if len(token) > max_length:
+        return False
+    # Reject tokens that are mostly numbers (likely IDs/codes)
+    if sum(c.isdigit() for c in token) > len(token) * 0.7:
+        return False
+    return True
+
+
+def _deduplicate_tokens(tokens: list[str], max_token_length: int = 30) -> list[str]:
+    """Deduplicate tokens preserving order, with normalization and filtering."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for token in tokens:
+        normalized = _normalize_token(token)
+        if not _is_valid_token(normalized, max_token_length):
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(token)  # Keep original case
+    return result
+
+
+def _extract_top_entities(
+    claim: dict[str, Any], max_count: int = 3, max_token_length: int = 30
+) -> list[str]:
     """Extract top subject entities from claim."""
     entities = claim.get("subject_entities", [])
     if not isinstance(entities, list):
         return []
-    valid = [e for e in entities if isinstance(e, str) and len(e) >= 2]
-    return valid[:max_count]
+    valid: list[str] = []
+    for e in entities:
+        if not isinstance(e, str):
+            continue
+        # Reject entities that are too long or too short
+        if len(e) < 2 or len(e) > max_token_length:
+            continue
+        valid.append(e)
+        if len(valid) >= max_count:
+            break
+    return valid
 
 
-def _extract_seed_terms(claim: dict[str, Any], max_count: int = 6) -> list[str]:
-    """Extract retrieval seed terms from claim."""
+def _extract_seed_terms(
+    claim: dict[str, Any], max_count: int = 6, max_token_length: int = 30
+) -> list[str]:
+    """Extract retrieval seed terms from claim.
+    
+    Filters out multi-word phrases (>3 words) to keep queries keyword-like.
+    """
     terms = claim.get("retrieval_seed_terms", [])
     if not isinstance(terms, list):
         return []
-    valid = [t for t in terms if isinstance(t, str) and len(t) >= 2]
-    return valid[:max_count]
+    valid: list[str] = []
+    for t in terms:
+        if not isinstance(t, str):
+            continue
+        t_stripped = t.strip()
+        # Reject terms that are too short
+        if len(t_stripped) < 2:
+            continue
+        # Reject multi-word phrases (>3 words) - these make queries sentence-like
+        word_count = len(t_stripped.split())
+        if word_count > 3:
+            continue
+        # Reject very long single tokens
+        if word_count == 1 and len(t_stripped) > max_token_length:
+            continue
+        valid.append(t_stripped)
+        if len(valid) >= max_count:
+            break
+    return valid
 
 
 def _extract_date_anchor(claim: dict[str, Any]) -> str | None:
-    """Extract explicit date from time_anchor if available."""
+    """Extract explicit date from time_anchor if available.
+    
+    For 'range' type, returns only the start date to avoid query pollution.
+    """
     time_anchor = claim.get("time_anchor")
     if not isinstance(time_anchor, dict):
         return None
 
     anchor_type = time_anchor.get("type", "unknown")
-    if anchor_type not in ("explicit_date", "range"):
-        return None
-
-    # Try to get the date value
-    date_val = time_anchor.get("value") or time_anchor.get("start")
-    if isinstance(date_val, str) and len(date_val) >= 4:
-        # Extract year or date portion (trim to reasonable length)
-        return date_val[:10]  # e.g., "2024-01-15" or "2024"
+    if anchor_type == "explicit_date":
+        date_val = time_anchor.get("value")
+        if isinstance(date_val, str) and len(date_val) >= 4:
+            # Return date portion only (YYYY-MM-DD or YYYY)
+            return date_val[:10]
+    elif anchor_type == "range":
+        # For range, use start date only (end date would bloat query)
+        start_val = time_anchor.get("start")
+        if isinstance(start_val, str) and len(start_val) >= 4:
+            return start_val[:10]
     return None
 
 
@@ -146,18 +235,20 @@ def build_query_variants(
     Q3 (broad): <top entities> <2-3 seed terms>
 
     Each query <= max_query_length chars, keyword-like (no sentences).
+    Tokens are deduplicated and normalized.
     """
     cfg = config or DEFAULT_ESCALATION_CONFIG
     max_len = cfg.max_query_length
+    max_token_len = cfg.max_token_length
 
-    entities = _extract_top_entities(claim, max_count=3)
-    seed_terms = _extract_seed_terms(claim, max_count=6)
+    entities = _extract_top_entities(claim, max_count=3, max_token_length=max_token_len)
+    seed_terms = _extract_seed_terms(claim, max_count=6, max_token_length=max_token_len)
     date_anchor = _extract_date_anchor(claim)
 
     variants: list[QueryVariant] = []
 
     # Q1: anchor-tight (entities + seed terms + date)
-    q1_parts = entities + seed_terms[:4]
+    q1_parts = _deduplicate_tokens(entities + seed_terms[:4], max_token_len)
     if date_anchor:
         q1_parts.append(date_anchor)
     q1_text = _truncate_query(" ".join(q1_parts), max_len)
@@ -169,7 +260,7 @@ def build_query_variants(
         ))
 
     # Q2: anchor-medium (entities + seed terms, no date)
-    q2_parts = entities + seed_terms[:4]
+    q2_parts = _deduplicate_tokens(entities + seed_terms[:4], max_token_len)
     q2_text = _truncate_query(" ".join(q2_parts), max_len)
     # Only add if different from Q1
     if q2_text and (not variants or q2_text != variants[0].text):
@@ -179,8 +270,14 @@ def build_query_variants(
             strategy="anchor_medium",
         ))
 
-    # Q3: broad (entities + 2-3 seed terms)
-    q3_parts = entities[:2] + seed_terms[:3]
+    # Q3: broad (fewer terms)
+    # If entities empty, use first few seed terms only
+    if entities:
+        q3_parts = _deduplicate_tokens(entities[:2] + seed_terms[:2], max_token_len)
+    else:
+        # No entities → use more seed terms but still short
+        q3_parts = _deduplicate_tokens(seed_terms[:3], max_token_len)
+    
     q3_text = _truncate_query(" ".join(q3_parts), max_len)
     # Only add if different from existing variants
     existing_texts = {v.text for v in variants}
@@ -223,12 +320,14 @@ def select_topic_from_claim(claim: dict[str, Any]) -> tuple[str, list[str]]:
 
     # Extract falsifiability info
     falsifiability = claim.get("falsifiability")
-    if isinstance(falsifiability, dict):
-        falsifiable_by = falsifiability.get("falsifiable_by", "other")
-    else:
-        falsifiable_by = "other"
-        reason_codes.append("no_falsifiability")
-
+    if not isinstance(falsifiability, dict):
+        # No falsifiability field at all
+        reason_codes.append("no_falsifiability_field")
+        reason_codes.append("default_news")
+        return "news", reason_codes
+    
+    falsifiable_by = falsifiability.get("falsifiable_by", "other")
+    
     # Rule 1: News sources
     if falsifiable_by in NEWS_FALSIFIABLE_BY:
         reason_codes.append(f"falsifiable_by:{falsifiable_by}")
@@ -250,6 +349,9 @@ def select_topic_from_claim(claim: dict[str, Any]) -> tuple[str, list[str]]:
             return "general", reason_codes
 
     # Default: news (better for recent events and domain allowlists)
+    # Provide diagnostic info about why we're defaulting
+    reason_codes.append(f"falsifiable_by:{falsifiable_by}")
+    reason_codes.append("unclassified_falsifiable_by")
     reason_codes.append("default_news")
     return "news", reason_codes
 
@@ -261,64 +363,63 @@ def select_topic_from_claim(claim: dict[str, Any]) -> tuple[str, list[str]]:
 
 @dataclass
 class RetrievalOutcome:
-    """Observable quality signals from search results."""
+    """Observable quality signals from RAW search results.
+    
+    IMPORTANT: This is for RETRIEVAL signals only - fields that exist in
+    raw Tavily results. Do NOT include post-match signals like quote_matches
+    or stance, which are added by matcher/judge after retrieval.
+    """
 
     sources_count: int
     """Total number of sources returned."""
 
     best_relevance: float
-    """Highest relevance score among sources."""
+    """Highest relevance score among sources (Tavily's score field)."""
 
     usable_snippets_count: int
-    """Number of sources with non-empty snippet/content."""
-
-    match_accept_count: int
-    """Sources with quote_matches=True or stance in (SUPPORT, REFUTE)."""
+    """Number of sources with snippet >= min_snippet_chars."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "sources_count": self.sources_count,
             "best_relevance": self.best_relevance,
             "usable_snippets_count": self.usable_snippets_count,
-            "match_accept_count": self.match_accept_count,
         }
 
 
-ACCEPTABLE_STANCES = {"support", "refute", "SUPPORT", "REFUTE"}
-
-
-def compute_retrieval_outcome(sources: list[dict[str, Any]]) -> RetrievalOutcome:
-    """Compute observable quality signals from search results."""
+def compute_retrieval_outcome(
+    sources: list[dict[str, Any]],
+    config: EscalationConfig | None = None,
+) -> RetrievalOutcome:
+    """Compute observable quality signals from RAW search results.
+    
+    Uses only Tavily-provided fields: score/relevance_score, snippet/content.
+    """
+    cfg = config or DEFAULT_ESCALATION_CONFIG
+    min_snippet_len = cfg.min_snippet_chars
+    
     sources_count = len(sources)
     best_relevance = 0.0
     usable_snippets_count = 0
-    match_accept_count = 0
 
     for src in sources:
         if not isinstance(src, dict):
             continue
 
-        # Track best relevance
+        # Track best relevance (Tavily's score field)
         score = src.get("score") or src.get("relevance_score") or 0.0
         if isinstance(score, (int, float)) and score > best_relevance:
             best_relevance = float(score)
 
-        # Count usable snippets
+        # Count usable snippets (configurable threshold)
         snippet = src.get("snippet") or src.get("content") or src.get("raw_content")
-        if isinstance(snippet, str) and len(snippet) >= 50:
+        if isinstance(snippet, str) and len(snippet) >= min_snippet_len:
             usable_snippets_count += 1
-
-        # Count match accepts
-        quote_matches = src.get("quote_matches", False)
-        stance = src.get("stance", "")
-        if quote_matches or stance in ACCEPTABLE_STANCES:
-            match_accept_count += 1
 
     return RetrievalOutcome(
         sources_count=sources_count,
         best_relevance=best_relevance,
         usable_snippets_count=usable_snippets_count,
-        match_accept_count=match_accept_count,
     )
 
 
@@ -327,18 +428,16 @@ def should_stop_escalation(
     config: EscalationConfig | None = None,
 ) -> tuple[bool, str]:
     """
-    Determine if escalation should stop based on outcome.
+    Determine if escalation should stop based on RETRIEVAL-ONLY outcome.
 
     Returns: (should_stop, reason)
 
     Stop if:
-    - match_accept_count >= 1
     - usable_snippets_count >= min_usable_snippets AND best_relevance >= min_relevance_threshold
+    
+    This is a quality-based stop: we have enough relevant content to proceed to matching.
     """
     cfg = config or DEFAULT_ESCALATION_CONFIG
-
-    if outcome.match_accept_count >= 1:
-        return True, "match_accept"
 
     if (
         outcome.usable_snippets_count >= cfg.min_usable_snippets
@@ -371,7 +470,7 @@ class EscalationPass:
     """Override topic, or None to use claim-derived topic."""
 
     include_domains_relaxed: bool
-    """If True, remove include_domains restriction."""
+    """If True, remove include_domains restriction (set to None)."""
 
     query_ids: list[str]
     """Which query variants to try: ['Q1', 'Q2'] etc."""
@@ -397,7 +496,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
     Pass A (cheap): basic depth, 3 results, Q1 then Q2
     Pass B (expand): basic depth, 6 results, Q2 then Q3
     Pass C (deep): advanced depth, 6 results, Q1 then Q2
-    Pass D (domain relaxation): basic depth, 6 results, Q2 only, domains relaxed
+    Pass D (domain relaxation): basic depth, 6 results, Q2 only, include_domains=None
     """
     return [
         EscalationPass(
@@ -416,7 +515,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
             topic=None,
             include_domains_relaxed=False,
             query_ids=["Q2", "Q3"],
-            trigger_conditions=["no_snippets", "no_matches"],
+            trigger_conditions=["no_snippets", "low_relevance"],
         ),
         EscalationPass(
             pass_id="C",
@@ -432,7 +531,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
             search_depth="basic",
             max_results=6,
             topic=None,
-            include_domains_relaxed=True,
+            include_domains_relaxed=True,  # include_domains will be None
             query_ids=["Q2"],
             trigger_conditions=["domain_mismatch", "last_resort"],
         ),
@@ -444,18 +543,25 @@ def get_escalation_ladder() -> list[EscalationPass]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def compute_escalation_reason_codes(outcome: RetrievalOutcome) -> list[str]:
-    """Compute reason codes for why escalation is needed."""
+def compute_escalation_reason_codes(
+    outcome: RetrievalOutcome,
+    config: EscalationConfig | None = None,
+) -> list[str]:
+    """Compute reason codes for why escalation is needed.
+    
+    Uses config thresholds for consistency with stop conditions.
+    """
+    cfg = config or DEFAULT_ESCALATION_CONFIG
     reasons: list[str] = []
 
     if outcome.sources_count == 0:
         reasons.append("no_sources")
     if outcome.usable_snippets_count == 0:
         reasons.append("no_snippets")
-    if outcome.match_accept_count == 0:
-        reasons.append("no_matches")
-    if outcome.best_relevance < 0.2:
-        reasons.append("low_relevance")
+    elif outcome.usable_snippets_count < cfg.min_usable_snippets:
+        reasons.append(f"insufficient_snippets:{outcome.usable_snippets_count}<{cfg.min_usable_snippets}")
+    if outcome.best_relevance < cfg.min_relevance_threshold:
+        reasons.append(f"low_relevance:{outcome.best_relevance:.2f}<{cfg.min_relevance_threshold}")
 
     return reasons if reasons else ["insufficient_quality"]
 
@@ -497,7 +603,12 @@ def trace_escalation_pass(
     outcome: RetrievalOutcome,
     include_domains_count: int | None = None,
 ) -> None:
-    """Log escalation pass trace event."""
+    """Log escalation pass trace event.
+    
+    include_domains_count should be:
+    - int: number of domains in allowlist
+    - None: when include_domains_relaxed=True (no allowlist)
+    """
     Trace.event(
         "search.escalation",
         {
@@ -550,7 +661,6 @@ def trace_search_summary(
             "tavily_calls": tavily_calls,
             "best_relevance_final": final_outcome.best_relevance,
             "usable_snippets_final": final_outcome.usable_snippets_count,
-            "match_accept_final": final_outcome.match_accept_count,
             "domains_relaxed": domains_relaxed,
         },
     )

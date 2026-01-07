@@ -14,12 +14,8 @@
 Unit tests for M126 search escalation module.
 """
 
-import pytest
-
 from spectrue_core.verification.search.search_escalation import (
-    QueryVariant,
     EscalationConfig,
-    EscalationPass,
     RetrievalOutcome,
     build_query_variants,
     select_topic_from_claim,
@@ -28,6 +24,7 @@ from spectrue_core.verification.search.search_escalation import (
     get_escalation_ladder,
     compute_escalation_reason_codes,
     DEFAULT_ESCALATION_CONFIG,
+    _deduplicate_tokens,
 )
 
 
@@ -78,7 +75,7 @@ class TestBuildQueryVariants:
     def test_max_query_length(self):
         """All variants should be <= 80 chars."""
         claim = {
-            "subject_entities": ["VeryLongCompanyNameThatExceedsNormalLength", "AnotherLongEntity"],
+            "subject_entities": ["VeryLongCompanyName", "AnotherLongEntity"],
             "retrieval_seed_terms": ["term1", "term2", "term3", "term4", "term5", "term6"],
             "time_anchor": {
                 "type": "explicit_date",
@@ -106,6 +103,80 @@ class TestBuildQueryVariants:
         variants = build_query_variants(claim)
         assert len(variants) >= 1
         assert "Tesla" in variants[0].text
+
+    def test_token_deduplication(self):
+        """Tokens should be deduplicated in queries."""
+        claim = {
+            "subject_entities": ["SpaceX", "Rocket"],
+            "retrieval_seed_terms": ["spacex", "rocket", "launch"],  # duplicates with different case
+        }
+        variants = build_query_variants(claim)
+        
+        # Should deduplicate (spacex appears once, rocket appears once)
+        for v in variants:
+            tokens = v.text.lower().split()
+            # No exact duplicates (normalized)
+            assert len(tokens) == len(set(tokens)), f"Duplicates in {v.text}"
+
+    def test_long_phrase_filtered(self):
+        """Multi-word phrases (>3 words) should be filtered from seed terms."""
+        claim = {
+            "subject_entities": ["Tesla"],
+            "retrieval_seed_terms": [
+                "stock",
+                "this is a very long phrase that should be filtered",  # >3 words
+                "price",
+            ],
+        }
+        variants = build_query_variants(claim)
+        
+        for v in variants:
+            assert "very long phrase" not in v.text
+
+    def test_no_entities_uses_seed_terms_for_q3(self):
+        """If entities empty, Q3 should use seed terms only."""
+        claim = {
+            "subject_entities": [],
+            "retrieval_seed_terms": ["launch", "rocket", "orbit", "mission"],
+        }
+        variants = build_query_variants(claim)
+        
+        # Should still generate variants from seed terms
+        assert len(variants) >= 1
+        # Q3 should have some seed terms
+        q3 = next((v for v in variants if v.query_id == "Q3"), None)
+        if q3:
+            assert "launch" in q3.text.lower() or "rocket" in q3.text.lower()
+
+
+class TestDeduplicateTokens:
+    """Tests for _deduplicate_tokens()."""
+
+    def test_removes_duplicates(self):
+        """Should remove duplicate tokens preserving order."""
+        tokens = ["Apple", "apple", "iPhone", "APPLE"]
+        result = _deduplicate_tokens(tokens)
+        assert len(result) == 2  # Apple and iPhone
+        assert result[0] == "Apple"  # Original case preserved
+        assert result[1] == "iPhone"
+
+    def test_preserves_order(self):
+        """Should preserve original order."""
+        tokens = ["first", "second", "third"]
+        result = _deduplicate_tokens(tokens)
+        assert result == ["first", "second", "third"]
+
+    def test_filters_short_tokens(self):
+        """Should filter tokens with length < 2."""
+        tokens = ["a", "ab", "abc"]
+        result = _deduplicate_tokens(tokens)
+        assert result == ["ab", "abc"]
+
+    def test_filters_long_tokens(self):
+        """Should filter tokens exceeding max_token_length."""
+        tokens = ["short", "x" * 50]
+        result = _deduplicate_tokens(tokens, max_token_length=30)
+        assert result == ["short"]
 
 
 class TestSelectTopicFromClaim:
@@ -189,13 +260,29 @@ class TestSelectTopicFromClaim:
         
         assert topic == "news"
 
-    def test_default_news(self):
-        """No falsifiability → default topic=news."""
+    def test_default_news_no_falsifiability(self):
+        """No falsifiability → default topic=news with diagnostic."""
         claim = {}
         topic, reasons = select_topic_from_claim(claim)
         
         assert topic == "news"
-        assert "default_news" in reasons or "no_falsifiability" in reasons
+        assert "no_falsifiability_field" in reasons
+        assert "default_news" in reasons
+
+    def test_default_news_other_falsifiable_by(self):
+        """falsifiable_by=other → default news with diagnostic."""
+        claim = {
+            "falsifiability": {
+                "is_falsifiable": True,
+                "falsifiable_by": "other",
+            },
+        }
+        topic, reasons = select_topic_from_claim(claim)
+        
+        assert topic == "news"
+        assert "falsifiable_by:other" in reasons
+        assert "unclassified_falsifiable_by" in reasons
+        assert "default_news" in reasons
 
 
 class TestComputeRetrievalOutcome:
@@ -208,33 +295,21 @@ class TestComputeRetrievalOutcome:
         assert outcome.sources_count == 0
         assert outcome.best_relevance == 0.0
         assert outcome.usable_snippets_count == 0
-        assert outcome.match_accept_count == 0
 
-    def test_sources_with_support_stance(self):
-        """Sources with SUPPORT stance → counted in match_accept."""
+    def test_sources_with_relevance(self):
+        """Sources with score → best_relevance computed."""
         sources = [
-            {"url": "https://example.com/a", "stance": "SUPPORT", "snippet": "a" * 60, "score": 0.8},
-            {"url": "https://example.com/b", "stance": "context", "snippet": "b" * 60, "score": 0.5},
+            {"url": "https://example.com/a", "snippet": "a" * 60, "score": 0.8},
+            {"url": "https://example.com/b", "snippet": "b" * 60, "score": 0.5},
         ]
         outcome = compute_retrieval_outcome(sources)
         
         assert outcome.sources_count == 2
-        assert outcome.match_accept_count == 1  # Only SUPPORT
         assert outcome.usable_snippets_count == 2  # Both have 60+ chars
         assert outcome.best_relevance == 0.8
 
-    def test_sources_with_quote_matches(self):
-        """Sources with quote_matches=True → counted in match_accept."""
-        sources = [
-            {"url": "https://example.com/a", "quote_matches": True, "snippet": "a" * 60},
-            {"url": "https://example.com/b", "quote_matches": False, "snippet": "b" * 60},
-        ]
-        outcome = compute_retrieval_outcome(sources)
-        
-        assert outcome.match_accept_count == 1
-
     def test_short_snippets_not_counted(self):
-        """Snippets < 50 chars not counted as usable."""
+        """Snippets < min_snippet_chars not counted as usable."""
         sources = [
             {"url": "https://example.com/a", "snippet": "short"},
             {"url": "https://example.com/b", "snippet": "x" * 100},
@@ -243,22 +318,29 @@ class TestComputeRetrievalOutcome:
         
         assert outcome.usable_snippets_count == 1
 
+    def test_configurable_snippet_threshold(self):
+        """min_snippet_chars from config is respected."""
+        sources = [
+            {"url": "https://example.com/a", "snippet": "x" * 30},
+            {"url": "https://example.com/b", "snippet": "x" * 100},
+        ]
+        # Default threshold (50)
+        outcome_default = compute_retrieval_outcome(sources)
+        assert outcome_default.usable_snippets_count == 1
+        
+        # Lower threshold (20)
+        config = EscalationConfig(min_snippet_chars=20)
+        outcome_low = compute_retrieval_outcome(sources, config)
+        assert outcome_low.usable_snippets_count == 2
+
+    def test_no_match_accept_count(self):
+        """RetrievalOutcome should NOT have match_accept_count (removed)."""
+        outcome = compute_retrieval_outcome([])
+        assert not hasattr(outcome, "match_accept_count")
+
 
 class TestShouldStopEscalation:
     """Tests for should_stop_escalation()."""
-
-    def test_stop_on_match_accept(self):
-        """match_accept_count >= 1 → stop."""
-        outcome = RetrievalOutcome(
-            sources_count=3,
-            best_relevance=0.5,
-            usable_snippets_count=1,
-            match_accept_count=1,
-        )
-        should_stop, reason = should_stop_escalation(outcome)
-        
-        assert should_stop is True
-        assert reason == "match_accept"
 
     def test_stop_on_snippets_and_relevance(self):
         """usable_snippets >= 2 AND relevance >= 0.2 → stop."""
@@ -266,7 +348,6 @@ class TestShouldStopEscalation:
             sources_count=5,
             best_relevance=0.3,
             usable_snippets_count=2,
-            match_accept_count=0,
         )
         config = EscalationConfig(min_usable_snippets=2, min_relevance_threshold=0.2)
         should_stop, reason = should_stop_escalation(outcome, config)
@@ -280,7 +361,6 @@ class TestShouldStopEscalation:
             sources_count=5,
             best_relevance=0.1,  # Below threshold
             usable_snippets_count=3,
-            match_accept_count=0,
         )
         config = EscalationConfig(min_relevance_threshold=0.2)
         should_stop, reason = should_stop_escalation(outcome, config)
@@ -294,7 +374,6 @@ class TestShouldStopEscalation:
             sources_count=5,
             best_relevance=0.5,
             usable_snippets_count=1,  # Below threshold
-            match_accept_count=0,
         )
         config = EscalationConfig(min_usable_snippets=2)
         should_stop, reason = should_stop_escalation(outcome, config)
@@ -349,7 +428,6 @@ class TestComputeEscalationReasonCodes:
             sources_count=0,
             best_relevance=0.0,
             usable_snippets_count=0,
-            match_accept_count=0,
         )
         reasons = compute_escalation_reason_codes(outcome)
         
@@ -361,20 +439,34 @@ class TestComputeEscalationReasonCodes:
             sources_count=3,
             best_relevance=0.5,
             usable_snippets_count=0,
-            match_accept_count=0,
         )
         reasons = compute_escalation_reason_codes(outcome)
         
         assert "no_snippets" in reasons
 
-    def test_low_relevance(self):
-        """Relevance below 0.2 → 'low_relevance' reason."""
+    def test_low_relevance_uses_config_threshold(self):
+        """Relevance below config threshold → low_relevance with threshold in reason."""
         outcome = RetrievalOutcome(
             sources_count=3,
             best_relevance=0.1,
             usable_snippets_count=2,
-            match_accept_count=0,
         )
-        reasons = compute_escalation_reason_codes(outcome)
+        config = EscalationConfig(min_relevance_threshold=0.3)
+        reasons = compute_escalation_reason_codes(outcome, config)
         
-        assert "low_relevance" in reasons
+        # Should include threshold in reason for diagnostics
+        assert any("low_relevance" in r for r in reasons)
+        assert any("0.3" in r for r in reasons)  # Threshold included
+
+    def test_insufficient_snippets_uses_config_threshold(self):
+        """Snippets below config threshold → reason includes threshold."""
+        outcome = RetrievalOutcome(
+            sources_count=3,
+            best_relevance=0.5,
+            usable_snippets_count=1,
+        )
+        config = EscalationConfig(min_usable_snippets=3)
+        reasons = compute_escalation_reason_codes(outcome, config)
+        
+        assert any("insufficient_snippets" in r for r in reasons)
+        assert any("1<3" in r for r in reasons)  # Current < threshold
