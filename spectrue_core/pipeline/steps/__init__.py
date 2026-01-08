@@ -34,6 +34,9 @@ from .evidence_collect import EvidenceCollectStep
 from .evidence_gating import EvidenceGatingStep
 from .stance_annotate import StanceAnnotateStep
 from .cluster_evidence import ClusterEvidenceStep
+from .audit_claims import AuditClaimsStep
+from .audit_evidence import AuditEvidenceStep
+from .aggregate_rgba_audit import AggregateRGBAAuditStep
 from .judge_standard import JudgeStandardStep
 from .oracle_flow import OracleFlowStep
 from .result_assembly import AssembleStandardResultStep, ResultAssemblyStep
@@ -67,6 +70,9 @@ __all__ = [
     "EvidenceGatingStep",
     "StanceAnnotateStep",
     "ClusterEvidenceStep",
+    "AuditClaimsStep",
+    "AuditEvidenceStep",
+    "AggregateRGBAAuditStep",
     "JudgeStandardStep",
     "OracleFlowStep",
     "AssembleStandardResultStep",

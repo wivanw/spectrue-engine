@@ -310,6 +310,9 @@ class PipelineFactory:
             EvidenceCollectStep,
             StanceAnnotateStep,
             ClusterEvidenceStep,
+            AuditClaimsStep,
+            AuditEvidenceStep,
+            AggregateRGBAAuditStep,
             ExtractClaimsStep,
             MeteringSetupStep,
             PrepareInputStep,
@@ -452,12 +455,45 @@ class PipelineFactory:
                 depends_on=["cluster_evidence"],
             ),
 
+            # Claim-level audit (LLM as auditor only)
+            *(
+                [
+                    StepNode(
+                        step=AuditClaimsStep(llm_client=llm_client),
+                        depends_on=["build_claim_frames"],
+                    ),
+                    StepNode(
+                        step=AuditEvidenceStep(llm_client=llm_client),
+                        depends_on=["audit_claims"],
+                    ),
+                ]
+                if llm_client
+                else []
+            ),
+
+            # Aggregate RGBA audit metrics (deterministic)
+            *(
+                [
+                    StepNode(
+                        step=AggregateRGBAAuditStep(),
+                        depends_on=["audit_evidence"],
+                    )
+                ]
+                if llm_client
+                else [
+                    StepNode(
+                        step=AggregateRGBAAuditStep(),
+                        depends_on=["build_claim_frames"],
+                    )
+                ]
+            ),
+
             # Summarize evidence per claim (always included if llm_client available)
             *(
                 [
                     StepNode(
                         step=SummarizeEvidenceStep(llm_client=llm_client),
-                        depends_on=["build_claim_frames"],
+                        depends_on=["audit_evidence"],
                     )
                 ]
                 if llm_client
@@ -484,7 +520,10 @@ class PipelineFactory:
             # Assemble deep result (per-claim verdicts, NO global RGBA)
             StepNode(
                 step=AssembleDeepResultStep(),
-                depends_on=["judge_claims" if llm_client else "judge_unavailable"],
+                depends_on=[
+                    "judge_claims" if llm_client else "judge_unavailable",
+                    "aggregate_rgba_audit",
+                ],
             ),
 
             StepNode(

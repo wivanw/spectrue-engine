@@ -17,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from spectrue_core.schema.rgba_audit import RGBAResult, RGBAMetric
+
 INPUT_DOC_KEY = "input_doc"
 CLAIMS_KEY = "claims_contract"
 EVIDENCE_INDEX_KEY = "evidence_index"
@@ -29,6 +31,7 @@ RAW_SEARCH_RESULTS_KEY = "raw_search_results"
 RANKED_RESULTS_KEY = "ranked_results"
 RETRIEVAL_ITEMS_KEY = "retrieval_items"
 GATES_KEY = "gates"
+RGBA_AUDIT_KEY = "rgba_audit"
 
 
 @dataclass(frozen=True, slots=True)
@@ -419,6 +422,76 @@ class Judgments:
 
 
 @dataclass(frozen=True, slots=True)
+class RGBAAuditMetricPayload:
+    """Serialized RGBA audit metric with legacy status code."""
+
+    status: str
+    status_code: int
+    value: float | None = None
+    confidence: float | None = None
+    uncertainty: dict[str, Any] | None = None
+    reasons: tuple[str, ...] = field(default_factory=tuple)
+    trace: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_metric(cls, metric: RGBAMetric) -> "RGBAAuditMetricPayload":
+        payload = metric.to_payload()
+        return cls(
+            status=payload["status"],
+            status_code=payload["status_code"],
+            value=payload.get("value"),
+            confidence=payload.get("confidence"),
+            uncertainty=payload.get("uncertainty"),
+            reasons=tuple(payload.get("reasons", [])),
+            trace=dict(payload.get("trace", {})),
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "status_code": self.status_code,
+            "value": self.value,
+            "confidence": self.confidence,
+            "uncertainty": self.uncertainty,
+            "reasons": list(self.reasons),
+            "trace": dict(self.trace),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class RGBAAuditResultPayload:
+    """Serialized RGBA audit result payload."""
+
+    R: RGBAAuditMetricPayload
+    G: RGBAAuditMetricPayload
+    B: RGBAAuditMetricPayload
+    A: RGBAAuditMetricPayload
+    global_reasons: tuple[str, ...] = field(default_factory=tuple)
+    summary_trace: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_result(cls, result: RGBAResult) -> "RGBAAuditResultPayload":
+        return cls(
+            R=RGBAAuditMetricPayload.from_metric(result.R),
+            G=RGBAAuditMetricPayload.from_metric(result.G),
+            B=RGBAAuditMetricPayload.from_metric(result.B),
+            A=RGBAAuditMetricPayload.from_metric(result.A),
+            global_reasons=tuple(result.global_reasons),
+            summary_trace=dict(result.summary_trace),
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "R": self.R.to_payload(),
+            "G": self.G.to_payload(),
+            "B": self.B.to_payload(),
+            "A": self.A.to_payload(),
+            "global_reasons": list(self.global_reasons),
+            "summary_trace": dict(self.summary_trace),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class CostSummary:
     """Cost breakdown from metering context."""
 
@@ -454,6 +527,7 @@ class StandardFinalPayload:
     analysis: str
     details: tuple[str, ...] = field(default_factory=tuple)
     anchor_claim: dict[str, Any] | None = None
+    rgba_audit: RGBAAuditResultPayload | None = None
     cost_summary: CostSummary | None = None
     credits: float = 0.0
     trace: dict[str, Any] = field(default_factory=dict)
@@ -467,6 +541,7 @@ class StandardFinalPayload:
             "analysis": self.analysis,
             "details": list(self.details),
             "anchor_claim": dict(self.anchor_claim) if self.anchor_claim else None,
+            "rgba_audit": self.rgba_audit.to_payload() if self.rgba_audit else None,
             "cost_summary": self.cost_summary.to_payload() if self.cost_summary else None,
             "credits": self.credits,
             "trace": dict(self.trace),
@@ -501,6 +576,7 @@ class DeepFinalPayload:
     prepared_text: str
     claims: tuple[dict[str, Any], ...]
     deep_analysis: DeepAnalysis
+    rgba_audit: RGBAAuditResultPayload | None = None
     cost_summary: CostSummary | None = None
     credits: float = 0.0
     trace: dict[str, Any] = field(default_factory=dict)
@@ -510,6 +586,7 @@ class DeepFinalPayload:
             "prepared_text": self.prepared_text,
             "claims": [dict(c) for c in self.claims],
             "deep_analysis": self.deep_analysis.to_payload(),
+            "rgba_audit": self.rgba_audit.to_payload() if self.rgba_audit else None,
             "cost_summary": self.cost_summary.to_payload() if self.cost_summary else None,
             "credits": self.credits,
             "trace": dict(self.trace),

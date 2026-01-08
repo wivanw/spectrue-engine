@@ -17,9 +17,17 @@ import math
 from decimal import Decimal
 from dataclasses import dataclass
 
-from spectrue_core.pipeline.contracts import CLAIMS_KEY, INPUT_DOC_KEY, Claims, InputDoc
+from spectrue_core.pipeline.contracts import (
+    CLAIMS_KEY,
+    INPUT_DOC_KEY,
+    RGBA_AUDIT_KEY,
+    Claims,
+    InputDoc,
+    RGBAAuditResultPayload,
+)
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
+from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -154,6 +162,14 @@ class AssembleStandardResultStep:
             original_fact = ctx.get_extra("original_fact") or ctx.get_extra("fact") or ""
 
             rgba = _build_rgba(verdict, ctx)
+            rgba_audit_payload = None
+            rgba_audit = ctx.get_extra(RGBA_AUDIT_KEY)
+            if isinstance(rgba_audit, RGBAResult):
+                rgba_audit_payload = RGBAAuditResultPayload.from_result(rgba_audit).to_payload()
+            elif isinstance(rgba_audit, RGBAAuditResultPayload):
+                rgba_audit_payload = rgba_audit.to_payload()
+            elif isinstance(rgba_audit, dict):
+                rgba_audit_payload = rgba_audit
             cost_summary = ctx.get_extra("cost_summary")
             if not isinstance(cost_summary, dict):
                 cost_summary = None
@@ -175,6 +191,8 @@ class AssembleStandardResultStep:
                 "bias_score": verdict.get("style_score"),
                 "cost": verdict.get("cost"),
             }
+            if rgba_audit_payload is not None:
+                final_result["rgba_audit"] = rgba_audit_payload
             if cost_summary is not None:
                 final_result["cost_summary"] = cost_summary
                 credits = _extract_credits(cost_summary)

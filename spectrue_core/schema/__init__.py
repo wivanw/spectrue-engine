@@ -109,6 +109,18 @@ from spectrue_core.schema.claim_frame import (
     DeepAnalysisResult,
 )
 
+# RGBA Audit Contracts
+from spectrue_core.schema.rgba_audit import (
+    RGBAStatus,
+    RGBAMetric,
+    RGBAResult,
+    ClaimAudit,
+    EvidenceAudit,
+    SourceCluster,
+    rgba_status_to_legacy_code,
+    legacy_code_to_rgba_status,
+)
+
 
 __all__ = [
     # Claims
@@ -139,4 +151,8 @@ __all__ = [
     "RetrievalHop", "RetrievalTrace", "ClaimFrame",
     "EvidenceReference", "EvidenceSummary", "RGBAScore",
     "JudgeOutput", "ClaimResult", "DeepAnalysisResult",
+    # RGBA Audit Contracts
+    "RGBAStatus", "RGBAMetric", "RGBAResult",
+    "ClaimAudit", "EvidenceAudit", "SourceCluster",
+    "rgba_status_to_legacy_code", "legacy_code_to_rgba_status",
 ]
