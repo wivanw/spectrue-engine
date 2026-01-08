@@ -124,13 +124,32 @@ class WebSearchStep:
                 # Store bundles in extra for next steps that know CEGS
                 ctx = ctx.set_extra("cegs_evidence_bundles", final_bundles)
                 
-                # Populate legacy sources
-                return ctx.with_update(sources=all_sources).set_extra(
-                    RAW_SEARCH_RESULTS_KEY, 
-                    RawSearchResults(
-                        plan_id=plan.plan_id,
-                        results=tuple(), # TODO: Populate if needed
-                        trace={"cegs_mvp": True, "pool_size": len(pool.items)}
+                # Populate legacy sources + required trace markers
+                return (
+                    ctx.with_update(sources=all_sources)
+                    .set_extra(
+                        RAW_SEARCH_RESULTS_KEY, 
+                        RawSearchResults(
+                            plan_id=plan.plan_id,
+                            results=tuple(),
+                            trace={"cegs_mvp": True, "pool_size": len(pool.items)}
+                        )
+                    )
+                    .set_extra(
+                        "retrieval_search_trace",
+                        {
+                            "plan_id": plan.plan_id,
+                            "sources": len(all_sources),
+                            "cegs_mvp": True,
+                        },
+                    )
+                    .set_extra(
+                        "retrieval_rerank_trace",
+                        {
+                            "plan_id": plan.plan_id,
+                            "reranked": len(all_sources),
+                            "cegs_mvp": True,
+                        },
                     )
                 )
 
