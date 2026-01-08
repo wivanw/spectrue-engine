@@ -128,7 +128,7 @@ class ValidationPipeline:
         # Determine Mode
         mode_name = "normal"
         
-        # M118: Map search_type="deep" to deep mode for backward compatibility
+        # Map search_type="deep" to deep mode for backward compatibility
         if search_type == "deep":
             mode_name = "deep"
             

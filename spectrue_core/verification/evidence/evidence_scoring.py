@@ -15,7 +15,7 @@ Evidence Scoring
 Bayesian scoring, anchor selection, and verdict computation utilities.
 Extracted from pipeline_evidence.py for better modularity.
 
-M118: Part of pipeline decomposition refactor.
+Part of pipeline decomposition refactor.
 """
 
 from __future__ import annotations

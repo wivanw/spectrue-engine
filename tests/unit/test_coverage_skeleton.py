@@ -8,7 +8,7 @@
 # (at your option) any later version.
 
 """
-M127: Unit tests for coverage_skeleton module.
+Unit tests for coverage_skeleton module.
 
 Tests:
 - Skeleton dataclasses

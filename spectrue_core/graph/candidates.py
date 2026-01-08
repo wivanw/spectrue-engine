@@ -172,7 +172,7 @@ async def generate_candidate_edges(
         )
 
     logger.debug(
-        "[M109] B-Stage: %d similarity candidate edges from %d nodes",
+        "B-Stage: %d similarity candidate edges from %d nodes",
         len(candidates),
         len(nodes),
     )

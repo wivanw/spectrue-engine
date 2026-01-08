@@ -68,12 +68,12 @@ def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
     """
     Build search queries from claim data.
     
-    M125: Prioritizes retrieval_seed_terms over search_queries and query_candidates.
+    Prioritizes retrieval_seed_terms over search_queries and query_candidates.
     Seed terms are joined into a keyword query (not full sentences).
     """
     queries: list[str] = []
 
-    # M125: Priority 1 - retrieval_seed_terms (joined as keyword query)
+    # Priority 1 - retrieval_seed_terms (joined as keyword query)
     seed_terms = claim.get("retrieval_seed_terms")
     if seed_terms and isinstance(seed_terms, list):
         valid_terms = [t for t in seed_terms if isinstance(t, str) and len(t) >= 2]
@@ -147,7 +147,7 @@ class BuildQueriesStep:
             if queries:
                 claim_copy["search_queries"] = list(queries)
             
-            # M126: Add query variants for escalation ladder
+            # Add query variants for escalation ladder
             variants = build_query_variants(claim)
             if variants:
                 claim_copy["query_variants"] = [v.to_dict() for v in variants]

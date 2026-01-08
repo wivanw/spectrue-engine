@@ -12,10 +12,15 @@ from .base_skill import BaseSkill, logger
 from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
+from spectrue_core.verification.claims.coverage_anchors import (
+    extract_all_anchors,
+    get_anchor_ids,
+)
+from spectrue_core.llm.fallback import call_with_fallback
 import re
 from spectrue_core.agents.llm_schemas import (
     CLAIM_RETRIEVAL_SCHEMA,
-    VERIFIABLE_CORE_CLAIM_SCHEMA,  # M125
+    VERIFIABLE_CORE_CLAIM_SCHEMA,
 )
 from .claims_prompts import (
     build_core_extraction_prompt,
@@ -65,7 +70,7 @@ RETRIEVAL_ALLOWED_FIELDS = {
 POST_EVIDENCE_ALLOWED_FIELDS: set[str] = set()
 
 
-# M125: Predicate types that don't require explicit time anchors
+# Predicate types that don't require explicit time anchors
 # - quote: verifiable via source attribution (who said it)
 # - policy: verifiable via official records
 # - ranking: verifiable via current datasets
@@ -73,9 +78,24 @@ POST_EVIDENCE_ALLOWED_FIELDS: set[str] = set()
 TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence"}
 
 
+# Default system instructions for claim extraction (MANDATORY)
+# These MUST always be present in LLM calls to prevent extraction failures.
+DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS = """
+You are extracting factual claims for verification.
+Do NOT summarize. Do NOT judge truth.
+Your task is to enumerate verifiable factual units.
+
+Rules:
+- Prefer over-extraction to under-extraction.
+- Extract events, measurements, quantities, dates, and quoted statements.
+- Each claim must be atomic and independently verifiable.
+- Output must strictly follow the provided JSON schema.
+"""
+
+
 def validate_core_claim(claim: dict) -> tuple[bool, list[str]]:
     """
-    M125: Deterministic validation for verifiable claims.
+    Deterministic validation for verifiable claims.
     
     Validates structural requirements:
     - claim_text non-empty, <= 240 chars (or use claim_text/text field)
@@ -146,7 +166,7 @@ def validate_core_claim(claim: dict) -> tuple[bool, list[str]]:
 
 class ExtractionStats:
     """
-    M125: Track extraction statistics for observability.
+    Track extraction statistics for observability.
     """
     def __init__(self):
         self.claims_extracted_total = 0
@@ -235,7 +255,7 @@ def sanitize_retrieval_response(data: dict, claim_text: str = "") -> dict:
     if "structure" in sanitized and isinstance(sanitized["structure"], dict):
         struct = sanitized["structure"]
         
-        # Merge premises_N → premises
+      
         premises = struct.get("premises", [])
         if not isinstance(premises, list):
             premises = []
@@ -298,10 +318,10 @@ def sanitize_post_evidence_response(data: dict) -> dict:
 
 class ClaimExtractionSkill(BaseSkill):
 
-    # M73.5: Dynamic timeout constants
-    BASE_TIMEOUT_SEC = 60.0     # Minimum timeout (Increased for DeepSeek)
+  
+    BASE_TIMEOUT_SEC = 60.0   
     TIMEOUT_PER_1K_CHARS = 3.0  # Additional seconds per 1000 chars
-    MAX_TIMEOUT_SEC = 120.0     # Maximum timeout cap
+    MAX_TIMEOUT_SEC = 120.0   
 
     def __init__(self, config, llm_client):
         super().__init__(config, llm_client)
@@ -341,14 +361,14 @@ class ClaimExtractionSkill(BaseSkill):
         self,
         text: str,
         *,
-        chunks: list[TextChunk] | None = None,  # M74
+        chunks: list[TextChunk] | None = None,
         lang: str = "en",
         max_claims: int = 5,
     ) -> tuple[list[Claim], bool, ArticleIntent, str]:
         """
         Extract atomic verifiable claims from article text with chunked, deterministic coverage.
         
-        Refactored to 2-stage pipeline (M120):
+        Refactored to 2-stage pipeline::
         1. Core Extraction: Fetch bare claims (text + normalized) from chunks.
         2. Metadata Enrichment: Fan-out parallel processing for classification & strategy.
         """
@@ -363,6 +383,16 @@ class ClaimExtractionSkill(BaseSkill):
 
 
         try:
+            # --- Stage 0: Extract Deterministic Anchors ---
+            # Extract anchors from full text for coverage guarantee
+            anchors = extract_all_anchors(text)
+            anchor_ids = get_anchor_ids(anchors)
+            
+            Trace.event("claim_extraction.anchors", {
+                "anchor_count": len(anchors),
+                "anchor_ids": sorted(anchor_ids)[:20],  # Limit trace size
+            })
+            
             # --- Stage 1: Core Extraction ---
             core_tasks = []
             for chunk in chunks:
@@ -370,7 +400,7 @@ class ClaimExtractionSkill(BaseSkill):
             
             core_results = await asyncio.gather(*core_tasks, return_exceptions=True)
             
-            # M125: Aggregate extraction statistics
+            # Aggregate extraction statistics
             aggregated_stats = ExtractionStats()
             
             # Flatten and filter results
@@ -382,7 +412,7 @@ class ClaimExtractionSkill(BaseSkill):
                     logger.error("[Claims] Core extraction failed for chunk %d: %s", i, res)
                     continue
                 
-                # M125: Unpack 3-tuple (claims, intent, stats)
+                # Unpack 3-tuple (claims, intent, stats)
                 chunk_claims, chunk_intent, chunk_stats = res
                 
                 if i == 0:
@@ -401,7 +431,7 @@ class ClaimExtractionSkill(BaseSkill):
                 for c in chunk_claims:
                     valid_core_claims.append((c, chunk_text))
             
-            # M125: Emit aggregated extraction stats
+            # Emit aggregated extraction stats
             Trace.event("claim_extraction.stats", aggregated_stats.to_trace_dict())
             
             if not valid_core_claims:
@@ -475,17 +505,25 @@ class ClaimExtractionSkill(BaseSkill):
             self._trace_extracted_claims(final_claims)
             self._trace_metadata_distribution(final_claims)
             
+            # --- Coverage Summary ---
+            # Emit final coverage metrics
+            Trace.event("claim_extraction.coverage_summary", {
+                "total_anchors": len(anchors),
+                "claims_extracted": len(final_claims),
+                "coverage_ratio": len(final_claims) / max(len(anchors), 1),
+            })
+            
             return final_claims, should_check_oracle_agg, overall_intent, stitched_text
         
         except Exception as e:
-            logger.exception("[M120] Critical failure in split claim extraction: %s", e)
+            logger.exception("Critical failure in split claim extraction: %s", e)
             raise
 
     async def _extract_core_from_chunk(self, chunk: TextChunk) -> tuple[list[dict], ArticleIntent, ExtractionStats]:
         """
         Stage 1: Core claim extraction using DeepSeek (temp=0).
         
-        M125: Uses VERIFIABLE_CORE_CLAIM_SCHEMA and validates each claim.
+        Uses VERIFIABLE_CORE_CLAIM_SCHEMA and validates each claim.
         Drops non-verifiable claims with trace events.
         
         Returns:
@@ -494,16 +532,54 @@ class ClaimExtractionSkill(BaseSkill):
         stats = ExtractionStats()
         prompt = build_core_extraction_prompt(text_excerpt=chunk.text)
         
-        # We assume 1-2 attempts is enough for this simpler task
-        result = await self.llm_client.call_json(
-            model=self.runtime.llm.model_claim_extraction,  # DeepSeek
-            input=prompt,
-            response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,  # M125: verifiable schema
-            reasoning_effort="low",
-            cache_key=f"core_extract_v2_{hash(chunk.text)}",  # v2 for new schema
-            timeout=self._calculate_timeout(len(chunk.text)),
-            trace_kind="claim_extraction_core",
-            temperature=0.0,  # Strict determinism
+        # Hard guard - instructions MUST always be present
+        # The prompt returned by build_core_extraction_prompt is the user/input message.
+        # We inject system instructions separately to ensure they are never empty.
+        instructions = DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS
+        instructions_injected_fallback = False
+        
+        # Trace guard: log if we're using fallback (this should always be the case now)
+        Trace.event("claim_extraction.guard.instructions_injected", {
+            "instructions_len": len(instructions),
+            "fallback_used": True,  # We always inject now as a safety measure
+        })
+        
+        # Define primary and fallback calls
+        async def primary_extraction():
+            return await self.llm_client.call_json(
+                model=self.runtime.llm.model_claim_extraction,  # DeepSeek
+                input=prompt,
+                instructions=instructions,
+                response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,
+                reasoning_effort="low",
+                cache_key=f"core_extract_v3_{hash(chunk.text)}",
+                timeout=self._calculate_timeout(len(chunk.text)),
+                trace_kind="claim_extraction_core",
+                temperature=0.0,
+            )
+
+        async def fallback_extraction():
+            # Fallback to secondary provider (configured in runtime)
+            fallback_model = self.runtime.llm.model_claim_extraction_fallback
+            return await self.llm_client.call_json(
+                model=fallback_model,
+                input=prompt,
+                instructions=instructions,
+                response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,
+                reasoning_effort="low",
+                cache_key=f"core_extract_fallback_v3_{hash(chunk.text)}",
+                timeout=self._calculate_timeout(len(chunk.text)),
+                trace_kind="claim_extraction_core.fallback",
+                temperature=0.0,
+            )
+
+        # Execute with fallback wrapper
+        result = await call_with_fallback(
+            primary_call=primary_extraction,
+            fallback_call=fallback_extraction,
+            task_name="claims.extraction.core",
+            primary_provider_name=self.runtime.llm.model_claim_extraction,
+            fallback_provider_name=self.runtime.llm.model_claim_extraction_fallback,
         )
         
         raw_claims = result.get("claims", [])
@@ -515,7 +591,7 @@ class ClaimExtractionSkill(BaseSkill):
             if not isinstance(claim, dict):
                 continue
             
-            # M125: Deterministic validation
+            # Deterministic validation
             ok, reason_codes = validate_core_claim(claim)
             
             if ok:
@@ -538,7 +614,7 @@ class ClaimExtractionSkill(BaseSkill):
                     "predicate_type": claim.get("predicate_type", "unknown"),
                 })
                 logger.debug(
-                    "[M125] Dropped claim: reasons=%s, preview=%s",
+                    "Dropped claim: reasons=%s, preview=%s",
                     reason_codes, claim_preview[:50]
                 )
         
@@ -602,7 +678,7 @@ class ClaimExtractionSkill(BaseSkill):
         # Sanitize enrichment response (whitelist, defaults, merge, repair empty queries)
         result = sanitize_retrieval_response(result, claim_text=claim_text)
 
-        # Merge core data + enriched data
+      
         merged = {**core_data, **result}
         
         # Validate defaults
@@ -713,7 +789,7 @@ class ClaimExtractionSkill(BaseSkill):
 
     def _trace_extracted_claims(self, claims: list[Claim]) -> None:
         """
-        M81/T4: Emit trace event with individual claim details for debugging.
+        Emit trace event with individual claim details for debugging.
         
         Logs first 100 chars of each claim text with metadata.
         Critical for diagnosing attribution/reality misclassification.
@@ -722,7 +798,7 @@ class ClaimExtractionSkill(BaseSkill):
             return
 
         claims_data = []
-        for c in claims[:7]:  # Max 7 claims
+        for c in claims[:7]:
             metadata = c.get("metadata")
             claims_data.append({
                 "id": c.get("id", "?"),

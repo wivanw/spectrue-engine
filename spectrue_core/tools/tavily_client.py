@@ -166,7 +166,7 @@ class TavilyClient:
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
         topic: str = "general",
-        include_raw_content: bool = False,  # M106: Allow caller to control raw content
+        include_raw_content: bool = False,  # Allow caller to control raw content
     ) -> dict:
         payload: dict = {"query": query, "search_depth": depth, "max_results": max_results}
         if include_domains:
@@ -177,7 +177,7 @@ class TavilyClient:
             payload["exclude_domains"] = merged_exclude
 
         payload["topic"] = topic
-        payload["include_raw_content"] = include_raw_content  # M106: Pass through from caller
+        payload["include_raw_content"] = include_raw_content  # Pass through from caller
 
         url = "https://api.tavily.com/search"
         async with self._sem:

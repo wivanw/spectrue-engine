@@ -110,7 +110,7 @@ async def test_normal_profile_allows_multiple_claims():
     )
 
     assert result["status"] == "ok"
-    # M120: Normal mode allows multiple claims, so we get veridcts for both
+    # Normal mode allows multiple claims, so we get veridcts for both
     assert len(result["claim_verdicts"]) == 2
 
 

@@ -141,6 +141,9 @@ class EngineLLMConfig:
     model_inline_source_verification: str = DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION
     model_clustering_stance: str = DEFAULT_MODEL_CLUSTERING_STANCE
 
+    # Fallback models
+    model_claim_extraction_fallback: str = "gpt-5.2"
+
     # Feature flags for optional pipeline steps
     enable_inline_source_verification: bool = True
 
@@ -555,6 +558,7 @@ class EngineRuntimeConfig:
             model_claim_extraction=model_claim_extraction,
             model_inline_source_verification=model_inline_source_verification,
             model_clustering_stance=model_clustering_stance,
+            model_claim_extraction_fallback=os.getenv("MODEL_CLAIM_EXTRACTION_FALLBACK", "gpt-5.2"),
             enable_inline_source_verification=enable_inline_source_verification,
         )
 
@@ -654,6 +658,7 @@ class EngineRuntimeConfig:
                 "deepseek_api_key_set": bool(self.llm.deepseek_api_key),
                 "deepseek_model_names": list(self.llm.deepseek_model_names),
                 "model_claim_extraction": self.llm.model_claim_extraction,
+                "model_claim_extraction_fallback": self.llm.model_claim_extraction_fallback,
                 "model_inline_source_verification": self.llm.model_inline_source_verification,
                 "model_clustering_stance": self.llm.model_clustering_stance,
                 "enable_inline_source_verification": bool(self.llm.enable_inline_source_verification),

@@ -28,6 +28,8 @@ class RGBAStatus(str, Enum):
     UNVERIFIABLE_BY_NATURE = "UNVERIFIABLE_BY_NATURE"
     PIPELINE_ERROR = "PIPELINE_ERROR"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
+    EVIDENCE_MISMATCH = "EVIDENCE_MISMATCH"
+    """Evidence retrieved is non-empty but not about the claim topic (off-topic)."""
 
 
 RGBA_STATUS_LEGACY_CODES: dict[RGBAStatus, int] = {
@@ -37,6 +39,7 @@ RGBA_STATUS_LEGACY_CODES: dict[RGBAStatus, int] = {
     RGBAStatus.UNVERIFIABLE_BY_NATURE: -3,
     RGBAStatus.PIPELINE_ERROR: -4,
     RGBAStatus.OUT_OF_SCOPE: -5,
+    RGBAStatus.EVIDENCE_MISMATCH: -6,
 }
 
 LEGACY_CODE_TO_STATUS: dict[int, RGBAStatus] = {

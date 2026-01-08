@@ -68,7 +68,7 @@ class TargetSelectionStep:
             anchor_for_selection = anchor_claim_id if ctx.mode.name == "normal" else None
 
             # DEEP MODE: Verify ALL claims (no target selection limits)
-            # M119: Mode logic moved to factory.py via process_all_claims constructor param
+            # Mode logic moved to factory.py via process_all_claims constructor param
             if self.process_all_claims:
                 # All claims are targets when process_all_claims=True
                 # Apply deterministic sorting for reproducible order

@@ -12,7 +12,7 @@ Evidence Stance Processing
 
 Stance classification, conflict detection, and verdict state derivation.
 
-M119: Extracted from pipeline_evidence.py as part of core logic modularization.
+Extracted from pipeline_evidence.py as part of core logic modularization.
 """
 
 from __future__ import annotations

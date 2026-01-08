@@ -170,7 +170,7 @@ class PhaseRunner:
         if self.inline_sources:
             import logging
             logging.getLogger(__name__).debug(
-                "[M109] PhaseRunner received %d inline sources", len(self.inline_sources)
+                "PhaseRunner received %d inline sources", len(self.inline_sources)
             )
 
     async def run_all_claims(
@@ -503,7 +503,7 @@ class PhaseRunner:
 
         # CRITICAL SHORTCUT: Check inline sources first (M109)
         if claim_inline_sources:
-            logger.debug("[M109] Checking inline sources shortcut for claim %s", claim_id)
+            logger.debug("Checking inline sources shortcut for claim %s", claim_id)
 
             # Enrich inline sources if agent is available
             if self.agent and hasattr(self.agent, "verify_inline_source_relevance"):
@@ -519,7 +519,7 @@ class PhaseRunner:
                             if verification:
                                 src.update(verification)
                         except Exception as e:
-                            logger.warning("[M109] Inline verification failed for %s: %s", src.get("url"), e)
+                            logger.warning("Inline verification failed for %s: %s", src.get("url"), e)
 
             sufficient, stats = verdict_ready_for_claim(
                 claim_inline_sources,
@@ -527,7 +527,7 @@ class PhaseRunner:
             )
 
             if sufficient:
-                logger.info("[M109] Inline sources sufficient (shortcut) for %s. Stats: %s", claim_id, stats)
+                logger.info("Inline sources sufficient (shortcut) for %s. Stats: %s", claim_id, stats)
                 return list(claim_inline_sources), hops, SufficiencyDecision.ENOUGH, "inline_sufficient"
 
         if not phases:
@@ -595,7 +595,7 @@ class PhaseRunner:
                 expected_cost=expected_cost,
             )
 
-            # M113: Value-based stop decision (EV) if enabled.
+            # Value-based stop decision (EV) if enabled.
             if self.ev_stop_params is not None:
                 try:
                     stop_result = evaluate_stop_decision(
@@ -679,7 +679,7 @@ class PhaseRunner:
             # claim_inline_sources already have claim_id set correctly
             potential_evidence = claim_sources + claim_inline_sources
             logger.debug(
-                "[M109] verdict_ready call: claim_id=%s sources=%d (claim=%d + inline=%d)",
+                "verdict_ready call: claim_id=%s sources=%d (claim=%d + inline=%d)",
                 claim_id, len(potential_evidence), len(claim_sources), len(claim_inline_sources)
             )
             ready, ready_stats = verdict_ready_for_claim(
@@ -689,7 +689,7 @@ class PhaseRunner:
 
             if ready:
                 logger.info(
-                    "[M109] Initial sufficiency check passed for claim %s (stats=%s)",
+                    "Initial sufficiency check passed for claim %s (stats=%s)",
                     claim_id, ready_stats
                 )
 
@@ -964,7 +964,7 @@ class PhaseRunner:
         escalation_config: EscalationConfig | None = None,
     ) -> tuple[list[dict], RetrievalOutcome, int, int, bool]:
         """
-        M126: Run multi-pass escalation ladder for a claim.
+        Run multi-pass escalation ladder for a claim.
         
         Tries query variants with escalating parameters until evidence found
         or ladder exhausted.
@@ -1124,7 +1124,7 @@ class PhaseRunner:
         if not query:
             return []
 
-        # M126: Topic selection from structured claim fields (not text heuristics)
+        # Topic selection from structured claim fields (not text heuristics)
         topic, topic_reasons = select_topic_from_claim(claim)
         claim_id = claim.get("id", "unknown")
         trace_topic_selected(claim_id, topic, topic_reasons)

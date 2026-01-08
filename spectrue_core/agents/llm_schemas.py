@@ -384,7 +384,7 @@ CORE_CLAIM_DESCRIPTION_SCHEMA: dict[str, Any] = {
 }
 
 
-# M125: Verifiable Core Claim Schema
+# Verifiable Core Claim Schema
 # Enforces verifiability-first contract: every claim must have anchors for search/match/score
 PREDICATE_TYPE_VALUES = [
     "event",           # Something happened at a point in time
@@ -858,13 +858,32 @@ EVIDENCE_AUDIT_SCHEMA: dict[str, Any] = {
 }
 
 
-# M127: Coverage Skeleton Schema
+# Coverage Skeleton Schema
 # Phase-1 extraction: all events/measurements/quotes/policies with raw_span
+# Added anchor_refs for deterministic coverage and skipped_anchors for gap tracking
 COVERAGE_SKELETON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["events", "measurements", "quotes", "policies"],
+    "required": ["events", "measurements", "quotes", "policies", "skipped_anchors"],
     "properties": {
+        # Track anchors that were deliberately skipped
+        "skipped_anchors": {
+            "type": "array",
+            "description": "Anchors not covered by any skeleton item, with reason",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["anchor_id", "reason_code"],
+                "properties": {
+                    "anchor_id": {"type": "string", "description": "ID of the skipped anchor (t1, n2, q1, etc.)"},
+                    "reason_code": {
+                        "type": "string",
+                        "enum": ["not_a_fact", "duplicate_of", "malformed", "navigation", "boilerplate"],
+                        "description": "Why this anchor was not covered",
+                    },
+                },
+            },
+        },
         "events": {
             "type": "array",
             "items": {
@@ -888,6 +907,12 @@ COVERAGE_SKELETON_SCHEMA: dict[str, Any] = {
                     },
                     "location_anchor": {"type": "string"},
                     "raw_span": {"type": "string", "minLength": 10},
+                    # Which deterministic anchors this item covers
+                    "anchor_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "IDs of anchors (t1, n2, q1) covered by this item",
+                    },
                 },
             },
         },
@@ -925,6 +950,12 @@ COVERAGE_SKELETON_SCHEMA: dict[str, Any] = {
                         },
                     },
                     "raw_span": {"type": "string", "minLength": 10},
+                    # Which deterministic anchors this item covers
+                    "anchor_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "IDs of anchors (t1, n2, q1) covered by this item",
+                    },
                 },
             },
         },
@@ -943,6 +974,12 @@ COVERAGE_SKELETON_SCHEMA: dict[str, Any] = {
                     },
                     "quote_text": {"type": "string", "minLength": 5},
                     "raw_span": {"type": "string", "minLength": 10},
+                    # Which deterministic anchors this item covers
+                    "anchor_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "IDs of anchors (t1, n2, q1) covered by this item",
+                    },
                 },
             },
         },
@@ -968,6 +1005,12 @@ COVERAGE_SKELETON_SCHEMA: dict[str, Any] = {
                         },
                     },
                     "raw_span": {"type": "string", "minLength": 10},
+                    # Which deterministic anchors this item covers
+                    "anchor_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "IDs of anchors (t1, n2, q1) covered by this item",
+                    },
                 },
             },
         },

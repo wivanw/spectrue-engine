@@ -8,7 +8,7 @@
 # (at your option) any later version.
 
 """
-Unified LLM client using OpenAI Responses API (M49/T180).
+Unified LLM client using OpenAI Responses API.
 
 This module provides a simplified interface for making LLM calls with:
 - Prompt caching for repeated instructions
@@ -358,8 +358,10 @@ class LLMClient:
             try:
                 async with self._sem:
                     if attempt > 0:
-                        await asyncio.sleep(0.5 * attempt)
-                        logger.debug("[LLMClient] Chat Completions retry %d/%d for %s", attempt + 1, self.max_retries, model)
+                        # Exponential backoff: 1s, 2s, 4s, ...
+                        backoff_seconds = min(2 ** attempt, 30)  # Cap at 30s
+                        await asyncio.sleep(backoff_seconds)
+                        logger.debug("[LLMClient] Chat Completions retry %d/%d for %s (backoff: %ds)", attempt + 1, self.max_retries, model, backoff_seconds)
 
                     response = await self.client.chat.completions.create(**params)
 
@@ -560,15 +562,25 @@ class LLMClient:
 
             except Exception as e:
                 last_error = e
+                error_str = str(e)[:200]
+                is_connection_error = "connection" in error_str.lower() or "timeout" in error_str.lower()
                 logger.warning("[LLMClient] Chat Completions attempt %d failed: %s", attempt + 1, e)
                 Trace.event(f"{trace_kind}.error", {
                     "model": model,
                     "attempt": attempt + 1,
-                    "error": str(e)[:200],
+                    "error": error_str,
+                    "is_connection_error": is_connection_error,
                     "payload_hash": payload_hash,
                     "api_mode": "chat_completions",
                 })
 
+        # All retries exhausted - emit provider_down event
+        Trace.event(f"{trace_kind}.provider_down", {
+            "model": model,
+            "total_attempts": self.max_retries,
+            "last_error": str(last_error)[:200] if last_error else None,
+            "api_mode": "chat_completions",
+        })
         raise ValueError(f"LLM call failed after {self.max_retries} attempts: {last_error}")
 
     async def call(
@@ -687,7 +699,7 @@ class LLMClient:
             # CAUTION: gpt-5-nano throws 400 "invalid_parameter" for this.
             # params["prompt_cache_retention"] = self.cache_retention
 
-        # Calculate payload hash for debug correlation (M55)
+        # Calculate payload hash for debug correlation
         # Hash includes input + instructions to match exactly what went into the prompt
         import hashlib
         import time
@@ -720,8 +732,10 @@ class LLMClient:
             try:
                 async with self._sem:
                     if attempt > 0:
-                        await asyncio.sleep(0.5 * attempt)
-                        logger.debug("[LLMClient] Retry %d/%d for %s", attempt + 1, self.max_retries, model)
+                        # Exponential backoff: 1s, 2s, 4s, ...
+                        backoff_seconds = min(2 ** attempt, 30)  # Cap at 30s
+                        await asyncio.sleep(backoff_seconds)
+                        logger.debug("[LLMClient] Retry %d/%d for %s (backoff: %ds)", attempt + 1, self.max_retries, model, backoff_seconds)
 
                     response = await self.client.responses.create(**params)
 
@@ -900,15 +914,24 @@ class LLMClient:
 
             except Exception as e:
                 last_error = e
+                error_str = str(e)[:200]
+                is_connection_error = "connection" in error_str.lower() or "timeout" in error_str.lower()
                 logger.warning("[LLMClient] Attempt %d failed: %s", attempt + 1, e)
                 Trace.event(f"{trace_kind}.error", {
                     "model": model,
                     "attempt": attempt + 1,
-                    "error": str(e)[:200],
+                    "error": error_str,
+                    "is_connection_error": is_connection_error,
                     "payload_hash": payload_hash
                 })
 
-        # All retries exhausted
+        # All retries exhausted - emit provider_down event
+        Trace.event(f"{trace_kind}.provider_down", {
+            "model": model,
+            "total_attempts": self.max_retries,
+            "last_error": str(last_error)[:200] if last_error else None,
+            "api_mode": "responses",
+        })
         raise ValueError(f"LLM call failed after {self.max_retries} attempts: {last_error}")
 
     async def call_json(

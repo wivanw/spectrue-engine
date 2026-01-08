@@ -30,7 +30,7 @@ class TestM62ClaimExtraction:
     async def test_extract_claims_with_new_fields(self, skill, mock_llm_client):
         """Claims should include normalized_text, topic_group, check_worthiness."""
         
-        # M120: Mocking 2-stage pipeline (Core -> Enrichment)
+        # Mocking 2-stage pipeline (Core -> Enrichment)
         core_response = {
             "claims": [{
                  "text": "He announced the new tariffs.",

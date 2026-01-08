@@ -8,7 +8,7 @@
 # (at your option) any later version.
 
 """
-M125: Tests for validate_core_claim() - verifiability contract enforcement.
+Tests for validate_core_claim() - verifiability contract enforcement.
 """
 
 from spectrue_core.agents.skills.claims import (

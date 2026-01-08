@@ -191,7 +191,7 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     kinds = [c.kwargs.get("trace_kind") for c in calls]
     
     assert "claim_extraction_core" in kinds
-    # M124: stance_clustering may be skipped by EVOI gating policy if expected_gain < threshold
+    # stance_clustering may be skipped by EVOI gating policy if expected_gain < threshold
     # This is correct behavior - gating decides based on evidence signals
     # The test should verify that either stance runs OR scoring runs (one or both)
     has_stance = "stance_clustering" in kinds

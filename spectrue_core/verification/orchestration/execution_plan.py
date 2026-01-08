@@ -292,7 +292,7 @@ class ExecutionPlan:
     budget_class: BudgetClass = BudgetClass.STANDARD
     """Budget classification used to build this plan."""
 
-    # M113: Pipeline profile metadata
+    # Pipeline profile metadata
     profile_name: str | None = None
     """Name of the pipeline profile used to build this plan (M113)."""
 
@@ -352,7 +352,7 @@ class ExecutionPlan:
                 for claim_id, phases in self.claim_phases.items()
             },
         }
-        # M113: Include profile metadata if present
+        # Include profile metadata if present
         if self.profile_name:
             result["profile_name"] = self.profile_name
         if self.profile_version:

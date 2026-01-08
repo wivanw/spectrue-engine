@@ -557,7 +557,7 @@ Return structured ClaimUnits in JSON format.
 
 def build_core_extraction_prompt(*, text_excerpt: str) -> str:
     """
-    M125: Verifiability-first core extraction prompt.
+    Verifiability-first core extraction prompt.
     Enforces structural anchors and filters out non-verifiable content.
     """
     return f"""**OUTPUT RULE: Output ONLY valid JSON. No prose. No prefixes. No markdown. Start with {{**
@@ -736,7 +736,7 @@ def build_metadata_enrichment_prompt(
 
 def build_skeleton_extraction_prompt(*, text_excerpt: str) -> str:
     """
-    M127: Coverage Skeleton extraction prompt.
+    Coverage Skeleton extraction prompt.
     
     Phase-1: Extract ALL events/measurements/quotes/policies with raw_span.
     No filtering at this stage - aim for complete coverage.

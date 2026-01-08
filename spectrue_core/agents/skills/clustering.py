@@ -78,7 +78,7 @@ class ClusteringSkill(BaseSkill):
             ],
         })
 
-        # M117: Log claims passed to clustering for debugging
+        # Log claims passed to clustering for debugging
         Trace.event("stance_clustering.claims_input", {
             "claim_count": len(claims_lite),
             "claim_ids": [c.get("id") for c in claims_lite],
@@ -135,7 +135,7 @@ class ClusteringSkill(BaseSkill):
                     logger.warning("[Clustering] Batch %d failed: %s", i, e)
                     # Proceed with partial results
 
-            # M117: Log LLM output for debugging claim assignment
+            # Log LLM output for debugging claim assignment
             Trace.event("stance_clustering.matrix_output", {
                 "total_rows": len(all_matrix_rows),
                 "claim_ids_assigned": list(set(
