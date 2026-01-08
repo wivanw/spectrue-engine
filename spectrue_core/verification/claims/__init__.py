@@ -12,6 +12,14 @@ from .coverage_anchors import (
     get_anchor_ids,
     anchors_to_prompt_context,
 )
+from .coverage_validator import (
+    CoverageGap,
+    validate_coverage,
+    build_gapfill_prompt,
+    merge_gapfill_result,
+    check_remaining_gaps,
+    emit_coverage_summary,
+)
 
 __all__ = [
     "pick_ui_main_claim",
@@ -26,4 +34,11 @@ __all__ = [
     "extract_quote_anchors",
     "get_anchor_ids",
     "anchors_to_prompt_context",
+    # Coverage validation
+    "CoverageGap",
+    "validate_coverage",
+    "build_gapfill_prompt",
+    "merge_gapfill_result",
+    "check_remaining_gaps",
+    "emit_coverage_summary",
 ]

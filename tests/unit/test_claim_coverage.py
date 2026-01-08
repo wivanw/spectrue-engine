@@ -248,3 +248,123 @@ class TestNoMaxClaimsCap:
         assert "top" not in instructions.lower() or "top-k" not in instructions.lower()
         assert "maximum" not in instructions.lower() or "maximum 5" not in instructions.lower()
         assert "at most" not in instructions.lower()
+
+
+class TestCoverageValidation:
+    """Test coverage validation functions."""
+
+    def test_validate_coverage_all_covered(self):
+        """No gap when all anchors are covered."""
+        from spectrue_core.verification.claims.coverage_validator import (
+            validate_coverage,
+        )
+        
+        text = "Revenue was $50 billion."
+        anchors = extract_all_anchors(text)
+        anchor_ids = [a.anchor_id for a in anchors]
+        
+        # Create skeleton items that cover ALL anchors dynamically
+        skeleton_items = [{"anchor_refs": anchor_ids}]
+        
+        gap = validate_coverage(anchors, skeleton_items, [])
+        assert gap is None
+
+    def test_validate_coverage_with_skipped(self):
+        """Skipped anchors are not gaps."""
+        from spectrue_core.verification.claims.coverage_validator import (
+            validate_coverage,
+        )
+        
+        text = "Revenue was $50 billion."
+        anchors = extract_all_anchors(text)
+        
+        # Cover first anchor, skip the rest
+        skeleton_items = [{"anchor_refs": [anchors[0].anchor_id]}] if anchors else []
+        skipped = [{"anchor_id": a.anchor_id, "reason_code": "not_a_fact"} for a in anchors[1:]]
+        
+        gap = validate_coverage(anchors, skeleton_items, skipped)
+        assert gap is None
+
+    def test_validate_coverage_detects_gaps(self):
+        """Detect missing anchors."""
+        from spectrue_core.verification.claims.coverage_validator import (
+            validate_coverage,
+        )
+        
+        text = "Revenue was $50 billion."
+        anchors = extract_all_anchors(text)
+        
+        # Don't cover any anchors - should detect gaps
+        skeleton_items = []
+        
+        gap = validate_coverage(anchors, skeleton_items, [])
+        assert gap is not None
+        assert len(gap.missing_anchor_ids) == len(anchors)
+
+
+class TestGapFillHelpers:
+    """Test gap-fill helper functions."""
+
+    def test_build_gapfill_prompt(self):
+        """Verify gap-fill prompt structure."""
+        from spectrue_core.verification.claims.coverage_validator import (
+            build_gapfill_prompt,
+        )
+        
+        text = "In 2024, revenue was $50 billion."
+        anchors = extract_all_anchors(text)
+        missing = [a for a in anchors if a.anchor_id == "n1"]
+        
+        skeleton = {"events": [], "measurements": [], "quotes": [], "policies": []}
+        
+        prompt = build_gapfill_prompt(text, skeleton, missing)
+        
+        assert "GAP-FILL" in prompt
+        assert "n1" in prompt
+
+    def test_merge_gapfill_result(self):
+        """Verify gapfill merge works correctly."""
+        from spectrue_core.verification.claims.coverage_validator import (
+            merge_gapfill_result,
+        )
+        
+        original = {
+            "events": [{"id": "evt_1"}],
+            "measurements": [],
+            "quotes": [],
+            "policies": [],
+            "skipped_anchors": [],
+        }
+        
+        gapfill = {
+            "new_measurements": [{"id": "msr_1", "anchor_refs": ["n1"]}],
+            "additional_skipped_anchors": [],
+        }
+        
+        merged = merge_gapfill_result(original, gapfill)
+        
+        assert len(merged["events"]) == 1
+        assert len(merged["measurements"]) == 1
+        assert merged["measurements"][0]["id"] == "msr_1"
+
+    def test_check_remaining_gaps(self):
+        """Verify remaining gap detection after merge."""
+        from spectrue_core.verification.claims.coverage_validator import (
+            check_remaining_gaps,
+        )
+        
+        text = "Revenue was $50 billion."
+        anchors = extract_all_anchors(text)
+        anchor_ids = [a.anchor_id for a in anchors]
+        
+        # Complete skeleton (all covered dynamically)
+        complete_skeleton = {
+            "events": [{"anchor_refs": anchor_ids}],
+            "measurements": [],
+            "quotes": [],
+            "policies": [],
+            "skipped_anchors": [],
+        }
+        
+        remaining = check_remaining_gaps(anchors, complete_skeleton)
+        assert remaining == []
