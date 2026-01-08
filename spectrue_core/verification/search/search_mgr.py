@@ -484,7 +484,7 @@ class SearchManager:
         topic: str = "general",
         intent: str = "news",
         article_intent: str = "news",
-        num_results: int = 5,  # M106: Allow caller to control, default 5 for back-compat
+        num_results: int = 5,  # Allow caller to control, default 5 for back-compat
     ) -> SearchResponse:
         """
         Unified search replacing Tier 1/2 split.
@@ -502,7 +502,7 @@ class SearchManager:
             topic = "general"
 
         self.tavily_calls += 1
-        # M106: Use caller-provided num_results instead of hardcoded 5
+        # Use caller-provided num_results instead of hardcoded 5
         context, results = await self.web_tool.search(
             query,
             num_results=num_results,
@@ -520,7 +520,7 @@ class SearchManager:
             self.tavily_calls += 1
             fb_context, fb_results = await self.web_tool.search(
                 query,
-                num_results=num_results,  # M106: Use same limit for fallback
+                num_results=num_results,  # Use same limit for fallback
                 depth="advanced",
                 topic="general"
             )

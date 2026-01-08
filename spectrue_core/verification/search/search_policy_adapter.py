@@ -286,7 +286,7 @@ def apply_claim_retrieval_policy(plan: ExecutionPlan, *, claims: list[dict]) -> 
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# M113: Pipeline Profile Adapter
+# Pipeline Profile Adapter
 # ─────────────────────────────────────────────────────────────────────────────
 
 

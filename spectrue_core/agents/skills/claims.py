@@ -65,7 +65,7 @@ RETRIEVAL_ALLOWED_FIELDS = {
 POST_EVIDENCE_ALLOWED_FIELDS: set[str] = set()
 
 
-# M125: Predicate types that don't require explicit time anchors
+# Predicate types that don't require explicit time anchors
 # - quote: verifiable via source attribution (who said it)
 # - policy: verifiable via official records
 # - ranking: verifiable via current datasets
@@ -73,9 +73,24 @@ POST_EVIDENCE_ALLOWED_FIELDS: set[str] = set()
 TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence"}
 
 
+# Default system instructions for claim extraction (MANDATORY)
+# These MUST always be present in LLM calls to prevent extraction failures.
+DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS = """
+You are extracting factual claims for verification.
+Do NOT summarize. Do NOT judge truth.
+Your task is to enumerate verifiable factual units.
+
+Rules:
+- Prefer over-extraction to under-extraction.
+- Extract events, measurements, quantities, dates, and quoted statements.
+- Each claim must be atomic and independently verifiable.
+- Output must strictly follow the provided JSON schema.
+"""
+
+
 def validate_core_claim(claim: dict) -> tuple[bool, list[str]]:
     """
-    M125: Deterministic validation for verifiable claims.
+    Deterministic validation for verifiable claims.
     
     Validates structural requirements:
     - claim_text non-empty, <= 240 chars (or use claim_text/text field)
@@ -146,7 +161,7 @@ def validate_core_claim(claim: dict) -> tuple[bool, list[str]]:
 
 class ExtractionStats:
     """
-    M125: Track extraction statistics for observability.
+    Track extraction statistics for observability.
     """
     def __init__(self):
         self.claims_extracted_total = 0
@@ -370,7 +385,7 @@ class ClaimExtractionSkill(BaseSkill):
             
             core_results = await asyncio.gather(*core_tasks, return_exceptions=True)
             
-            # M125: Aggregate extraction statistics
+            # Aggregate extraction statistics
             aggregated_stats = ExtractionStats()
             
             # Flatten and filter results
@@ -382,7 +397,7 @@ class ClaimExtractionSkill(BaseSkill):
                     logger.error("[Claims] Core extraction failed for chunk %d: %s", i, res)
                     continue
                 
-                # M125: Unpack 3-tuple (claims, intent, stats)
+                # Unpack 3-tuple (claims, intent, stats)
                 chunk_claims, chunk_intent, chunk_stats = res
                 
                 if i == 0:
@@ -401,7 +416,7 @@ class ClaimExtractionSkill(BaseSkill):
                 for c in chunk_claims:
                     valid_core_claims.append((c, chunk_text))
             
-            # M125: Emit aggregated extraction stats
+            # Emit aggregated extraction stats
             Trace.event("claim_extraction.stats", aggregated_stats.to_trace_dict())
             
             if not valid_core_claims:
@@ -478,14 +493,14 @@ class ClaimExtractionSkill(BaseSkill):
             return final_claims, should_check_oracle_agg, overall_intent, stitched_text
         
         except Exception as e:
-            logger.exception("[M120] Critical failure in split claim extraction: %s", e)
+            logger.exception("Critical failure in split claim extraction: %s", e)
             raise
 
     async def _extract_core_from_chunk(self, chunk: TextChunk) -> tuple[list[dict], ArticleIntent, ExtractionStats]:
         """
         Stage 1: Core claim extraction using DeepSeek (temp=0).
         
-        M125: Uses VERIFIABLE_CORE_CLAIM_SCHEMA and validates each claim.
+        Uses VERIFIABLE_CORE_CLAIM_SCHEMA and validates each claim.
         Drops non-verifiable claims with trace events.
         
         Returns:
@@ -494,13 +509,26 @@ class ClaimExtractionSkill(BaseSkill):
         stats = ExtractionStats()
         prompt = build_core_extraction_prompt(text_excerpt=chunk.text)
         
+        # Hard guard - instructions MUST always be present
+        # The prompt returned by build_core_extraction_prompt is the user/input message.
+        # We inject system instructions separately to ensure they are never empty.
+        instructions = DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS
+        instructions_injected_fallback = False
+        
+        # Trace guard: log if we're using fallback (this should always be the case now)
+        Trace.event("claim_extraction.guard.instructions_injected", {
+            "instructions_len": len(instructions),
+            "fallback_used": True,  # We always inject now as a safety measure
+        })
+        
         # We assume 1-2 attempts is enough for this simpler task
         result = await self.llm_client.call_json(
             model=self.runtime.llm.model_claim_extraction,  # DeepSeek
             input=prompt,
-            response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,  # M125: verifiable schema
+            instructions=instructions,  # MANDATORY instructions
+            response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,  # verifiable schema
             reasoning_effort="low",
-            cache_key=f"core_extract_v2_{hash(chunk.text)}",  # v2 for new schema
+            cache_key=f"core_extract_v3_{hash(chunk.text)}",  # v3 for mandatory instructions
             timeout=self._calculate_timeout(len(chunk.text)),
             trace_kind="claim_extraction_core",
             temperature=0.0,  # Strict determinism
@@ -515,7 +543,7 @@ class ClaimExtractionSkill(BaseSkill):
             if not isinstance(claim, dict):
                 continue
             
-            # M125: Deterministic validation
+            # Deterministic validation
             ok, reason_codes = validate_core_claim(claim)
             
             if ok:
@@ -538,7 +566,7 @@ class ClaimExtractionSkill(BaseSkill):
                     "predicate_type": claim.get("predicate_type", "unknown"),
                 })
                 logger.debug(
-                    "[M125] Dropped claim: reasons=%s, preview=%s",
+                    "Dropped claim: reasons=%s, preview=%s",
                     reason_codes, claim_preview[:50]
                 )
         

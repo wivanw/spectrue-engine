@@ -11,7 +11,7 @@
 # Copyright (c) 2024-2025 Spectrue Contributors
 
 """
-M127: Coverage Skeleton Extraction
+Coverage Skeleton Extraction
 
 Phase 1 of 2-phase claim extraction:
 1. Skeleton: Extract all events/measurements/quotes/policies with raw_span

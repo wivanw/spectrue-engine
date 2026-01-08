@@ -15,7 +15,7 @@ Pipeline Factory
 Builds DAGPipeline instances with the correct step composition for each mode.
 This is the single place where mode -> step sequence mapping is defined.
 
-M118: Removed legacy steps. All pipelines now use DAG architecture with
+Removed legacy steps. All pipelines now use DAG architecture with
 decomposed steps. No more `if(deep)` conditionals in pipeline code.
 
 Usage:
@@ -51,7 +51,7 @@ class PipelineFactory:
     The factory is the ONLY place where mode -> step sequence is defined.
     This eliminates scattered if-statements throughout the codebase.
 
-    M118: All methods now build DAGPipeline. Legacy Pipeline class is deprecated.
+    All methods now build DAGPipeline. Legacy Pipeline class is deprecated.
 
     Attributes:
         search_mgr: SearchManager for retrieval steps

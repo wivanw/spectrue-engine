@@ -36,9 +36,9 @@ async def test_inline_sources_shortcut_flow():
     # Mock calculate_cost to allow search (even if shortcut skips it)
     mock_search_mgr.calculate_cost.return_value = 0
     mock_search_mgr.can_afford.return_value = True
-    # M109: PhaseRunner expects (context, results) tuple from search_phase
+    # PhaseRunner expects (context, results) tuple from search_phase
     mock_search_mgr.search_phase.return_value = ("", [])
-    # M109: Also mock ladder to return input list
+    # Also mock ladder to return input list
     mock_search_mgr.apply_evidence_acquisition_ladder.side_effect = lambda x, **kwargs: x
     
     mock_agent = AsyncMock()

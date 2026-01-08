@@ -11,7 +11,7 @@
 # Copyright (c) 2024-2025 Spectrue Contributors
 
 """
-M126: Search Escalation Policy
+Search Escalation Policy
 
 Evidence-driven, deterministic escalation for Tavily retrieval.
 Start cheap, expand only when observable quality signals indicate need.

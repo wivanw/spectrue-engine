@@ -404,7 +404,7 @@ class WebSearchTool:
                 include_domains=normalized_include,
                 exclude_domains=normalized_exclude,
                 topic=topic,
-                include_raw_content=raw_mode,  # M106: Pass through raw mode
+                include_raw_content=raw_mode,  # Pass through raw mode
             )
             results_raw = response.get("results", [])
             logger.debug("[Tavily] Got %d raw results", len(results_raw))
@@ -470,7 +470,7 @@ class WebSearchTool:
                             include_domains=normalized_include,
                             exclude_domains=diversify_exclude,
                             topic="general",
-                            include_raw_content=raw_mode,  # M106: Consistent with main search
+                            include_raw_content=raw_mode,  # Consistent with main search
                         )
                         results2 = clean_tavily_results(response2.get("results", []))
                         merged = cleaned + results2

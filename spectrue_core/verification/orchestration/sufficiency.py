@@ -139,7 +139,7 @@ class SufficiencyDecisionResult:
     diversity: float = 0.0
 
 
-# M104: Bayesian Parameters (Scientific Scoring)
+# Bayesian Parameters (Scientific Scoring)
 base_prior: float = 0.5       # Neutral starting point
 sufficiency_threshold: float = 0.95
 

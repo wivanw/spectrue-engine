@@ -325,7 +325,7 @@ class ClaimGraphBuilder:
             elapsed_ms = int((time.time() - start_time) * 1000)
             result.latency_ms = elapsed_ms
             logger.debug(
-                "[M109] ClaimGraph complete: %d claims, %d edges, %d selected (%.1fms)",
+                "ClaimGraph complete: %d claims, %d edges, %d selected (%.1fms)",
                 len(nodes),
                 len(sim_edges),
                 len(selected),
@@ -333,7 +333,7 @@ class ClaimGraphBuilder:
             )
             return result
         except Exception as e:
-            logger.warning("[M109] ClaimGraph failed: %s", e)
+            logger.warning("ClaimGraph failed: %s", e)
             Trace.event("claim_graph.error", {"error": str(e)[:200]})
             result.disabled = False
             return result

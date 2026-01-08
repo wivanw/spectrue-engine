@@ -45,7 +45,7 @@ def confidence_from_density(
     k = max(0, num_edges)
     n = max(0, num_candidates)
     if k > n:
-        logger.warning("[M109] quality_gate: num_edges %d > num_candidates %d, clamping", k, n)
+        logger.warning("quality_gate: num_edges %d > num_candidates %d, clamping", k, n)
         k = n
 
     kept_ratio = k / max(1, n)
