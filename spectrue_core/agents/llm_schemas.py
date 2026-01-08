@@ -793,6 +793,71 @@ CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
 }
 
 
+CLAIM_AUDIT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "claim_id",
+        "predicate_type",
+        "truth_conditions",
+        "expected_evidence_types",
+        "failure_modes",
+        "assertion_strength",
+        "risk_facets",
+        "honesty_facets",
+        "what_would_change_mind",
+        "audit_confidence",
+    ],
+    "properties": {
+        "claim_id": {"type": "string"},
+        "predicate_type": {
+            "type": "string",
+            "enum": ["event", "measurement", "quote", "policy", "ranking", "causal", "other"],
+        },
+        "truth_conditions": {"type": "array", "items": {"type": "string"}},
+        "expected_evidence_types": {"type": "array", "items": {"type": "string"}},
+        "failure_modes": {"type": "array", "items": {"type": "string"}},
+        "assertion_strength": {"type": "string", "enum": ["weak", "medium", "strong"]},
+        "risk_facets": {"type": "array", "items": {"type": "string"}},
+        "honesty_facets": {"type": "array", "items": {"type": "string"}},
+        "what_would_change_mind": {"type": "array", "items": {"type": "string"}},
+        "audit_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+}
+
+
+EVIDENCE_AUDIT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "claim_id",
+        "evidence_id",
+        "source_id",
+        "stance",
+        "directness",
+        "specificity",
+        "quote_integrity",
+        "extraction_confidence",
+        "novelty_vs_copy",
+        "dependency_hints",
+        "audit_confidence",
+    ],
+    "properties": {
+        "claim_id": {"type": "string"},
+        "evidence_id": {"type": "string"},
+        "source_id": {"type": "string"},
+        "stance": {"type": "string", "enum": ["support", "refute", "unclear", "unrelated"]},
+        "directness": {"type": "string", "enum": ["direct", "indirect", "tangential"]},
+        "specificity": {"type": "string", "enum": ["high", "medium", "low"]},
+        "quote_integrity": {"type": "string", "enum": ["ok", "partial", "out_of_context", "not_applicable"]},
+        "extraction_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "novelty_vs_copy": {"type": "string", "enum": ["original", "syndicated", "unknown"]},
+        "dependency_hints": {"type": "array", "items": {"type": "string"}},
+        "audit_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+}
+
+
 # M127: Coverage Skeleton Schema
 # Phase-1 extraction: all events/measurements/quotes/policies with raw_span
 COVERAGE_SKELETON_SCHEMA: dict[str, Any] = {
@@ -924,6 +989,8 @@ SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
     "edge_typing": EDGE_TYPING_SCHEMA,
     "evidence_summarizer": EVIDENCE_SUMMARIZER_SCHEMA,
     "claim_judge": CLAIM_JUDGE_SCHEMA,
+    "claim_audit": CLAIM_AUDIT_SCHEMA,
+    "evidence_audit": EVIDENCE_AUDIT_SCHEMA,
 }
 
 

@@ -29,13 +29,19 @@ from spectrue_core.agents.skills.claim_judge_prompts import (
     build_claim_judge_system_prompt,
 )
 from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
-from spectrue_core.pipeline.contracts import JUDGMENTS_KEY, Judgments
+from spectrue_core.pipeline.contracts import (
+    JUDGMENTS_KEY,
+    RGBA_AUDIT_KEY,
+    Judgments,
+    RGBAAuditResultPayload,
+)
 from spectrue_core.pipeline.core import PipelineContext, Step
 from spectrue_core.schema.claim_frame import (
     ClaimFrame,
     EvidenceSummary,
     JudgeOutput,
 )
+from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.claims.claim_frame_builder import (
     build_claim_frames_from_pipeline,
@@ -510,6 +516,15 @@ class AssembleDeepResultStep(Step):
                 "claim_verdicts": claim_verdicts,
             }
 
+            rgba_audit_payload = None
+            rgba_audit = ctx.get_extra(RGBA_AUDIT_KEY)
+            if isinstance(rgba_audit, RGBAResult):
+                rgba_audit_payload = RGBAAuditResultPayload.from_result(rgba_audit).to_payload()
+            elif isinstance(rgba_audit, RGBAAuditResultPayload):
+                rgba_audit_payload = rgba_audit.to_payload()
+            elif isinstance(rgba_audit, dict):
+                rgba_audit_payload = rgba_audit
+
             final_result = {
                 "analysis_mode": analysis_mode,
                 "judge_mode": judge_mode,
@@ -517,6 +532,8 @@ class AssembleDeepResultStep(Step):
                     "claim_results": claim_results,
                 },
             }
+            if rgba_audit_payload is not None:
+                final_result["rgba_audit"] = rgba_audit_payload
             if deep_ctx.claim_frames:
                 final_result["claims"] = [frame.claim_text for frame in deep_ctx.claim_frames]
 
