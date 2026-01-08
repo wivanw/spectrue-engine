@@ -43,23 +43,37 @@ def _compute_content_hash(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 def _extract_entities_from_claim(claim: Dict[str, Any]) -> List[str]:
-    """Safely extract entities from a claim dict."""
+    """
+    Safely extract entities from a claim dict.
+    
+    Prioritizes structured entity fields, falls back to seed terms.
+    """
     entities = []
     
-    # context_entities
+    # 1. context_entities (highest priority)
     ce = claim.get("context_entities")
     if isinstance(ce, list):
         entities.extend([str(e) for e in ce if isinstance(e, str)])
         
-    # subject_entities - assuming it's a list or similar
+    # 2. subject_entities
     se = claim.get("subject_entities")
     if isinstance(se, list):
         entities.extend([str(e) for e in se if isinstance(e, str)])
         
-    # subject
+    # 3. subject field
     subj = claim.get("subject")
     if isinstance(subj, str) and subj:
         entities.append(subj)
+    
+    # 4. retrieval_seed_terms (fallback when entity fields are empty)
+    # These are keyword-like terms often containing entities
+    if not entities:
+        seed_terms = claim.get("retrieval_seed_terms")
+        if isinstance(seed_terms, list):
+            # Use first 5 seed terms as entity fallback
+            for term in seed_terms[:5]:
+                if isinstance(term, str) and len(term) >= 2:
+                    entities.append(term)
         
     return entities
 

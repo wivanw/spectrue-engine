@@ -316,3 +316,28 @@ class TestExtractEntitiesFromClaim:
         entities = _extract_entities_from_claim(claim)
         
         assert entities == []
+
+    def test_fallback_to_seed_terms(self):
+        """Falls back to retrieval_seed_terms when entity fields are empty."""
+        claim = {
+            "text": "Some claim",
+            "retrieval_seed_terms": ["Marinera", "tanker", "sanctions", "USA"],
+        }
+        entities = _extract_entities_from_claim(claim)
+        
+        # Should have extracted seed terms as fallback
+        assert len(entities) >= 3
+        assert "Marinera" in entities
+        assert "tanker" in entities
+
+    def test_seed_terms_not_used_when_entities_exist(self):
+        """Seed terms are NOT used when entity fields have data."""
+        claim = {
+            "text": "Some claim",
+            "context_entities": ["Entity1"],
+            "retrieval_seed_terms": ["seed1", "seed2"],
+        }
+        entities = _extract_entities_from_claim(claim)
+        
+        # Should only have context_entities, not seed terms
+        assert entities == ["Entity1"]
