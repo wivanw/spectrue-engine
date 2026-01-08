@@ -30,6 +30,28 @@ def _normalize_text(text: str) -> Set[str]:
     """Normalize text to set of tokens for overlap checking."""
     return set(re.findall(r"\w{3,}", text.lower()))
 
+
+def _get_source_score(src: Dict[str, Any]) -> float:
+    """
+    Tavily (and other search backends) may expose relevance under different keys.
+    We treat these as equivalent and normalize to a float.
+
+    Supported fields:
+      - score
+      - relevance_score
+      - provider_score
+    """
+    raw = (
+        src.get("score")
+        or src.get("relevance_score")
+        or src.get("provider_score")
+        or 0.0
+    )
+    try:
+        return float(raw) if isinstance(raw, (int, float)) else 0.0
+    except Exception:
+        return 0.0
+
 def _calculate_jaccard(text1: str, text2: str) -> float:
     set1 = _normalize_text(text1)
     set2 = _normalize_text(text2)
@@ -445,14 +467,18 @@ async def _execute_retrieval_flow(
             text_to_check = f"{title} {snippet}"
             src_tokens = _normalize_text(text_to_check)
             overlap = len(sanity_terms & src_tokens)
-            score = float(src.get("score", 0.0) or 0.0)
+            
+            # Support multiple score field names (Tavily uses relevance_score)
+            score = _get_source_score(src)
             
             max_overlap = max(max_overlap, overlap)
             best_score = max(best_score, score)
             
             if overlap >= 1 or score >= RELEVANCE_THRESHOLD:
-                src["_temp_text"] = text_to_check
-                src["_temp_score"] = score
+                # Normalize fields for downstream clustering/selection.
+                # Clustering expects a stable text field; selection expects a stable numeric score.
+                src["text"] = text_to_check
+                src["score"] = score
                 kept_results.append(src)
                 query_kept_count += 1
                 
@@ -461,18 +487,19 @@ async def _execute_retrieval_flow(
             "results_count": len(sources),
             "kept_count": query_kept_count,
             "max_overlap": max_overlap,
-            "best_score": best_score
+            "best_score": best_score,
+            "score_fields_checked": ["score", "relevance_score", "provider_score"],
         })
         
     # 3. Redundancy Clustering
     clusters: List[List[Dict[str, Any]]] = []
-    kept_results.sort(key=lambda x: x.get("_temp_score", 0.0), reverse=True)
+    kept_results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
     
     for res in kept_results:
         placed = False
         for cluster in clusters:
             rep = cluster[0]
-            sim = _calculate_jaccard(res.get("_temp_text", ""), rep.get("_temp_text", ""))
+            sim = _calculate_jaccard(res.get("text", ""), rep.get("text", ""))
             if sim >= CLUSTER_TAU:
                 cluster.append(res)
                 placed = True
@@ -514,7 +541,7 @@ async def _execute_retrieval_flow(
             url=url,
             title=rep.get("title", ""),
             snippet=rep.get("content", "") or rep.get("snippet", ""),
-            score=rep.get("_temp_score", 0.0),
+            score=rep.get("score", 0.0),
             provider_meta=rep
         )
         kept_meta.append(meta)
