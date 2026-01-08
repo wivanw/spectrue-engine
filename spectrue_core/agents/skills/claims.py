@@ -12,10 +12,14 @@ from .base_skill import BaseSkill, logger
 from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
+from spectrue_core.verification.claims.coverage_anchors import (
+    extract_all_anchors,
+    get_anchor_ids,
+)
 import re
 from spectrue_core.agents.llm_schemas import (
     CLAIM_RETRIEVAL_SCHEMA,
-    VERIFIABLE_CORE_CLAIM_SCHEMA,  # M125
+    VERIFIABLE_CORE_CLAIM_SCHEMA,
 )
 from .claims_prompts import (
     build_core_extraction_prompt,
@@ -250,7 +254,7 @@ def sanitize_retrieval_response(data: dict, claim_text: str = "") -> dict:
     if "structure" in sanitized and isinstance(sanitized["structure"], dict):
         struct = sanitized["structure"]
         
-        # Merge premises_N → premises
+      
         premises = struct.get("premises", [])
         if not isinstance(premises, list):
             premises = []
@@ -313,10 +317,10 @@ def sanitize_post_evidence_response(data: dict) -> dict:
 
 class ClaimExtractionSkill(BaseSkill):
 
-    # M73.5: Dynamic timeout constants
-    BASE_TIMEOUT_SEC = 60.0     # Minimum timeout (Increased for DeepSeek)
+  
+    BASE_TIMEOUT_SEC = 60.0   
     TIMEOUT_PER_1K_CHARS = 3.0  # Additional seconds per 1000 chars
-    MAX_TIMEOUT_SEC = 120.0     # Maximum timeout cap
+    MAX_TIMEOUT_SEC = 120.0   
 
     def __init__(self, config, llm_client):
         super().__init__(config, llm_client)
@@ -356,14 +360,14 @@ class ClaimExtractionSkill(BaseSkill):
         self,
         text: str,
         *,
-        chunks: list[TextChunk] | None = None,  # M74
+        chunks: list[TextChunk] | None = None,
         lang: str = "en",
         max_claims: int = 5,
     ) -> tuple[list[Claim], bool, ArticleIntent, str]:
         """
         Extract atomic verifiable claims from article text with chunked, deterministic coverage.
         
-        Refactored to 2-stage pipeline (M120):
+        Refactored to 2-stage pipeline::
         1. Core Extraction: Fetch bare claims (text + normalized) from chunks.
         2. Metadata Enrichment: Fan-out parallel processing for classification & strategy.
         """
@@ -378,6 +382,16 @@ class ClaimExtractionSkill(BaseSkill):
 
 
         try:
+            # --- Stage 0: Extract Deterministic Anchors ---
+            # Extract anchors from full text for coverage guarantee
+            anchors = extract_all_anchors(text)
+            anchor_ids = get_anchor_ids(anchors)
+            
+            Trace.event("claim_extraction.anchors", {
+                "anchor_count": len(anchors),
+                "anchor_ids": sorted(anchor_ids)[:20],  # Limit trace size
+            })
+            
             # --- Stage 1: Core Extraction ---
             core_tasks = []
             for chunk in chunks:
@@ -490,6 +504,14 @@ class ClaimExtractionSkill(BaseSkill):
             self._trace_extracted_claims(final_claims)
             self._trace_metadata_distribution(final_claims)
             
+            # --- Coverage Summary ---
+            # Emit final coverage metrics
+            Trace.event("claim_extraction.coverage_summary", {
+                "total_anchors": len(anchors),
+                "claims_extracted": len(final_claims),
+                "coverage_ratio": len(final_claims) / max(len(anchors), 1),
+            })
+            
             return final_claims, should_check_oracle_agg, overall_intent, stitched_text
         
         except Exception as e:
@@ -525,7 +547,7 @@ class ClaimExtractionSkill(BaseSkill):
         result = await self.llm_client.call_json(
             model=self.runtime.llm.model_claim_extraction,  # DeepSeek
             input=prompt,
-            instructions=instructions,  # MANDATORY instructions
+            instructions=instructions,
             response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,  # verifiable schema
             reasoning_effort="low",
             cache_key=f"core_extract_v3_{hash(chunk.text)}",  # v3 for mandatory instructions
@@ -630,7 +652,7 @@ class ClaimExtractionSkill(BaseSkill):
         # Sanitize enrichment response (whitelist, defaults, merge, repair empty queries)
         result = sanitize_retrieval_response(result, claim_text=claim_text)
 
-        # Merge core data + enriched data
+      
         merged = {**core_data, **result}
         
         # Validate defaults
@@ -741,7 +763,7 @@ class ClaimExtractionSkill(BaseSkill):
 
     def _trace_extracted_claims(self, claims: list[Claim]) -> None:
         """
-        M81/T4: Emit trace event with individual claim details for debugging.
+        Emit trace event with individual claim details for debugging.
         
         Logs first 100 chars of each claim text with metadata.
         Critical for diagnosing attribution/reality misclassification.
@@ -750,7 +772,7 @@ class ClaimExtractionSkill(BaseSkill):
             return
 
         claims_data = []
-        for c in claims[:7]:  # Max 7 claims
+        for c in claims[:7]:
             metadata = c.get("metadata")
             claims_data.append({
                 "id": c.get("id", "?"),
