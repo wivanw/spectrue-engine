@@ -26,6 +26,15 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.retrieval.cegs_mvp import (
+    doc_retrieve_to_pool,
+    match_claim_to_pool,
+    compute_deficit,
+    escalate_claim,
+    _extract_entities_from_claim,
+    _normalize_text,
+    EvidenceBundle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +51,12 @@ def _group_sources_by_claim(sources: list[dict[str, Any]]) -> dict[str, list[dic
     return grouped
 
 
+def _claim_id_for(claim: dict[str, Any], idx: int) -> str:
+    raw = claim.get("id") or claim.get("claim_id")
+    if raw:
+        return str(raw)
+    return f"c{idx + 1}"
+
 @dataclass
 class WebSearchStep:
     """Execute web search based on the current query plan."""
@@ -53,8 +68,76 @@ class WebSearchStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
+            # CEGS MVP Integration
+            # We check if we have a plan with global queries (doc queries)
+            plan: SearchPlan | None = ctx.get_extra(SEARCH_PLAN_KEY)
+            
+            # Use CEGS flow if we have queries and it looks like a CEGS plan (or just default)
+            use_cegs = True # Force for this feature
+            
+            if use_cegs and plan and plan.global_queries:
+                doc_queries = list(plan.global_queries)
+                claims = ctx.get_extra("target_claims", ctx.claims) or []
+                safe_claims = [c for c in claims if isinstance(c, dict)]
+                
+                # 1. Build Sanity Terms
+                all_text_parts = []
+                for c in safe_claims:
+                    ents = _extract_entities_from_claim(c)
+                    all_text_parts.extend(ents)
+                    seeds = c.get("retrieval_seed_terms", [])
+                    if isinstance(seeds, list):
+                        all_text_parts.extend([str(s) for s in seeds])
+                        
+                sanity_terms = _normalize_text(" ".join(all_text_parts))
+                
+                # 2. Doc Retrieve
+                pool = await doc_retrieve_to_pool(doc_queries, sanity_terms, self.search_mgr)
+                
+                # 3. Match & Escalate per claim
+                final_bundles: dict[str, EvidenceBundle] = {}
+                
+                for idx, claim in enumerate(safe_claims):
+                    claim_id = _claim_id_for(claim, idx)
+                    
+                    bundle = match_claim_to_pool(claim, pool)
+                    deficit = compute_deficit(claim, bundle)
+                    
+                    if deficit.is_deficit:
+                        pool, bundle = await escalate_claim(claim, pool, self.search_mgr)
+                        
+                    final_bundles[claim_id] = bundle
+                    
+                # 4. Map to legacy format for compatibility (RawSearchResults / sources list)
+                all_sources = []
+                for item in pool.items:
+                    # Convert EvidenceItem back to dict source format
+                    src = item.source_meta.provider_meta.copy()
+                    src["content"] = item.extracted_text
+                    src["fulltext"] = True
+                    all_sources.append(src)
+                    
+                # Also need to map which source belongs to which claim for downstream steps?
+                # The legacy pipeline uses "retrieval_items_by_claim" or "grouped sources".
+                # We should populate that.
+                
+                # Store bundles in extra for next steps that know CEGS
+                ctx = ctx.set_extra("cegs_evidence_bundles", final_bundles)
+                
+                # Populate legacy sources
+                return ctx.with_update(sources=all_sources).set_extra(
+                    RAW_SEARCH_RESULTS_KEY, 
+                    RawSearchResults(
+                        plan_id=plan.plan_id,
+                        results=tuple(), # TODO: Populate if needed
+                        trace={"cegs_mvp": True, "pool_size": len(pool.items)}
+                    )
+                )
+
+            # Legacy Fallback
             from spectrue_core.verification.pipeline.pipeline_search import (
                 SearchFlowInput,
+# ... (rest of legacy code)
                 SearchFlowState,
                 run_search_flow,
             )

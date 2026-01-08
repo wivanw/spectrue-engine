@@ -536,7 +536,6 @@ class ClaimExtractionSkill(BaseSkill):
         # The prompt returned by build_core_extraction_prompt is the user/input message.
         # We inject system instructions separately to ensure they are never empty.
         instructions = DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS
-        instructions_injected_fallback = False
         
         # Trace guard: log if we're using fallback (this should always be the case now)
         Trace.event("claim_extraction.guard.instructions_injected", {

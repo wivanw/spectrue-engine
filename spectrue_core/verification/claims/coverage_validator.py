@@ -18,7 +18,6 @@ If gaps exist, triggers a targeted gap-fill repair LLM call.
 """
 
 from dataclasses import dataclass
-from typing import Any
 
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.claims.coverage_anchors import (
