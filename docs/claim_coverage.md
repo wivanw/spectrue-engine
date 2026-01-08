@@ -89,6 +89,56 @@ context = anchors_to_prompt_context(anchors)
 | `claims.coverage.anchors` | Extracted anchors with counts by type |
 | `claims.coverage.gaps` | Missing anchor IDs after skeleton extraction |
 | `claims.coverage.gapfill` | Gap-fill repair attempt results |
+| `claims.context.anchored` | Context entities inherited from document pool |
+| `search.query.variants` | Query variants with context entities count |
+| `search.query.empty_blocked` | Empty query blocked (no queryable terms) |
+| `search.sanity` | Sanity gate decision on retrieval results |
+
+## Context Entities
+
+Claims may lose document context when extracted in isolation. To prevent off-topic retrieval:
+
+**Document Context Pool:**
+- Computed from all skeleton items (events, measurements, quotes, policies)
+- Contains `subject_entities` + `speaker_entities` + domain metrics
+- Top 10 entities by frequency
+
+**Context Inheritance:**
+- Claims with < 2 `subject_entities` inherit from document pool
+- Injected as `context_entities` field during skeleton→claims conversion
+- Included in Q1/Q2 query variants
+
+**Trace:** `claims.context.anchored` with `added_context_entities` and `source`
+
+## Retrieval Sanity Gate
+
+Post-retrieval check to detect off-topic sources before evidence auditing:
+
+**Anchor Terms:**
+```python
+anchor_terms = normalize(subject_entities + context_entities + retrieval_seed_terms)
+# normalize: lowercase, strip punctuation, drop < 3 chars
+```
+
+**Overlap Check:**
+- For each source, count anchor terms in (title + snippet)
+- If max_overlap_count == 0 → OFF_TOPIC
+
+**Actions:**
+- OFF_TOPIC → trigger next escalation pass
+- After full ladder → set `EVIDENCE_MISMATCH` status
+
+## Evidence Mismatch Status
+
+New `RGBAStatus.EVIDENCE_MISMATCH = -6`:
+
+| Condition | Status |
+|-----------|--------|
+| No sources found | `INSUFFICIENT_EVIDENCE` |
+| Sources found but off-topic | `EVIDENCE_MISMATCH` |
+| Sources on-topic, conflicting | `CONFLICTING_EVIDENCE` |
+
+The sanity gate ensures off-topic evidence never reaches the judge/audit phase.
 
 ## Related
 

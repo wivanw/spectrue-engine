@@ -818,12 +818,83 @@ def _skeleton_policy_to_claim(
     )
 
 
+def compute_document_context_pool(skeleton: CoverageSkeleton) -> list[str]:
+    """
+    Build document-level entity pool from all skeleton items.
+    
+    Used for context inheritance when claims have weak/empty subject_entities.
+    Returns deduplicated list of entities, ordered by frequency (most common first).
+    """
+    from collections import Counter
+    
+    entity_counts: Counter[str] = Counter()
+    
+    for evt in skeleton.events:
+        for entity in evt.subject_entities:
+            if entity and len(entity) >= 2:
+                entity_counts[entity.strip()] += 1
+    
+    for msr in skeleton.measurements:
+        for entity in msr.subject_entities:
+            if entity and len(entity) >= 2:
+                entity_counts[entity.strip()] += 1
+        # Include metric as entity (domain-specific)
+        if msr.metric and len(msr.metric) >= 3:
+            entity_counts[msr.metric.strip()] += 1
+    
+    for qot in skeleton.quotes:
+        for entity in qot.speaker_entities:
+            if entity and len(entity) >= 2:
+                entity_counts[entity.strip()] += 1
+    
+    for pol in skeleton.policies:
+        for entity in pol.subject_entities:
+            if entity and len(entity) >= 2:
+                entity_counts[entity.strip()] += 1
+    
+    # Return top 10 entities by frequency
+    return [entity for entity, _ in entity_counts.most_common(10)]
+
+
+def _select_context_entities(
+    claim_entities: list[str],
+    document_pool: list[str],
+    max_context: int = 5,
+) -> tuple[list[str], str]:
+    """
+    Select context entities for a claim based on its own entities and document pool.
+    
+    Args:
+        claim_entities: The claim's own subject_entities
+        document_pool: Document-level entity pool
+        max_context: Maximum context entities to return
+    
+    Returns:
+        (context_entities, source) where source is "document_pool", "none", or "already_rich"
+    """
+    # If claim has >= 2 entities, it's already contextually rich
+    if len(claim_entities) >= 2:
+        return [], "already_rich"
+    
+    # If no document pool available
+    if not document_pool:
+        return [], "none"
+    
+    # Filter out entities already in claim
+    claim_set = {e.lower() for e in claim_entities}
+    context = [e for e in document_pool if e.lower() not in claim_set]
+    
+    return context[:max_context], "document_pool"
+
+
 def skeleton_to_claims(
     skeleton: CoverageSkeleton,
     start_claim_id: int = 1,
 ) -> tuple[list[SkeletonClaimResult], int, int]:
     """
     Convert skeleton items to claim-compatible dicts.
+    
+    Includes context anchoring: claims with weak entities inherit from document pool.
     
     Args:
         skeleton: The coverage skeleton to convert
@@ -837,9 +908,29 @@ def skeleton_to_claims(
     emitted = 0
     dropped = 0
     
+    # Compute document-level context pool for context anchoring
+    document_pool = compute_document_context_pool(skeleton)
+    
+    def _inject_context_and_trace(result: SkeletonClaimResult) -> None:
+        """Inject context entities into claim and emit trace."""
+        claim_entities = result.claim_data.get("subject_entities", [])
+        context_entities, source = _select_context_entities(claim_entities, document_pool)
+        
+        # Always set context_entities field (may be empty)
+        result.claim_data["context_entities"] = context_entities
+        
+        # Emit trace event for context anchoring
+        if context_entities:
+            Trace.event("claims.context.anchored", {
+                "claim_id": result.claim_id,
+                "added_context_entities": context_entities,
+                "source": source,
+            })
+    
     # Convert events
     for event in skeleton.events:
         result = _skeleton_event_to_claim(event, f"c{claim_num}")
+        _inject_context_and_trace(result)
         results.append(result)
         claim_num += 1
         if result.is_valid:
@@ -855,6 +946,7 @@ def skeleton_to_claims(
     # Convert measurements
     for measurement in skeleton.measurements:
         result = _skeleton_measurement_to_claim(measurement, f"c{claim_num}")
+        _inject_context_and_trace(result)
         results.append(result)
         claim_num += 1
         if result.is_valid:
@@ -870,6 +962,7 @@ def skeleton_to_claims(
     # Convert quotes
     for quote in skeleton.quotes:
         result = _skeleton_quote_to_claim(quote, f"c{claim_num}")
+        _inject_context_and_trace(result)
         results.append(result)
         claim_num += 1
         if result.is_valid:
@@ -885,6 +978,7 @@ def skeleton_to_claims(
     # Convert policies
     for policy in skeleton.policies:
         result = _skeleton_policy_to_claim(policy, f"c{claim_num}")
+        _inject_context_and_trace(result)
         results.append(result)
         claim_num += 1
         if result.is_valid:

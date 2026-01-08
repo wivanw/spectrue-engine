@@ -16,6 +16,7 @@ from spectrue_core.verification.claims.coverage_anchors import (
     extract_all_anchors,
     get_anchor_ids,
 )
+from spectrue_core.llm.fallback import call_with_fallback
 import re
 from spectrue_core.agents.llm_schemas import (
     CLAIM_RETRIEVAL_SCHEMA,
@@ -543,17 +544,42 @@ class ClaimExtractionSkill(BaseSkill):
             "fallback_used": True,  # We always inject now as a safety measure
         })
         
-        # We assume 1-2 attempts is enough for this simpler task
-        result = await self.llm_client.call_json(
-            model=self.runtime.llm.model_claim_extraction,  # DeepSeek
-            input=prompt,
-            instructions=instructions,
-            response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,  # verifiable schema
-            reasoning_effort="low",
-            cache_key=f"core_extract_v3_{hash(chunk.text)}",  # v3 for mandatory instructions
-            timeout=self._calculate_timeout(len(chunk.text)),
-            trace_kind="claim_extraction_core",
-            temperature=0.0,  # Strict determinism
+        # Define primary and fallback calls
+        async def primary_extraction():
+            return await self.llm_client.call_json(
+                model=self.runtime.llm.model_claim_extraction,  # DeepSeek
+                input=prompt,
+                instructions=instructions,
+                response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,
+                reasoning_effort="low",
+                cache_key=f"core_extract_v3_{hash(chunk.text)}",
+                timeout=self._calculate_timeout(len(chunk.text)),
+                trace_kind="claim_extraction_core",
+                temperature=0.0,
+            )
+
+        async def fallback_extraction():
+            # Fallback to secondary provider (configured in runtime)
+            fallback_model = self.runtime.llm.model_claim_extraction_fallback
+            return await self.llm_client.call_json(
+                model=fallback_model,
+                input=prompt,
+                instructions=instructions,
+                response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,
+                reasoning_effort="low",
+                cache_key=f"core_extract_fallback_v3_{hash(chunk.text)}",
+                timeout=self._calculate_timeout(len(chunk.text)),
+                trace_kind="claim_extraction_core.fallback",
+                temperature=0.0,
+            )
+
+        # Execute with fallback wrapper
+        result = await call_with_fallback(
+            primary_call=primary_extraction,
+            fallback_call=fallback_extraction,
+            task_name="claims.extraction.core",
+            primary_provider_name=self.runtime.llm.model_claim_extraction,
+            fallback_provider_name=self.runtime.llm.model_claim_extraction_fallback,
         )
         
         raw_claims = result.get("claims", [])

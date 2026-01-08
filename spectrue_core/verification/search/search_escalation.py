@@ -188,6 +188,31 @@ def _extract_seed_terms(
     return valid
 
 
+def _extract_context_entities(
+    claim: dict[str, Any], max_count: int = 2, max_token_length: int = 30
+) -> list[str]:
+    """Extract context entities from claim.
+    
+    Context entities are inherited from document-level pool during skeleton→claims conversion.
+    They provide additional query terms for contextless claims.
+    """
+    entities = claim.get("context_entities", [])
+    if not isinstance(entities, list):
+        return []
+    valid: list[str] = []
+    for e in entities:
+        if not isinstance(e, str):
+            continue
+        e_stripped = e.strip()
+        # Reject entities that are too long or too short
+        if len(e_stripped) < 2 or len(e_stripped) > max_token_length:
+            continue
+        valid.append(e_stripped)
+        if len(valid) >= max_count:
+            break
+    return valid
+
+
 def _extract_date_anchor(claim: dict[str, Any]) -> str | None:
     """Extract explicit date from time_anchor if available.
     
@@ -230,10 +255,11 @@ def build_query_variants(
     """
     Build up to 3 query variants from claim structured fields.
 
-    Q1 (anchor-tight): <top entities> <top seed terms> <date/range if explicit>
-    Q2 (anchor-medium): <top entities> <top seed terms>
+    Q1 (anchor-tight): <top entities> <context entities> <top seed terms> <date/range if explicit>
+    Q2 (anchor-medium): <top entities> <context entities> <top seed terms>
     Q3 (broad): <top entities> <2-3 seed terms>
 
+    Context entities (from document pool) are included in Q1/Q2 for contextless claims.
     Each query <= max_query_length chars, keyword-like (no sentences).
     Tokens are deduplicated and normalized.
     """
@@ -242,13 +268,22 @@ def build_query_variants(
     max_token_len = cfg.max_token_length
 
     entities = _extract_top_entities(claim, max_count=3, max_token_length=max_token_len)
+    context_entities = _extract_context_entities(claim, max_count=2, max_token_length=max_token_len)
     seed_terms = _extract_seed_terms(claim, max_count=6, max_token_length=max_token_len)
     date_anchor = _extract_date_anchor(claim)
 
+    # Early return if no query can be built (empty query guard)
+    if not entities and not seed_terms and not context_entities:
+        Trace.event("search.query.empty_blocked", {
+            "claim_id": claim.get("id", "unknown"),
+            "reason": "no_queryable_terms",
+        })
+        return []
+
     variants: list[QueryVariant] = []
 
-    # Q1: anchor-tight (entities + seed terms + date)
-    q1_parts = _deduplicate_tokens(entities + seed_terms[:4], max_token_len)
+    # Q1: anchor-tight (entities + context + seed terms + date)
+    q1_parts = _deduplicate_tokens(entities + context_entities + seed_terms[:4], max_token_len)
     if date_anchor:
         q1_parts.append(date_anchor)
     q1_text = _truncate_query(" ".join(q1_parts), max_len)
@@ -259,8 +294,8 @@ def build_query_variants(
             strategy="anchor_tight",
         ))
 
-    # Q2: anchor-medium (entities + seed terms, no date)
-    q2_parts = _deduplicate_tokens(entities + seed_terms[:4], max_token_len)
+    # Q2: anchor-medium (entities + context + seed terms, no date)
+    q2_parts = _deduplicate_tokens(entities + context_entities + seed_terms[:4], max_token_len)
     q2_text = _truncate_query(" ".join(q2_parts), max_len)
     # Only add if different from Q1
     if q2_text and (not variants or q2_text != variants[0].text):
@@ -270,7 +305,7 @@ def build_query_variants(
             strategy="anchor_medium",
         ))
 
-    # Q3: broad (fewer terms)
+    # Q3: broad (fewer terms, no context - keeps it very short)
     # If entities empty, use first few seed terms only
     if entities:
         q3_parts = _deduplicate_tokens(entities[:2] + seed_terms[:2], max_token_len)
@@ -571,14 +606,31 @@ def compute_escalation_reason_codes(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def trace_query_variants(claim_id: str, variants: list[QueryVariant]) -> None:
-    """Log query variants trace event."""
+def trace_query_variants(
+    claim_id: str, 
+    variants: list[QueryVariant],
+    claim: dict[str, Any] | None = None,
+) -> None:
+    """Log query variants trace event.
+    
+    Args:
+        claim_id: The claim ID
+        variants: Built query variants
+        claim: Optional claim dict to extract context entities count
+    """
+    context_count = 0
+    if claim:
+        context_entities = claim.get("context_entities", [])
+        if isinstance(context_entities, list):
+            context_count = len(context_entities)
+    
     Trace.event(
         "search.query.variants",
         {
             "claim_id": claim_id,
             "variants": [v.to_dict() for v in variants],
             "count": len(variants),
+            "included_context_entities_count": context_count,
         },
     )
 
