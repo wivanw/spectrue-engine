@@ -589,7 +589,8 @@ async def _execute_retrieval_flow(
     
     fetch_tasks = []
     for rep in representatives:
-        url = rep.get("url")
+        # Check both 'url' and 'link' fields (Tavily raw uses 'url', build_sources_list uses 'link')
+        url = rep.get("url") or rep.get("link")
         if url:
              fetch_tasks.append(search_mgr.fetch_url_content(url))
         else:
@@ -599,7 +600,8 @@ async def _execute_retrieval_flow(
     
     fetch_idx = 0
     for i, rep in enumerate(representatives):
-        url = rep.get("url", "")
+        # Check both 'url' and 'link' fields
+        url = rep.get("url") or rep.get("link") or ""
         kept_urls.append(url)
         
         # Meta is always kept for representatives
