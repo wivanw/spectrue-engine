@@ -284,7 +284,7 @@ class WebSearchTool:
         if not target_urls:
             return ranked, 0
 
-        # Check cache first
+        # 1) Cache first (URL-level)
         cached_map: dict[str, str] = {}
         missing: list[str] = []
         for u in target_urls:
@@ -294,13 +294,12 @@ class WebSearchTool:
             else:
                 missing.append(u)
 
-        Trace.event("tavily.extract.cache", {
-            "hit": len(cached_map),
-            "miss": len(missing),
-            "target": len(target_urls),
-        })
+        Trace.event(
+            "tavily.extract.cache",
+            {"hit": len(cached_map), "miss": len(missing), "target": len(target_urls)},
+        )
 
-        # Batch extract missing URLs
+        # 2) Batch extract missing URLs (Tavily billing: 1 credit per 5 URLs)
         url_map: dict[str, str] = dict(cached_map)
         BATCH_SIZE = 5
         

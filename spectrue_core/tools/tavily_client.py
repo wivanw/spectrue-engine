@@ -313,17 +313,12 @@ class TavilyClient:
         """
         Extract content from multiple URLs in a single API call.
         
-        Tavily bills 1 credit per 5 URLs for basic extract, so batching
-        reduces cost significantly (3 URLs = 1 credit instead of 3).
+        Tavily bills 1 credit per 5 URLs for basic extract. If we call extract
+        with {"urls":[single]} we burn a full batch for 1/5 of capacity.
         
-        Args:
-            urls: List of URLs to extract (will be deduplicated)
-            format: Output format ("markdown" or "text")
-            
-        Returns:
-            Dict with "results" list containing extracted content per URL
+        This method preserves semantics: same URLs, same content, fewer HTTP calls.
         """
-        # Dedupe with order preservation
+        # Stable dedupe (order-preserving) + strip
         urls2 = list(dict.fromkeys(u.strip() for u in urls if u and u.strip()))
         if not urls2:
             return {"results": []}
