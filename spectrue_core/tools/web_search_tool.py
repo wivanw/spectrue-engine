@@ -169,23 +169,25 @@ class WebSearchTool:
         return clean_url_for_cache(url)
 
     async def _fetch_extract_text(self, url: str) -> str | None:
+        """
+        Fetch extracted text for a single URL (uses batch API internally).
+        
+        DEPRECATED: Prefer using _enrich_with_fulltext or direct extract_batch calls.
+        This method is kept for backward compatibility with tests.
+        """
         from spectrue_core.tools.url_utils import is_valid_public_http_url
 
         if not is_valid_public_http_url(url) or not self.api_key:
             return None
 
-        clean_url = self._clean_url_key(url)
-        cache_key = f"page_tavily|{clean_url}"
-        try:
-            if cache_key in self.page_cache:
-                cached = self.page_cache[cache_key]
-                if isinstance(cached, str) and cached.strip():
-                    return cached
-        except Exception:
-            pass
+        # Check cache first
+        cached = self._try_page_cache(url)
+        if cached:
+            return cached
 
         try:
-            data = await self._tavily.extract(url=url, format="markdown")
+            # Use batch API (single-element batch)
+            data = await self._tavily.extract_batch(urls=[url], format="markdown")
             results = data.get("results", [])
             if not results:
                 return None
@@ -200,29 +202,11 @@ class WebSearchTool:
             if not extracted_text:
                 return None
 
-            cleaned = ""
-            if trafilatura and ("<html" in extracted_text or "<body" in extracted_text or "<div" in extracted_text):
-                try:
-                    cleaned = trafilatura.extract(
-                        extracted_text,
-                        include_links=True,
-                        include_images=False,
-                        include_comments=False,
-                    )
-                except Exception as e:
-                    logger.warning("[Tavily] Trafilatura extraction failed: %s", e)
-
+            cleaned = self._clean_extracted_text(extracted_text)
             if not cleaned:
-                cleaned = extracted_text
-            cleaned = cleaned.strip()
-            if len(cleaned) < 50:
                 return None
 
-            try:
-                self.page_cache.set(cache_key, cleaned, expire=self.page_ttl)
-            except Exception:
-                pass
-
+            self._write_page_cache(url, cleaned)
             Trace.event("tavily.extract.success", {"url": url, "chars": len(cleaned)})
             return cleaned
 

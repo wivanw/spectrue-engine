@@ -286,28 +286,10 @@ class TavilyClient:
             raise
 
     async def extract(self, *, url: str, format: str = "markdown") -> dict:
-        endpoint = "https://api.tavily.com/extract"
-        payload = {"urls": [url], "format": format}
-        async with self._sem:
-            r = await self._request_with_retry(
-                url=endpoint,
-                payload=payload,
-                trace_event_prefix="tavily.extract",
-            )
-            result = r.json()
-            if self._meter:
-                try:
-                    event = self._meter.record_extract(response=result)
-                    Trace.event("tavily.metering.recorded", {
-                        "type": "extract",
-                        "cost_credits": str(event.cost_credits),
-                    })
-                except Exception as exc:
-                    logger.warning("[Tavily] Metering failed: %s", exc)
-                    Trace.event("tavily.metering.failed", {"error": str(exc)[:200]})
-            else:
-                Trace.event("tavily.metering.skipped", {"reason": "no_meter"})
-            return result
+        raise RuntimeError(
+            "TavilyClient.extract(url=...) is forbidden. "
+            "Use extract_batch(urls=[...]) instead."
+        )
 
     async def extract_batch(self, *, urls: list[str], format: str = "markdown") -> dict:
         """
