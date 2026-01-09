@@ -33,12 +33,29 @@ from spectrue_core.tools.tavily_client import TavilyClient
 from spectrue_core.tools.url_utils import clean_url_for_cache, normalize_host
 from spectrue_core.utils.trace import Trace
 
+
 try:
     import trafilatura
 except ImportError:
     trafilatura = None
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_text_from_batch_response(data: dict, url: str) -> str | None:
+    """Extract text content for a specific URL from batch response."""
+    results = data.get("results", [])
+    if not results:
+        return None
+
+    for item in results:
+        if item.get("url") == url:
+            return item.get("raw_content") or item.get("content") or ""
+    
+    # Fallback to first result if URL not matched exactly
+    if results:
+        return results[0].get("raw_content") or results[0].get("content") or ""
+    return None
 
 
 class WebSearchTool:
@@ -186,19 +203,9 @@ class WebSearchTool:
             return cached
 
         try:
-            # Use batch API (single-element batch)
-            data = await self._tavily.extract_batch(urls=[url], format="markdown")
-            results = data.get("results", [])
-            if not results:
-                return None
-
-            extracted_text = ""
-            for item in results:
-                if item.get("url") == url:
-                    extracted_text = item.get("raw_content") or item.get("content") or ""
-                    break
-            if not extracted_text and results:
-                extracted_text = results[0].get("raw_content") or results[0].get("content") or ""
+            # Use single-via-batch API
+            data = await self._tavily.extract_single_via_batch(url=url, format="markdown")
+            extracted_text = _extract_text_from_batch_response(data, url)
             if not extracted_text:
                 return None
 

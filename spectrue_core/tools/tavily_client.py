@@ -291,6 +291,9 @@ class TavilyClient:
             "Use extract_batch(urls=[...]) instead."
         )
 
+    async def extract_single_via_batch(self, *, url: str, format: str = "markdown") -> dict:
+        return await self.extract_batch(urls=[url], format=format)
+
     async def extract_batch(self, *, urls: list[str], format: str = "markdown") -> dict:
         """
         Extract content from multiple URLs in a single API call.
