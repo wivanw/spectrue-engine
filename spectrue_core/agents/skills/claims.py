@@ -753,6 +753,11 @@ class ClaimExtractionSkill(BaseSkill):
             evidence_requirement=req,
             search_queries=search_queries,
             check_oracle=bool(merged.get("check_oracle", False)),
+            # Retrieval escalation fields (from core extraction)
+            subject_entities=merged.get("subject_entities", []),
+            retrieval_seed_terms=merged.get("retrieval_seed_terms", []),
+            context_entities=merged.get("context_entities", []),
+            time_anchor=merged.get("time_anchor"),
             normalized_text=normalized,
             topic_group=topic,
             check_worthiness=worthiness,

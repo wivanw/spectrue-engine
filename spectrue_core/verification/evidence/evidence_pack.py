@@ -341,6 +341,11 @@ class Claim(TypedDict, total=False):
     evidence_requirement: EvidenceRequirement
     search_queries: list[str]       # Generated queries for this claim (legacy)
     check_oracle: bool              # T10: Should this specific claim be checked against Oracle?
+    # Retrieval escalation fields (from LLM extraction)
+    subject_entities: list[str]     # Named entities (people, orgs, places)
+    retrieval_seed_terms: list[str] # Keywords for search queries
+    context_entities: list[str]     # Document-level context terms
+    time_anchor: dict               # Temporal anchor (type, value, start, end)
     # Context-aware atomization fields
     normalized_text: str            # Self-sufficient statement with pronouns resolved
     topic_group: str                # Topic tag (e.g., "Economy", "War", "Science")
