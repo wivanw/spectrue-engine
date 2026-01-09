@@ -37,6 +37,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.retrieval.experiment_mode import (
+    should_apply_budget,
+    emit_budget_bypassed_trace,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -293,8 +297,24 @@ class BudgetState:
         
         Returns the k where:
             sum_{i=0}^{k-1} EVOI(i) - cost × k is maximized
+            
+        When experiment_mode=true: returns max_extracts (infinite budget)
         """
         params = self.params
+        
+        # EXPERIMENT MODE: bypass budget - return max extracts
+        if not should_apply_budget():
+            emit_budget_bypassed_trace()
+            Trace.event("budget.extract_limit_computed", {
+                "extracts_used": self.extracts_used,
+                "posterior_mean": round(self.posterior_mean, 4),
+                "posterior_entropy": round(self.posterior_entropy, 4),
+                "evidence_sufficiency": round(self.evidence_sufficiency, 4),
+                "computed_limit": params.max_extracts,
+                "cumulative_value": 0.0,
+                "experiment_mode_bypass": True,
+            })
+            return params.max_extracts
         
         # Simulate forward to find optimal k
         optimal_k = self.extracts_used
@@ -345,8 +365,16 @@ class BudgetState:
         Decide whether to continue extracting based on EVOI analysis.
         
         Returns: (should_continue, reason)
+        
+        When experiment_mode=true: always returns True (infinite budget)
         """
         params = self.params
+        
+        # EXPERIMENT MODE: bypass budget - always continue (until max_extracts)
+        if not should_apply_budget():
+            if self.extracts_used >= params.max_extracts:
+                return False, "max_extracts_reached"
+            return True, "experiment_mode_bypass"
         
         # Hard stop at max
         if self.extracts_used >= params.max_extracts:

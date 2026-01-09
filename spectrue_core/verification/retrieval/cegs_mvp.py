@@ -15,6 +15,14 @@ from spectrue_core.verification.search.search_escalation import (
     build_query_variants,
     select_topic_from_claim
 )
+from spectrue_core.verification.retrieval.experiment_mode import (
+    is_experiment_mode,
+    should_filter_sources,
+    should_stop_early,
+    emit_experiment_mode_trace,
+    emit_filters_bypassed_trace,
+    emit_escalation_full_run_trace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -455,9 +463,22 @@ async def _execute_retrieval_flow(
     """
     Core retrieval logic: Search -> Sanity Gate -> Cluster -> Extract.
     Returns (items, meta, kept_urls).
+    
+    When experiment_mode=true:
+    - Sanity gate bypass: ALL sources kept regardless of overlap/score
+    - Clustering bypass: ALL kept sources passed to extraction (no reps-only)
     """
+    # Emit experiment mode trace once per retrieval flow
+    emit_experiment_mode_trace()
+    
     RELEVANCE_THRESHOLD = 0.5 
     CLUSTER_TAU = 0.6 
+    
+    # Check if we should apply filters
+    apply_filters = should_filter_sources()
+    
+    if not apply_filters:
+        emit_filters_bypassed_trace()
     
     kept_results: List[Dict[str, Any]] = []
     
@@ -483,6 +504,7 @@ async def _execute_retrieval_flow(
         
         # 2. Sanity Gate
         query_kept_count = 0
+        query_total_count = len(sources)
         best_score = 0.0
         max_overlap = 0
         
@@ -502,9 +524,16 @@ async def _execute_retrieval_flow(
             max_overlap = max(max_overlap, overlap)
             best_score = max(best_score, score)
             
-            if overlap >= 1 or score >= RELEVANCE_THRESHOLD:
-                # Normalize fields for downstream clustering/selection.
-                # Clustering expects a stable text field; selection expects a stable numeric score.
+            # EXPERIMENT MODE: bypass sanity gate - keep ALL sources
+            if apply_filters:
+                # Normal mode: apply sanity gate
+                if overlap >= 1 or score >= RELEVANCE_THRESHOLD:
+                    src["text"] = text_to_check
+                    src["score"] = score
+                    kept_results.append(src)
+                    query_kept_count += 1
+            else:
+                # Experiment mode: keep ALL sources (no filtering)
                 src["text"] = text_to_check
                 src["score"] = score
                 kept_results.append(src)
@@ -512,11 +541,12 @@ async def _execute_retrieval_flow(
                 
         Trace.event(f"{trace_event_prefix}.search", {
             "query": query,
-            "results_count": len(sources),
+            "results_count": query_total_count,
             "kept_count": query_kept_count,
             "max_overlap": max_overlap,
             "best_score": best_score,
             "score_fields_checked": ["score", "relevance_score", "provider_score"],
+            "experiment_mode_bypass": not apply_filters,
         })
         
     # 3. Redundancy Clustering
@@ -534,13 +564,21 @@ async def _execute_retrieval_flow(
                 break
         if not placed:
             clusters.append([res])
-            
-    representatives = [c[0] for c in clusters]
+    
+    # EXPERIMENT MODE: bypass clustering - pass ALL kept sources to extraction
+    if apply_filters:
+        # Normal mode: use cluster representatives only
+        representatives = [c[0] for c in clusters]
+    else:
+        # Experiment mode: use ALL kept sources (no downselection)
+        representatives = kept_results
     
     Trace.event(f"{trace_event_prefix}.clusters", {
         "cluster_count": len(clusters),
         "max_cluster_size": max([len(c) for c in clusters]) if clusters else 0,
-        "tau": CLUSTER_TAU
+        "tau": CLUSTER_TAU,
+        "representatives_count": len(representatives),
+        "experiment_mode_bypass": not apply_filters,
     })
     
     # 4. Selective Extraction
@@ -691,10 +729,24 @@ async def escalate_claim(
     """
     Performs bounded claim-level search to resolve deficit.
     Updates and returns the pool and the new bundle.
+    
+    When experiment_mode=true:
+    - No early-stop: Full escalation ladder runs regardless of deficit resolution
+    - Max passes still bounded (A-D) to avoid infinite loops
     """
     claim_id = str(claim.get("id") or "unknown")
     
-    Trace.event("retrieval.claim.escalation.start", {"claim_id": claim_id})
+    # Check if we should allow early stopping
+    allow_early_stop = should_stop_early()
+    max_passes = 4
+    
+    if not allow_early_stop:
+        emit_escalation_full_run_trace(max_passes=max_passes)
+    
+    Trace.event("retrieval.claim.escalation.start", {
+        "claim_id": claim_id,
+        "experiment_mode_full_run": not allow_early_stop,
+    })
     
     # Pre-calc signals
     sanity_terms = _normalize_text(" ".join(_extract_entities_from_claim(claim)))
@@ -706,7 +758,7 @@ async def escalate_claim(
     stop_reason = "max_passes"
     
     for i, pass_config in enumerate(ladder):
-        if i >= 4:
+        if i >= max_passes:
             break # Max 4 passes (matches ladder length usually)
         
         # Prepare queries
@@ -743,7 +795,8 @@ async def escalate_claim(
             "pass_id": pass_config.pass_id,
             "queries": pass_queries,
             "kept_count": len(meta),
-            "extracted_count": len(items)
+            "extracted_count": len(items),
+            "experiment_mode_full_run": not allow_early_stop,
         })
         
         # Merge to Pool
@@ -753,7 +806,8 @@ async def escalate_claim(
             bundle = match_claim_to_pool(claim, pool)
             deficit = compute_deficit(claim, bundle)
             
-            if not deficit.is_deficit:
+            # EXPERIMENT MODE: disable early-stop - run full ladder
+            if allow_early_stop and not deficit.is_deficit:
                 resolved = True
                 stop_reason = "deficit_resolved"
                 break

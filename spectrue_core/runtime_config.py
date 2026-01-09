@@ -337,6 +337,23 @@ class ContentBudgetConfig:
 
 
 @dataclass(frozen=True)
+class RetrievalExperimentConfig:
+    """
+    Configuration for retrieval experiment mode.
+    
+    When experiment_mode=True:
+    - Sanity gate bypass: ALL sources kept regardless of overlap/score
+    - Clustering bypass: ALL kept sources passed to extraction (no reps-only)
+    - Budget bypass: Budgets treated as infinite (except API max_results)
+    - Source broadcasting: ALL sources passed to ALL claims
+    - No early-stop: Escalation runs full ladder depth
+    
+    This is for controlled experiments only. Default: OFF.
+    """
+    experiment_mode: bool = False
+
+
+@dataclass(frozen=True)
 class ClaimGraphConfig:
     """
     Hybrid ClaimGraph (B + C) configuration.
@@ -406,6 +423,9 @@ class EngineRuntimeConfig:
     tunables: EngineTunableConfig
     content_budget: ContentBudgetConfig
     claim_graph: ClaimGraphConfig
+    retrieval_experiment: RetrievalExperimentConfig = field(
+        default_factory=RetrievalExperimentConfig
+    )
 
     @staticmethod
     def load_from_env() -> "EngineRuntimeConfig":
@@ -598,6 +618,13 @@ class EngineRuntimeConfig:
             evidence_need_routing_enabled=_parse_bool(os.getenv("CLAIM_GRAPH_EVIDENCE_NEED_ENABLED"), default=True),
         )
 
+        # Retrieval experiment mode configuration
+        retrieval_experiment = RetrievalExperimentConfig(
+            experiment_mode=_parse_bool(
+                os.getenv("SPECTRUE_RETRIEVAL_EXPERIMENT_MODE"), default=False
+            ),
+        )
+
         return EngineRuntimeConfig(
             llm=llm,
             features=features,
@@ -609,6 +636,7 @@ class EngineRuntimeConfig:
             tunables=tunables,
             content_budget=content_budget,
             claim_graph=claim_graph,
+            retrieval_experiment=retrieval_experiment,
         )
 
     def to_safe_log_dict(self) -> dict[str, Any]:
@@ -706,5 +734,8 @@ class EngineRuntimeConfig:
                 "structural_prioritization_enabled": bool(self.claim_graph.structural_prioritization_enabled),
                 "tension_signal_enabled": bool(self.claim_graph.tension_signal_enabled),
                 "evidence_need_routing_enabled": bool(self.claim_graph.evidence_need_routing_enabled),
+            },
+            "retrieval_experiment": {
+                "experiment_mode": bool(self.retrieval_experiment.experiment_mode),
             },
         }
