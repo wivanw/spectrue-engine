@@ -267,8 +267,12 @@ def match_claim_to_pool(claim: Dict[str, Any], pool: EvidencePool) -> EvidenceBu
     match_terms |= set(claim.get("document_context_entities", []))
     match_terms |= set(claim.get("anchor_terms", []))
     
-    # Normalize all terms
-    match_terms = {t.lower() for t in match_terms if isinstance(t, str) and len(t) >= 2}
+    # Normalize all terms to tokens (same as content)
+    raw_terms = list(match_terms)
+    match_terms = set()
+    for t in raw_terms:
+         if isinstance(t, str):
+             match_terms.update(_normalize_text(t))
     
     # Anchors (for optional bonuses, not hard filters)
     claim_text = claim.get("normalized_text") or claim.get("text") or ""
@@ -385,7 +389,15 @@ def build_doc_query_plan(claims: List[Dict[str, Any]], anchors: List[Anchor]) ->
         else:
             date_anchor = time_anchors[0].span_text
 
-    numeric_anchor = number_anchors[0].span_text if number_anchors else None
+    # Filter numeric anchors to avoid years (e.g. 2000, 1999) being treated as quantities in queries
+    numeric_anchor = None
+    for a in number_anchors:
+        txt = a.span_text
+        # Skip if it looks like a year (4 digits starting with 19 or 20)
+        if re.match(r"^(19|20)\d{2}$", txt):
+            continue
+        numeric_anchor = txt
+        break
     
     queries: List[str] = []
     
