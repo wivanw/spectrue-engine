@@ -52,6 +52,36 @@ def _get_source_score(src: Dict[str, Any]) -> float:
     except Exception:
         return 0.0
 
+
+def _contains_time(text: str) -> bool:
+    """Check if text contains time-like patterns (dates, years, etc.)."""
+    # Simple regex patterns for time detection
+    time_patterns = [
+        r'\b\d{4}\b',  # Years like 2024
+        r'\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\b',  # Dates like 01/15/2024
+        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}',  # Month day
+        r'\b\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)',  # Day month
+    ]
+    for pattern in time_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
+
+
+def _contains_number(text: str) -> bool:
+    """Check if text contains significant numbers (statistics, percentages, etc.)."""
+    # Patterns for significant numbers
+    number_patterns = [
+        r'\b\d+(?:\.\d+)?%',  # Percentages
+        r'\$\d+(?:[,.\d]*\d)?',  # Money
+        r'\b\d{1,3}(?:,\d{3})+\b',  # Large numbers with commas
+        r'\b\d+(?:\.\d+)?\s*(?:million|billion|thousand|trillion)\b',  # Named numbers
+    ]
+    for pattern in number_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
+
 def _calculate_jaccard(text1: str, text2: str) -> float:
     set1 = _normalize_text(text1)
     set2 = _normalize_text(text2)
@@ -221,11 +251,18 @@ def match_claim_to_pool(claim: Dict[str, Any], pool: EvidencePool) -> EvidenceBu
     """
     claim_id = str(claim.get("id") or claim.get("claim_id") or "unknown")
     
-    # 1. Prepare Claim Signals
-    # Entities
-    claim_entities = _normalize_text(" ".join(_extract_entities_from_claim(claim)))
+    # 1. Build relaxed match terms:
+    # claim entities + context entities + document context entities
+    match_terms: Set[str] = set()
+    match_terms |= set(_extract_entities_from_claim(claim))
+    match_terms |= set(claim.get("context_entities", []))
+    match_terms |= set(claim.get("document_context_entities", []))
+    match_terms |= set(claim.get("anchor_terms", []))
     
-    # Anchors
+    # Normalize all terms
+    match_terms = {t.lower() for t in match_terms if isinstance(t, str) and len(t) >= 2}
+    
+    # Anchors (for optional bonuses, not hard filters)
     claim_text = claim.get("normalized_text") or claim.get("text") or ""
     claim_anchors = extract_all_anchors(claim_text)
     
@@ -236,36 +273,27 @@ def match_claim_to_pool(claim: Dict[str, Any], pool: EvidencePool) -> EvidenceBu
     
     for item in pool.items:
         # Check Content
-        content_text = f"{item.source_meta.title} {item.source_meta.snippet} {item.extracted_text}"
-        
-        # Anchor Constraints (Hard Filters or Strong Penalties?)
-        # Spec: "if claim has time anchor -> evidence must contain a time-like token"
-        # We will use penalty for MVP or hard filter. Spec says "must contain".
-        # Let's check constraints.
-        
-        passes_constraints = True
-        item_anchors = extract_all_anchors(content_text)
-        
-        if has_time_anchor:
-            if not any(a.kind == AnchorKind.TIME for a in item_anchors):
-                passes_constraints = False
-        
-        if has_number_anchor:
-             if not any(a.kind == AnchorKind.NUMBER for a in item_anchors):
-                 passes_constraints = False
-                 
-        if not passes_constraints:
-            continue
-            
-        # Entity Overlap Score
+        content_text = f"{item.source_meta.title} {item.source_meta.snippet} {item.extracted_text or ''}"
         content_tokens = _normalize_text(content_text)
-        overlap = len(claim_entities & content_tokens)
         
-        # Score = overlap count + small bonus for source score
-        score = overlap + (item.source_meta.score * 0.1)
+        # Entity Overlap Score
+        base_overlap = len(match_terms & content_tokens)
         
-        if overlap > 0: # Only consider items with at least some overlap
-             scored_items.append((score, item))
+        if base_overlap == 0:
+            continue  # still need some semantic tie
+        
+        score = float(base_overlap)
+        
+        # Optional bonuses (do NOT filter)
+        if has_time_anchor and _contains_time(content_text):
+            score += 0.5
+        if has_number_anchor and _contains_number(content_text):
+            score += 0.5
+        
+        # Small bonus for source score
+        score += (item.source_meta.score * 0.1)
+        
+        scored_items.append((score, item))
              
     # Pick Top N=3
     scored_items.sort(key=lambda x: x[0], reverse=True)

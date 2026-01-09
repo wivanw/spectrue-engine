@@ -89,19 +89,20 @@ def test_match_claim_to_pool(sample_claims):
     assert bundle.matched_items[0].url == "u1"
     assert bundle.coverage_flags["has_time_anchor"] is True
 
-def test_match_claim_to_pool_constraint_fail(sample_claims):
-    # Setup pool with NO time anchor match
-    meta = EvidenceSourceMeta(url="u2", title="Apple iPhone 15", snippet="No date here", score=1.0)
+def test_match_claim_to_pool_no_overlap(sample_claims):
+    # Setup pool with NO entity overlap at all
+    meta = EvidenceSourceMeta(url="u2", title="Unrelated topic", snippet="Something else", score=1.0)
     item = EvidenceItem(
         url="u2", 
-        extracted_text="Just text without year.", 
+        extracted_text="Completely unrelated content about bananas.", 
         content_hash="hash", 
         source_meta=meta
     )
     pool = EvidencePool(items=[item], meta=[meta])
     
-    claim = sample_claims[0] # Requires "2023" (Time Anchor)
+    claim = sample_claims[0]  # Has entities "Apple", "iPhone", "smartphone", etc.
     
     bundle = match_claim_to_pool(claim, pool)
     
-    assert len(bundle.matched_items) == 0 # Should fail constraint
+    # With relaxed matching, still needs some semantic tie (base_overlap > 0)
+    assert len(bundle.matched_items) == 0  # No entity overlap
