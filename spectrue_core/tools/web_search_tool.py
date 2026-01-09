@@ -231,15 +231,114 @@ class WebSearchTool:
             Trace.event("tavily.extract.error", {"url": url, "error": str(e)})
             return None
 
+    def _clean_extracted_text(self, raw: str | None) -> str | None:
+        """Clean extracted text using trafilatura if needed."""
+        if not raw:
+            return None
+        
+        cleaned = ""
+        if trafilatura and ("<html" in raw or "<body" in raw or "<div" in raw):
+            try:
+                cleaned = trafilatura.extract(
+                    raw,
+                    include_links=True,
+                    include_images=False,
+                    include_comments=False,
+                )
+            except Exception as e:
+                logger.warning("[Tavily] Trafilatura extraction failed: %s", e)
+        
+        if not cleaned:
+            cleaned = raw
+        cleaned = cleaned.strip()
+        
+        if len(cleaned) < 50:
+            return None
+        return cleaned
+
+    def _try_page_cache(self, url: str) -> str | None:
+        """Try to get extracted text from cache."""
+        clean_url = self._clean_url_key(url)
+        cache_key = f"page_tavily|{clean_url}"
+        try:
+            if cache_key in self.page_cache:
+                cached = self.page_cache[cache_key]
+                if isinstance(cached, str) and cached.strip():
+                    return cached
+        except Exception:
+            pass
+        return None
+
+    def _write_page_cache(self, url: str, text: str) -> None:
+        """Write extracted text to cache."""
+        clean_url = self._clean_url_key(url)
+        cache_key = f"page_tavily|{clean_url}"
+        try:
+            self.page_cache.set(cache_key, text, expire=self.page_ttl)
+        except Exception:
+            pass
+
     async def _enrich_with_fulltext(self, query: str, ranked: list[dict], *, limit: int = 3) -> tuple[list[dict], int]:
         target_urls = [r.get("url") for r in (ranked or []) if r.get("url")]
         target_urls = target_urls[: max(0, int(limit))]
         if not target_urls:
             return ranked, 0
 
-        texts = await asyncio.gather(*[self._fetch_extract_text(u) for u in target_urls])
-        url_map = {u: t for u, t in zip(target_urls, texts) if t}
+        # Check cache first
+        cached_map: dict[str, str] = {}
+        missing: list[str] = []
+        for u in target_urls:
+            cached = self._try_page_cache(u)
+            if cached:
+                cached_map[u] = cached
+            else:
+                missing.append(u)
 
+        Trace.event("tavily.extract.cache", {
+            "hit": len(cached_map),
+            "miss": len(missing),
+            "target": len(target_urls),
+        })
+
+        # Batch extract missing URLs
+        url_map: dict[str, str] = dict(cached_map)
+        BATCH_SIZE = 5
+        
+        if missing and self.api_key:
+            # Chunk missing URLs into batches of 5
+            batches = [missing[i:i + BATCH_SIZE] for i in range(0, len(missing), BATCH_SIZE)]
+            
+            for batch_idx, batch in enumerate(batches):
+                Trace.event("tavily.extract.batch.call", {
+                    "batch_index": batch_idx,
+                    "urls_count": len(batch),
+                })
+                try:
+                    data = await self._tavily.extract_batch(urls=batch, format="markdown")
+                    results = data.get("results", [])
+                    
+                    for item in results:
+                        item_url = item.get("url")
+                        if not item_url:
+                            continue
+                        raw = item.get("raw_content") or item.get("content") or ""
+                        cleaned = self._clean_extracted_text(raw)
+                        if cleaned:
+                            url_map[item_url] = cleaned
+                            self._write_page_cache(item_url, cleaned)
+                            Trace.event("tavily.extract.success", {
+                                "url": item_url,
+                                "chars": len(cleaned),
+                            })
+                except Exception as e:
+                    logger.warning("[Tavily] Batch extract failed: %s", e)
+                    Trace.event("tavily.extract.batch.error", {
+                        "batch_index": batch_idx,
+                        "urls_count": len(batch),
+                        "error": str(e)[:200],
+                    })
+
+        # Rebuild ranked list with fulltext content
         updated: list[dict] = []
         fetched = 0
         for item in ranked:
