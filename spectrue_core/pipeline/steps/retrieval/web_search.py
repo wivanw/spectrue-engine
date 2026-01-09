@@ -36,6 +36,7 @@ from spectrue_core.verification.retrieval.cegs_mvp import (
     _normalize_text,
     EvidenceBundle,
 )
+from spectrue_core.verification.retrieval.experiment_mode import is_experiment_mode
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ class WebSearchStep:
                     bundle = match_claim_to_pool(claim, pool)
                     deficit = compute_deficit(claim, bundle)
                     
-                    if deficit.is_deficit:
+                    if deficit.is_deficit or is_experiment_mode():
                         pool, bundle = await escalate_claim(claim, pool, self.search_mgr)
                         
                     final_bundles[claim_id] = bundle
