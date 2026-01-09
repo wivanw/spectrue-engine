@@ -365,7 +365,26 @@ def build_doc_query_plan(claims: List[Dict[str, Any]], anchors: List[Anchor]) ->
     time_anchors = [a for a in anchors if a.kind == AnchorKind.TIME]
     number_anchors = [a for a in anchors if a.kind == AnchorKind.NUMBER]
     
-    date_anchor = time_anchors[0].span_text if time_anchors else None
+    # Priority: Explicit recent years > First available
+    date_anchor = None
+    if time_anchors:
+        best_year = -1
+        best_anchor = None
+        for a in time_anchors:
+            # Look for 4-digit years 1990-2035
+            years = re.findall(r"\b(199\d|20[0-3]\d)\b", a.span_text)
+            if years:
+                max_y = max(int(y) for y in years)
+                if max_y > best_year:
+                    best_year = max_y
+                    best_anchor = a
+        
+        # If we found a year, usage it. Otherwise fall back to first (e.g. "November 14")
+        if best_anchor:
+            date_anchor = best_anchor.span_text
+        else:
+            date_anchor = time_anchors[0].span_text
+
     numeric_anchor = number_anchors[0].span_text if number_anchors else None
     
     queries: List[str] = []
