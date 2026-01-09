@@ -378,8 +378,13 @@ def build_doc_query_plan(claims: List[Dict[str, Any]], anchors: List[Anchor]) ->
     queries.append(q1)
     
     # Q2: Top 3 entities + optional numeric anchor (C)
-    # Use different entity slice if possible for diversity
-    q2_entities = top_entities[:3] if len(top_entities) <= 3 else top_entities[1:4]
+    # Use strided entity slice if possible for diversity (cover indices 3-5)
+    if len(top_entities) >= 5:
+        q2_entities = top_entities[3:6]
+    elif len(top_entities) > 3:
+        q2_entities = top_entities[1:4]
+    else:
+        q2_entities = top_entities[:3]
     q2_parts = q2_entities[:]
     if numeric_anchor:
         q2_parts = q2_parts + [numeric_anchor]
