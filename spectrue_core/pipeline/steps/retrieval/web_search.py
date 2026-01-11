@@ -32,6 +32,7 @@ from spectrue_core.verification.retrieval.cegs_mvp import (
     match_claim_to_pool,
     compute_deficit,
     escalate_claim,
+    hydrate_pool_with_content,
     _extract_entities_from_claim,
     _normalize_text,
     EvidenceBundle,
@@ -112,11 +113,19 @@ class WebSearchStep:
                         
                 sanity_terms = _normalize_text(" ".join(all_text_parts))
                 
+                # === PASS 1: Search & Collect URLs (Skip Extraction) ===
+                
                 # 2. Doc Retrieve
-                pool = await doc_retrieve_to_pool(doc_queries, sanity_terms, self.search_mgr)
+                pool, doc_urls = await doc_retrieve_to_pool(
+                    doc_queries, 
+                    sanity_terms, 
+                    self.search_mgr,
+                    skip_extraction=True
+                )
                 
                 # 3. Match & Escalate per claim
                 final_bundles: dict[str, EvidenceBundle] = {}
+                all_urls_to_batch = list(doc_urls)
                 
                 for idx, claim in enumerate(safe_claims):
                     claim_id = _claim_id_for(claim, idx)
@@ -125,9 +134,32 @@ class WebSearchStep:
                     deficit = compute_deficit(claim, bundle)
                     
                     if deficit.is_deficit or is_experiment_mode():
-                        pool, bundle = await escalate_claim(claim, pool, self.search_mgr)
+                        pool, bundle, esc_urls = await escalate_claim(
+                            claim, 
+                            pool, 
+                            self.search_mgr,
+                            skip_extraction=True
+                        )
+                        all_urls_to_batch.extend(esc_urls)
                         
                     final_bundles[claim_id] = bundle
+                    
+                # === PASS 2: Batch Extract ALL URLs ===
+                
+                if all_urls_to_batch and hasattr(self.search_mgr, "fetch_urls_content_batch"):
+                    Trace.event("retrieval.global_batch.start", {
+                         "total_urls": len(all_urls_to_batch),
+                         "unique_urls": len(set(all_urls_to_batch))
+                    })
+                    try:
+                        content_map = await self.search_mgr.fetch_urls_content_batch(all_urls_to_batch)
+                        
+                        # === PASS 3: Hydrate Pool ===
+                        hydrate_pool_with_content(pool, content_map)
+                        
+                    except Exception as e:
+                        logger.warning(f"[WebSearchStep] Global batch extract failed: {e}")
+                        Trace.event("retrieval.global_batch.error", {"error": str(e)})
                     
                 # 4) Build retrieval_items contract so EvidenceCollectStep can produce evidence_by_claim
                 #    - global: representative pool sources (optional; deep mode may ignore)

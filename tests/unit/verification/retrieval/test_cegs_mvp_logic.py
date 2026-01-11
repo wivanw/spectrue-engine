@@ -15,6 +15,7 @@ def mock_search_mgr():
     # Return valid structure for search results
     mgr.search_phase = AsyncMock(return_value=("snippet", [{"url": "http://escalation.com", "title": "Escalation", "content": "Found it", "score": 0.9}]))
     mgr.fetch_url_content = AsyncMock(return_value="Full content for escalation")
+    mgr.fetch_urls_content_batch = AsyncMock(return_value={"http://escalation.com": "Full content for escalation"})
     return mgr
 
 @pytest.fixture
@@ -68,8 +69,30 @@ async def test_escalate_claim_success(sample_claim, mock_search_mgr):
     # Escalation should run, find evidence, merge to pool, and resolve deficit
     # We mock search_mgr to return good evidence that matches "Escalation" (in sample_claim)
     
-    updated_pool, new_bundle = await escalate_claim(sample_claim, pool, mock_search_mgr)
+    updated_pool, new_bundle, collected_urls = await escalate_claim(sample_claim, pool, mock_search_mgr)
     
     assert len(updated_pool.items) > 0
     assert len(new_bundle.matched_items) > 0
     assert mock_search_mgr.search_phase.called
+    assert set(collected_urls) == {"http://escalation.com"}
+
+@pytest.mark.asyncio
+async def test_escalate_claim_skip_extraction(sample_claim, mock_search_mgr):
+    pool = EvidencePool()
+    
+    # Run with skip_extraction=True
+    updated_pool, new_bundle, collected_urls = await escalate_claim(
+        sample_claim, 
+        pool, 
+        mock_search_mgr, 
+        skip_extraction=True
+    )
+    
+    # Should collect URL but NOT fetch content
+    assert set(collected_urls) == {"http://escalation.com"}
+    assert not mock_search_mgr.fetch_urls_content_batch.called
+    assert mock_search_mgr.search_phase.called
+    
+    # Pool items should have empty text
+    assert len(updated_pool.items) > 0
+    assert updated_pool.items[0].extracted_text == ""

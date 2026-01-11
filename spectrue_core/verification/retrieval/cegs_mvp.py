@@ -494,11 +494,12 @@ async def _execute_retrieval_flow(
     sanity_terms: Set[str],
     search_mgr: Any,
     search_params: Dict[str, Any],
-    trace_event_prefix: str = "retrieval.doc"
-) -> Tuple[List[EvidenceItem], List[EvidenceSourceMeta], List[str]]:
+    trace_event_prefix: str = "retrieval.doc",
+    skip_extraction: bool = False
+) -> Tuple[List[EvidenceItem], List[EvidenceSourceMeta], List[str], List[str]]:
     """
     Core retrieval logic: Search -> Sanity Gate -> Cluster -> Extract.
-    Returns (items, meta, kept_urls).
+    Returns (items, meta, kept_urls, collected_urls).
     
     When experiment_mode=true:
     - Sanity gate bypass: ALL sources kept regardless of overlap/score
@@ -647,7 +648,7 @@ async def _execute_retrieval_flow(
     
     # Batch fetch all URLs at once (1 credit per 5 URLs)
     fetched_content_map: Dict[str, str] = {}
-    if all_urls_to_fetch and hasattr(search_mgr, "fetch_urls_content_batch"):
+    if not skip_extraction and all_urls_to_fetch and hasattr(search_mgr, "fetch_urls_content_batch"):
         Trace.event(f"{trace_event_prefix}.batch_extract.start", {
             "total_urls": len(all_urls_to_fetch),
         })
@@ -659,7 +660,7 @@ async def _execute_retrieval_flow(
                 "error": str(e)[:200],
             })
     
-    # Build EvidenceItems from fetched content
+    # Build EvidenceItems from fetched content (or placeholders if skipped)
     for url in all_urls_to_fetch:
         rep = url_to_rep.get(url)
         if not rep:
@@ -667,7 +668,7 @@ async def _execute_retrieval_flow(
             
         content = fetched_content_map.get(url)
         
-        if not content:
+        if not content and not skip_extraction:
             extraction_failures += 1
             continue
             
@@ -689,9 +690,9 @@ async def _execute_retrieval_flow(
             
         item = EvidenceItem(
             url=url,
-            extracted_text=str(content),
+            extracted_text=str(content) if content else "",
             citations=[],
-            content_hash=_compute_content_hash(str(content)),
+            content_hash=_compute_content_hash(str(content) if content else ""),
             source_meta=meta
         )
         extracted_items.append(item)
@@ -700,12 +701,13 @@ async def _execute_retrieval_flow(
         "reps_count": len(representatives),
         "extracted_count": len(extracted_items),
         "failures_count": extraction_failures,
-        "batch_efficiency": f"{len(all_urls_to_fetch)}/{(len(all_urls_to_fetch) + 4) // 5}",
+        "batch_efficiency": f"{len(all_urls_to_fetch)}/{(len(all_urls_to_fetch) + 4) // 5}" if not skip_extraction else "skipped",
+        "skipped_extraction": skip_extraction,
     })
     
     # Also include meta for non-representatives? For now just representatives.
     
-    return extracted_items, kept_meta, kept_urls
+    return extracted_items, kept_meta, kept_urls, all_urls_to_fetch
 
 # --- T006: Document Retrieval ---
 
@@ -713,23 +715,26 @@ async def doc_retrieve_to_pool(
     doc_queries: List[str], 
     sanity_terms: Set[str],
     search_mgr: Any,
-    config: Any = None
-) -> EvidencePool:
+    config: Any = None,
+    skip_extraction: bool = False
+) -> Tuple[EvidencePool, List[str]]:
     """
     Executes metadata search, sanity gate, clustering, and selective extraction.
+    Returns (pool, collected_urls).
     """
-    items, meta, _ = await _execute_retrieval_flow(
+    items, meta, _, collected_urls = await _execute_retrieval_flow(
         doc_queries, 
         sanity_terms, 
         search_mgr, 
         search_params={"max_results": 5, "depth": "basic", "topic": "general"},
-        trace_event_prefix="retrieval.doc"
+        trace_event_prefix="retrieval.doc",
+        skip_extraction=skip_extraction
     )
     
     pool = EvidencePool()
     pool.meta = meta
     pool.add_items(items)
-    return pool
+    return pool, collected_urls
 
 # --- T009: Deficit Gate ---
 
@@ -790,11 +795,12 @@ def compute_deficit(claim: Dict[str, Any], bundle: EvidenceBundle) -> Deficit:
 async def escalate_claim(
     claim: Dict[str, Any], 
     pool: EvidencePool,
-    search_mgr: Any
-) -> Tuple[EvidencePool, EvidenceBundle]:
+    search_mgr: Any,
+    skip_extraction: bool = False
+) -> Tuple[EvidencePool, EvidenceBundle, List[str]]:
     """
     Performs bounded claim-level search to resolve deficit.
-    Updates and returns the pool and the new bundle.
+    Updates and returns the pool, the new bundle, and collected URLs.
     
     When experiment_mode=true:
     - No early-stop: Full escalation ladder runs regardless of deficit resolution
@@ -823,6 +829,8 @@ async def escalate_claim(
     resolved = False
     stop_reason = "max_passes"
     
+    all_collected_urls: List[str] = []
+    
     for i, pass_config in enumerate(ladder):
         if i >= max_passes:
             break # Max 4 passes (matches ladder length usually)
@@ -849,13 +857,16 @@ async def escalate_claim(
         }
         
         # Execute Retrieval
-        items, meta, _ = await _execute_retrieval_flow(
+        items, meta, _, collected_urls = await _execute_retrieval_flow(
             pass_queries,
             sanity_terms,
             search_mgr,
             search_params,
-            trace_event_prefix="retrieval.claim.escalation"
+            trace_event_prefix="retrieval.claim.escalation",
+            skip_extraction=skip_extraction
         )
+        
+        all_collected_urls.extend(collected_urls)
         
         Trace.event("retrieval.claim.escalation.pass", {
             "pass_id": pass_config.pass_id,
@@ -863,12 +874,13 @@ async def escalate_claim(
             "kept_count": len(meta),
             "extracted_count": len(items),
             "experiment_mode_full_run": not allow_early_stop,
+            "collected_urls": len(collected_urls),
         })
         
-        # Merge to Pool
+        # Merge to Pool (even if empty text)
         if items:
             pool.add_items(items)
-            # Re-match
+            # Re-match (will usage snippet-based matching if text empty)
             bundle = match_claim_to_pool(claim, pool)
             deficit = compute_deficit(claim, bundle)
             
@@ -884,7 +896,28 @@ async def escalate_claim(
     Trace.event("retrieval.claim.escalation.stop", {
         "claim_id": claim_id, 
         "resolved": resolved, 
-        "reason": stop_reason
+        "reason": stop_reason,
+        "total_collected_urls": len(all_collected_urls)
     })
     
-    return pool, bundle
+    return pool, bundle, all_collected_urls
+
+
+def hydrate_pool_with_content(pool: EvidencePool, content_map: Dict[str, str]):
+    """
+    Hydrate EvidenceItems in the pool with content from map.
+    This enables Pass 3 of the Two-Pass architecture.
+    """
+    hydrated_count = 0
+    for item in pool.items:
+        if item.url in content_map and not item.extracted_text:
+            content = content_map[item.url]
+            item.extracted_text = content
+            item.content_hash = _compute_content_hash(content)
+            hydrated_count += 1
+            
+    Trace.event("retrieval.pool.hydrate", {
+        "pool_size": len(pool.items),
+        "hydrated_count": hydrated_count,
+        "content_map_size": len(content_map)
+    })
