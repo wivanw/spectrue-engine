@@ -546,7 +546,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
         EscalationPass(
             pass_id="B",
             search_depth="basic",
-            max_results=6,
+            max_results=5,
             topic=None,
             include_domains_relaxed=False,
             query_ids=["Q2", "Q3"],
@@ -555,7 +555,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
         EscalationPass(
             pass_id="C",
             search_depth="advanced",
-            max_results=6,
+            max_results=5,
             topic=None,
             include_domains_relaxed=False,
             query_ids=["Q1", "Q2"],
@@ -564,7 +564,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
         EscalationPass(
             pass_id="D",
             search_depth="basic",
-            max_results=6,
+            max_results=5,
             topic=None,
             include_domains_relaxed=True,  # include_domains will be None
             query_ids=["Q2"],
