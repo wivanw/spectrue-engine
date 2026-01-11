@@ -15,6 +15,7 @@ def mock_search_mgr():
     mgr = MagicMock()
     mgr.search_phase = AsyncMock(return_value=("snippet", [{"url": "http://example.com", "title": "Test Title", "content": "Test Snippet", "score": 0.9}]))
     mgr.fetch_url_content = AsyncMock(return_value="Full content with entities")
+    mgr.fetch_urls_content_batch = AsyncMock(return_value={"http://example.com": "Full content with entities"})
     return mgr
 
 @pytest.fixture
@@ -56,7 +57,7 @@ def test_build_doc_query_plan_limits(sample_claims, sample_anchors):
 @pytest.mark.asyncio
 async def test_doc_retrieve_to_pool(mock_search_mgr):
     sanity_terms = {"test", "title"}
-    pool = await doc_retrieve_to_pool(
+    pool, _ = await doc_retrieve_to_pool(
         doc_queries=["query1"],
         sanity_terms=sanity_terms,
         search_mgr=mock_search_mgr
@@ -66,8 +67,9 @@ async def test_doc_retrieve_to_pool(mock_search_mgr):
     assert len(pool.items) > 0
     assert pool.items[0].url == "http://example.com"
     # Verify search was called
+    # Verify search was called
     mock_search_mgr.search_phase.assert_called_once()
-    mock_search_mgr.fetch_url_content.assert_called_once()
+    mock_search_mgr.fetch_urls_content_batch.assert_called_once()
 
 def test_match_claim_to_pool(sample_claims):
     # Setup pool with matching item

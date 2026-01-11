@@ -715,7 +715,6 @@ async def doc_retrieve_to_pool(
     doc_queries: List[str], 
     sanity_terms: Set[str],
     search_mgr: Any,
-    config: Any = None,
     skip_extraction: bool = False
 ) -> Tuple[EvidencePool, List[str]]:
     """
