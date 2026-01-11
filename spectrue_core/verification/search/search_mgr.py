@@ -311,6 +311,7 @@ class SearchManager:
         max_fetches: int = 2,
         budget_context: str = "claim",
         claim_id: str | None = None,
+        cache_only: bool = False,
     ) -> list[dict]:
         """
         EAL: Enrich snippet-only sources with content + quote candidates.
@@ -327,6 +328,8 @@ class SearchManager:
                 - "inline": For inline source verification (separate budget)
             claim_id: If provided, use per-claim budget tracker (for deep mode).
                 Each claim gets its own independent budget.
+            cache_only: If True, only use cached content (no API calls).
+                Use when orchestration layer has already pre-fetched URLs.
         
         Uses batch quote extraction for efficiency (single embedding call).
         """
@@ -393,10 +396,25 @@ class SearchManager:
                         src_by_url[url] = []
                     src_by_url[url].append(src)
 
-        # Phase 1b: Batch fetch all collected URLs at once
+        # Phase 1b: Fetch content for collected URLs
+        # In cache_only mode, only read from cache (no API calls)
         fetch_count = 0
         if urls_to_fetch:
-            fetched_map = await self.fetch_urls_content_batch(urls_to_fetch)
+            if cache_only:
+                # Cache-only mode: read from web_tool's cache without API calls
+                fetched_map: dict[str, str] = {}
+                for url in urls_to_fetch:
+                    cached = self.web_tool._try_page_cache(url)
+                    if cached:
+                        fetched_map[url] = cached
+                Trace.event("eal.cache_only_fetch", {
+                    "urls_requested": len(urls_to_fetch),
+                    "cache_hits": len(fetched_map),
+                    "cache_misses": len(urls_to_fetch) - len(fetched_map),
+                })
+            else:
+                # Normal mode: batch fetch with API calls
+                fetched_map = await self.fetch_urls_content_batch(urls_to_fetch)
 
             # Apply fetched content to sources
             for url, content in fetched_map.items():

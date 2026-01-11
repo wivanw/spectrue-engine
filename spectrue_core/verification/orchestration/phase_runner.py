@@ -342,6 +342,45 @@ class PhaseRunner:
         for summary in summaries:
             Trace.event("claim.trace.summary", summary)
 
+    async def _pre_extract_inline_urls(self) -> None:
+        """
+        Pre-fetch all inline source URLs to populate cache.
+        
+        This ensures subsequent EAL calls get cache hits instead of
+        making individual API calls (5 URLs = 1 credit vs 1 URL = 1 credit).
+        """
+        if not self.inline_sources:
+            return
+        
+        # Collect all URLs from inline sources
+        all_urls: list[str] = []
+        for src in self.inline_sources:
+            if not isinstance(src, dict):
+                continue
+            url = src.get("url") or src.get("link")
+            if url and isinstance(url, str) and url not in all_urls:
+                all_urls.append(url)
+        
+        if not all_urls:
+            return
+        
+        # Batch extract using search_mgr
+        if hasattr(self.search_mgr, "fetch_urls_content_batch"):
+            Trace.event("phase_runner.prefetch.start", {
+                "total_urls": len(all_urls),
+                "source": "inline_sources",
+            })
+            try:
+                await self.search_mgr.fetch_urls_content_batch(all_urls)
+                Trace.event("phase_runner.prefetch.done", {
+                    "urls_extracted": len(all_urls),
+                })
+            except Exception as e:
+                logger.warning("[PhaseRunner] Pre-fetch failed: %s", e)
+                Trace.event("phase_runner.prefetch.error", {
+                    "error": str(e)[:200],
+                })
+
     async def _run_claims_with_loop(
         self,
         *,
@@ -353,6 +392,10 @@ class PhaseRunner:
         """
         evidence: dict[str, list[dict]] = {c.get("id"): [] for c in claims}
         dependency_layers = self._get_dependency_layers(claims)
+
+        # === PRE-FETCH: Batch extract all inline source URLs ===
+        # This populates the cache so EAL calls get cache hits
+        await self._pre_extract_inline_urls()
 
         for layer in dependency_layers:
             tasks = []
@@ -580,6 +623,7 @@ class PhaseRunner:
                 sources = await self.search_mgr.apply_evidence_acquisition_ladder(
                     sources,
                     claim_id=claim_id,  # Per-claim budget in deep mode
+                    cache_only=True,  # Use pre-fetched cache from _pre_extract_inline_urls
                 )
 
             all_sources.extend(sources)
@@ -697,6 +741,7 @@ class PhaseRunner:
                     claim_inline_sources = await self.search_mgr.apply_evidence_acquisition_ladder(
                         claim_inline_sources,
                         budget_context="inline",  # Use separate budget from claim verification
+                        cache_only=True,  # Use pre-fetched cache from _pre_extract_inline_urls
                     )
 
                 # IMPORTANT: We must return the inline sources too!
