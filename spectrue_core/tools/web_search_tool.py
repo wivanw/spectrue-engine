@@ -362,6 +362,7 @@ class WebSearchTool:
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
         topic: str = "general",
+        skip_enrichment: bool = False,  # Skip fulltext enrichment for batch mode
     ) -> tuple[str, list[dict]]:
         if not self.api_key:
             logger.debug("[Tavily] API key missing; skipping search")
@@ -380,6 +381,7 @@ class WebSearchTool:
             include_domains=include_domains,
             exclude_domains=exclude_domains,
             topic=topic,
+            skip_enrichment=skip_enrichment,
         )
 
     async def _search_internal(
@@ -393,6 +395,7 @@ class WebSearchTool:
         exclude_domains: list[str] | None,
         topic: str,
         ttl: int | None = None,
+        skip_enrichment: bool = False,  # Skip per-search fulltext enrichment for batch mode
     ) -> tuple[str, list[dict]]:
         from spectrue_core.utils.text_processing import normalize_search_query
 
@@ -576,7 +579,8 @@ class WebSearchTool:
 
             quality = self._quality_from_ranked(ranked)
             fulltext_fetches = 0
-            if self._should_fulltext_enrich():
+            # Skip enrichment in batch mode - orchestration layer will do centralized enrichment
+            if self._should_fulltext_enrich() and not skip_enrichment:
                 ranked, fulltext_fetches = await self._enrich_with_fulltext(q, ranked, limit=3)
                 quality = self._quality_from_ranked(ranked)
                 logger.debug("[Tavily] Fulltext enrichment: %d pages", fulltext_fetches)

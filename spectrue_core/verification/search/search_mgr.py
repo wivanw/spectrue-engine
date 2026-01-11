@@ -600,7 +600,8 @@ class SearchManager:
             query,
             num_results=num_results,
             depth="advanced",
-            topic=topic
+            topic=topic,
+            skip_enrichment=True,  # Centralized enrichment at orchestration level
         )
 
         filtered = self._filter_search_results(results, intent)
@@ -615,7 +616,8 @@ class SearchManager:
                 query,
                 num_results=num_results,  # Use same limit for fallback
                 depth="advanced",
-                topic="general"
+                topic="general",
+                skip_enrichment=True,  # Centralized enrichment at orchestration level
             )
             fb_filtered = self._filter_search_results(fb_results, intent)
 
@@ -664,6 +666,7 @@ class SearchManager:
             include_domains=include_domains,
             exclude_domains=exclude_domains,
             topic=topic,
+            skip_enrichment=True,  # Centralized enrichment at orchestration level
         )
 
     async def search_tier1(self, query: str, domains: list[str]) -> SearchResponse:
@@ -672,7 +675,8 @@ class SearchManager:
         return await self.web_tool.search(
             query, 
             depth="advanced", 
-            include_domains=domains
+            include_domains=domains,
+            skip_enrichment=True,  # Centralized enrichment at orchestration level
         )
 
     async def search_tier2(
@@ -687,7 +691,8 @@ class SearchManager:
             query,
             depth="advanced",
             exclude_domains=exclude_domains,
-            topic=topic
+            topic=topic,
+            skip_enrichment=True,  # Centralized enrichment at orchestration level
         )
 
     async def search_google_cse(self, query: str, lang: str) -> list[dict]:

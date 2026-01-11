@@ -338,6 +338,10 @@ class PhaseRunner:
                                 "reason": sufficiency.reason,
                             })
 
+        # === CENTRALIZED BATCH ENRICHMENT ===
+        # After all searches complete, enrich all sources at once
+        evidence = await self._batch_enrich_all_sources(evidence)
+
         self._emit_claim_trace_summaries(execution_plan)
         return evidence
 
@@ -384,6 +388,67 @@ class PhaseRunner:
                 Trace.event("phase_runner.prefetch.error", {
                     "error": str(e)[:200],
                 })
+
+    async def _batch_enrich_all_sources(
+        self, evidence: dict[str, list[dict]]
+    ) -> dict[str, list[dict]]:
+        """
+        Centralized batch enrichment for all sources across all claims.
+        
+        Collects all URLs from all claim sources, fetches them in batch
+        (5 URLs = 1 credit), then applies content to sources.
+        
+        This replaces per-search enrichment for ~90% cost reduction.
+        """
+        # Collect all URLs from all claims
+        all_urls: list[str] = []
+        for claim_id, sources in evidence.items():
+            for src in sources:
+                if not isinstance(src, dict):
+                    continue
+                url = src.get("url") or src.get("link")
+                if url and isinstance(url, str) and url not in all_urls:
+                    all_urls.append(url)
+        
+        if not all_urls:
+            return evidence
+        
+        # Batch fetch all URLs at once
+        if not hasattr(self.search_mgr, "fetch_urls_content_batch"):
+            return evidence
+        
+        Trace.event("orchestration.batch_enrich.start", {
+            "total_urls": len(all_urls),
+            "claims_count": len(evidence),
+        })
+        
+        try:
+            content_map = await self.search_mgr.fetch_urls_content_batch(all_urls)
+            
+            # Apply content to sources
+            enriched_count = 0
+            for claim_id, sources in evidence.items():
+                for src in sources:
+                    if not isinstance(src, dict):
+                        continue
+                    url = src.get("url") or src.get("link")
+                    if url and url in content_map and not src.get("fulltext"):
+                        src["content"] = content_map[url]
+                        src["fulltext"] = True
+                        enriched_count += 1
+            
+            Trace.event("orchestration.batch_enrich.done", {
+                "urls_fetched": len(content_map),
+                "sources_enriched": enriched_count,
+            })
+            
+        except Exception as e:
+            logger.warning("[PhaseRunner] Batch enrichment failed: %s", e)
+            Trace.event("orchestration.batch_enrich.error", {
+                "error": str(e)[:200],
+            })
+        
+        return evidence
 
     async def _run_claims_with_loop(
         self,
