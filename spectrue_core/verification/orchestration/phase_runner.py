@@ -206,6 +206,10 @@ class PhaseRunner:
             self._emit_claim_trace_summaries(execution_plan)
             return evidence
 
+        # === PRE-FETCH: Batch extract all inline source URLs ===
+        # This populates the cache so per-claim EAL calls get cache hits
+        await self._pre_extract_inline_urls()
+
         dependency_layers = self._get_dependency_layers(claims)
 
         # Determine phase order (collect all unique phases in order)
