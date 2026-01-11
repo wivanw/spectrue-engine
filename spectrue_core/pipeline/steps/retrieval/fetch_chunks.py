@@ -64,6 +64,39 @@ class FetchChunksStep:
             claim_texts = _claim_text_map(ctx.claims)
             chunks_by_url: dict[str, dict[str, Any]] = {}
 
+            # === PHASE 0: Aggregate all URLs for batch pre-fetch ===
+            # This ensures all URLs are fetched in one API call (5 URLs = 1 credit)
+            # Then individual EAL calls get cache hits instead of API calls
+            all_urls: list[str] = []
+            
+            for claim_id, items in ranked.results_by_claim.items():
+                for item in items:
+                    url = getattr(item, "url", None) or (item.raw.get("url") if isinstance(item.raw, dict) else None)
+                    if url and url not in all_urls:
+                        all_urls.append(url)
+            
+            if ranked.results_global:
+                for item in ranked.results_global:
+                    url = getattr(item, "url", None) or (item.raw.get("url") if isinstance(item.raw, dict) else None)
+                    if url and url not in all_urls:
+                        all_urls.append(url)
+            
+            # Pre-fetch all URLs in batches of 5
+            if all_urls and hasattr(self.search_mgr, "fetch_urls_content_batch"):
+                Trace.event("fetch_chunks.prefetch.start", {
+                    "total_urls": len(all_urls),
+                })
+                try:
+                    # This populates the cache; EAL will get cache hits
+                    await self.search_mgr.fetch_urls_content_batch(all_urls)
+                    Trace.event("fetch_chunks.prefetch.done", {
+                        "urls_prefetched": len(all_urls),
+                    })
+                except Exception as e:
+                    logger.warning("[FetchChunksStep] Prefetch failed: %s", e)
+                    Trace.event("fetch_chunks.prefetch.error", {"error": str(e)[:200]})
+
+            # === PHASE 1: Per-claim EAL (now gets cache hits) ===
             for claim_id, items in ranked.results_by_claim.items():
                 claim_text = claim_texts.get(claim_id)
                 sources = _prepare_sources(items, claim_text)
