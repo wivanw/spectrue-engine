@@ -395,51 +395,72 @@ class PhaseRunner:
         """
         Centralized batch enrichment for all sources across all claims.
         
-        Collects all URLs from all claim sources, fetches them in batch
-        (5 URLs = 1 credit), then applies content to sources.
+        Collects all URLs from:
+        1. All claim sources (from search results)
+        2. Inline sources (article citations)
         
-        This replaces per-search enrichment for ~90% cost reduction.
+        Fetches them in batch (5 URLs = 1 credit), then applies content.
+        
+        This consolidates ALL URL extraction for ~90% cost reduction.
         """
-        # Collect all URLs from all claims
+        # Collect all URLs from all claims + inline sources
         all_urls: list[str] = []
+        url_to_sources: dict[str, list[dict]] = {}  # Track which sources need each URL
+        
+        # 1. Collect from claim sources
         for claim_id, sources in evidence.items():
             for src in sources:
                 if not isinstance(src, dict):
                     continue
                 url = src.get("url") or src.get("link")
-                if url and isinstance(url, str) and url not in all_urls:
+                if url and isinstance(url, str):
+                    if url not in all_urls:
+                        all_urls.append(url)
+                    url_to_sources.setdefault(url, []).append(src)
+        
+        # 2. Collect from inline sources
+        for src in self.inline_sources:
+            if not isinstance(src, dict):
+                continue
+            url = src.get("url") or src.get("link")
+            if url and isinstance(url, str):
+                if url not in all_urls:
                     all_urls.append(url)
+                url_to_sources.setdefault(url, []).append(src)
         
         if not all_urls:
+            Trace.event("orchestration.batch_enrich.skip", {
+                "reason": "no_urls",
+            })
             return evidence
         
         # Batch fetch all URLs at once
         if not hasattr(self.search_mgr, "fetch_urls_content_batch"):
+            logger.warning("[PhaseRunner] SearchManager lacks fetch_urls_content_batch")
             return evidence
         
         Trace.event("orchestration.batch_enrich.start", {
             "total_urls": len(all_urls),
             "claims_count": len(evidence),
+            "inline_count": len(self.inline_sources),
         })
         
         try:
             content_map = await self.search_mgr.fetch_urls_content_batch(all_urls)
             
-            # Apply content to sources
+            # Apply content to ALL sources that reference each URL
             enriched_count = 0
-            for claim_id, sources in evidence.items():
-                for src in sources:
-                    if not isinstance(src, dict):
-                        continue
-                    url = src.get("url") or src.get("link")
-                    if url and url in content_map and not src.get("fulltext"):
-                        src["content"] = content_map[url]
+            for url, content in content_map.items():
+                for src in url_to_sources.get(url, []):
+                    if not src.get("fulltext"):
+                        src["content"] = content
                         src["fulltext"] = True
                         enriched_count += 1
             
             Trace.event("orchestration.batch_enrich.done", {
                 "urls_fetched": len(content_map),
                 "sources_enriched": enriched_count,
+                "batch_efficiency": f"{len(all_urls)}/{(len(all_urls) + 4) // 5}",
             })
             
         except Exception as e:
@@ -688,12 +709,9 @@ class PhaseRunner:
                     if claim_text and not src.get("claim_text"):
                         src["claim_text"] = claim_text
 
-            if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
-                sources = await self.search_mgr.apply_evidence_acquisition_ladder(
-                    sources,
-                    claim_id=claim_id,  # Per-claim budget in deep mode
-                    cache_only=True,  # Use pre-fetched cache from _pre_extract_inline_urls
-                )
+            # NOTE: Content enrichment deferred to _batch_enrich_all_sources after
+            # all searches complete. This enables batching (5 URLs = 1 credit).
+            # Sources collected here contain only snippets from search results.
 
             all_sources.extend(sources)
 
@@ -806,12 +824,8 @@ class PhaseRunner:
                     claim_id, ready_stats
                 )
 
-                if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
-                    claim_inline_sources = await self.search_mgr.apply_evidence_acquisition_ladder(
-                        claim_inline_sources,
-                        budget_context="inline",  # Use separate budget from claim verification
-                        cache_only=True,  # Use pre-fetched cache from _pre_extract_inline_urls
-                    )
+                # NOTE: Inline source enrichment deferred to _batch_enrich_all_sources
+                # to enable batched URL extraction (5 URLs = 1 credit).
 
                 # IMPORTANT: We must return the inline sources too!
                 # Filter to only unique sources to avoid dupes if they were already in claim_sources
