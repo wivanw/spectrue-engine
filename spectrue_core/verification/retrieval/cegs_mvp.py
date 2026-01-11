@@ -617,48 +617,75 @@ async def _execute_retrieval_flow(
         "experiment_mode_bypass": not apply_filters,
     })
     
-    # 4. Selective Extraction
+    # 4. Selective Extraction — BATCH MODE (5 URLs = 1 credit)
     extracted_items: List[EvidenceItem] = []
     extraction_failures = 0
     kept_meta: List[EvidenceSourceMeta] = []
     kept_urls: List[str] = []
     
-    fetch_tasks = []
+    # Collect all URLs first for batch extraction
+    all_urls_to_fetch: List[str] = []
+    url_to_rep: Dict[str, Dict[str, Any]] = {}
+    
     for rep in representatives:
         # Check both 'url' and 'link' fields (Tavily raw uses 'url', build_sources_list uses 'link')
         url = rep.get("url") or rep.get("link")
         if url:
-             fetch_tasks.append(search_mgr.fetch_url_content(url))
-        else:
-             fetch_tasks.append(None)
-             
-    fetched_contents = await asyncio.gather(*[t for t in fetch_tasks if t], return_exceptions=True)
+            all_urls_to_fetch.append(url)
+            url_to_rep[url] = rep
+            kept_urls.append(url)
+            
+            # Meta is always kept for representatives
+            meta = EvidenceSourceMeta(
+                url=url,
+                title=rep.get("title", ""),
+                snippet=rep.get("content", "") or rep.get("snippet", ""),
+                score=rep.get("score", 0.0),
+                provider_meta=rep
+            )
+            kept_meta.append(meta)
     
-    fetch_idx = 0
-    for i, rep in enumerate(representatives):
-        # Check both 'url' and 'link' fields
-        url = rep.get("url") or rep.get("link") or ""
-        kept_urls.append(url)
-        
-        # Meta is always kept for representatives
-        meta = EvidenceSourceMeta(
-            url=url,
-            title=rep.get("title", ""),
-            snippet=rep.get("content", "") or rep.get("snippet", ""),
-            score=rep.get("score", 0.0),
-            provider_meta=rep
-        )
-        kept_meta.append(meta)
-        
-        if fetch_tasks[i] is None:
+    # Batch fetch all URLs at once (1 credit per 5 URLs)
+    fetched_content_map: Dict[str, str] = {}
+    if all_urls_to_fetch and hasattr(search_mgr, "fetch_urls_content_batch"):
+        Trace.event(f"{trace_event_prefix}.batch_extract.start", {
+            "total_urls": len(all_urls_to_fetch),
+        })
+        try:
+            fetched_content_map = await search_mgr.fetch_urls_content_batch(all_urls_to_fetch)
+        except Exception as e:
+            logger.warning(f"Batch extract failed: {e}")
+            Trace.event(f"{trace_event_prefix}.batch_extract.error", {
+                "error": str(e)[:200],
+            })
+    
+    # Build EvidenceItems from fetched content
+    for url in all_urls_to_fetch:
+        rep = url_to_rep.get(url)
+        if not rep:
             continue
             
-        content = fetched_contents[fetch_idx]
-        fetch_idx += 1
+        content = fetched_content_map.get(url)
         
-        if isinstance(content, Exception) or not content:
+        if not content:
             extraction_failures += 1
             continue
+            
+        # Find corresponding meta
+        meta = None
+        for m in kept_meta:
+            if m.url == url:
+                meta = m
+                break
+        
+        if not meta:
+            meta = EvidenceSourceMeta(
+                url=url,
+                title=rep.get("title", ""),
+                snippet=rep.get("content", "") or rep.get("snippet", ""),
+                score=rep.get("score", 0.0),
+                provider_meta=rep
+            )
             
         item = EvidenceItem(
             url=url,
@@ -672,7 +699,8 @@ async def _execute_retrieval_flow(
     Trace.event(f"{trace_event_prefix}.extract", {
         "reps_count": len(representatives),
         "extracted_count": len(extracted_items),
-        "failures_count": extraction_failures
+        "failures_count": extraction_failures,
+        "batch_efficiency": f"{len(all_urls_to_fetch)}/{(len(all_urls_to_fetch) + 4) // 5}",
     })
     
     # Also include meta for non-representatives? For now just representatives.

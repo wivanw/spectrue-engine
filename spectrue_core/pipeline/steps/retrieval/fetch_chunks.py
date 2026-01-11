@@ -106,6 +106,7 @@ class FetchChunksStep:
                     sources,
                     budget_context="claim",
                     claim_id=claim_id,
+                    cache_only=True,  # Use pre-fetched cache from PHASE 0
                 )
                 for src in enriched:
                     url = src.get("url") or src.get("link")
@@ -118,6 +119,7 @@ class FetchChunksStep:
                     enriched = await self.search_mgr.apply_evidence_acquisition_ladder(
                         sources,
                         budget_context="claim",
+                        cache_only=True,  # Use pre-fetched cache from PHASE 0
                     )
                     for src in enriched:
                         url = src.get("url") or src.get("link")
