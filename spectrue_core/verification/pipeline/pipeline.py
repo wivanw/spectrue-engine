@@ -46,13 +46,13 @@ class ValidationPipeline:
 
         # ClaimGraph for key claim identification
         self._claim_graph: ClaimGraphBuilder | None = None
-        claim_graph_enabled = (
-            getattr(getattr(getattr(config, "runtime", None), "claim_graph", None), "enabled", False)
-            is True
-        )
-        if config and claim_graph_enabled:
+        # ClaimGraph is always enabled in ClaimGraphConfig (flag removed)
+        runtime_cfg = getattr(config, "runtime", None)
+        claim_graph_cfg = getattr(runtime_cfg, "claim_graph", None)
+        
+        if config and claim_graph_cfg:
             self._claim_graph = ClaimGraphBuilder(
-                config=config.runtime.claim_graph,
+                config=claim_graph_cfg,
                 edge_typing_skill=agent.edge_typing_skill,
             )
 
