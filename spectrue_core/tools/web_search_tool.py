@@ -7,7 +7,6 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Tuple
