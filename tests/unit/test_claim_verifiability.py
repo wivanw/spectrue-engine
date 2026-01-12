@@ -275,4 +275,4 @@ class TestTimeAnchorExemptPredicates:
         assert "ranking" in TIME_ANCHOR_EXEMPT_PREDICATES
         assert "existence" in TIME_ANCHOR_EXEMPT_PREDICATES
         assert "event" not in TIME_ANCHOR_EXEMPT_PREDICATES
-        assert "measurement" not in TIME_ANCHOR_EXEMPT_PREDICATES
+        assert "measurement" in TIME_ANCHOR_EXEMPT_PREDICATES

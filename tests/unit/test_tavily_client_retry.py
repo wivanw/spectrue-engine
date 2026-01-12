@@ -203,7 +203,7 @@ class TestTavilyClientRetry:
             mock_post.side_effect = [response_432, mock_response_ok]
             
             with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-                result = await tavily_client.extract(url="https://example.com")
+                result = await tavily_client.extract_batch(urls=["https://example.com"])
                 
                 assert result == {"results": []}
                 assert mock_post.call_count == 2

@@ -407,7 +407,7 @@ class TestEscalationLadder:
         pass_c = ladder[2]
         
         assert pass_c.search_depth == "advanced"
-        assert pass_c.max_results == 6
+        assert pass_c.max_results == 5
 
     def test_pass_d_relaxes_domains(self):
         """Pass D should relax domain restrictions."""
