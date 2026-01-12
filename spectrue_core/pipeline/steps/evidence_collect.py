@@ -32,10 +32,6 @@ from spectrue_core.verification.pipeline.pipeline_evidence import (
     EvidenceFlowInput,
     collect_evidence,
 )
-from spectrue_core.verification.retrieval.experiment_mode import (
-    is_experiment_mode,
-    build_broadcasted_sources,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +56,7 @@ def _build_evidence_items(raw_items: list[dict[str, Any]]) -> tuple[EvidenceItem
         items.append(
             EvidenceItem(
                 url=str(raw.get("url") or raw.get("link") or ""),
+                source_id=raw.get("source_id"),
                 title=raw.get("title"),
                 snippet=raw.get("snippet") or raw.get("content"),
                 quote=raw.get("quote"),
@@ -160,29 +157,6 @@ class EvidenceCollectStep:
                     sources = flat_by_claim
             else:
                 by_claim_items = _group_sources_by_claim(sources)
-
-            # EXPERIMENT MODE: broadcast ALL sources to ALL claims
-            if is_experiment_mode() and (global_items or by_claim_items):
-                # Build unified source list for broadcasting
-                broadcasted = build_broadcasted_sources(global_items, by_claim_items)
-                
-                if broadcasted:
-                    # Override by_claim_items: every claim gets ALL sources
-                    claim_ids = []
-                    for claim in claims or []:
-                        if isinstance(claim, dict):
-                            cid = claim.get("id") or claim.get("claim_id")
-                            if cid:
-                                claim_ids.append(str(cid))
-                    
-                    # Assign broadcasted sources to each claim
-                    by_claim_items = {cid: list(broadcasted) for cid in claim_ids}
-                    sources = broadcasted
-                    
-                    Trace.event("evidence_collect.experiment_mode_broadcast", {
-                        "claims_count": len(claim_ids),
-                        "broadcasted_sources_count": len(broadcasted),
-                    })
 
             inp = EvidenceFlowInput(
                 fact=ctx.get_extra("prepared_fact", ""),

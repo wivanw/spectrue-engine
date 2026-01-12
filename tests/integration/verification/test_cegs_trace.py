@@ -23,6 +23,7 @@ async def test_cegs_trace_flow():
     # Mock Deps
     search_mgr = MagicMock()
     search_mgr.search_phase = AsyncMock(return_value=("snippet", [{"url": "u1", "title": "T", "content": "C", "score": 0.9}]))
+    search_mgr.fetch_urls_content_batch = AsyncMock(return_value={"u1": "Full content"})
     search_mgr.fetch_url_content = AsyncMock(return_value="Full content")
     
     agent = MagicMock()
@@ -48,13 +49,13 @@ async def test_cegs_trace_flow():
         search_step = WebSearchStep(config, search_mgr, agent)
         ctx = await search_step.run(ctx)
         
-        # Verify Search/Cluster/Match Traces
+        # Verify fixed pipeline traces
         expected_events = [
-            "retrieval.doc.search",
-            "retrieval.doc.clusters",
-            "retrieval.doc.extract",
+            "urls_registered",
+            "extract_batch_started",
+            "extract_batch_finished",
+            "bind_completed",
             "retrieval.pool.match",
-            "retrieval.claim.deficit"
         ]
         
         emitted_events = [call[0][0] for call in trace_spy.call_args_list]

@@ -60,7 +60,8 @@ def build_evidence_audit_system_prompt() -> str:
     return (
         "You are an evidence audit annotator. Output JSON only that matches the schema.\n"
         "Do NOT produce final scores or narrative summaries.\n"
-        "Avoid markdown, code fences, or commentary. JSON only.\n\n"
+        "Avoid markdown, code fences, or commentary. JSON only.\n"
+        "Return the exact Source ID provided in the prompt.\n\n"
         "BAD (do not do this):\n"
         "This source supports the claim strongly because...\n\n"
         "GOOD (example shape):\n"
@@ -86,7 +87,7 @@ def build_evidence_audit_prompt(frame: ClaimFrame, evidence: EvidenceItemFrame) 
         f"Claim ID: {frame.claim_id}\n"
         f"Claim Text: {frame.claim_text}\n"
         f"Evidence ID: {evidence.evidence_id}\n"
-        f"Source ID: {evidence.source_type or evidence.url}\n"
+        f"Source ID: {evidence.source_id}\n"
         f"URL: {evidence.url}\n"
         f"Title: {evidence.title or ''}\n"
         f"Snippet: {evidence.snippet or ''}\n"

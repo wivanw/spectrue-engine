@@ -232,15 +232,20 @@ class SearchManager:
             return True
         return current_cost <= max_cost
 
-    async def fetch_url_content(self, url: str) -> str | None:
+    async def fetch_url_content(self, url: str, *, stage: int | None = None) -> str | None:
         """Securely fetch content via Tavily Extract (single URL, for back-compat)."""
-        results = await self.fetch_urls_content_batch([url])
+        results = await self.fetch_urls_content_batch([url], stage=stage)
         content = results.get(url)
         if content:
             self.page_fetches += 1
         return content
 
-    async def fetch_urls_content_batch(self, urls: list[str]) -> dict[str, str]:
+    async def fetch_urls_content_batch(
+        self,
+        urls: list[str],
+        *,
+        stage: int | None = None,
+    ) -> dict[str, str]:
         """
         Fetch content for multiple URLs using batch extraction.
         
@@ -268,6 +273,7 @@ class SearchManager:
             "hit": len(url_map),
             "miss": len(missing),
             "total": len(urls),
+            "stage": stage,
         })
         
         if missing and self.web_tool.api_key:
@@ -279,6 +285,7 @@ class SearchManager:
                 Trace.event("search_mgr.batch_fetch.call", {
                     "batch_index": batch_idx,
                     "urls_count": len(batch),
+                    "stage": stage,
                 })
                 try:
                     data = await self.web_tool._tavily.extract_batch(urls=batch, format="markdown")
@@ -300,6 +307,7 @@ class SearchManager:
                         "batch_index": batch_idx,
                         "urls_count": len(batch),
                         "error": str(e)[:200],
+                        "stage": stage,
                     })
         
         return url_map

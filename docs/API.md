@@ -124,6 +124,9 @@ config = SpectrueConfig(
 | `TRACE_SAFE_PAYLOADS` | Sanitize PII/sensitive data in traces | `false` |
 | `TRACE_MAX_HEAD_CHARS` | Truncation limit for trace logs | `120` |
 
+Retrieval pipeline behavior is fixed. There is no experiment-mode flag or
+alternate retriever configuration.
+
 ---
 
 ## Claim Metadata

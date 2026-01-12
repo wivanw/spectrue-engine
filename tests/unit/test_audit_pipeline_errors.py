@@ -44,6 +44,7 @@ def _build_frame() -> ClaimFrame:
                 evidence_id="e1",
                 claim_id="c1",
                 url="https://example.com",
+                source_id="src_example",
                 title="Example",
                 snippet="Example snippet",
                 source_tier="B",

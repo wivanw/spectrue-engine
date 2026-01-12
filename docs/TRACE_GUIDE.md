@@ -8,9 +8,10 @@ Spectrue Engine emits a structured JSONL trace for every run.
 - `claims.skeleton.*`: coverage skeleton extraction events (parsing, coverage warnings, conversion stats).
 - `claims.dropped`: rejected non-verifiable claims with reason codes.
 - `target_selection.completed`: which claims were chosen for retrieval (targets) vs deferred.
-- `retrieval.search.*` and `tavily.extract.*`: external calls and their cost impact.
-- `search.escalation`: escalation ladder progress (passes A/B/C/D) and topic selection.
-- `search.stop`: early stopping reasons (quality gates, budget caps).
+- `urls_registered`: URLs collected per stage (stage, count).
+- `extract_batch_started`: extraction batch started (batch_size, pending_before, batch_urls_count, pending_after, stage).
+- `extract_batch_finished`: extraction batch completed (success_count, pending_before, batch_urls_count, pending_after, stage).
+- `bind_completed`: claim/url binding finished (stage).
 - `evidence.items.summary`: stance distribution (SUPPORT/REFUTE/CONTEXT) per claim.
 - `score_evidence.response`: LLM scoring output per claim.
 - `verdict.*`: deterministic post-processing and final per-claim verdict.
@@ -21,7 +22,7 @@ Spectrue Engine emits a structured JSONL trace for every run.
 1. Start from `total_credits` and per-phase costs.
 2. Count external calls:
    - number of searches
-   - number of extracts
+   - number of extract batches (`extract_batch_started`)
 3. Inspect why stop-early did or didn't trigger:
    - check readiness / sufficiency events
 4. Verify `target_selection`:

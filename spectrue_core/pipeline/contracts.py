@@ -249,6 +249,7 @@ class RetrievalItem:
     """Normalized retrieval item used for evidence packaging."""
 
     url: str
+    source_id: str | None = None
     provider_score: float | None = None
     similarity_score: float | None = None
     blended_score: float | None = None
@@ -263,6 +264,7 @@ class RetrievalItem:
     def to_payload(self) -> dict[str, Any]:
         return {
             "url": self.url,
+            "source_id": self.source_id,
             "provider_score": self.provider_score,
             "similarity_score": self.similarity_score,
             "blended_score": self.blended_score,
@@ -281,6 +283,7 @@ class EvidenceItem:
     """Single evidence item for contract-level handoff."""
 
     url: str
+    source_id: str | None = None
     title: str | None = None
     snippet: str | None = None
     quote: str | None = None
@@ -293,6 +296,7 @@ class EvidenceItem:
     def to_payload(self) -> dict[str, Any]:
         return {
             "url": self.url,
+            "source_id": self.source_id,
             "title": self.title,
             "snippet": self.snippet,
             "quote": self.quote,
