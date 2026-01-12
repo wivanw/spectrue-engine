@@ -15,7 +15,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import hashlib
-from typing import Any, Awaitable, Callable, Dict, Iterable, Literal
+from typing import Any, Awaitable, Callable, Literal
 from urllib.parse import urlparse, urlunparse
 
 from spectrue_core.utils.trace import Trace
