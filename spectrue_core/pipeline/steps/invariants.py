@@ -467,6 +467,12 @@ class AssertRetrievalTraceStep:
     name: str = "assert_retrieval_trace"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
+        # Oracle short-circuit: when oracle produces a jackpot verdict, the pipeline
+        # may intentionally skip retrieval. In that case, retrieval trace markers
+        # are not required.
+        if bool(ctx.get_extra("oracle_hit", False)):
+            return ctx
+
         # Strict key membership check (no payload validation, no truthiness check)
         present_keys = set(ctx.extras.keys())
         missing = [key for key in self.required if key not in present_keys]
