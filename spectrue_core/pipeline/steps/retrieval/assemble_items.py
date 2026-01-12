@@ -25,6 +25,7 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.retrieval.fixed_pipeline import source_id_for_url
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +69,10 @@ class AssembleRetrievalItemsStep:
             for idx, item in enumerate(ranked.results_global, start=1):
                 enriched = chunks_by_url.get(item.url, {})
                 merged = _merge_enriched(item.raw, enriched)
+                source_id = merged.get("source_id") or item.raw.get("source_id") or source_id_for_url(item.url)
                 retrieval_item = RetrievalItem(
                     url=item.url,
+                    source_id=source_id,
                     provider_score=item.provider_score,
                     similarity_score=item.similarity_score,
                     blended_score=item.blended_score,
@@ -88,8 +91,10 @@ class AssembleRetrievalItemsStep:
                 for idx, item in enumerate(items, start=1):
                     enriched = chunks_by_url.get(item.url, {})
                     merged = _merge_enriched(item.raw, enriched)
+                    source_id = merged.get("source_id") or item.raw.get("source_id") or source_id_for_url(item.url)
                     retrieval_item = RetrievalItem(
                         url=item.url,
+                        source_id=source_id,
                         provider_score=item.provider_score,
                         similarity_score=item.similarity_score,
                         blended_score=item.blended_score,

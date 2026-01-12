@@ -19,7 +19,6 @@ from typing import Any
 from spectrue_core.pipeline.contracts import (
     RAW_SEARCH_RESULTS_KEY,
     SEARCH_PLAN_KEY,
-    RETRIEVAL_ITEMS_KEY,
     RawSearchResult,
     RawSearchResults,
     SearchPlan,
@@ -27,31 +26,28 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.retrieval.cegs_mvp import (
-    doc_retrieve_to_pool,
-    match_claim_to_pool,
-    compute_deficit,
-    escalate_claim,
-    hydrate_pool_with_content,
-    _extract_entities_from_claim,
-    _normalize_text,
-    EvidenceBundle,
+from spectrue_core.verification.orchestration.sufficiency import sufficiency_threshold
+from spectrue_core.verification.retrieval.fixed_pipeline import (
+    ExtractedContent,
+    FixedPipelineContext,
+    bind_after_extract,
+    compute_sufficiency,
+    current_stage,
+    extract_all_batches,
+    init_state,
+    normalize_url,
+    register_urls,
+    source_id_for_url,
 )
-from spectrue_core.verification.retrieval.experiment_mode import is_experiment_mode
+from spectrue_core.verification.retrieval.cegs_mvp import (
+    EvidenceItem,
+    EvidencePool,
+    EvidenceSourceMeta,
+    _compute_content_hash,
+    match_claim_to_pool,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _group_sources_by_claim(sources: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for source in sources:
-        if not isinstance(source, dict):
-            continue
-        claim_id = source.get("claim_id")
-        if not claim_id:
-            continue
-        grouped.setdefault(str(claim_id), []).append(source)
-    return grouped
 
 
 def _claim_id_for(claim: dict[str, Any], idx: int) -> str:
@@ -59,6 +55,147 @@ def _claim_id_for(claim: dict[str, Any], idx: int) -> str:
     if raw:
         return str(raw)
     return f"c{idx + 1}"
+
+
+def _coerce_score(value: Any) -> float:
+    try:
+        score = float(value)
+    except Exception:
+        return 0.0
+    return score
+
+
+def _metadata_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "to_dict"):
+        try:
+            return dict(value.to_dict())
+        except Exception:
+            return {}
+    return {}
+
+
+def _first_query_for_claim(
+    plan: SearchPlan | None,
+    claim_id: str,
+    claim: dict[str, Any],
+) -> str | None:
+    if plan and plan.per_claim_queries:
+        queries = list(plan.per_claim_queries.get(claim_id) or [])
+        for q in queries:
+            if isinstance(q, str) and q.strip():
+                return q
+    raw_queries = claim.get("search_queries") or []
+    if isinstance(raw_queries, list):
+        for q in raw_queries:
+            if isinstance(q, str) and q.strip():
+                return q
+    return None
+
+
+def _record_sources(
+    sources: list[dict[str, Any]],
+    url_metadata: dict[str, dict[str, Any]],
+) -> list[str]:
+    urls: list[str] = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        url = source.get("url") or source.get("link")
+        if not url:
+            continue
+        nurl = normalize_url(str(url))
+        if not nurl:
+            continue
+        source_id = source_id_for_url(nurl)
+        urls.append(nurl)
+        if nurl not in url_metadata:
+            score = source.get("score")
+            if score is None:
+                score = source.get("relevance_score")
+            if score is None:
+                score = source.get("provider_score")
+            url_metadata[nurl] = {
+                "url": nurl,
+                "title": source.get("title") or "",
+                "snippet": source.get("content") or source.get("snippet") or "",
+                "score": _coerce_score(score),
+                "source_id": source_id,
+                "provider_meta": dict(source, source_id=source_id),
+            }
+    return urls
+
+
+def _apply_metadata(
+    extracted: dict[str, ExtractedContent],
+    url_metadata: dict[str, dict[str, Any]],
+) -> None:
+    for url, content in extracted.items():
+        meta = url_metadata.get(url)
+        if meta:
+            content.metadata.update(meta)
+        content.metadata.setdefault("url", url)
+        content.metadata.setdefault("source_id", meta.get("source_id") if meta else source_id_for_url(url))
+
+
+def _build_evidence_pool(
+    extracted: dict[str, ExtractedContent],
+    url_metadata: dict[str, dict[str, Any]],
+) -> EvidencePool:
+    pool = EvidencePool()
+    items: list[EvidenceItem] = []
+    for url, content in extracted.items():
+        meta = url_metadata.get(url, {})
+        source_meta = EvidenceSourceMeta(
+            url=url,
+            title=str(meta.get("title") or ""),
+            snippet=str(meta.get("snippet") or ""),
+            score=_coerce_score(meta.get("score")),
+            provider_meta=dict(meta.get("provider_meta") or {}),
+        )
+        items.append(
+            EvidenceItem(
+                url=url,
+                extracted_text=str(content.text or ""),
+                citations=[],
+                content_hash=_compute_content_hash(str(content.text or "")),
+                source_meta=source_meta,
+            )
+        )
+    if items:
+        pool.add_items(items)
+    return pool
+
+
+def _build_sources_for_urls(
+    urls: list[str],
+    extracted: dict[str, ExtractedContent],
+    url_metadata: dict[str, dict[str, Any]],
+    *,
+    claim_id: str | None = None,
+) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for url in urls:
+        content = extracted.get(url)
+        meta = url_metadata.get(url, {})
+        src = dict(meta.get("provider_meta") or {})
+        src["url"] = url
+        src.setdefault("source_id", meta.get("source_id") or source_id_for_url(url))
+        src["title"] = meta.get("title") or ""
+        src["snippet"] = meta.get("snippet") or ""
+        if content and content.text:
+            src["content"] = content.text
+            src["fulltext"] = True
+        score = meta.get("score")
+        if score is not None:
+            src["provider_score"] = score
+            src["score"] = score
+        if claim_id is not None:
+            src["claim_id"] = str(claim_id)
+        sources.append(src)
+    return sources
+
 
 @dataclass
 class WebSearchStep:
@@ -71,317 +208,193 @@ class WebSearchStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
-            # CEGS MVP Integration
-            # We check if we have a plan with global queries (doc queries)
             plan: SearchPlan | None = ctx.get_extra(SEARCH_PLAN_KEY)
-            
-            # Use CEGS flow if we have queries and it looks like a CEGS plan (or just default)
-            use_cegs = True # Force for this feature
-            
-            if use_cegs and plan and plan.global_queries:
-                def _evidence_item_to_source_dict(item, *, claim_id: str | None = None) -> dict[str, Any]:
-                    """
-                    Convert CEGS EvidenceItem into legacy 'source' dict.
-                    IMPORTANT: downstream grouping requires claim_id for by-claim packs.
-                    """
-                    src = dict(item.source_meta.provider_meta or {})
-                    src["url"] = item.url
-                    src["title"] = item.source_meta.title
-                    # keep snippet/content for matchers and trace
-                    src["snippet"] = item.source_meta.snippet
-                    src["content"] = item.extracted_text
-                    src["fulltext"] = True
-                    # normalize score field names for downstream consumers
-                    src["provider_score"] = item.source_meta.score
-                    src["score"] = item.source_meta.score
-                    if claim_id is not None:
-                        src["claim_id"] = str(claim_id)
-                    return src
+            if not plan or not plan.global_queries:
+                raise PipelineExecutionError(self.name, "Missing search plan")
 
-                doc_queries = list(plan.global_queries)
-                claims = ctx.get_extra("target_claims", ctx.claims) or []
-                safe_claims = [c for c in claims if isinstance(c, dict)]
-                
-                # 1. Build Sanity Terms
-                all_text_parts = []
-                for c in safe_claims:
-                    ents = _extract_entities_from_claim(c)
-                    all_text_parts.extend(ents)
-                    seeds = c.get("retrieval_seed_terms", [])
-                    if isinstance(seeds, list):
-                        all_text_parts.extend([str(s) for s in seeds])
-                        
-                sanity_terms = _normalize_text(" ".join(all_text_parts))
-                
-                # === PASS 1: Search & Collect URLs (Skip Extraction) ===
-                
-                # 2. Doc Retrieve
-                pool, doc_urls = await doc_retrieve_to_pool(
-                    doc_queries, 
-                    sanity_terms, 
-                    self.search_mgr,
-                    skip_extraction=True
-                )
-                
-                # 3. Match & Escalate per claim
-                final_bundles: dict[str, EvidenceBundle] = {}
-                all_urls_to_batch = list(doc_urls)
-                
+            claims = ctx.get_extra("target_claims", ctx.claims) or []
+            safe_claims = [c for c in claims if isinstance(c, dict)]
+            if not safe_claims:
+                Trace.event("retrieval.search.skipped", {"reason": "no_claims", "plan_id": plan.plan_id})
+                return ctx
+
+            claim_id_map: dict[str, dict[str, Any]] = {}
+            for idx, claim in enumerate(safe_claims):
+                claim_id_map[_claim_id_for(claim, idx)] = claim
+
+            all_claim_ids = set(claim_id_map.keys())
+            url_metadata: dict[str, dict[str, Any]] = {}
+            state = init_state()
+            audited_urls_by_claim: dict[str, set[str]] = {}
+
+            async def _extract_batch(urls: list[str]) -> dict[str, ExtractedContent]:
+                stage = current_stage()
+                content_map = await self.search_mgr.fetch_urls_content_batch(urls, stage=stage)
+                extracted: dict[str, ExtractedContent] = {}
+                for url, text in content_map.items():
+                    if not text:
+                        continue
+                    extracted[url] = ExtractedContent(text=str(text), metadata={"url": url})
+                return extracted
+
+            def _audit_match(claim_id: str, content: ExtractedContent) -> bool:
+                url = content.metadata.get("url")
+                if not url:
+                    return False
+                return url in audited_urls_by_claim.get(str(claim_id), set())
+
+            async def _run_search_queries(queries: list[str]) -> list[str]:
+                urls: list[str] = []
+                for query in queries:
+                    if not query:
+                        continue
+                    _, sources = await self.search_mgr.search_phase(
+                        query,
+                        max_results=5,
+                        depth="basic",
+                        topic="general",
+                    )
+                    urls.extend(_record_sources(sources, url_metadata))
+                return urls
+
+            def _refresh_audit_matches() -> None:
+                nonlocal audited_urls_by_claim
+                pool = _build_evidence_pool(state.extractor_queue.extracted, url_metadata)
+                audited_urls_by_claim = {}
                 for idx, claim in enumerate(safe_claims):
                     claim_id = _claim_id_for(claim, idx)
-                    
                     bundle = match_claim_to_pool(claim, pool)
-                    deficit = compute_deficit(claim, bundle)
-                    
-                    if deficit.is_deficit or is_experiment_mode():
-                        pool, bundle, esc_urls = await escalate_claim(
-                            claim, 
-                            pool, 
-                            self.search_mgr,
-                            skip_extraction=True
-                        )
-                        all_urls_to_batch.extend(esc_urls)
-                        
-                    final_bundles[claim_id] = bundle
-                    
-                # === PASS 2: Batch Extract ALL URLs ===
-                
-                if all_urls_to_batch and hasattr(self.search_mgr, "fetch_urls_content_batch"):
-                    Trace.event("retrieval.global_batch.start", {
-                         "total_urls": len(all_urls_to_batch),
-                         "unique_urls": len(set(all_urls_to_batch))
-                    })
-                    try:
-                        content_map = await self.search_mgr.fetch_urls_content_batch(all_urls_to_batch)
-                        
-                        # === PASS 3: Hydrate Pool ===
-                        hydrate_pool_with_content(pool, content_map)
-                        
-                    except Exception as e:
-                        logger.warning(f"[WebSearchStep] Global batch extract failed: {e}")
-                        Trace.event("retrieval.global_batch.error", {"error": str(e)})
-                    
-                # 4) Build retrieval_items contract so EvidenceCollectStep can produce evidence_by_claim
-                #    - global: representative pool sources (optional; deep mode may ignore)
-                #    - by_claim: per-claim matched evidence items (MUST include claim_id)
-                retrieval_items: dict[str, Any] = {"global": [], "by_claim": {}}
+                    audited_urls_by_claim[claim_id] = {item.url for item in bundle.matched_items}
 
-                # Global pack = all extracted pool items (no claim_id)
-                global_sources: list[dict[str, Any]] = []
-                for item in pool.items:
-                    global_sources.append(_evidence_item_to_source_dict(item))
-                retrieval_items["global"] = global_sources
+            with FixedPipelineContext(
+                state=state,
+                extract_batch=_extract_batch,
+                audit_match=_audit_match,
+            ) as pipeline_ctx:
+                # Stage 0: Universal search
+                pipeline_ctx.set_stage(0)
+                stage0_urls = await _run_search_queries(list(plan.global_queries))
+                register_urls(stage=0, claim_ids=all_claim_ids, urls=stage0_urls)
+                await extract_all_batches()
+                _apply_metadata(state.extractor_queue.extracted, url_metadata)
+                _refresh_audit_matches()
+                bind_after_extract()
 
-                # By-claim packs = matched items per claim (with claim_id)
-                by_claim: dict[str, list[dict[str, Any]]] = {}
-                for cid, bundle in final_bundles.items():
-                    items = []
-                    for ev in getattr(bundle, "matched_items", []) or []:
-                        items.append(_evidence_item_to_source_dict(ev, claim_id=cid))
-                    if items:
-                        by_claim[str(cid)] = items
-                retrieval_items["by_claim"] = by_claim
+                # Stage 1: Graph priority
+                pipeline_ctx.set_stage(1)
+                key_claim_ids = ctx.get_extra("key_claim_ids", []) or []
+                for claim_id in key_claim_ids:
+                    claim = claim_id_map.get(str(claim_id))
+                    if not claim:
+                        continue
+                    query = _first_query_for_claim(plan, str(claim_id), claim)
+                    if not query:
+                        continue
+                    stage1_urls = await _run_search_queries([query])
+                    register_urls(stage=1, claim_ids={str(claim_id)}, urls=stage1_urls)
+                await extract_all_batches()
+                _apply_metadata(state.extractor_queue.extracted, url_metadata)
+                _refresh_audit_matches()
+                bind_after_extract()
 
-                # 5) Provide audit_sources + audit_trace_context for RGBA audit aggregation.
-                #    audit_sources are used for clustering/trace in the RGBA audit engine.
-                audit_sources: list[dict[str, Any]] = []
-                for meta in pool.meta:
-                    sm = dict(meta.provider_meta or {})
-                    sm["url"] = meta.url
-                    sm["title"] = meta.title
-                    sm["snippet"] = meta.snippet
-                    sm["provider_score"] = meta.score
-                    sm["score"] = meta.score
-                    audit_sources.append(sm)
+                # Stage 2: Sufficiency-driven escalation
+                pipeline_ctx.set_stage(2)
+                for idx, claim in enumerate(safe_claims):
+                    claim_id = _claim_id_for(claim, idx)
+                    metadata = _metadata_dict(claim.get("metadata")) or _metadata_dict(claim)
+                    s_value = compute_sufficiency(metadata)
+                    s_min = float(metadata.get("S_min", sufficiency_threshold))
+                    if s_value < s_min:
+                        query = _first_query_for_claim(plan, claim_id, claim)
+                        if not query:
+                            continue
+                        stage2_urls = await _run_search_queries([query])
+                        register_urls(stage=2, claim_ids={claim_id}, urls=stage2_urls)
+                await extract_all_batches()
+                _apply_metadata(state.extractor_queue.extracted, url_metadata)
+                _refresh_audit_matches()
+                bind_after_extract()
 
-                audit_trace_context = {
-                    "cegs_mvp": True,
-                    "plan_id": plan.plan_id,
-                    "doc_queries": doc_queries,
-                    "pool_items": len(pool.items),
-                    "claims_total": len(safe_claims),
-                    "claims_with_bundles": len([1 for b in final_bundles.values() if (b.matched_items or [])]),
-                }
-                
-                # Store bundles in extra for next steps that know CEGS
-                ctx = ctx.set_extra("cegs_evidence_bundles", final_bundles)
-                
-                # Populate legacy sources + required trace markers
-                return (
-                    ctx.with_update(sources=global_sources)
-                    .set_extra(RETRIEVAL_ITEMS_KEY, retrieval_items)
-                    .set_extra("audit_sources", audit_sources)
-                    .set_extra("audit_trace_context", audit_trace_context)
-                    .set_extra(
-                        RAW_SEARCH_RESULTS_KEY, 
-                        RawSearchResults(
-                            plan_id=plan.plan_id,
-                            results=tuple(),
-                            trace={"cegs_mvp": True, "pool_size": len(pool.items), "by_claim": len(by_claim)}
-                        )
-                    )
-                    .set_extra(
-                        "retrieval_search_trace",
-                        {
-                            "plan_id": plan.plan_id,
-                            "sources": len(global_sources),
-                            "cegs_mvp": True,
-                        },
-                    )
-                    .set_extra(
-                        "retrieval_rerank_trace",
-                        {
-                            "plan_id": plan.plan_id,
-                            "reranked": len(global_sources),
-                            "cegs_mvp": True,
-                        },
-                    )
+            # Build sources for downstream steps
+            extracted_urls = list(state.extractor_queue.extracted.keys())
+            global_sources = _build_sources_for_urls(
+                extracted_urls,
+                state.extractor_queue.extracted,
+                url_metadata,
+            )
+
+            by_claim_sources: dict[str, list[dict[str, Any]]] = {}
+            for claim_id, urls in state.bindings.audited.items():
+                ordered = [u for u in extracted_urls if u in urls]
+                by_claim_sources[str(claim_id)] = _build_sources_for_urls(
+                    ordered,
+                    state.extractor_queue.extracted,
+                    url_metadata,
+                    claim_id=str(claim_id),
                 )
 
-            # Legacy Fallback
-            from spectrue_core.verification.pipeline.pipeline_search import (
-                SearchFlowInput,
-# ... (rest of legacy code)
-                SearchFlowState,
-                run_search_flow,
-            )
-
-            plan: SearchPlan | None = ctx.get_extra(SEARCH_PLAN_KEY)
-            plan_id = plan.plan_id if plan else "plan-unknown"
-            global_queries = list(plan.global_queries) if plan else ctx.get_extra("search_queries", [])
-
-            target_claims = ctx.get_extra("target_claims", ctx.claims)
-            inline_sources = ctx.get_extra("inline_sources", [])
-            search_candidates = ctx.get_extra("search_candidates", [])
-            claims_to_search = search_candidates if search_candidates else target_claims
-
-            if not claims_to_search:
-                Trace.event("retrieval.search.skipped", {"reason": "no_candidates", "plan_id": plan_id})
-                empty_results = RawSearchResults(plan_id=plan_id, results=tuple())
-                return ctx.set_extra(RAW_SEARCH_RESULTS_KEY, empty_results)
-
-            progress_callback = ctx.get_extra("progress_callback")
-
-            def can_add_search(model: str, search_type: str, max_cost: int | None) -> bool:
-                return True
-
-            inp = SearchFlowInput(
-                fact=ctx.get_extra("prepared_fact", ""),
-                lang=ctx.lang,
-                gpt_model=ctx.gpt_model,
-                search_type=ctx.search_type,
-                max_cost=ctx.get_extra("max_cost"),
-                article_intent=ctx.get_extra("article_intent", "general"),
-                search_queries=global_queries,
-                claims=claims_to_search,
-                preloaded_context=ctx.get_extra("prepared_context"),
-                progress_callback=progress_callback,
-                inline_sources=inline_sources,
-                pipeline=ctx.mode.name,
-            )
-
-            state = SearchFlowState(
-                final_context="",
-                final_sources=[],
-                preloaded_context=ctx.get_extra("prepared_context"),
-                used_orchestration=False,
-            )
-
-            result_state = await run_search_flow(
-                config=self.config,
-                search_mgr=self.search_mgr,
-                agent=self.agent,
-                can_add_search=can_add_search,
-                inp=inp,
-                state=state,
-            )
-
-            sources = list(result_state.final_sources)
-            grouped = _group_sources_by_claim(sources)
-            ungrouped = [src for src in sources if not isinstance(src, dict) or not src.get("claim_id")]
             raw_results: list[RawSearchResult] = []
-
-            if grouped:
-                for claim_id, claim_sources in grouped.items():
-                    query = ""
-                    if plan and plan.per_claim_queries.get(claim_id):
-                        query = plan.per_claim_queries[claim_id][0]
-                    elif global_queries:
-                        query = global_queries[0]
-                    raw_results.append(
-                        RawSearchResult(
-                            plan_id=plan_id,
-                            query_id=f"{claim_id}:legacy",
-                            query=query,
-                            claim_id=claim_id,
-                            provider_payload=claim_sources,
-                            trace={
-                                "source": "legacy_search_flow",
-                                "sources_count": len(claim_sources),
-                            },
-                        )
-                    )
-                if ungrouped:
-                    query = global_queries[0] if global_queries else ""
-                    raw_results.append(
-                        RawSearchResult(
-                            plan_id=plan_id,
-                            query_id="global:legacy",
-                            query=query,
-                            claim_id=None,
-                            provider_payload=ungrouped,
-                            trace={
-                                "source": "legacy_search_flow",
-                                "sources_count": len(ungrouped),
-                            },
-                        )
-                    )
-            else:
-                query = global_queries[0] if global_queries else ""
+            if global_sources:
                 raw_results.append(
                     RawSearchResult(
-                        plan_id=plan_id,
-                        query_id="global:legacy",
-                        query=query,
+                        plan_id=plan.plan_id,
+                        query_id="fixed:global",
+                        query="universal",
                         claim_id=None,
+                        provider_payload=global_sources,
+                        trace={"fixed_pipeline": True},
+                    )
+                )
+            for claim_id, sources in by_claim_sources.items():
+                if not sources:
+                    continue
+                raw_results.append(
+                    RawSearchResult(
+                        plan_id=plan.plan_id,
+                        query_id=f"fixed:{claim_id}",
+                        query="claim",
+                        claim_id=str(claim_id),
                         provider_payload=sources,
-                        trace={
-                            "source": "legacy_search_flow",
-                            "sources_count": len(sources),
-                        },
+                        trace={"fixed_pipeline": True},
                     )
                 )
 
-            raw_contract = RawSearchResults(
-                plan_id=plan_id,
-                results=tuple(raw_results),
-                trace={
-                    "used_orchestration": result_state.used_orchestration,
-                    "sources_total": len(sources),
-                },
+            audit_sources = _build_sources_for_urls(
+                extracted_urls,
+                state.extractor_queue.extracted,
+                url_metadata,
             )
 
-            Trace.event(
-                "retrieval.search",
-                {
-                    "plan_id": plan_id,
-                    "sources_count": len(sources),
-                    "used_orchestration": result_state.used_orchestration,
-                },
-            )
+            audit_trace_context = {
+                "plan_id": plan.plan_id,
+                "fixed_pipeline": True,
+                "claims_total": len(safe_claims),
+            }
+
+            all_sources = list(global_sources)
+            for sources in by_claim_sources.values():
+                all_sources.extend(sources)
 
             return (
-                ctx.with_update(sources=sources)
-                .set_extra("search_context", result_state.final_context)
-                .set_extra("execution_state", result_state.execution_state)
-                .set_extra(RAW_SEARCH_RESULTS_KEY, raw_contract)
+                ctx.with_update(sources=all_sources)
+                .set_extra(
+                    RAW_SEARCH_RESULTS_KEY,
+                    RawSearchResults(
+                        plan_id=plan.plan_id,
+                        results=tuple(raw_results),
+                        trace={"fixed_pipeline": True},
+                    ),
+                )
                 .set_extra(
                     "retrieval_search_trace",
                     {
-                        "plan_id": plan_id,
-                        "sources": len(sources),
+                        "plan_id": plan.plan_id,
+                        "sources": len(all_sources),
+                        "fixed_pipeline": True,
                     },
                 )
+                .set_extra("audit_sources", audit_sources)
+                .set_extra("audit_trace_context", audit_trace_context)
             )
 
         except Exception as e:

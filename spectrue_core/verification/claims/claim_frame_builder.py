@@ -35,6 +35,7 @@ from spectrue_core.verification.search.retrieval_trace import (
     format_retrieval_trace,
 )
 from spectrue_core.verification.orchestration.execution_plan import ClaimExecutionState
+from spectrue_core.verification.retrieval.fixed_pipeline import source_id_for_url
 
 
 def _generate_evidence_id(claim_id: str, url: str, index: int) -> str:
@@ -121,11 +122,15 @@ def convert_evidence_items(
             ev.get("url", f"unknown_{idx}"),
             idx
         )
+        source_id = str(ev.get("source_id") or "")
+        if not source_id:
+            source_id = source_id_for_url(ev.get("url", "")) or evidence_id
 
         item = EvidenceItemFrame(
             evidence_id=evidence_id,
             claim_id=claim_id,
             url=ev.get("url", ""),
+            source_id=source_id,
             title=ev.get("title"),
             source_tier=ev.get("tier") or ev.get("source_tier"),
             source_type=ev.get("source_type"),

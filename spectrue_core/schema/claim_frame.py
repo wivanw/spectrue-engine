@@ -61,6 +61,7 @@ class EvidenceItemFrame:
     evidence_id: str
     claim_id: str
     url: str
+    source_id: str
     title: str | None = None
     source_tier: str | None = None  # A, A', B, C, D, UNKNOWN
     source_type: str | None = None

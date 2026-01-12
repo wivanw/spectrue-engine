@@ -152,48 +152,97 @@ Each dimension is tracked independently:
 
 ## Retrieval Mechanisms
 
-### Retrieval Loop [A-inspired]
+### Fixed Retrieval Pipeline [C]
 
-**Status:** Academically Inspired (ReAct Pattern)
+**Status:** Constraint-Based Safeguard (Single deterministic path)
 
-The retrieval loop interleaves search and reasoning:
+The engine uses one fixed retrieval pipeline with batch-only extraction.
+There are no alternate retrievers or experiment branches.
+
+**Data Structures (invariants):**
+
+```python
+NormalizedUrl = str
+
+class GlobalUrlRegistry:
+    urls: dict[NormalizedUrl, UrlMeta]
+
+class UrlMeta:
+    status: Literal["seen", "extracted", "failed"]
+    first_seen_stage: int
+    seen_by_claims: set[ClaimId]
+
+class ExtractorQueue:
+    pending: list[NormalizedUrl]          # status == "seen" only
+    extracted: dict[NormalizedUrl, ExtractedContent]
+
+class ClaimBindings:
+    eligible: dict[ClaimId, set[NormalizedUrl]]
+    audited: dict[ClaimId, set[NormalizedUrl]]
+```
+
+**Core invariants:**
+- `NormalizedUrl` is the unique key.
+- If `status == "extracted"`, extraction never repeats.
+- `pending` contains only URLs with `status == "seen"`.
+- Extraction only happens in `extract_all_batches()` with batch size 5.
+
+**Pipeline stages:**
 
 ```
-for hop in range(max_hops):
-    sources = search(query)
-    decision = SufficiencyJudge(claim, sources)
-    if decision == ENOUGH: break
-    query = generate_followup(sources)
+Stage 0 — Universal Search
+urls = tavily.search(universal_query)
+register_urls(stage=0, claim_ids=ALL, urls=urls)
+extract_all_batches()
+bind_after_extract()
+
+Stage 1 — Graph Priority
+core_claims = pick_by_graph_centrality(claim_graph)
+for claim in core_claims:
+  urls = tavily.search(query_for(claim))
+  register_urls(stage=1, claim_ids={claim.id}, urls=urls)
+extract_all_batches()
+bind_after_extract()
+
+Stage 2 — Escalation (algorithmic)
+for claim in claims:
+  S = compute_sufficiency(claim.metadata)
+  if S < S_min:
+    urls = tavily.search(query_for(claim))
+    register_urls(stage=2, claim_ids={claim.id}, urls=urls)
+extract_all_batches()
+bind_after_extract()
 ```
 
-**Code location:** `spectrue_core/verification/phase_runner.py`
+**Sufficiency formula (fixed):**
 
-**Inspiration:** [ReAct](https://arxiv.org/abs/2210.03629) paradigm — "think, act, observe" loop.
+```
+S = (w1 * CE_cluster_count
+     + w2 * SE_support_mass
+     - w3 * conflict_mass
+     - w4 * missing_constraints)
+```
 
-> **Note:** We use the ReAct *pattern* but not its specific implementation details.
-> Our sufficiency judgment is rule-based, not LLM-generated reflection tokens.
+There are no additional heuristics or early-stop rules beyond `S < S_min`.
 
----
+**Trace events (retrieval):**
+- `urls_registered(stage, count)`
+- `extract_batch_started(batch_size)`
+- `extract_batch_finished(success_count)`
+- `bind_completed(stage)`
 
-### SufficiencyJudge [A-inspired]
-
-**Status:** Academically Inspired (Self-RAG Adaptive Retrieval)
-
-Determines when to stop searching:
-
-- **ENOUGH:** Sufficient supporting evidence found
-- **NEED_FOLLOWUP:** Quality below threshold, continue searching
-- **STOP:** Max hops reached or budget exhausted
-
-**Inspiration:** [Self-RAG](https://arxiv.org/abs/2310.11511) adaptive retrieval tokens.
-
-> **Note:** We implement *analogous* logic but with deterministic rules, not LLM tokens.
+**Code location:** `spectrue_core/verification/retrieval/fixed_pipeline.py`,
+`spectrue_core/pipeline/steps/retrieval/web_search.py`
 
 ---
 
 ### Evidence Acquisition Ladder (EAL) [B]
 
 **Status:** Engineering Heuristic + Bayesian Budget Model
+
+Used for post-search content enrichment (e.g., chunk fetch/inline verification).
+The fixed retrieval pipeline uses batch-only extraction and does not use EAL to
+control search stages.
 
 Escalation strategy to enrich sources with quotes:
 1. Start with snippets from search results
@@ -242,50 +291,6 @@ Inline sources often have lower quote hit-rates, so their Bayesian prior shouldn
 
 ---
 
-### Search Escalation Policy [B]
-
-**Status:** Engineering Heuristic
-
-Multi-pass Tavily search with evidence-driven escalation and early stopping:
-
-```python
-# 4-pass ladder with escalating cost
-Pass A: basic, k=3, Q1/Q2        # Cheap
-Pass B: basic, k=6, Q2/Q3        # Expand
-Pass C: advanced, k=6, Q1/Q2     # Deep
-Pass D: basic, k=6, relax_domains # Last resort
-
-# Stop conditions (RETRIEVAL-ONLY signals)
-should_stop = (
-    usable_snippets >= min_usable_snippets AND
-    best_relevance >= min_relevance_threshold
-)
-```
-
-**Query Variants (deterministic from claim fields):**
-
-| Variant | Strategy | Composition |
-|---------|----------|-------------|
-| Q1 | anchor_tight | entities + seed_terms[:4] + date_anchor |
-| Q2 | anchor_medium | entities + seed_terms[:4] (no date) |
-| Q3 | broad | entities[:2] + seed_terms[:2] |
-
-**Topic Selection (from falsifiability):**
-
-| falsifiable_by | time_anchor | Topic |
-|----------------|-------------|-------|
-| reputable_news, official_statement | any | news |
-| dataset, scientific_publication | explicit_date, range | news |
-| dataset, scientific_publication | unknown | general |
-| other | any | news (default) |
-
-**Code location:** `spectrue_core/verification/search/search_escalation.py`
-
-> ⚠️ **Epistemological Note:** This is an **engineering decision** based on empirical
-> observation of Tavily API behavior. The escalation thresholds are tuned for
-> cost/quality balance, not derived from theory.
-
----
 
 ### Coverage Skeleton Extraction [B]
 
@@ -518,4 +523,3 @@ All selected claims still require evidence to score high. The Bayesian approach 
 - Selects more targets for high-harm/high-uncertainty claims
 - Selects fewer targets when marginal value drops below cost
 - Respects budget constraints as safety nets
-

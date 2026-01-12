@@ -46,10 +46,6 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.claims.claim_frame_builder import (
     build_claim_frames_from_pipeline,
 )
-from spectrue_core.verification.retrieval.experiment_mode import (
-    is_experiment_mode,
-    build_broadcasted_sources,
-)
 
 
 @dataclass
@@ -138,33 +134,6 @@ class BuildClaimFramesStep(Step):
                 Trace.event("build_claim_frames.skip", {"reason": "no_claims"})
                 return ctx.set_extra("deep_claim_ctx", DeepClaimContext())
 
-            # EXPERIMENT MODE: broadcast ALL sources to ALL claims
-            if is_experiment_mode() and evidence_by_claim:
-                # Collect global sources if available
-                global_sources: list[dict] = []
-                retrieval_items = ctx.extras.get("retrieval_items", {})
-                if isinstance(retrieval_items, dict):
-                    global_sources = list(retrieval_items.get("global", []) or [])
-                
-                # Build broadcasted sources
-                broadcasted = build_broadcasted_sources(global_sources, evidence_by_claim)
-                
-                if broadcasted:
-                    # Override evidence_by_claim: every claim gets ALL sources
-                    claim_ids = []
-                    for claim in claims:
-                        if isinstance(claim, dict):
-                            cid = claim.get("id") or claim.get("claim_id")
-                            if cid:
-                                claim_ids.append(str(cid))
-                    
-                    evidence_by_claim = {cid: list(broadcasted) for cid in claim_ids}
-                    
-                    Trace.event("build_claim_frames.experiment_mode_broadcast", {
-                        "claims_count": len(claim_ids),
-                        "broadcasted_sources_count": len(broadcasted),
-                    })
-
             # Build frames
             frames = build_claim_frames_from_pipeline(
                 claims=claims,
@@ -178,7 +147,6 @@ class BuildClaimFramesStep(Step):
             Trace.event("build_claim_frames.complete", {
                 "frame_count": len(frames),
                 "claim_ids": [f.claim_id for f in frames],
-                "experiment_mode": is_experiment_mode(),
             })
 
             return ctx.set_extra("deep_claim_ctx", deep_ctx)
