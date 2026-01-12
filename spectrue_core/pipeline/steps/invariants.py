@@ -467,14 +467,21 @@ class AssertRetrievalTraceStep:
     name: str = "assert_retrieval_trace"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
-        missing = [key for key in self.required if not ctx.get_extra(key)]
+        # Strict key membership check (no payload validation, no truthiness check)
+        present_keys = set(ctx.extras.keys())
+        missing = [key for key in self.required if key not in present_keys]
+
         if missing:
+            # Report what keys ARE present to disambiguate "missing" vs "empty"
             raise PipelineViolation(
                 step_name=self.name,
                 invariant="retrieval_trace_missing",
                 expected=self.required,
-                actual=tuple(missing),
-                details={"mode": ctx.mode.name},
+                actual=tuple(sorted(present_keys)),
+                details={
+                    "mode": ctx.mode.name,
+                    "missing_keys": missing,
+                },
             )
         return ctx
 
