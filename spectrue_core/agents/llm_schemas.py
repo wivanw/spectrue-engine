@@ -87,11 +87,17 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
                             "partially_verified",
                         ],
                     },
-                    "verdict_score": {"type": "number", "minimum": 0, "maximum": 1},
+                    "verdict_score": {"type": "number", "minimum": -1, "maximum": 1},
                     "reason": {"type": "string"},
                     "rgba": {
                         "type": "array",
-                        "items": {"type": "number", "minimum": 0, "maximum": 1},
+                        "items": [
+                            {"type": "number", "minimum": 0, "maximum": 1},   # R danger
+                            {"type": "number", "minimum": -1, "maximum": 1},  # G verdict_score (can be -1)
+                            {"type": "number", "minimum": 0, "maximum": 1},   # B style
+                            {"type": "number", "minimum": 0, "maximum": 1},   # A explainability
+                        ],
+                        "additionalItems": False,
                         "minItems": 4,
                         "maxItems": 4,
                         "description": "Per-claim [R=danger, G=veracity, B=style, A=explainability]",
@@ -131,11 +137,17 @@ SINGLE_CLAIM_SCORING_SCHEMA: dict[str, Any] = {
                 "partially_verified",
             ],
         },
-        "verdict_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "verdict_score": {"type": "number", "minimum": -1, "maximum": 1},
         "reason": {"type": "string"},
         "rgba": {
             "type": "array",
-            "items": {"type": "number", "minimum": 0, "maximum": 1},
+            "items": [
+                {"type": "number", "minimum": 0, "maximum": 1},
+                {"type": "number", "minimum": -1, "maximum": 1},
+                {"type": "number", "minimum": 0, "maximum": 1},
+                {"type": "number", "minimum": 0, "maximum": 1},
+            ],
+            "additionalItems": False,
             "minItems": 4,
             "maxItems": 4,
             "description": "[R=danger, G=veracity, B=style, A=explainability]",
@@ -187,7 +199,7 @@ SCORE_EVIDENCE_STRUCTURED_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "claim_id": {"type": "string"},
                     "status": {"type": "string"},
-                    "verdict_score": {"type": "number", "minimum": 0, "maximum": 1},
+                    "verdict_score": {"type": "number", "minimum": -1, "maximum": 1},
                     "reason": {"type": "string"},
                     "assertion_verdicts": {
                         "type": "array",
