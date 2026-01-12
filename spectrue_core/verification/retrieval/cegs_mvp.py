@@ -16,7 +16,6 @@ from spectrue_core.verification.search.search_escalation import (
     select_topic_from_claim
 )
 from spectrue_core.verification.retrieval.experiment_mode import (
-    is_experiment_mode,
     should_filter_sources,
     should_stop_early,
     emit_experiment_mode_trace,

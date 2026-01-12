@@ -19,8 +19,6 @@ Tests cover:
    - all claims receive same broadcasted_sources_count
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
 
 from spectrue_core.verification.retrieval.experiment_mode import (
     is_experiment_mode,
@@ -33,7 +31,6 @@ from spectrue_core.verification.retrieval.experiment_mode import (
 )
 from spectrue_core.runtime_config import (
     EngineRuntimeConfig,
-    RetrievalExperimentConfig,
 )
 from spectrue_core.scoring.budget_allocation import BudgetState, ExtractBudgetParams
 

@@ -47,7 +47,7 @@ class TestTavilyClientExtractBatch:
         client._client.post = mock_post
 
         urls = ["https://a.com", "https://b.com", "https://c.com"]
-        result = await client.extract_batch(urls=urls)
+        await client.extract_batch(urls=urls)
 
         # Should be 1 HTTP call
         assert mock_post.call_count == 1
