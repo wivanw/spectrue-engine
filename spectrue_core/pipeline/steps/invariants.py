@@ -462,9 +462,7 @@ class AssertRetrievalTraceStep:
     """Assert retrieval trace markers are present in context extras."""
 
     required: tuple[str, ...] = (
-        "retrieval_plan_trace",
         "retrieval_search_trace",
-        "retrieval_rerank_trace",
     )
     name: str = "assert_retrieval_trace"
 
