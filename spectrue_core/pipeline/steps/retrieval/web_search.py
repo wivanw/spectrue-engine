@@ -19,6 +19,7 @@ from typing import Any
 from spectrue_core.pipeline.contracts import (
     RAW_SEARCH_RESULTS_KEY,
     SEARCH_PLAN_KEY,
+    RETRIEVAL_ITEMS_KEY,
     RawSearchResult,
     RawSearchResults,
     SearchPlan,
@@ -26,6 +27,17 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.retrieval.cegs_mvp import (
+    doc_retrieve_to_pool,
+    match_claim_to_pool,
+    compute_deficit,
+    escalate_claim,
+    hydrate_pool_with_content,
+    _extract_entities_from_claim,
+    _normalize_text,
+    EvidenceBundle,
+)
+from spectrue_core.verification.retrieval.experiment_mode import is_experiment_mode
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +54,12 @@ def _group_sources_by_claim(sources: list[dict[str, Any]]) -> dict[str, list[dic
     return grouped
 
 
+def _claim_id_for(claim: dict[str, Any], idx: int) -> str:
+    raw = claim.get("id") or claim.get("claim_id")
+    if raw:
+        return str(raw)
+    return f"c{idx + 1}"
+
 @dataclass
 class WebSearchStep:
     """Execute web search based on the current query plan."""
@@ -53,8 +71,177 @@ class WebSearchStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
+            # CEGS MVP Integration
+            # We check if we have a plan with global queries (doc queries)
+            plan: SearchPlan | None = ctx.get_extra(SEARCH_PLAN_KEY)
+            
+            # Use CEGS flow if we have queries and it looks like a CEGS plan (or just default)
+            use_cegs = True # Force for this feature
+            
+            if use_cegs and plan and plan.global_queries:
+                def _evidence_item_to_source_dict(item, *, claim_id: str | None = None) -> dict[str, Any]:
+                    """
+                    Convert CEGS EvidenceItem into legacy 'source' dict.
+                    IMPORTANT: downstream grouping requires claim_id for by-claim packs.
+                    """
+                    src = dict(item.source_meta.provider_meta or {})
+                    src["url"] = item.url
+                    src["title"] = item.source_meta.title
+                    # keep snippet/content for matchers and trace
+                    src["snippet"] = item.source_meta.snippet
+                    src["content"] = item.extracted_text
+                    src["fulltext"] = True
+                    # normalize score field names for downstream consumers
+                    src["provider_score"] = item.source_meta.score
+                    src["score"] = item.source_meta.score
+                    if claim_id is not None:
+                        src["claim_id"] = str(claim_id)
+                    return src
+
+                doc_queries = list(plan.global_queries)
+                claims = ctx.get_extra("target_claims", ctx.claims) or []
+                safe_claims = [c for c in claims if isinstance(c, dict)]
+                
+                # 1. Build Sanity Terms
+                all_text_parts = []
+                for c in safe_claims:
+                    ents = _extract_entities_from_claim(c)
+                    all_text_parts.extend(ents)
+                    seeds = c.get("retrieval_seed_terms", [])
+                    if isinstance(seeds, list):
+                        all_text_parts.extend([str(s) for s in seeds])
+                        
+                sanity_terms = _normalize_text(" ".join(all_text_parts))
+                
+                # === PASS 1: Search & Collect URLs (Skip Extraction) ===
+                
+                # 2. Doc Retrieve
+                pool, doc_urls = await doc_retrieve_to_pool(
+                    doc_queries, 
+                    sanity_terms, 
+                    self.search_mgr,
+                    skip_extraction=True
+                )
+                
+                # 3. Match & Escalate per claim
+                final_bundles: dict[str, EvidenceBundle] = {}
+                all_urls_to_batch = list(doc_urls)
+                
+                for idx, claim in enumerate(safe_claims):
+                    claim_id = _claim_id_for(claim, idx)
+                    
+                    bundle = match_claim_to_pool(claim, pool)
+                    deficit = compute_deficit(claim, bundle)
+                    
+                    if deficit.is_deficit or is_experiment_mode():
+                        pool, bundle, esc_urls = await escalate_claim(
+                            claim, 
+                            pool, 
+                            self.search_mgr,
+                            skip_extraction=True
+                        )
+                        all_urls_to_batch.extend(esc_urls)
+                        
+                    final_bundles[claim_id] = bundle
+                    
+                # === PASS 2: Batch Extract ALL URLs ===
+                
+                if all_urls_to_batch and hasattr(self.search_mgr, "fetch_urls_content_batch"):
+                    Trace.event("retrieval.global_batch.start", {
+                         "total_urls": len(all_urls_to_batch),
+                         "unique_urls": len(set(all_urls_to_batch))
+                    })
+                    try:
+                        content_map = await self.search_mgr.fetch_urls_content_batch(all_urls_to_batch)
+                        
+                        # === PASS 3: Hydrate Pool ===
+                        hydrate_pool_with_content(pool, content_map)
+                        
+                    except Exception as e:
+                        logger.warning(f"[WebSearchStep] Global batch extract failed: {e}")
+                        Trace.event("retrieval.global_batch.error", {"error": str(e)})
+                    
+                # 4) Build retrieval_items contract so EvidenceCollectStep can produce evidence_by_claim
+                #    - global: representative pool sources (optional; deep mode may ignore)
+                #    - by_claim: per-claim matched evidence items (MUST include claim_id)
+                retrieval_items: dict[str, Any] = {"global": [], "by_claim": {}}
+
+                # Global pack = all extracted pool items (no claim_id)
+                global_sources: list[dict[str, Any]] = []
+                for item in pool.items:
+                    global_sources.append(_evidence_item_to_source_dict(item))
+                retrieval_items["global"] = global_sources
+
+                # By-claim packs = matched items per claim (with claim_id)
+                by_claim: dict[str, list[dict[str, Any]]] = {}
+                for cid, bundle in final_bundles.items():
+                    items = []
+                    for ev in getattr(bundle, "matched_items", []) or []:
+                        items.append(_evidence_item_to_source_dict(ev, claim_id=cid))
+                    if items:
+                        by_claim[str(cid)] = items
+                retrieval_items["by_claim"] = by_claim
+
+                # 5) Provide audit_sources + audit_trace_context for RGBA audit aggregation.
+                #    audit_sources are used for clustering/trace in the RGBA audit engine.
+                audit_sources: list[dict[str, Any]] = []
+                for meta in pool.meta:
+                    sm = dict(meta.provider_meta or {})
+                    sm["url"] = meta.url
+                    sm["title"] = meta.title
+                    sm["snippet"] = meta.snippet
+                    sm["provider_score"] = meta.score
+                    sm["score"] = meta.score
+                    audit_sources.append(sm)
+
+                audit_trace_context = {
+                    "cegs_mvp": True,
+                    "plan_id": plan.plan_id,
+                    "doc_queries": doc_queries,
+                    "pool_items": len(pool.items),
+                    "claims_total": len(safe_claims),
+                    "claims_with_bundles": len([1 for b in final_bundles.values() if (b.matched_items or [])]),
+                }
+                
+                # Store bundles in extra for next steps that know CEGS
+                ctx = ctx.set_extra("cegs_evidence_bundles", final_bundles)
+                
+                # Populate legacy sources + required trace markers
+                return (
+                    ctx.with_update(sources=global_sources)
+                    .set_extra(RETRIEVAL_ITEMS_KEY, retrieval_items)
+                    .set_extra("audit_sources", audit_sources)
+                    .set_extra("audit_trace_context", audit_trace_context)
+                    .set_extra(
+                        RAW_SEARCH_RESULTS_KEY, 
+                        RawSearchResults(
+                            plan_id=plan.plan_id,
+                            results=tuple(),
+                            trace={"cegs_mvp": True, "pool_size": len(pool.items), "by_claim": len(by_claim)}
+                        )
+                    )
+                    .set_extra(
+                        "retrieval_search_trace",
+                        {
+                            "plan_id": plan.plan_id,
+                            "sources": len(global_sources),
+                            "cegs_mvp": True,
+                        },
+                    )
+                    .set_extra(
+                        "retrieval_rerank_trace",
+                        {
+                            "plan_id": plan.plan_id,
+                            "reranked": len(global_sources),
+                            "cegs_mvp": True,
+                        },
+                    )
+                )
+
+            # Legacy Fallback
             from spectrue_core.verification.pipeline.pipeline_search import (
                 SearchFlowInput,
+# ... (rest of legacy code)
                 SearchFlowState,
                 run_search_flow,
             )

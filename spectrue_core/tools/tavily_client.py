@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 
 import httpx
@@ -285,8 +286,33 @@ class TavilyClient:
             raise
 
     async def extract(self, *, url: str, format: str = "markdown") -> dict:
+        raise RuntimeError(
+            "TavilyClient.extract(url=...) is forbidden. "
+            "Use extract_batch(urls=[...]) instead."
+        )
+
+    async def extract_single_via_batch(self, *, url: str, format: str = "markdown") -> dict:
+        return await self.extract_batch(urls=[url], format=format)
+
+    async def extract_batch(self, *, urls: list[str], format: str = "markdown") -> dict:
+        """
+        Extract content from multiple URLs in a single API call.
+        
+        Tavily bills 1 credit per 5 URLs for basic extract. If we call extract
+        with {"urls":[single]} we burn a full batch for 1/5 of capacity.
+        
+        This method preserves semantics: same URLs, same content, fewer HTTP calls.
+        """
+        # Stable dedupe (order-preserving) + strip
+        urls2 = list(dict.fromkeys(u.strip() for u in urls if u and u.strip()))
+        if not urls2:
+            return {"results": []}
+        
+        Trace.event("tavily.extract.batch", {"urls_count": len(urls2)})
+        
         endpoint = "https://api.tavily.com/extract"
-        payload = {"urls": [url], "format": format}
+        payload = {"urls": urls2, "format": format}
+        
         async with self._sem:
             r = await self._request_with_retry(
                 url=endpoint,
@@ -294,11 +320,23 @@ class TavilyClient:
                 trace_event_prefix="tavily.extract",
             )
             result = r.json()
+            
             if self._meter:
                 try:
-                    event = self._meter.record_extract(response=result)
+                    # Tavily pricing: 1 credit per 5 URLs (basic extract)
+                    credits_used = float(math.ceil(len(urls2) / 5))
+                    event = self._meter.record_extract(
+                        response=result,
+                        credits_used=credits_used,
+                        meta={
+                            "urls_count": len(urls2),
+                            "batch_size": 5,
+                            "credits_used": credits_used,
+                        },
+                    )
                     Trace.event("tavily.metering.recorded", {
-                        "type": "extract",
+                        "type": "extract_batch",
+                        "urls_count": len(urls2),
                         "cost_credits": str(event.cost_credits),
                     })
                 except Exception as exc:
@@ -306,4 +344,5 @@ class TavilyClient:
                     Trace.event("tavily.metering.failed", {"error": str(exc)[:200]})
             else:
                 Trace.event("tavily.metering.skipped", {"reason": "no_meter"})
+            
             return result

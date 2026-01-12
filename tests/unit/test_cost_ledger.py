@@ -11,6 +11,7 @@
 # Copyright (c) 2024-2025 Spectrue Contributors
 
 from decimal import Decimal
+from unittest.mock import patch
 
 from spectrue_core.billing.cost_event import CostEvent
 from spectrue_core.billing.cost_ledger import CostLedger
@@ -72,3 +73,21 @@ def test_cost_ledger_backward_compatible_total_credits_property() -> None:
     assert ledger.total_credits == Decimal("0")
     ledger.record_event(CostEvent(stage="search", provider="tavily", cost_usd=0.01, cost_credits=Decimal("1.25")))
     assert ledger.total_credits == Decimal("1.25")
+
+
+@patch("spectrue_core.utils.trace.Trace.event")
+def test_record_event_emits_trace(mock_trace_event) -> None:
+    ledger = CostLedger(run_id="run-trace")
+    event = CostEvent(
+        stage="search",
+        provider="tavily",
+        cost_usd=0.05,
+        cost_credits=Decimal("5"),
+        run_id="run-trace"
+    )
+    ledger.record_event(event)
+
+    mock_trace_event.assert_called_once_with(
+        "billing.cost_event",
+        event.to_dict()
+    )

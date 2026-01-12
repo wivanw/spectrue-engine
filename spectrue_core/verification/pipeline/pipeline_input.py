@@ -124,10 +124,22 @@ async def verify_inline_sources(
         )
 
     if verified_inline_sources:
+        # === PRE-FETCH: Batch extract all inline source URLs ===
+        # This populates cache so EAL and primary fetch get cache hits
+        all_inline_urls = [s.get("url") for s in verified_inline_sources if s.get("url")]
+        if all_inline_urls and search_mgr and hasattr(search_mgr, "fetch_urls_content_batch"):
+            Trace.event("pipeline.inline.prefetch.start", {"total_urls": len(all_inline_urls)})
+            try:
+                await search_mgr.fetch_urls_content_batch(all_inline_urls)
+                Trace.event("pipeline.inline.prefetch.done", {"urls": len(all_inline_urls)})
+            except Exception as e:
+                logger.warning("[Pipeline] Inline pre-fetch failed: %s", e)
+
         if search_mgr and hasattr(search_mgr, "apply_evidence_acquisition_ladder"):
             verified_inline_sources = await search_mgr.apply_evidence_acquisition_ladder(
                 verified_inline_sources,
                 budget_context="inline",  # Use separate budget from claim verification
+                cache_only=True,  # Use pre-fetched cache
             )
         
         skipped_count = len([s for s in verified_inline_sources if s.get("verification_skipped")])
@@ -143,25 +155,37 @@ async def verify_inline_sources(
         )
 
         # Fetch content for primary inline sources (only if verification was done)
+        # Content should already be in cache from pre-fetch
         primary_sources = [s for s in verified_inline_sources if s.get("is_primary") and not s.get("verification_skipped")]
         if primary_sources and search_mgr and content_budget_config:
             for src in primary_sources[:2]:  # Limit to 2 primary sources
                 url = src.get("url", "")
                 if url and not src.get("content"):
-                    try:
-                        fetched = await search_mgr.web_tool.fetch_page_content(url)
-                        if fetched and len(fetched) > 100:
-                            budgeted_content, _ = apply_content_budget(
-                                fetched, content_budget_config, source="inline_source"
-                            )
-                            src["content"] = budgeted_content
-                            src["snippet"] = budgeted_content[:300]
-                            Trace.event("inline_source.content_fetched", {
-                                "url": url[:80],
-                                "chars": len(fetched),
-                            })
-                    except Exception as e:
-                        logger.debug("[Pipeline] Failed to fetch inline source: %s", e)
+                    # Try cache first (populated by pre-fetch)
+                    cached = None
+                    if hasattr(search_mgr, "web_tool") and hasattr(search_mgr.web_tool, "_try_page_cache"):
+                        cached = search_mgr.web_tool._try_page_cache(url)
+                    
+                    if cached:
+                        src["content"] = cached
+                        src["snippet"] = cached[:300]
+                        Trace.event("inline_source.content_from_cache", {"url": url[:80], "chars": len(cached)})
+                    else:
+                        # Fallback to fetch if not in cache
+                        try:
+                            fetched = await search_mgr.web_tool.fetch_page_content(url)
+                            if fetched and len(fetched) > 100:
+                                budgeted_content, _ = apply_content_budget(
+                                    fetched, content_budget_config, source="inline_source"
+                                )
+                                src["content"] = budgeted_content
+                                src["snippet"] = budgeted_content[:300]
+                                Trace.event("inline_source.content_fetched", {
+                                    "url": url[:80],
+                                    "chars": len(fetched),
+                                })
+                        except Exception as e:
+                            logger.debug("[Pipeline] Failed to fetch inline source: %s", e)
 
     return verified_inline_sources
 

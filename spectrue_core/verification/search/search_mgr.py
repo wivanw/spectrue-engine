@@ -233,11 +233,76 @@ class SearchManager:
         return current_cost <= max_cost
 
     async def fetch_url_content(self, url: str) -> str | None:
-        """Securely fetch content via Tavily Extract."""
-        content = await self.web_tool._fetch_extract_text(url)
+        """Securely fetch content via Tavily Extract (single URL, for back-compat)."""
+        results = await self.fetch_urls_content_batch([url])
+        content = results.get(url)
         if content:
             self.page_fetches += 1
         return content
+
+    async def fetch_urls_content_batch(self, urls: list[str]) -> dict[str, str]:
+        """
+        Fetch content for multiple URLs using batch extraction.
+        
+        Uses WebSearchTool's internal cache and TavilyClient.extract_batch for efficiency.
+        Tavily bills 1 credit per 5 URLs, so batching saves ~80% on extract costs.
+        
+        Returns:
+            Dict mapping URL -> extracted content (only successful extractions)
+        """
+        if not urls:
+            return {}
+        
+        url_map: dict[str, str] = {}
+        missing: list[str] = []
+        
+        # Check cache first
+        for u in urls:
+            cached = self.web_tool._try_page_cache(u)
+            if cached:
+                url_map[u] = cached
+            else:
+                missing.append(u)
+        
+        Trace.event("search_mgr.batch_fetch.cache", {
+            "hit": len(url_map),
+            "miss": len(missing),
+            "total": len(urls),
+        })
+        
+        if missing and self.web_tool.api_key:
+            # Batch extract with 5-URL chunks
+            BATCH_SIZE = 5
+            batches = [missing[i:i + BATCH_SIZE] for i in range(0, len(missing), BATCH_SIZE)]
+            
+            for batch_idx, batch in enumerate(batches):
+                Trace.event("search_mgr.batch_fetch.call", {
+                    "batch_index": batch_idx,
+                    "urls_count": len(batch),
+                })
+                try:
+                    data = await self.web_tool._tavily.extract_batch(urls=batch, format="markdown")
+                    results = data.get("results", [])
+                    
+                    for item in results:
+                        item_url = item.get("url")
+                        if not item_url:
+                            continue
+                        raw = item.get("raw_content") or item.get("content") or ""
+                        cleaned = self.web_tool._clean_extracted_text(raw)
+                        if cleaned:
+                            url_map[item_url] = cleaned
+                            self.web_tool._write_page_cache(item_url, cleaned)
+                            self.page_fetches += 1
+                except Exception as e:
+                    logger.warning("[SearchMgr] Batch extract failed: %s", e)
+                    Trace.event("search_mgr.batch_fetch.error", {
+                        "batch_index": batch_idx,
+                        "urls_count": len(batch),
+                        "error": str(e)[:200],
+                    })
+        
+        return url_map
 
     async def apply_evidence_acquisition_ladder(
         self,
@@ -246,6 +311,7 @@ class SearchManager:
         max_fetches: int = 2,
         budget_context: str = "claim",
         claim_id: str | None = None,
+        cache_only: bool = False,
     ) -> list[dict]:
         """
         EAL: Enrich snippet-only sources with content + quote candidates.
@@ -262,6 +328,8 @@ class SearchManager:
                 - "inline": For inline source verification (separate budget)
             claim_id: If provided, use per-claim budget tracker (for deep mode).
                 Each claim gets its own independent budget.
+            cache_only: If True, only use cached content (no API calls).
+                Use when orchestration layer has already pre-fetched URLs.
         
         Uses batch quote extraction for efficiency (single embedding call).
         """
@@ -275,7 +343,6 @@ class SearchManager:
         if not needs_evidence_acquisition_ladder(sources):
             return sources
 
-        fetch_count = 0
         # Prefer higher relevance scores.
         candidates = sorted(
             [s for s in sources if isinstance(s, dict)],
@@ -283,66 +350,92 @@ class SearchManager:
             reverse=True,
         )
 
-        processed_urls = set()
+        # Phase 1: Collect URLs that need fetching (respecting budget and max_fetches)
+        urls_to_fetch: list[str] = []
+        src_by_url: dict[str, list[dict]] = {}  # URL -> sources that need this URL
+        processed_urls: set[str] = set()
 
-        # Phase 1: Fetch content for sources that need it
-        sources_for_quote_extraction: list[tuple[int, dict]] = []  # (index, source)
-
-        for idx, src in enumerate(candidates):
+        for src in candidates:
             if src.get("quote"):
                 continue
 
             current_content = src.get("content") or src.get("snippet") or ""
-            should_fetch = False
 
-            if fetch_count < max_fetches:
-                # Check Bayesian budget allocation (dynamic limit)
-                should_continue, reason = tracker.should_extract()
-                if not should_continue:
-                    Trace.event(
-                        "eal.budget_stop",
-                        {
-                            "reason": reason,
-                            "budget_context": budget_context,
-                            "claim_id": claim_id,
-                            "budget_state": tracker.to_dict(),
-                        },
-                    )
-                    break
-                # If explicitly marked as fulltext, don't re-fetch
-                if src.get("fulltext"):
-                    should_fetch = False
-                # If content is very short (likely snippet) or missing, fetch
-                elif len(current_content) < 2000:
-                    should_fetch = True
+            # Check if we can afford more fetches
+            if len(urls_to_fetch) >= max_fetches:
+                break
+
+            # Check Bayesian budget allocation (dynamic limit)
+            should_continue, reason = tracker.should_extract()
+            if not should_continue:
+                Trace.event(
+                    "eal.budget_stop",
+                    {
+                        "reason": reason,
+                        "budget_context": budget_context,
+                        "claim_id": claim_id,
+                        "budget_state": tracker.to_dict(),
+                    },
+                )
+                break
+
+            # Decide if this source needs fetching
+            should_fetch = False
+            if src.get("fulltext"):
+                should_fetch = False  # Already has fulltext
+            elif len(current_content) < 2000:
+                should_fetch = True  # Short content, likely snippet
 
             if should_fetch:
                 url = src.get("url") or src.get("link")
-                if url:
-                    # Deduplication to avoid wasted fetches
-                    if url in processed_urls:
-                        continue
-
-                    fetched = await self.fetch_url_content(url)
+                if url and url not in processed_urls:
+                    urls_to_fetch.append(url)
                     processed_urls.add(url)
+                    # Track which sources need this URL
+                    if url not in src_by_url:
+                        src_by_url[url] = []
+                    src_by_url[url].append(src)
 
-                    if fetched:
-                        src["content"] = fetched
-                        src["fulltext"] = True
-                        current_content = fetched
-                        fetch_count += 1
-                        
-                        # Record extract with Bayesian update
-                        relevance = float(src.get("relevance_score", 0.5) or 0.5)
-                        is_authoritative = src.get("source_tier") in ("A", "B")
-                        # Quote detection will happen in Phase 2
-                        tracker.record_extract(
-                            relevance_score=relevance,
-                            has_quote=False,  # Updated after quote extraction
-                            is_authoritative=is_authoritative,
-                        )
+        # Phase 1b: Fetch content for collected URLs
+        # In cache_only mode, only read from cache (no API calls)
+        fetch_count = 0
+        if urls_to_fetch:
+            if cache_only:
+                # Cache-only mode: read from web_tool's cache without API calls
+                fetched_map: dict[str, str] = {}
+                for url in urls_to_fetch:
+                    cached = self.web_tool._try_page_cache(url)
+                    if cached:
+                        fetched_map[url] = cached
+                Trace.event("eal.cache_only_fetch", {
+                    "urls_requested": len(urls_to_fetch),
+                    "cache_hits": len(fetched_map),
+                    "cache_misses": len(urls_to_fetch) - len(fetched_map),
+                })
+            else:
+                # Normal mode: batch fetch with API calls
+                fetched_map = await self.fetch_urls_content_batch(urls_to_fetch)
 
-            # Collect sources that need quote extraction
+            # Apply fetched content to sources
+            for url, content in fetched_map.items():
+                for src in src_by_url.get(url, []):
+                    src["content"] = content
+                    src["fulltext"] = True
+                    fetch_count += 1
+
+                    # Record extract with Bayesian update
+                    relevance = float(src.get("relevance_score", 0.5) or 0.5)
+                    is_authoritative = src.get("source_tier") in ("A", "B")
+                    tracker.record_extract(
+                        relevance_score=relevance,
+                        has_quote=False,  # Updated after quote extraction
+                        is_authoritative=is_authoritative,
+                    )
+
+        # Phase 1c: Collect sources that need quote extraction
+        sources_for_quote_extraction: list[tuple[int, dict]] = []
+        for idx, src in enumerate(candidates):
+            current_content = src.get("content") or src.get("snippet") or ""
             if current_content and len(current_content) >= 50:
                 claim_text = src.get("claim_text") or ""
                 if claim_text:
@@ -507,7 +600,8 @@ class SearchManager:
             query,
             num_results=num_results,
             depth="advanced",
-            topic=topic
+            topic=topic,
+            skip_enrichment=True,  # Centralized enrichment at orchestration level
         )
 
         filtered = self._filter_search_results(results, intent)
@@ -522,7 +616,8 @@ class SearchManager:
                 query,
                 num_results=num_results,  # Use same limit for fallback
                 depth="advanced",
-                topic="general"
+                topic="general",
+                skip_enrichment=True,  # Centralized enrichment at orchestration level
             )
             fb_filtered = self._filter_search_results(fb_results, intent)
 
@@ -571,6 +666,7 @@ class SearchManager:
             include_domains=include_domains,
             exclude_domains=exclude_domains,
             topic=topic,
+            skip_enrichment=True,  # Centralized enrichment at orchestration level
         )
 
     async def search_tier1(self, query: str, domains: list[str]) -> SearchResponse:
@@ -579,7 +675,8 @@ class SearchManager:
         return await self.web_tool.search(
             query, 
             depth="advanced", 
-            include_domains=domains
+            include_domains=domains,
+            skip_enrichment=True,  # Centralized enrichment at orchestration level
         )
 
     async def search_tier2(
@@ -594,7 +691,8 @@ class SearchManager:
             query,
             depth="advanced",
             exclude_domains=exclude_domains,
-            topic=topic
+            topic=topic,
+            skip_enrichment=True,  # Centralized enrichment at orchestration level
         )
 
     async def search_google_cse(self, query: str, lang: str) -> list[dict]:

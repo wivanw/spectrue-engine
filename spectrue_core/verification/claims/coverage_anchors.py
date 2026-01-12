@@ -19,9 +19,8 @@ Anchors represent verifiable facts that must be accounted for during extraction.
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Iterator
 
 from spectrue_core.utils.trace import Trace
 

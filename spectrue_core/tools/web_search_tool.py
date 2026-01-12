@@ -33,12 +33,29 @@ from spectrue_core.tools.tavily_client import TavilyClient
 from spectrue_core.tools.url_utils import clean_url_for_cache, normalize_host
 from spectrue_core.utils.trace import Trace
 
+
 try:
     import trafilatura
 except ImportError:
     trafilatura = None
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_text_from_batch_response(data: dict, url: str) -> str | None:
+    """Extract text content for a specific URL from batch response."""
+    results = data.get("results", [])
+    if not results:
+        return None
+
+    for item in results:
+        if item.get("url") == url:
+            return item.get("raw_content") or item.get("content") or ""
+    
+    # Fallback to first result if URL not matched exactly
+    if results:
+        return results[0].get("raw_content") or results[0].get("content") or ""
+    return None
 
 
 class WebSearchTool:
@@ -169,11 +186,69 @@ class WebSearchTool:
         return clean_url_for_cache(url)
 
     async def _fetch_extract_text(self, url: str) -> str | None:
+        """
+        Fetch extracted text for a single URL (uses batch API internally).
+        
+        DEPRECATED: Prefer using _enrich_with_fulltext or direct extract_batch calls.
+        This method is kept for backward compatibility with tests.
+        """
         from spectrue_core.tools.url_utils import is_valid_public_http_url
 
         if not is_valid_public_http_url(url) or not self.api_key:
             return None
 
+        # Check cache first
+        cached = self._try_page_cache(url)
+        if cached:
+            return cached
+
+        try:
+            # Use single-via-batch API
+            data = await self._tavily.extract_single_via_batch(url=url, format="markdown")
+            extracted_text = _extract_text_from_batch_response(data, url)
+            if not extracted_text:
+                return None
+
+            cleaned = self._clean_extracted_text(extracted_text)
+            if not cleaned:
+                return None
+
+            self._write_page_cache(url, cleaned)
+            Trace.event("tavily.extract.success", {"url": url, "chars": len(cleaned)})
+            return cleaned
+
+        except Exception as e:
+            logger.warning("[Tavily] Extract failed for %s: %s", url, e)
+            Trace.event("tavily.extract.error", {"url": url, "error": str(e)})
+            return None
+
+    def _clean_extracted_text(self, raw: str | None) -> str | None:
+        """Clean extracted text using trafilatura if needed."""
+        if not raw:
+            return None
+        
+        cleaned = ""
+        if trafilatura and ("<html" in raw or "<body" in raw or "<div" in raw):
+            try:
+                cleaned = trafilatura.extract(
+                    raw,
+                    include_links=True,
+                    include_images=False,
+                    include_comments=False,
+                )
+            except Exception as e:
+                logger.warning("[Tavily] Trafilatura extraction failed: %s", e)
+        
+        if not cleaned:
+            cleaned = raw
+        cleaned = cleaned.strip()
+        
+        if len(cleaned) < 50:
+            return None
+        return cleaned
+
+    def _try_page_cache(self, url: str) -> str | None:
+        """Try to get extracted text from cache."""
         clean_url = self._clean_url_key(url)
         cache_key = f"page_tavily|{clean_url}"
         try:
@@ -183,53 +258,16 @@ class WebSearchTool:
                     return cached
         except Exception:
             pass
+        return None
 
+    def _write_page_cache(self, url: str, text: str) -> None:
+        """Write extracted text to cache."""
+        clean_url = self._clean_url_key(url)
+        cache_key = f"page_tavily|{clean_url}"
         try:
-            data = await self._tavily.extract(url=url, format="markdown")
-            results = data.get("results", [])
-            if not results:
-                return None
-
-            extracted_text = ""
-            for item in results:
-                if item.get("url") == url:
-                    extracted_text = item.get("raw_content") or item.get("content") or ""
-                    break
-            if not extracted_text and results:
-                extracted_text = results[0].get("raw_content") or results[0].get("content") or ""
-            if not extracted_text:
-                return None
-
-            cleaned = ""
-            if trafilatura and ("<html" in extracted_text or "<body" in extracted_text or "<div" in extracted_text):
-                try:
-                    cleaned = trafilatura.extract(
-                        extracted_text,
-                        include_links=True,
-                        include_images=False,
-                        include_comments=False,
-                    )
-                except Exception as e:
-                    logger.warning("[Tavily] Trafilatura extraction failed: %s", e)
-
-            if not cleaned:
-                cleaned = extracted_text
-            cleaned = cleaned.strip()
-            if len(cleaned) < 50:
-                return None
-
-            try:
-                self.page_cache.set(cache_key, cleaned, expire=self.page_ttl)
-            except Exception:
-                pass
-
-            Trace.event("tavily.extract.success", {"url": url, "chars": len(cleaned)})
-            return cleaned
-
-        except Exception as e:
-            logger.warning("[Tavily] Extract failed for %s: %s", url, e)
-            Trace.event("tavily.extract.error", {"url": url, "error": str(e)})
-            return None
+            self.page_cache.set(cache_key, text, expire=self.page_ttl)
+        except Exception:
+            pass
 
     async def _enrich_with_fulltext(self, query: str, ranked: list[dict], *, limit: int = 3) -> tuple[list[dict], int]:
         target_urls = [r.get("url") for r in (ranked or []) if r.get("url")]
@@ -237,9 +275,60 @@ class WebSearchTool:
         if not target_urls:
             return ranked, 0
 
-        texts = await asyncio.gather(*[self._fetch_extract_text(u) for u in target_urls])
-        url_map = {u: t for u, t in zip(target_urls, texts) if t}
+        # 1) Cache first (URL-level)
+        cached_map: dict[str, str] = {}
+        missing: list[str] = []
+        for u in target_urls:
+            cached = self._try_page_cache(u)
+            if cached:
+                cached_map[u] = cached
+            else:
+                missing.append(u)
 
+        Trace.event(
+            "tavily.extract.cache",
+            {"hit": len(cached_map), "miss": len(missing), "target": len(target_urls)},
+        )
+
+        # 2) Batch extract missing URLs (Tavily billing: 1 credit per 5 URLs)
+        url_map: dict[str, str] = dict(cached_map)
+        BATCH_SIZE = 5
+        
+        if missing and self.api_key:
+            # Chunk missing URLs into batches of 5
+            batches = [missing[i:i + BATCH_SIZE] for i in range(0, len(missing), BATCH_SIZE)]
+            
+            for batch_idx, batch in enumerate(batches):
+                Trace.event("tavily.extract.batch.call", {
+                    "batch_index": batch_idx,
+                    "urls_count": len(batch),
+                })
+                try:
+                    data = await self._tavily.extract_batch(urls=batch, format="markdown")
+                    results = data.get("results", [])
+                    
+                    for item in results:
+                        item_url = item.get("url")
+                        if not item_url:
+                            continue
+                        raw = item.get("raw_content") or item.get("content") or ""
+                        cleaned = self._clean_extracted_text(raw)
+                        if cleaned:
+                            url_map[item_url] = cleaned
+                            self._write_page_cache(item_url, cleaned)
+                            Trace.event("tavily.extract.success", {
+                                "url": item_url,
+                                "chars": len(cleaned),
+                            })
+                except Exception as e:
+                    logger.warning("[Tavily] Batch extract failed: %s", e)
+                    Trace.event("tavily.extract.batch.error", {
+                        "batch_index": batch_idx,
+                        "urls_count": len(batch),
+                        "error": str(e)[:200],
+                    })
+
+        # Rebuild ranked list with fulltext content
         updated: list[dict] = []
         fetched = 0
         for item in ranked:
@@ -273,6 +362,7 @@ class WebSearchTool:
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
         topic: str = "general",
+        skip_enrichment: bool = False,  # Skip fulltext enrichment for batch mode
     ) -> tuple[str, list[dict]]:
         if not self.api_key:
             logger.debug("[Tavily] API key missing; skipping search")
@@ -291,6 +381,7 @@ class WebSearchTool:
             include_domains=include_domains,
             exclude_domains=exclude_domains,
             topic=topic,
+            skip_enrichment=skip_enrichment,
         )
 
     async def _search_internal(
@@ -304,6 +395,7 @@ class WebSearchTool:
         exclude_domains: list[str] | None,
         topic: str,
         ttl: int | None = None,
+        skip_enrichment: bool = False,  # Skip per-search fulltext enrichment for batch mode
     ) -> tuple[str, list[dict]]:
         from spectrue_core.utils.text_processing import normalize_search_query
 
@@ -487,7 +579,8 @@ class WebSearchTool:
 
             quality = self._quality_from_ranked(ranked)
             fulltext_fetches = 0
-            if self._should_fulltext_enrich():
+            # Skip enrichment in batch mode - orchestration layer will do centralized enrichment
+            if self._should_fulltext_enrich() and not skip_enrichment:
                 ranked, fulltext_fetches = await self._enrich_with_fulltext(q, ranked, limit=3)
                 quality = self._quality_from_ranked(ranked)
                 logger.debug("[Tavily] Fulltext enrichment: %d pages", fulltext_fetches)

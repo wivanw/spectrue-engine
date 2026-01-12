@@ -70,12 +70,13 @@ RETRIEVAL_ALLOWED_FIELDS = {
 POST_EVIDENCE_ALLOWED_FIELDS: set[str] = set()
 
 
-# Predicate types that don't require explicit time anchors
-# - quote: verifiable via source attribution (who said it)
-# - policy: verifiable via official records
-# - ranking: verifiable via current datasets
-# - existence: verifiable via document/entity lookup
-TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence"}
+#
+# Time anchors are NOT universally required.
+# Many predicates are timeless (definitions/properties/measurements) and forcing
+# time_anchor makes claims "mathematically unreachable" in non-experiment mode.
+#
+# NOTE: This is not a heuristic. It is a predicate-level schema rule.
+TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence", "measurement"}
 
 
 # Default system instructions for claim extraction (MANDATORY)
@@ -536,7 +537,6 @@ class ClaimExtractionSkill(BaseSkill):
         # The prompt returned by build_core_extraction_prompt is the user/input message.
         # We inject system instructions separately to ensure they are never empty.
         instructions = DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS
-        instructions_injected_fallback = False
         
         # Trace guard: log if we're using fallback (this should always be the case now)
         Trace.event("claim_extraction.guard.instructions_injected", {
@@ -603,6 +603,29 @@ class ClaimExtractionSkill(BaseSkill):
                 valid_claims.append(claim)
                 stats.record_emit()
             else:
+                # SOFT-FAIL rule: time_anchor issues must NOT drop the claim.
+                # They reduce retrieval precision but should not block evidence acquisition.
+                # This preserves the project invariant: "inconclusive evidence" != "no evidence".
+                time_only = all(
+                    rc in ("missing_time_anchor", "unknown_time_anchor")
+                    for rc in (reason_codes or [])
+                )
+                if time_only and reason_codes:
+                    claim_preview = (claim.get("claim_text") or claim.get("text") or "")[:100]
+                    Trace.event("claim.validation.warning", {
+                        "temp_id": f"warn_{idx}",
+                        "warning_codes": reason_codes,
+                        "claim_preview": claim_preview,
+                        "predicate_type": claim.get("predicate_type", "unknown"),
+                    })
+                    # Keep the claim, but annotate warnings for downstream explainability/trace.
+                    claim["_validation_warnings"] = list(reason_codes)
+                    if "claim_text" in claim and "text" not in claim:
+                        claim["text"] = claim["claim_text"]
+                    valid_claims.append(claim)
+                    stats.record_emit()
+                    continue
+
                 stats.record_drop(reason_codes)
                 
                 # Emit trace event for dropped claim
@@ -754,6 +777,11 @@ class ClaimExtractionSkill(BaseSkill):
             evidence_requirement=req,
             search_queries=search_queries,
             check_oracle=bool(merged.get("check_oracle", False)),
+            # Retrieval escalation fields (from core extraction)
+            subject_entities=merged.get("subject_entities", []),
+            retrieval_seed_terms=merged.get("retrieval_seed_terms", []),
+            context_entities=merged.get("context_entities", []),
+            time_anchor=merged.get("time_anchor"),
             normalized_text=normalized,
             topic_group=topic,
             check_worthiness=worthiness,

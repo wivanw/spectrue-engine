@@ -206,6 +206,10 @@ class PhaseRunner:
             self._emit_claim_trace_summaries(execution_plan)
             return evidence
 
+        # === PRE-FETCH: Batch extract all inline source URLs ===
+        # This populates the cache so per-claim EAL calls get cache hits
+        await self._pre_extract_inline_urls()
+
         dependency_layers = self._get_dependency_layers(claims)
 
         # Determine phase order (collect all unique phases in order)
@@ -334,6 +338,10 @@ class PhaseRunner:
                                 "reason": sufficiency.reason,
                             })
 
+        # === CENTRALIZED BATCH ENRICHMENT ===
+        # After all searches complete, enrich all sources at once
+        evidence = await self._batch_enrich_all_sources(evidence)
+
         self._emit_claim_trace_summaries(execution_plan)
         return evidence
 
@@ -341,6 +349,127 @@ class PhaseRunner:
         summaries = self.execution_state.build_trace_summaries(plan=execution_plan)
         for summary in summaries:
             Trace.event("claim.trace.summary", summary)
+
+    async def _pre_extract_inline_urls(self) -> None:
+        """
+        Pre-fetch all inline source URLs to populate cache.
+        
+        This ensures subsequent EAL calls get cache hits instead of
+        making individual API calls (5 URLs = 1 credit vs 1 URL = 1 credit).
+        """
+        if not self.inline_sources:
+            return
+        
+        # Collect all URLs from inline sources
+        all_urls: list[str] = []
+        for src in self.inline_sources:
+            if not isinstance(src, dict):
+                continue
+            url = src.get("url") or src.get("link")
+            if url and isinstance(url, str) and url not in all_urls:
+                all_urls.append(url)
+        
+        if not all_urls:
+            return
+        
+        # Batch extract using search_mgr
+        if hasattr(self.search_mgr, "fetch_urls_content_batch"):
+            Trace.event("phase_runner.prefetch.start", {
+                "total_urls": len(all_urls),
+                "source": "inline_sources",
+            })
+            try:
+                await self.search_mgr.fetch_urls_content_batch(all_urls)
+                Trace.event("phase_runner.prefetch.done", {
+                    "urls_extracted": len(all_urls),
+                })
+            except Exception as e:
+                logger.warning("[PhaseRunner] Pre-fetch failed: %s", e)
+                Trace.event("phase_runner.prefetch.error", {
+                    "error": str(e)[:200],
+                })
+
+    async def _batch_enrich_all_sources(
+        self, evidence: dict[str, list[dict]]
+    ) -> dict[str, list[dict]]:
+        """
+        Centralized batch enrichment for all sources across all claims.
+        
+        Collects all URLs from:
+        1. All claim sources (from search results)
+        2. Inline sources (article citations)
+        
+        Fetches them in batch (5 URLs = 1 credit), then applies content.
+        
+        This consolidates ALL URL extraction for ~90% cost reduction.
+        """
+        # Collect all URLs from all claims + inline sources
+        all_urls: list[str] = []
+        url_to_sources: dict[str, list[dict]] = {}  # Track which sources need each URL
+        
+        # 1. Collect from claim sources
+        for claim_id, sources in evidence.items():
+            for src in sources:
+                if not isinstance(src, dict):
+                    continue
+                url = src.get("url") or src.get("link")
+                if url and isinstance(url, str):
+                    if url not in all_urls:
+                        all_urls.append(url)
+                    url_to_sources.setdefault(url, []).append(src)
+        
+        # 2. Collect from inline sources
+        for src in self.inline_sources:
+            if not isinstance(src, dict):
+                continue
+            url = src.get("url") or src.get("link")
+            if url and isinstance(url, str):
+                if url not in all_urls:
+                    all_urls.append(url)
+                url_to_sources.setdefault(url, []).append(src)
+        
+        if not all_urls:
+            Trace.event("orchestration.batch_enrich.skip", {
+                "reason": "no_urls",
+            })
+            return evidence
+        
+        # Batch fetch all URLs at once
+        if not hasattr(self.search_mgr, "fetch_urls_content_batch"):
+            logger.warning("[PhaseRunner] SearchManager lacks fetch_urls_content_batch")
+            return evidence
+        
+        Trace.event("orchestration.batch_enrich.start", {
+            "total_urls": len(all_urls),
+            "claims_count": len(evidence),
+            "inline_count": len(self.inline_sources),
+        })
+        
+        try:
+            content_map = await self.search_mgr.fetch_urls_content_batch(all_urls)
+            
+            # Apply content to ALL sources that reference each URL
+            enriched_count = 0
+            for url, content in content_map.items():
+                for src in url_to_sources.get(url, []):
+                    if not src.get("fulltext"):
+                        src["content"] = content
+                        src["fulltext"] = True
+                        enriched_count += 1
+            
+            Trace.event("orchestration.batch_enrich.done", {
+                "urls_fetched": len(content_map),
+                "sources_enriched": enriched_count,
+                "batch_efficiency": f"{len(all_urls)}/{(len(all_urls) + 4) // 5}",
+            })
+            
+        except Exception as e:
+            logger.warning("[PhaseRunner] Batch enrichment failed: %s", e)
+            Trace.event("orchestration.batch_enrich.error", {
+                "error": str(e)[:200],
+            })
+        
+        return evidence
 
     async def _run_claims_with_loop(
         self,
@@ -353,6 +482,10 @@ class PhaseRunner:
         """
         evidence: dict[str, list[dict]] = {c.get("id"): [] for c in claims}
         dependency_layers = self._get_dependency_layers(claims)
+
+        # === PRE-FETCH: Batch extract all inline source URLs ===
+        # This populates the cache so EAL calls get cache hits
+        await self._pre_extract_inline_urls()
 
         for layer in dependency_layers:
             tasks = []
@@ -576,11 +709,9 @@ class PhaseRunner:
                     if claim_text and not src.get("claim_text"):
                         src["claim_text"] = claim_text
 
-            if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
-                sources = await self.search_mgr.apply_evidence_acquisition_ladder(
-                    sources,
-                    claim_id=claim_id,  # Per-claim budget in deep mode
-                )
+            # NOTE: Content enrichment deferred to _batch_enrich_all_sources after
+            # all searches complete. This enables batching (5 URLs = 1 credit).
+            # Sources collected here contain only snippets from search results.
 
             all_sources.extend(sources)
 
@@ -693,11 +824,8 @@ class PhaseRunner:
                     claim_id, ready_stats
                 )
 
-                if hasattr(self.search_mgr, "apply_evidence_acquisition_ladder"):
-                    claim_inline_sources = await self.search_mgr.apply_evidence_acquisition_ladder(
-                        claim_inline_sources,
-                        budget_context="inline",  # Use separate budget from claim verification
-                    )
+                # NOTE: Inline source enrichment deferred to _batch_enrich_all_sources
+                # to enable batched URL extraction (5 URLs = 1 credit).
 
                 # IMPORTANT: We must return the inline sources too!
                 # Filter to only unique sources to avoid dupes if they were already in claim_sources

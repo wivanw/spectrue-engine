@@ -18,10 +18,7 @@ Tests cover:
 - Coverage validation
 """
 
-import pytest
-
 from spectrue_core.verification.claims.coverage_anchors import (
-    Anchor,
     AnchorKind,
     extract_time_anchors,
     extract_numeric_anchors,

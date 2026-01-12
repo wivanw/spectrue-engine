@@ -5,7 +5,6 @@
 """Unit tests for LLM fallback wrapper."""
 
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, patch
 from spectrue_core.llm.fallback import call_with_fallback
 from spectrue_core.llm.failures import classify_llm_failure, LLMFailureKind

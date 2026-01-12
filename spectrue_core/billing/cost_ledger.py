@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from spectrue_core.billing.cost_event import CostEvent, RunCostSummary
+from spectrue_core.utils.trace import Trace
 
 
 @dataclass(slots=True)
@@ -34,6 +35,7 @@ class CostLedger:
 
     def record_event(self, event: CostEvent) -> None:
         self.events.append(event)
+        Trace.event("billing.cost_event", event.to_dict())
 
     def set_phase_usage(self, usage: list[dict]) -> None:
         self.phase_usage = list(usage)

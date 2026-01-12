@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -19,12 +20,14 @@ from typing import Any
 from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
 from spectrue_core.verification.pipeline.pipeline_queries import (
     is_fuzzy_duplicate,
     normalize_and_sanitize,
     resolve_budgeted_max_queries,
     select_diverse_queries,
 )
+from spectrue_core.verification.retrieval.cegs_mvp import build_doc_query_plan
 from spectrue_core.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
@@ -33,6 +36,8 @@ from spectrue_core.verification.search.search_escalation import (
     build_query_variants,
     trace_query_variants,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _claim_id_for(claim: dict[str, Any], idx: int) -> str:
@@ -124,11 +129,69 @@ class BuildQueriesStep:
         max_queries = resolve_budgeted_max_queries(claims_for_plan, default_max=3)
         fact_fallback = _fallback_fact(ctx)
 
-        global_queries = select_diverse_queries(
-            claims_for_plan,
-            max_queries=max_queries,
-            fact_fallback=fact_fallback,
-        )
+        # CEGS MVP Integration: Use doc-level query planning (A)
+        # Extract anchors from full text if available
+        full_text = ctx.get_extra("prepared_fact", "") or ctx.get_extra("input_text", "")
+        anchors = extract_all_anchors(full_text)
+        
+        # Ensure claims are dicts
+        safe_claims = [c for c in claims_for_plan if isinstance(c, dict)]
+        
+        try:
+            # Use CEGS planner
+            cegs_queries = build_doc_query_plan(safe_claims, anchors)
+            
+            # (A) Handle empty doc-plan with fallback
+            if not cegs_queries:
+                Trace.event("retrieval.doc_plan.empty", {
+                    "reason": "no_queries",
+                    "entity_count_used": 0,
+                    "anchor_count_used": len(anchors),
+                })
+                
+                # Fallback to legacy query builder
+                global_queries = select_diverse_queries(
+                    claims_for_plan,
+                    max_queries=max_queries,
+                    fact_fallback=fact_fallback,
+                )
+                
+                Trace.event("retrieval.doc_plan.fallback", {
+                    "fallback_used": True,
+                    "queries_count": len(global_queries),
+                    "method": "legacy",
+                })
+            else:
+                global_queries = cegs_queries
+                
+        except Exception as e:
+            # Exception fallback to legacy
+            logger.warning(f"CEGS query planning failed: {e}. Falling back to legacy.")
+            Trace.event("retrieval.doc_plan.empty", {
+                "reason": "exception",
+                "error": str(e)[:100],
+                "anchor_count_used": len(anchors),
+            })
+            
+            global_queries = select_diverse_queries(
+                claims_for_plan,
+                max_queries=max_queries,
+                fact_fallback=fact_fallback,
+            )
+            
+            Trace.event("retrieval.doc_plan.fallback", {
+                "fallback_used": True,
+                "queries_count": len(global_queries),
+                "method": "legacy_exception",
+            })
+        
+        # (A) Terminal guard: assert global_queries_count >= 1
+        if not global_queries:
+            Trace.event("retrieval.doc_plan.terminal_empty", {
+                "claims_count": len(claims_for_plan),
+                "anchors_count": len(anchors),
+            })
+            raise ValueError("PIPELINE_ERROR: Retrieval planning produced 0 global queries")
 
         per_claim_queries: dict[str, tuple[str, ...]] = {}
         for idx, claim in enumerate(claims_for_plan):
@@ -137,6 +200,8 @@ class BuildQueriesStep:
             claim_id = _claim_id_for(claim, idx)
             queries = _build_claim_queries(claim, max_queries=max_queries)
             per_claim_queries[claim_id] = tuple(queries)
+        
+        # ... (rest of the function)
         updated_claims: list[dict[str, Any]] = []
         for idx, claim in enumerate(claims):
             if not isinstance(claim, dict):

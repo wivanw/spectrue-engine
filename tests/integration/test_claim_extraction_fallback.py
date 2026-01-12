@@ -5,10 +5,8 @@
 """Integration tests for Claim Extraction Fallback."""
 
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 from spectrue_core.agents.skills.claims import ClaimExtractionSkill
-from spectrue_core.llm.failures import LLMFailureKind
 
 
 @pytest.mark.asyncio
