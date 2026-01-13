@@ -182,7 +182,6 @@ class AssembleStandardResultStep:
                 "sources": sources,
                 "rationale": verdict.get("rationale"),
                 "analysis": verdict.get("analysis") or verdict.get("rationale"),
-                "analysis": verdict.get("analysis") or verdict.get("rationale"),
                 "verified_score": (_coerce_score(verdict.get("verified_score"), 0.0) + 1.0) / 2.0,  # Normalize [-1, 1] -> [0, 1]
                 "veracity_signed": verdict.get("verified_score"),  # Preserve signed score for debug/backend use
                 "explainability_score": verdict.get("explainability_score"),
