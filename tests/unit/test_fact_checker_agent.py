@@ -33,10 +33,10 @@ async def test_analyze_calls_llm_client_responses(mock_llm_client):
     mock_instance = mock_llm_client.return_value
     mock_instance.call_json = AsyncMock(return_value=mock_response)
     
-    config = SpectrueConfig(openai_api_key="sk-test", tavily_api_key="test")
+    config = SpectrueConfig(openai_api_key="sk-test", tavily_api_key="test", openai_model="gpt-5-nano")
     agent = FactCheckerAgent(config)
     
-    result = await agent.analyze("Test fact", "Test context", "gpt-5-nano", "en", analysis_mode="general")
+    result = await agent.analyze("Test fact", "Test context", "en", analysis_mode="general")
     
     assert result == mock_response
     

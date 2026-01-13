@@ -17,6 +17,7 @@ class TestScoringSkill:
     @pytest.fixture
     def skill(self, mock_llm_client, mock_config):
         # BaseSkill(config: SpectrueConfig, llm_client: LLMClient)
+        mock_config.openai_model = "gpt-5.2"
         skill = ScoringSkill(config=mock_config, llm_client=mock_llm_client)
         return skill
 

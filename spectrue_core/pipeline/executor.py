@@ -57,7 +57,7 @@ async def execute_pipeline(
     agent: Any,
     lang: str = "en",
     search_type: str = "general",
-    gpt_model: str = "gpt-5-nano",
+
     max_cost: int | None = None,
     inline_sources: list[dict] | None = None,
     progress_callback: Any | None = None,
@@ -76,7 +76,6 @@ async def execute_pipeline(
         agent: FactCheckerAgent for LLM operations
         lang: Primary language code
         search_type: Search type string (legacy compat)
-        gpt_model: Model to use
         max_cost: Max cost budget
         inline_sources: Pre-verified inline sources
         progress_callback: Async progress callback
@@ -97,7 +96,6 @@ async def execute_pipeline(
         claims=claims,
         lang=lang,
         search_type=search_type,
-        gpt_model=gpt_model,
         trace=trace,
     )
 

@@ -100,7 +100,7 @@ async def test_normal_profile_allows_multiple_claims():
             original_fact="x",
             lang="uk",
             content_lang="uk",
-            gpt_model="gpt-5.2",
+
             search_type="smart",
             progress_callback=None,
             

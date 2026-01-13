@@ -213,9 +213,10 @@ class SearchManager:
         search_key = (search_type or "smart").lower()
         return float(SEARCH_COSTS.get(search_key, 100))
 
-    def calculate_cost(self, model: str, search_type: str) -> int:
+    def calculate_cost(self, search_type: str) -> int:
         """Calculate total billed cost based on operations performed."""
-        model_cost = int(MODEL_COSTS.get(model, 20))
+        # Use default model cost (gpt-5-nano)
+        model_cost = int(MODEL_COSTS.get("gpt-5-nano", 5))
         per_search_cost = int(SEARCH_COSTS.get(search_type, 100))
         cse_cost = int(getattr(self.config.runtime.search, "google_cse_cost", 0) or 0)
         # Cap CSE cost to avoiding surpassing search cost

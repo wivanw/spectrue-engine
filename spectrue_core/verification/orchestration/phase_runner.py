@@ -136,7 +136,7 @@ class PhaseRunner:
         use_retrieval_loop: bool = False,
         policy_profile=None,
         can_add_search=None,
-        gpt_model: str | None = None,
+        # gpt_model removed
         search_type: str | None = None,
         max_cost: int | None = None,
         inline_sources: list[dict] | None = None,
@@ -161,7 +161,7 @@ class PhaseRunner:
         self.use_retrieval_loop = use_retrieval_loop
         self.policy_profile = policy_profile
         self.can_add_search = can_add_search
-        self.gpt_model = gpt_model
+        # self.gpt_model removed
         self.search_type = search_type
         self.max_cost = max_cost
         self.inline_sources = inline_sources or []

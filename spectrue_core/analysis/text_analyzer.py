@@ -350,7 +350,7 @@ class TextAnalyzer:
         segments = self.segment_sentences(text, lang)
         return [s.text for s in segments]
 
-    async def analyze_text(self, sentences: List[str], search_type: str, gpt_model: str, lang: str, 
+    async def analyze_text(self, sentences: List[str], search_type: str, lang: str, 
                           progress_callback: Optional[Callable] = None, analysis_mode: str = "general",
                           global_context: str = None, global_sources: list = None,
                           content_lang: str = None) -> dict:  # Added content_lang
@@ -388,7 +388,7 @@ class TextAnalyzer:
 
             # Pass content_lang to verify_fact
             res = await self.verifier.verify_fact(
-                sent, search_type, gpt_model, lang, analysis_mode, callback, 
+                sent, search_type, lang, analysis_mode, callback, 
                 context_text=context_text,
                 preloaded_context=global_context,
                 preloaded_sources=global_sources,

@@ -60,7 +60,6 @@ class ScoringSkill(BaseSkill):
         self,
         pack: EvidencePack,
         *,
-        model: str = "gpt-5.2",
         lang: str = "en",
     ) -> dict:
         """
@@ -193,7 +192,7 @@ class ScoringSkill(BaseSkill):
         cache_key = f"score_v7_plat_{prompt_hash}"
 
         try:
-            m = model if "gpt-5" in model or "o1" in model else "gpt-5.2"
+            m = self.config.openai_model or "gpt-5.2"
 
             result = await self.llm_client.call_json(
                 model=m,
@@ -301,7 +300,6 @@ class ScoringSkill(BaseSkill):
         self,
         pack: EvidencePack,
         *,
-        model: str = "gpt-5.2",
         lang: str = "en",
         max_concurrency: int = 5,
     ) -> dict:
@@ -411,7 +409,7 @@ class ScoringSkill(BaseSkill):
 
             for attempt in range(1, max_attempts + 1):
                 try:
-                    m = model if "gpt-5" in model or "o1" in model else "gpt-5.2"
+                    m = self.config.openai_model or "gpt-5.2"
 
                     result = await self.llm_client.call_json(
                         model=m,
@@ -703,7 +701,7 @@ Return valid JSON now."""
     def _maybe_drop_style_section(self, rationale: str, *, honesty_score: float | None, lang: str | None) -> str:
         return maybe_drop_style_section(rationale, honesty_score=honesty_score, lang=lang)
 
-    async def analyze(self, fact: str, context: str, gpt_model: str, lang: str, analysis_mode: str = "general") -> dict:
+    async def analyze(self, fact: str, context: str, lang: str, analysis_mode: str = "general") -> dict:
         """Analyze fact based on context and return structured JSON."""
 
         prompt_key = 'prompts.aletheia_lite' if analysis_mode == 'lite' else 'prompts.final_analysis'
@@ -730,10 +728,10 @@ Return valid JSON now."""
         }
         prompt += "\n\n" + no_tag_note_by_lang.get((lang or "").lower(), no_tag_note_by_lang["en"])
 
-        Trace.event("llm.prompt", {"kind": "analysis", "model": gpt_model})
+        Trace.event("llm.prompt", {"kind": "analysis", "model": self.config.openai_model})
         try:
             result = await self.llm_client.call_json(
-                model=gpt_model,
+                model=self.config.openai_model or "gpt-5-nano",
                 input=prompt,
                 instructions="You are Aletheia, an advanced fact-checking AI.",
                 response_schema=ANALYSIS_RESPONSE_SCHEMA,
@@ -745,7 +743,7 @@ Return valid JSON now."""
             Trace.event("llm.parsed", {"kind": "analysis", "keys": list(result.keys())})
 
         except Exception as e:
-            logger.exception("[GPT] ✗ Error calling %s: %s", gpt_model, e)
+            logger.exception("[GPT] ✗ Error calling %s: %s", self.llm_client.model, e)
             Trace.event("llm.error", {"kind": "analysis", "error": str(e)})
             if is_schema_failure(e):
                 raise
@@ -782,7 +780,6 @@ Return valid JSON now."""
         claim_units: list[ClaimUnit],
         evidence: list[dict],
         *,
-        model: str = "gpt-5.2",
         lang: str = "en",
     ) -> StructuredVerdict:
         """
@@ -889,7 +886,7 @@ Return valid JSON now."""
         cache_key = f"score_struct_v1_{prompt_hash}"
 
         try:
-            m = model if "gpt-5" in model or "o1" in model else "gpt-5.2"
+            m = self.config.openai_model or "gpt-5.2"
 
             result = await self.llm_client.call_json(
                 model=m,

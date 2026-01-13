@@ -100,7 +100,6 @@ class TestDeepScoringPipeline:
         await pipeline.execute(
             fact="Test Fact",
             search_type="deep",
-            gpt_model="gpt-4",
             lang="en"
         )
 
@@ -134,7 +133,6 @@ class TestDeepScoringPipeline:
         await pipeline.execute(
             fact="Test Fact",
             search_type="smart",
-            gpt_model="gpt-4",
             lang="en"
         )
 

@@ -256,7 +256,7 @@ class JudgeClaimsStep(Step):
                 repair_system = f"{repair_system}\nReturn only JSON; no markdown or extra text."
 
                 response = await self._llm.call_json(
-                    model="gpt-5-nano",
+                    model=self._llm.model or "gpt-5-nano",
                     input=repair_prompt,
                     instructions=repair_system,
                     response_schema=CLAIM_JUDGE_SCHEMA,

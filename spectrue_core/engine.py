@@ -79,7 +79,7 @@ class SpectrueEngine:
         text: str,
         lang: str = "en",
         analysis_mode: str = "general",
-        gpt_model: str = None,
+        # gpt_model removed
         search_type: str = "advanced",
         progress_callback=None,
         max_credits: Optional[int] = None,
@@ -94,7 +94,6 @@ class SpectrueEngine:
             text: Text to analyze
             lang: UI language ISO code
             analysis_mode: "general" or "lite"
-            gpt_model: Model override (optional, uses config default if None)
             search_type: "basic" or "advanced"
             progress_callback: Async callable(stage: str)
 
@@ -105,7 +104,8 @@ class SpectrueEngine:
         Trace.start(trace_id, runtime=self.config.runtime)
 
         try:
-            model = gpt_model or self.config.openai_model
+            # Use canonical model from config (no override allowed)
+            model = self.config.openai_model
 
             # Detect content language
             detected_lang, detected_prob = detect_content_language(text, fallback=lang)
@@ -169,7 +169,6 @@ class SpectrueEngine:
                 initial_result = await self.verifier.verify_fact(
                     fact=working_text,
                     search_type=search_type,
-                    gpt_model=model,
                     lang=lang,
                     progress_callback=progress_callback,
                     _content_lang=content_lang,
@@ -209,7 +208,6 @@ class SpectrueEngine:
                 verification_result = await self.verifier.verify_fact(
                     fact=working_text,  # Full article text for context
                     search_type=search_type,
-                    gpt_model=model,
                     lang=lang,
                     progress_callback=progress_callback,
                     _content_lang=content_lang,
@@ -267,7 +265,6 @@ class SpectrueEngine:
             result = await self.verifier.verify_fact(
                 fact=text,
                 search_type=search_type,
-                gpt_model=model,
                 lang=lang,
                 progress_callback=progress_callback,
                 _content_lang=content_lang,

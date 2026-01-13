@@ -43,7 +43,6 @@ class FactVerifier:
         self,
         fact: str,
         search_type: str = "advanced",
-        gpt_model: str = "gpt-5.2",
         lang: str = "en",
         _content_lang: str | None = None,  # Kept for API compatibility but not used
         _max_cost: int | None = None,  # Kept for API compatibility but not used
@@ -67,7 +66,7 @@ class FactVerifier:
         result = await self.pipeline.execute(
             fact=fact,
             search_type=search_type,
-            gpt_model=gpt_model,
+            # gpt_model removed
             lang=lang,
             runtime_config=runtime_config,
             progress_callback=progress_callback,

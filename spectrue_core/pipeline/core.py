@@ -78,7 +78,7 @@ class PipelineContext:
     claims: list[dict[str, Any]] = field(default_factory=list)
     lang: str = "en"
     search_type: str = "general"
-    gpt_model: str = "gpt-5-nano"
+    # gpt_model removed
     trace: Trace | None = None
     sources: list[dict[str, Any]] = field(default_factory=list)
     evidence: dict[str, Any] | None = None
@@ -99,7 +99,6 @@ class PipelineContext:
             "claims": self.claims,
             "lang": self.lang,
             "search_type": self.search_type,
-            "gpt_model": self.gpt_model,
             "trace": self.trace,
             "sources": self.sources,
             "evidence": self.evidence,

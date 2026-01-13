@@ -77,7 +77,6 @@ class ClusterEvidenceStep:
                 original_fact=ctx.get_extra("original_fact", ""),
                 lang=ctx.lang,
                 content_lang=ctx.lang,
-                gpt_model=ctx.gpt_model,
                 search_type=ctx.search_type,
                 progress_callback=ctx.get_extra("progress_callback"),
             )

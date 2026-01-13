@@ -173,7 +173,7 @@ async def test_verification_uses_score_evidence(mock_config, caplog):
     verifier.agent.scoring_skill.score_evidence_parallel = parallel_side_effect
     
     # Execute verification
-    result = await verifier.verify_fact("The sky is blue", "advanced", "gpt-5.2", "en")
+    result = await verifier.verify_fact("The sky is blue", "advanced", "en")
     
     # Assert result
     # Bayesian scoring may produce non-0.5 values based on evidence signals.
@@ -338,7 +338,6 @@ async def test_causal_dependency_penalty_applied(mock_config):
     result = await verifier.verify_fact(
         "Measles cases increased because vaccination rates declined.",
         "basic",
-        "gpt-5.2",
         "en",
     )
 

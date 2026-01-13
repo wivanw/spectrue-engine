@@ -111,23 +111,24 @@ class FactCheckerAgent:
             stance_pass_mode=stance_pass_mode,
         )
 
-    async def score_evidence(self, pack: EvidencePack, *, model: str = "gpt-5.2", lang: str = "en") -> dict:
-        return await self.scoring_skill.score_evidence(pack, model=model, lang=lang)
+    async def score_evidence(self, pack: EvidencePack, *, lang: str = "en") -> dict:
+        # Use default config model
+        return await self.scoring_skill.score_evidence(pack, lang=lang)
 
     async def score_evidence_parallel(
-        self, pack: EvidencePack, *, model: str = "gpt-5.2", lang: str = "en", max_concurrency: int = 5
+        self, pack: EvidencePack, *, lang: str = "en", max_concurrency: int = 5
     ) -> dict:
         """Score evidence with parallel per-claim LLM calls (for deep mode)."""
         return await self.scoring_skill.score_evidence_parallel(
-            pack, model=model, lang=lang, max_concurrency=max_concurrency
+            pack, lang=lang, max_concurrency=max_concurrency
         )
 
     def detect_evidence_gaps(self, pack: EvidencePack) -> list[str]:
         return self.scoring_skill.detect_evidence_gaps(pack)
 
-    async def analyze(self, fact: str, context: str, gpt_model: str, lang: str, analysis_mode: str = "general") -> dict:
+    async def analyze(self, fact: str, context: str, lang: str, analysis_mode: str = "general") -> dict:
         # Delegate to scoring skill for final analysis (it has the logic)
-        return await self.scoring_skill.analyze(fact, context, gpt_model, lang, analysis_mode)
+        return await self.scoring_skill.analyze(fact, context, lang, analysis_mode=analysis_mode)
 
     async def generate_search_queries(self, fact: str, context: str = "", lang: str = "en", content_lang: str = None) -> list[str]:
         return await self.query_skill.generate_search_queries(

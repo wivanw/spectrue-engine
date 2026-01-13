@@ -93,7 +93,7 @@ class ValidationPipeline:
         fact: str,
         *,
         search_type: str = "smart",
-        gpt_model: str = "standard",
+        # gpt_model removed
         preloaded_sources: list | None = None,
         preloaded_context: str | None = None,
         lang: str = "en",
@@ -145,7 +145,7 @@ class ValidationPipeline:
                 mode=mode,
                 lang=lang,
                 search_type=search_type,
-                gpt_model=gpt_model,
+                # gpt_model removed
             )
             
             # Populate Context

@@ -396,7 +396,6 @@ class DAGPipeline:
                 claims=merged_claims,
                 lang=current_ctx.lang,
                 search_type=current_ctx.search_type,
-                gpt_model=current_ctx.gpt_model,
                 trace=current_ctx.trace,
                 sources=merged_sources,
                 evidence=merged_evidence,

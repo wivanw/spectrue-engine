@@ -40,7 +40,7 @@ CanAddSearch = Callable[[str, str, int | None], bool]
 class SearchFlowInput:
     fact: str
     lang: str
-    gpt_model: str
+    # gpt_model removed
     search_type: str
     max_cost: int | None
     article_intent: str
@@ -145,7 +145,7 @@ async def run_search_flow(
                 agent=agent,
                 lang=inp.lang,
                 search_type=inp.search_type,
-                gpt_model=inp.gpt_model,
+                # gpt_model removed
                 max_cost=inp.max_cost,
                 inline_sources=inp.inline_sources,
                 progress_callback=inp.progress_callback,
@@ -276,7 +276,7 @@ async def run_search_flow(
                 use_retrieval_loop=True,
                 policy_profile=profile,
                 can_add_search=can_add_search,
-                gpt_model=inp.gpt_model,
+                # gpt_model removed
                 search_type=inp.search_type,
                 max_cost=inp.max_cost,
                 inline_sources=inp.inline_sources,
@@ -418,7 +418,7 @@ async def run_search_flow(
         has_results = False
 
         if primary_query and can_add_search(
-            inp.gpt_model, inp.search_type, inp.max_cost
+            inp.search_type, inp.max_cost
         ):
             current_topic = tavily_topic
 

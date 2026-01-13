@@ -95,7 +95,6 @@ class EvidenceFlowInput:
     original_fact: str
     lang: str
     content_lang: str | None
-    gpt_model: str
     search_type: str
     progress_callback: ProgressCallback | None
     prior_belief: BeliefState | None = None
@@ -132,7 +131,8 @@ async def collect_evidence(
     if inp.progress_callback:
         await inp.progress_callback("ai_analysis")
 
-    current_cost = search_mgr.calculate_cost(inp.gpt_model, inp.search_type)
+    # Use default model for cost calculation
+    current_cost = search_mgr.calculate_cost(inp.search_type)
 
     sources = canonicalize_sources(sources)
 
@@ -326,11 +326,11 @@ async def score_evidence_collection(
     if use_parallel_scoring:
         # Per-claim scoring: each claim gets its own LLM call with individual RGBA
         result = await agent.score_evidence_parallel(
-            pack, model=inp.gpt_model, lang=inp.lang, max_concurrency=5
+            pack, lang=inp.lang, max_concurrency=5
         )
     else:
         # Standard mode: single LLM call for batch scoring
-        result = await agent.score_evidence(pack, model=inp.gpt_model, lang=inp.lang)
+        result = await agent.score_evidence(pack, lang=inp.lang)
 
     # Track judge mode for downstream logic
     result["judge_mode"] = "deep" if use_parallel_scoring else "standard"
