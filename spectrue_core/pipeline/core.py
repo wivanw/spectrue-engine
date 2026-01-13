@@ -66,7 +66,6 @@ class PipelineContext:
         claims: List of claims to process
         lang: Primary language code
         search_type: Search type string (legacy compatibility)
-        gpt_model: Model to use for LLM calls
         trace: Trace logger for observability
         sources: Accumulated sources from retrieval
         evidence: Evidence pack after processing

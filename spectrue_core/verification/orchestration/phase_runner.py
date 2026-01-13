@@ -908,9 +908,9 @@ class PhaseRunner:
     def _budget_allows_hop(self) -> bool:
         if not self.can_add_search:
             return True
-        if not self.gpt_model or not self.search_type:
+        if not self.search_type:
             return True
-        return bool(self.can_add_search(self.gpt_model, self.search_type, self.max_cost))
+        return bool(self.can_add_search("gpt-5-nano", self.search_type, self.max_cost))
 
     def _get_claims_needing_phase(
         self,
