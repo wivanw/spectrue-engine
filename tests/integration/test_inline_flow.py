@@ -68,7 +68,7 @@ async def test_inline_sources_shortcut_flow():
     inp = SearchFlowInput(
         fact=claim_text,
         lang="en",
-        gpt_model="gpt-4o",
+
         search_type="deep_research",
         max_cost=100,
         article_intent="news",
