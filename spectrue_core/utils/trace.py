@@ -206,8 +206,9 @@ def _sanitize(
 
 
 def _trace_dir() -> Path:
-    # Keep traces next to other local artifacts (cache/), but never rely on global paths.
-    p = Path("data/trace")
+    # Traces in Spectrue repository root /trace directory
+    # Engine is at SpectrueBack/spectrue-engine, so go up 2 levels
+    p = Path(__file__).resolve().parent.parent.parent.parent.parent / "trace"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

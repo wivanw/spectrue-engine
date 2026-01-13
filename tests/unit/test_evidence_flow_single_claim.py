@@ -48,7 +48,7 @@ class _DummySearchMgr:
         return {}
 
 
-def _build_evidence_pack(*, fact, claims, sources, search_results_clustered, content_lang, article_context=None):
+def _build_evidence_pack(*, fact, claims, sources, search_results_clustered, content_lang, article_context=None, anchor_claim_id=None):
     # Minimal pack shape used by ScoringSkill/run_evidence_flow.
     return {
         "original_fact": fact,
