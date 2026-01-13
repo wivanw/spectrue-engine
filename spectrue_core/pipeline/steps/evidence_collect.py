@@ -207,27 +207,39 @@ class EvidenceCollectStep:
                 cid = claim.get("id") or claim.get("claim_id")
                 if cid:
                     claim_ids.append(str(cid))
-            missing_claims = [cid for cid in claim_ids if cid not in by_claim_contract]
-
+            # Count claims that have ANY evidence (support, refute, OR context)
+            # This should match what score_evidence.coverage sees
+            claims_with_any_items = set()
+            for item in pack_items:
+                if isinstance(item, dict):
+                    item_claim_id = item.get("claim_id")
+                    if item_claim_id:
+                        claims_with_any_items.add(str(item_claim_id))
+            
+            # If pack_items exist but have unassigned claim_ids, fallback to claim count
+            if not claims_with_any_items and pack_items and claim_ids:
+                # All items are "global" (no claim_id) - count all claims as having evidence
+                claims_with_any_items = set(claim_ids)
+            
             evidence_index = EvidenceIndex(
                 by_claim_id=by_claim_contract,
                 global_pack=pack_contract,
                 stats={
                     "claims_total": len(claim_ids),
-                    "claims_with_evidence": len(by_claim_contract),
-                    "missing_claims": len(missing_claims),
+                    "claims_with_evidence": len(claims_with_any_items),
+                    "missing_claims": len(claim_ids) - len(claims_with_any_items),
                 },
                 trace={
                     "plan_id": getattr(ctx.get_extra(SEARCH_PLAN_KEY), "plan_id", None),
                 },
-                missing_claims=tuple(missing_claims),
+                missing_claims=tuple(cid for cid in claim_ids if cid not in claims_with_any_items),
             )
 
             Trace.event(
                 "evidence_collect.completed",
                 {
-                    "claims_with_evidence": len(by_claim_contract),
-                    "missing_claims": len(missing_claims),
+                    "claims_with_evidence": len(claims_with_any_items),
+                    "missing_claims": len(claim_ids) - len(claims_with_any_items),
                 },
             )
 

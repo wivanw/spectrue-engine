@@ -247,16 +247,20 @@ def assign_claim_rgba(
         final_a = float(local_a) if local_a is not None and float(local_a) >= 0 else global_a
         
         claim_verdict["rgba"] = [global_r, g_score, global_b, final_a]
-        Trace.event(
-            "cv.rgba_assigned",
-            {
-                "claim_id": cid,
-                "judge_mode": judge_mode,
-                "source": "fallback",
-                "rgba": claim_verdict["rgba"],
-                "note": "using_local_a" if local_a is not None else "using_global_a",
-            },
-        )
+        
+        # Log tier-factor info only when it's actually applied
+        trace_data = {
+            "claim_id": cid,
+            "judge_mode": judge_mode,
+            "source": "fallback",
+            "rgba": claim_verdict["rgba"],
+        }
+        if local_a is not None:
+            trace_data["tier_factor_applied"] = True
+            trace_data["global_a"] = global_a
+            trace_data["local_a"] = local_a
+        
+        Trace.event("cv.rgba_assigned", trace_data)
 
 
 def enrich_claim_sources(

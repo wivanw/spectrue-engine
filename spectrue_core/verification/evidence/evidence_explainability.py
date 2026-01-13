@@ -105,19 +105,8 @@ def compute_explainability_tier_adjustment(
     if abs(post_a - pre_a) < 1e-9:
         return None
     
-    Trace.event(
-        "verdict.explainability_tier_factor",
-        {
-            "claim_id": claim_id,
-            "best_tier": best_tier,
-            "pre_A": pre_a,
-            "prior": prior,
-            "baseline": TIER_A_BASELINE,
-            "factor": factor,
-            "post_A": post_a,
-            "source": source,
-        },
-    )
+    # NOTE: Trace event moved to caller (evidence_verdict_processing.py)
+    # Only log when the adjustment is actually applied (source != "llm")
     
     return post_a
 
