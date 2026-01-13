@@ -31,6 +31,11 @@
       "usd_per_input_token": 0.00000055,
       "usd_per_output_token": 0.00000219,
       "usd_per_reasoning_token": 0.00000219
+    },
+    "text-embedding-3-small": {
+      "usd_per_input_token": 0.00000002,
+      "usd_per_output_token": 0,
+      "usd_per_reasoning_token": null
     }
   }
 }
