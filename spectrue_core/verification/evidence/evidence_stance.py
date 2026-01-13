@@ -242,7 +242,11 @@ def assign_claim_rgba(
             )
     else:
         # Standard mode fallback: compute from global values
-        claim_verdict["rgba"] = [global_r, g_score, global_b, global_a]
+        # Support per-claim explainability adjustment (Tier masking) if present
+        local_a = claim_verdict.get("local_explainability")
+        final_a = float(local_a) if local_a is not None and float(local_a) >= 0 else global_a
+        
+        claim_verdict["rgba"] = [global_r, g_score, global_b, final_a]
         Trace.event(
             "cv.rgba_assigned",
             {
@@ -250,6 +254,7 @@ def assign_claim_rgba(
                 "judge_mode": judge_mode,
                 "source": "fallback",
                 "rgba": claim_verdict["rgba"],
+                "note": "using_local_a" if local_a is not None else "using_global_a",
             },
         )
 

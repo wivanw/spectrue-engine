@@ -227,6 +227,7 @@ async def collect_evidence(
         article_context={"text_excerpt": inp.fact[:500]}
         if inp.fact != inp.original_fact
         else None,
+        anchor_claim_id=anchor_claim_id,
     )
 
     return EvidenceCollection(
@@ -281,6 +282,7 @@ def rebuild_evidence_pack(
         article_context={"text_excerpt": inp.fact[:500]}
         if inp.fact != inp.original_fact
         else None,
+        anchor_claim_id=collection.anchor_claim_id,
     )
 
     return EvidenceCollection(
@@ -396,8 +398,12 @@ async def score_evidence_collection(
             )
         )
 
-        if explainability_update is not None:
-            result["explainability_score"] = explainability_update
+
+
+        # FIX: Do NOT overwrite global explainability with per-claim update.
+        # Tier adjustments are now handled locally in cv["local_explainability"].
+        # if explainability_update is not None:
+        #     result["explainability_score"] = explainability_update
 
         # Prepare global RGBA for enrichment
         # IMPORTANT: These global_* values are ONLY used as fallback for standard mode.

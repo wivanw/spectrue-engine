@@ -245,6 +245,7 @@ def build_evidence_pack(
     article_context: ArticleContext | None = None,
     content_lang: str | None = None,
     claim_units: list[Any] | None = None,  # Structured ClaimUnits
+    anchor_claim_id: str | None = None,   # Fix for evidence mapping
 ) -> EvidencePack:
     """
     Build structured Evidence Pack for LLM scorer.
@@ -294,7 +295,7 @@ def build_evidence_pack(
 
     # If clustering ran and returned a list (even empty), use it.
     # Only fallback to raw sources if it returned None (error/timeout).
-    default_claim_id = claims[0].get("id") if claims else "c1"
+    default_claim_id = anchor_claim_id or (claims[0].get("id") if claims else "c1")
     if search_results_clustered is not None:
         search_results = search_results_clustered
         logger.debug("Using clustered evidence: %d items", len(search_results))
