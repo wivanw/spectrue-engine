@@ -214,10 +214,8 @@ class TavilyClient:
                         "cost_credits": str(event.cost_credits),
                     })
                 except Exception as exc:
-                    logger.warning("[Tavily] Metering failed: %s", exc)
                     Trace.event("tavily.metering.failed", {"error": str(exc)[:200]})
-            else:
-                Trace.event("tavily.metering.skipped", {"reason": "no_meter"})
+            # Skip tavily.metering.skipped trace - provides no value
             return result
 
     async def _handle_400_with_minimal_payload(
@@ -340,9 +338,7 @@ class TavilyClient:
                         "cost_credits": str(event.cost_credits),
                     })
                 except Exception as exc:
-                    logger.warning("[Tavily] Metering failed: %s", exc)
                     Trace.event("tavily.metering.failed", {"error": str(exc)[:200]})
-            else:
-                Trace.event("tavily.metering.skipped", {"reason": "no_meter"})
+            # Skip tavily.metering.skipped trace - provides no value
             
             return result

@@ -164,31 +164,13 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                         else:
                             # 0.4 < p < 0.6 → conflicted (evidence exists but ambiguous)
                             cv["verdict_state"] = "conflicted"
-                        
-                        Trace.event(
-                            "verdict.state_normalized",
-                            {
-                                "claim_id": cv.get("claim_id"),
-                                "p": p,
-                                "raw_state": raw_state or None,
-                                "normalized_state": cv["verdict_state"],
-                            },
-                        )
+                        # Note: verdict.state_normalized event removed (data in evidence.llm_output)
 
                 # --- (2) Normalize verdict (UI label) from p ---
                 # Deep mode: skip this normalization, preserve LLM output
                 raw_verdict = str(cv.get("verdict") or "").lower().strip()
                 if not is_deep and raw_verdict not in CANONICAL_VERDICTS:
-                    # Log non-canonical LLM verdict
-                    Trace.event(
-                        "verdict.label_noncanonical",
-                        {
-                            "claim_id": cv.get("claim_id"),
-                            "raw_verdict": raw_verdict or None,
-                            "p": p,
-                        },
-                    )
-                    # Normalize to canonical UI label
+                    # Normalize to canonical UI label (verdict.label_noncanonical event removed)
                     if p < 0:
                         cv["verdict"] = "unverified"
                     elif p >= 0.8:
@@ -222,13 +204,7 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                             max(0.0, min(1.0, float(raw_rgba[3]))),  # A (explainability)
                         ]
                         cv["rgba"] = normalized_rgba
-                        Trace.event(
-                            "verdict.rgba_parsed",
-                            {
-                                "claim_id": cv.get("claim_id"),
-                                "rgba": normalized_rgba,
-                            },
-                        )
+                        # Note: verdict.rgba_parsed event removed (data in evidence.llm_output)
                     except (TypeError, ValueError, IndexError):
                         # Invalid rgba format
                         if is_deep:

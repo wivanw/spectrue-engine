@@ -196,27 +196,15 @@ def assign_claim_rgba(
         and all(isinstance(x, (int, float)) for x in existing_rgba)
     )
     
-    Trace.event(
-        "cv.before_rgba_fill",
-        {
-            "claim_id": cid,
-            "judge_mode": judge_mode,
-            "has_rgba": has_valid_rgba,
-            "existing_rgba": existing_rgba,
-            "verdict_score": claim_verdict.get("verdict_score"),
-            "global_r": global_r,
-            "global_b": global_b,
-            "global_a": global_a,
-        },
-    )
-    
+    # Determine source and final RGBA in one pass
     if has_valid_rgba:
         # Deep claim-judge already provided RGBA - keep LLM output 1:1
         Trace.event(
-            "cv.rgba_preserved",
+            "cv.rgba_assigned",
             {
                 "claim_id": cid,
                 "judge_mode": judge_mode,
+                "source": "llm",
                 "rgba": existing_rgba,
             },
         )
@@ -225,12 +213,13 @@ def assign_claim_rgba(
         if claim_verdict.get("status") == "error":
             # Expected: error claim has no RGBA
             Trace.event(
-                "cv.rgba_deep_error_claim",
+                "cv.rgba_assigned",
                 {
                     "claim_id": cid,
                     "judge_mode": "deep",
+                    "source": "error",
+                    "rgba": None,
                     "error_type": claim_verdict.get("error_type"),
-                    "note": "Error claim - no RGBA expected",
                 },
             )
         else:
@@ -238,12 +227,13 @@ def assign_claim_rgba(
             claim_verdict["rgba"] = None
             claim_verdict["rgba_error"] = "missing_from_llm"
             Trace.event(
-                "cv.rgba_deep_missing",
+                "cv.rgba_assigned",
                 {
                     "claim_id": cid,
                     "judge_mode": "deep",
-                    "verdict_score": claim_verdict.get("verdict_score"),
-                    "error": "Deep mode claim missing RGBA from judge - NOT using fallback",
+                    "source": "missing",
+                    "rgba": None,
+                    "error": "Deep mode claim missing RGBA from judge",
                 },
             )
             logger.warning(
@@ -254,10 +244,11 @@ def assign_claim_rgba(
         # Standard mode fallback: compute from global values
         claim_verdict["rgba"] = [global_r, g_score, global_b, global_a]
         Trace.event(
-            "cv.rgba_fallback",
+            "cv.rgba_assigned",
             {
                 "claim_id": cid,
                 "judge_mode": judge_mode,
+                "source": "fallback",
                 "rgba": claim_verdict["rgba"],
             },
         )

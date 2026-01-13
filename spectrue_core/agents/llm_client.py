@@ -545,8 +545,8 @@ class LLMClient:
                             "cost_credits": str(event.cost_credits),
                             "api_mode": "chat_completions",
                         })
-                    except Exception as exc:
-                        logger.warning("[LLMClient] Metering failed: %s", exc)
+                    except Exception:
+                        pass  # Metering failure is non-critical
 
                 Trace.event(f"{trace_kind}.response", {
                     "model": model,
@@ -895,10 +895,8 @@ class LLMClient:
                             "cost_credits": str(event.cost_credits),
                         })
                     except Exception as exc:
-                        logger.warning("[LLMClient] Metering failed: %s", exc)
                         Trace.event("llm.metering.failed", {"error": str(exc)[:200]})
-                else:
-                    Trace.event("llm.metering.skipped", {"reason": "no_meter"})
+                # Skip metering trace - no actionable info (removed for trace size reduction)
 
                 Trace.event(f"{trace_kind}.response", {
                     "model": response.model,
