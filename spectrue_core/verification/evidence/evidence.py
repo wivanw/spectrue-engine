@@ -539,15 +539,15 @@ def build_evidence_pack(
         else:
             context_sources.append(r)
 
-    stance_failure = bool(search_results) and not scored_sources
-    evidence_metrics["stance_failure"] = stance_failure
-
     if not scored_sources and context_sources:
         # Fallback: If heuristic/classifier found no support/refute/mixed/neutral sources,
         # promote ALL context sources to scored_sources.
         # This gives the LLM a chance to verify using "context" items that might contain answers.
         # This prevents "Unavailable / -1.0" when we actually found relevant pages.
         scored_sources.extend(context_sources)
+
+    stance_failure = bool(search_results) and not scored_sources
+    evidence_metrics["stance_failure"] = stance_failure
 
     # 6. Build canonical evidence items for deterministic scoring
     evidence_items: list[EvidenceItem] = []
