@@ -182,7 +182,9 @@ class AssembleStandardResultStep:
                 "sources": sources,
                 "rationale": verdict.get("rationale"),
                 "analysis": verdict.get("analysis") or verdict.get("rationale"),
-                "verified_score": verdict.get("verified_score"),
+                "analysis": verdict.get("analysis") or verdict.get("rationale"),
+                "verified_score": (_coerce_score(verdict.get("verified_score"), 0.0) + 1.0) / 2.0,  # Normalize [-1, 1] -> [0, 1]
+                "veracity_signed": verdict.get("verified_score"),  # Preserve signed score for debug/backend use
                 "explainability_score": verdict.get("explainability_score"),
                 "danger_score": verdict.get("danger_score"),
                 "context_score": verdict.get("context_score"),
@@ -220,30 +222,31 @@ class AssembleStandardResultStep:
                         cv["text"] = fallback_txt
                 enriched_verdicts.append(cv)
 
-            details = []
-            for cv in enriched_verdicts:
-                if not isinstance(cv, dict):
-                    continue
-                text = (cv.get("text") or cv.get("claim_text") or cv.get("claim") or "").strip()
-                if not text:
-                    continue
-                details.append(
-                    {
-                        "text": text,
-                        "rgba": cv.get("rgba") or rgba,
-                        "rationale": cv.get("rationale") or verdict.get("rationale"),
-                        "sources": cv.get("sources") or sources,
-                    }
-                )
-
-            if not details and claims_contract:
-                details = [
-                    {"text": claim.text, "rgba": rgba, "rationale": verdict.get("rationale"), "sources": sources}
-                    for claim in claims_contract.claims
-                    if claim.text
-                ]
-
-            final_result["details"] = details
+            # Standard mode contract:
+            # 1. No "accordion" of claims -> claim_verdicts = []
+            # 2. UI card renders via 'details' -> details = [single_global_entry]
+            
+            final_result["claim_verdicts"] = []  # Hide specific claim list in UI
+            
+            # Construct single detail entry for validity visualization
+            anchor_text = ""
+            anchor_obj = _build_anchor_claim(
+                verdict, claims_contract, claim_text_by_id, ctx.claims or []
+            )
+            if anchor_obj:
+                anchor_text = anchor_obj.get("text", "")
+            
+            display_text = anchor_text or final_result["text"] or ""
+            
+            final_result["details"] = [
+                {
+                    "text": display_text,
+                    "rgba": rgba,
+                    "sources": sources,
+                    "rationale": final_result.get("rationale"),
+                    "verdict": final_result.get("status"),
+                }
+            ]
 
             final_result["_extracted_claims"] = ctx.claims or []
 

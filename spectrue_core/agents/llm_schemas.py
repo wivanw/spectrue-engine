@@ -91,13 +91,13 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
                     "reason": {"type": "string"},
                     "rgba": {
                         "type": "array",
-                        "items": [
+                        "prefixItems": [
                             {"type": "number", "minimum": 0, "maximum": 1},   # R danger
                             {"type": "number", "minimum": -1, "maximum": 1},  # G verdict_score (can be -1)
                             {"type": "number", "minimum": 0, "maximum": 1},   # B style
                             {"type": "number", "minimum": 0, "maximum": 1},   # A explainability
                         ],
-                        "additionalItems": False,
+                        "items": {"type": "number"},
                         "minItems": 4,
                         "maxItems": 4,
                         "description": "Per-claim [R=danger, G=veracity, B=style, A=explainability]",
@@ -141,13 +141,13 @@ SINGLE_CLAIM_SCORING_SCHEMA: dict[str, Any] = {
         "reason": {"type": "string"},
         "rgba": {
             "type": "array",
-            "items": [
+            "prefixItems": [
                 {"type": "number", "minimum": 0, "maximum": 1},
                 {"type": "number", "minimum": -1, "maximum": 1},
                 {"type": "number", "minimum": 0, "maximum": 1},
                 {"type": "number", "minimum": 0, "maximum": 1},
             ],
-            "additionalItems": False,
+            "items": {"type": "number"},
             "minItems": 4,
             "maxItems": 4,
             "description": "[R=danger, G=veracity, B=style, A=explainability]",
@@ -346,7 +346,7 @@ CLAIM_EXTRACTION_SCHEMA: dict[str, Any] = {
                         "items": {
                             "type": "object",
                             "additionalProperties": False,
-                            "required": ["text", "role", "score"],
+                            "required": ["text", "score"],
                             "properties": {
                                 "text": {"type": "string"},
                                 "role": {"type": "string"},
@@ -625,7 +625,7 @@ CLAIM_RETRIEVAL_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["text", "role", "score"],
+                "required": ["text", "score"],
                 "properties": {
                     "text": {"type": "string"},
                     "role": {"type": "string"},

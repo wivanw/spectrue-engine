@@ -125,12 +125,14 @@ class OracleFlowStep:
             
             # Handle dataclass result
             # OracleFlowResult(early_result, evidence_source, ran_oracle, skip_reason)
-            oracle_hit = False
+            oracle_jackpot = False
+            oracle_partial = False
+            
             early_result = getattr(result, "early_result", None)
             
             if early_result:
-                # Jackpot!
-                oracle_hit = True
+                # Jackpot! (Definitive verification from Oracle)
+                oracle_jackpot = True
                 Trace.event("oracle_flow.jackpot", {"score": early_result.get("verified_score")})
                 
                 # Update context with final result and stop search
@@ -146,15 +148,25 @@ class OracleFlowStep:
                 ctx = ctx.set_extra("final_result", early_result).set_extra("rgba", early_result.get("rgba"))
                 
             elif getattr(result, "evidence_source", None):
-                 # Partial evidence finding
-                 oracle_hit = True
-                 # Add to sources? EvidenceFlow handles this usually if we pass sources?
-                 pass
+                 # Partial evidence finding (Oracle found a relevant link but not a definitive fact check)
+                 # Do NOT set oracle_hit=True because we still need LLM judging.
+                 oracle_partial = True
+                 ev = result.evidence_source
+                 # Inject into sources so EvidenceCollectStep picks it up
+                 current_sources = ctx.sources or []
+                 ctx = ctx.with_update(sources=current_sources + [ev])
 
-            Trace.event("oracle_flow.step_completed", {"hit": oracle_hit})
+            Trace.event("oracle_flow.step_completed", {
+                "jackpot": oracle_jackpot, 
+                "partial": oracle_partial,
+                "hit": oracle_jackpot  # hit means "stop pipeline" in current semantics
+            })
 
-            return ctx.set_extra("oracle_hit", oracle_hit).set_extra(
-                "oracle_result", result if oracle_hit else None
+            return (
+                ctx
+                .set_extra("oracle_hit", oracle_jackpot)          # ONLY jackpot stops pipeline
+                .set_extra("oracle_partial", oracle_partial)
+                .set_extra("oracle_result", result if (oracle_jackpot or oracle_partial) else None)
             )
 
         except Exception as e:

@@ -35,8 +35,9 @@ def test_trace_keeps_tail_snippet_and_hash(monkeypatch, tmp_path):
     trace_mod.Trace.event("llm.prompt", {"prompt": long_text})
     trace_mod.Trace.stop()
 
-    trace_file = _tmp_trace_dir() / f"{trace_id}.jsonl"
-    records = [json.loads(line) for line in trace_file.read_text().splitlines()]
+    trace_file = _tmp_trace_dir() / f"{trace_id}.json"
+    payload = json.loads(trace_file.read_text())
+    records = payload.get("events", [])
     prompt_rec = next(r for r in records if r["event"] == "llm.prompt")
     prompt_payload = prompt_rec["data"]["prompt"]
 
@@ -63,4 +64,3 @@ def test_trace_keeps_tail_snippet_and_hash(monkeypatch, tmp_path):
         # Verify head content
         assert prompt_payload["head"].startswith("start-")
         assert len(prompt_payload["head"]) <= 120  # Default limit for 'prompt' key
-

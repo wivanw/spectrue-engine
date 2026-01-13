@@ -120,6 +120,7 @@ class ClaimStructureType(str, Enum):
     DEFINITION = "definition"
     POLICY_PLAN = "policy_plan"
     FORECAST = "forecast"
+    EXISTENCE = "existence"
     META_SCIENTIFIC = "meta_scientific"
     OTHER = "other"
 

@@ -33,6 +33,12 @@ _trace_max_override_var: contextvars.ContextVar[int | None] = contextvars.Contex
 _trace_phase_starts: contextvars.ContextVar[dict[str, int]] = contextvars.ContextVar(
     "spectrue_trace_phase_starts", default={}
 )
+_trace_events_var: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
+    "spectrue_trace_events", default=None
+)
+_trace_meta_var: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "spectrue_trace_meta", default=None
+)
 
 # PII Regex Patterns
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
@@ -257,14 +263,22 @@ class Trace:
         _trace_max_head_var.set(runtime.debug.trace_max_head_chars)
         _trace_max_inline_var.set(runtime.debug.trace_max_inline_chars)
         if enabled:
+            _trace_events_var.set([])
+            _trace_meta_var.set(
+                {
+                    "trace_id": trace_id,
+                    "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
             # Clean up old traces, keep only the latest one
             try:
                 trace_dir = _trace_dir()
-                for old_file in trace_dir.glob("*.jsonl"):
-                    try:
-                        old_file.unlink()
-                    except Exception:
-                        pass
+                for pattern in ("*.json", "*.jsonl"):
+                    for old_file in trace_dir.glob(pattern):
+                        try:
+                            old_file.unlink()
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
@@ -284,8 +298,32 @@ class Trace:
             if Trace._emit_trace_id():
                 payload["trace_id"] = tid
             Trace.event("trace.stop", payload)
+            events = _trace_events_var.get() or []
+            meta = _trace_meta_var.get() or {}
+            meta.setdefault("trace_id", tid)
+            meta.setdefault("started_at", time.strftime("%Y-%m-%d %H:%M:%S"))
+            meta["stopped_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                safe_tid = "".join(c if c.isalnum() or c in "._-" else "_" for c in tid)
+                path = _trace_dir() / f"{safe_tid}.json"
+                with path.open("w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "trace_id": meta.get("trace_id"),
+                            "started_at": meta.get("started_at"),
+                            "stopped_at": meta.get("stopped_at"),
+                            "events": events,
+                        },
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+            except Exception:
+                pass
         _trace_enabled_var.set(False)
         _trace_id_var.set(None)
+        _trace_events_var.set(None)
+        _trace_meta_var.set(None)
 
     @staticmethod
     def event(name: str, data: Any | None = None) -> None:
@@ -293,6 +331,9 @@ class Trace:
             return
         tid = current_trace_id()
         if not tid:
+            return
+        events = _trace_events_var.get()
+        if events is None:
             return
 
         rec = {
@@ -303,11 +344,7 @@ class Trace:
         if Trace._emit_trace_id():
             rec["trace_id"] = tid
         try:
-            # Sanitize trace_id for filename safety (e.g. replace ':' with '_')
-            safe_tid = "".join(c if c.isalnum() or c in "._-" else "_" for c in tid)
-            path = _trace_dir() / f"{safe_tid}.jsonl"
-            with path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            events.append(rec)
         except Exception:
             # Tracing must never break the main flow.
             return

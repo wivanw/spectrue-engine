@@ -517,7 +517,7 @@ except Exception as e:
 import os
 os.environ["SPECTRUE_ENGINE_DEBUG"] = "true"
 
-# Traces are written to data/trace/<trace_id>.jsonl
+# Traces are written to data/trace/<trace_id>.json
 ```
 
 ### Trace Events
@@ -529,7 +529,7 @@ from spectrue_core.utils.trace import Trace
 Trace.event("my.event", {"key": "value"})
 
 # View trace file
-# data/trace/2024-12-21_22-30-00_abc123.jsonl
+# data/trace/2024-12-21_22-30-00_abc123.json
 ```
 
 ### Safe Payloads
