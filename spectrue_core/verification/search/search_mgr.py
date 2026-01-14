@@ -364,6 +364,9 @@ class SearchManager:
         src_by_url: dict[str, list[dict]] = {}  # URL -> sources that need this URL
         processed_urls: set[str] = set()
 
+        # Track which sources have already been accounted in BudgetState.total_sources
+        # to avoid double-counting (e.g., fetched then quoted).
+
         for src in candidates:
             if src.get("quote"):
                 continue
@@ -440,6 +443,7 @@ class SearchManager:
                         has_quote=False,  # Updated after quote extraction
                         is_authoritative=is_authoritative,
                     )
+                    src["_budget_observed"] = True
 
         # Phase 1c: Collect sources that need quote extraction
         sources_for_quote_extraction: list[tuple[int, dict]] = []
@@ -480,9 +484,22 @@ class SearchManager:
                             src["eal_enriched"] = True
                             enriched_count += 1
                             quoted_count += 1
-                            # Update Bayesian state: quote found = success
-                            tracker.state.quotes_found += 1
-                            tracker.state.alpha += 0.5  # Bonus for quote
+                            # If we did NOT fetch (cache_only miss / snippet-only),
+                            # the tracker never saw this source, so total_sources stays 0.
+                            # That breaks downstream evidence stats and explainability A.
+                            relevance = float(src.get("relevance_score", 0.5) or 0.5)
+                            is_authoritative = src.get("source_tier") in ("A", "B")
+                            if not src.get("_budget_observed"):
+                                tracker.state.update_from_source(
+                                    relevance_score=relevance,
+                                    has_quote=True,
+                                    is_authoritative=is_authoritative,
+                                )
+                                src["_budget_observed"] = True
+                            else:
+                                # We already counted this source (via fetch). Only mark quote.
+                                tracker.state.quotes_found += 1
+                                tracker.state.alpha += 0.5  # Bonus for quote
                         else:
                             # Fallback to heuristic extraction
                             content = src.get("content") or src.get("snippet") or ""
@@ -493,7 +510,17 @@ class SearchManager:
                                 src["eal_enriched"] = True
                                 enriched_count += 1
                                 quoted_count += 1
-                                tracker.state.quotes_found += 1
+                                relevance = float(src.get("relevance_score", 0.5) or 0.5)
+                                is_authoritative = src.get("source_tier") in ("A", "B")
+                                if not src.get("_budget_observed"):
+                                    tracker.state.update_from_source(
+                                        relevance_score=relevance,
+                                        has_quote=True,
+                                        is_authoritative=is_authoritative,
+                                    )
+                                    src["_budget_observed"] = True
+                                else:
+                                    tracker.state.quotes_found += 1
                 else:
                     # Embeddings unavailable - use heuristic for all
                     for _, src in sources_for_quote_extraction:
@@ -505,7 +532,17 @@ class SearchManager:
                             src["eal_enriched"] = True
                             enriched_count += 1
                             quoted_count += 1
-                            tracker.state.quotes_found += 1
+                            relevance = float(src.get("relevance_score", 0.5) or 0.5)
+                            is_authoritative = src.get("source_tier") in ("A", "B")
+                            if not src.get("_budget_observed"):
+                                tracker.state.update_from_source(
+                                    relevance_score=relevance,
+                                    has_quote=True,
+                                    is_authoritative=is_authoritative,
+                                )
+                                src["_budget_observed"] = True
+                            else:
+                                tracker.state.quotes_found += 1
             except ImportError:
                 # Fallback to heuristic extraction
                 for _, src in sources_for_quote_extraction:
@@ -517,7 +554,32 @@ class SearchManager:
                         src["eal_enriched"] = True
                         enriched_count += 1
                         quoted_count += 1
-                        tracker.state.quotes_found += 1
+                        relevance = float(src.get("relevance_score", 0.5) or 0.5)
+                        is_authoritative = src.get("source_tier") in ("A", "B")
+                        if not src.get("_budget_observed"):
+                            tracker.state.update_from_source(
+                                relevance_score=relevance,
+                                has_quote=True,
+                                is_authoritative=is_authoritative,
+                            )
+                            src["_budget_observed"] = True
+                        else:
+                            tracker.state.quotes_found += 1
+
+        # ------------------------------------------------------------------
+        # Reconcile evidence counters AFTER enrichment.
+        # This keeps BudgetState.total_sources/relevant_sources consistent
+        # even when fetch_count == 0 (cache_only/snippet-only paths).
+        # ------------------------------------------------------------------
+        from spectrue_core.verification.evidence.evidence_stats_reconcile import (
+            reconcile_budget_state_from_sources,
+        )
+        reconcile_budget_state_from_sources(
+            tracker,
+            candidates,
+            context=budget_context,
+            claim_id=claim_id,
+        )
 
         # Log budget state at end of EAL
         Trace.event(
