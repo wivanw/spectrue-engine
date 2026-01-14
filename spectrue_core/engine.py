@@ -137,7 +137,7 @@ class SpectrueEngine:
 
             fetch_cost = 0.0
 
-            if analysis_mode == "deep":
+            if analysis_mode in ("deep", "deep_v2"):
                 if progress_callback:
                     await progress_callback("extracting_claims")
 
@@ -205,6 +205,7 @@ class SpectrueEngine:
 
                 # Step 2: Single pipeline run with all claims (avoids N+1 pipeline runs)
                 # This replaces the per-claim loop that caused N+1 pipeline runs
+                pipeline_profile = "deep_v2" if analysis_mode == "deep_v2" else "deep"
                 verification_result = await self.verifier.verify_fact(
                     fact=working_text,  # Full article text for context
                     search_type=search_type,
@@ -214,7 +215,7 @@ class SpectrueEngine:
                     _max_cost=max_credits - int(extraction_cost)
                     if max_credits is not None
                     else None,
-                    pipeline_profile="deep",
+                    pipeline_profile=pipeline_profile,
                     preloaded_claims=extracted_claims,  # Skip re-extraction
                 )
 
@@ -230,7 +231,7 @@ class SpectrueEngine:
                     deep_analysis = {"claim_results": []}
 
                 final = {
-                    "judge_mode": "deep",
+                    "judge_mode": analysis_mode,
                     "deep_analysis": deep_analysis,
                     "cost": total_cost,
                     "cost_summary": verification_result.get("cost_summary")
@@ -242,7 +243,7 @@ class SpectrueEngine:
                     "detected_lang": detected_lang,
                     "detected_lang_prob": detected_prob,
                     "search_lang": content_lang,
-                    "analysis_mode": "deep",
+                    "analysis_mode": analysis_mode,
                 }
                 if max_credits is not None:
                     final["budget"] = {

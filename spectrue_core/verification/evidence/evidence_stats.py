@@ -15,7 +15,12 @@ Computes aggregate counts summarizing evidence coverage for a single claim.
 
 from __future__ import annotations
 
-from spectrue_core.schema.claim_frame import EvidenceItemFrame, EvidenceStats
+from spectrue_core.schema.claim_frame import (
+    ConfirmationCounts,
+    EvidenceItemFrame,
+    EvidenceStats,
+    EvidenceStanceStats,
+)
 
 
 # High trust tiers (A, A', B are considered high trust)
@@ -43,6 +48,11 @@ def build_evidence_stats(evidence_items: tuple[EvidenceItemFrame, ...]) -> Evide
             conflicting_evidence=False,
             missing_sources=True,
             missing_direct_quotes=True,
+            exact_dupes_total=0,
+            similar_clusters_total=0,
+            publishers_total=0,
+            support=EvidenceStanceStats(),
+            refute=EvidenceStanceStats(),
         )
 
     total = len(evidence_items)
@@ -51,6 +61,14 @@ def build_evidence_stats(evidence_items: tuple[EvidenceItemFrame, ...]) -> Evide
     context_count = 0
     high_trust_count = 0
     quote_count = 0
+
+    hash_counts: dict[str, int] = {}
+    publisher_ids: set[str] = set()
+    similar_clusters: set[str] = set()
+    support_precise_publishers: set[str] = set()
+    support_corr_clusters: set[str] = set()
+    refute_precise_publishers: set[str] = set()
+    refute_corr_clusters: set[str] = set()
 
     for item in evidence_items:
         # Count by stance
@@ -71,8 +89,35 @@ def build_evidence_stats(evidence_items: tuple[EvidenceItemFrame, ...]) -> Evide
         if item.quote and len(item.quote.strip()) > 10:
             quote_count += 1
 
+        # Duplicate + similarity stats
+        content_hash = (item.content_hash or "").strip()
+        if content_hash:
+            hash_counts[content_hash] = hash_counts.get(content_hash, 0) + 1
+
+        publisher_id = (item.publisher_id or "").strip()
+        if publisher_id:
+            publisher_ids.add(publisher_id)
+
+        sim_cluster_id = (item.similar_cluster_id or "").strip()
+        if sim_cluster_id:
+            similar_clusters.add(sim_cluster_id)
+
+        attribution = (item.attribution or "").lower()
+        if stance == "SUPPORT":
+            if attribution == "precision" and publisher_id:
+                support_precise_publishers.add(publisher_id)
+            elif attribution == "corroboration" and sim_cluster_id:
+                support_corr_clusters.add(sim_cluster_id)
+        elif stance == "REFUTE":
+            if attribution == "precision" and publisher_id:
+                refute_precise_publishers.add(publisher_id)
+            elif attribution == "corroboration" and sim_cluster_id:
+                refute_corr_clusters.add(sim_cluster_id)
+
     # Detect conflicting evidence (both support and refute present)
     conflicting = support_count > 0 and refute_count > 0
+
+    exact_dupes_total = sum(count for count in hash_counts.values() if count > 1)
 
     return EvidenceStats(
         total_sources=total,
@@ -84,7 +129,45 @@ def build_evidence_stats(evidence_items: tuple[EvidenceItemFrame, ...]) -> Evide
         conflicting_evidence=conflicting,
         missing_sources=(total == 0),
         missing_direct_quotes=(quote_count == 0),
+        exact_dupes_total=exact_dupes_total,
+        similar_clusters_total=len(similar_clusters),
+        publishers_total=len(publisher_ids),
+        support=EvidenceStanceStats(
+            precision_publishers=len(support_precise_publishers),
+            corroboration_clusters=len(support_corr_clusters),
+        ),
+        refute=EvidenceStanceStats(
+            precision_publishers=len(refute_precise_publishers),
+            corroboration_clusters=len(refute_corr_clusters),
+        ),
     )
+
+
+def build_confirmation_counts(
+    evidence_items: tuple[EvidenceItemFrame, ...],
+    *,
+    lambda_weight: float,
+) -> ConfirmationCounts:
+    support_publishers: set[str] = set()
+    support_clusters: set[str] = set()
+
+    for item in evidence_items:
+        if (item.stance or "").upper() != "SUPPORT":
+            continue
+        attribution = (item.attribution or "").lower()
+        if attribution == "precision":
+            publisher_id = (item.publisher_id or "").strip()
+            if publisher_id:
+                support_publishers.add(publisher_id)
+        elif attribution == "corroboration":
+            cluster_id = (item.similar_cluster_id or "").strip()
+            if cluster_id:
+                support_clusters.add(cluster_id)
+
+    c_precise = float(len(support_publishers))
+    c_corr = float(len(support_clusters))
+    c_total = c_precise + float(lambda_weight) * c_corr
+    return ConfirmationCounts(C_precise=c_precise, C_corr=c_corr, C_total=c_total)
 
 
 def compute_evidence_quality_score(stats: EvidenceStats) -> float:

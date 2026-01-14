@@ -21,14 +21,19 @@ from .prepare_input import PrepareInputStep
 from .extract_claims import ExtractClaimsStep
 from .verify_inline_sources import VerifyInlineSourcesStep
 from .claim_graph import ClaimGraphStep
+from .claim_clusters import ClaimClustersStep
 from .target_selection import TargetSelectionStep
 from .evaluate_semantic_gating import EvaluateSemanticGatingStep
 from .retrieval import (
     AssembleRetrievalItemsStep,
     BuildQueriesStep,
+    BuildClusterQueriesStep,
+    ClusterEvidenceEnrichStep,
     FetchChunksStep,
+    ClusterWebSearchStep,
     RerankStep,
     WebSearchStep,
+    ClusterAttributionStep,
 )
 from .evidence_collect import EvidenceCollectStep
 from .evidence_gating import EvidenceGatingStep
@@ -59,13 +64,18 @@ __all__ = [
     "ExtractClaimsStep",
     "VerifyInlineSourcesStep",
     "ClaimGraphStep",
+    "ClaimClustersStep",
     "TargetSelectionStep",
     "EvaluateSemanticGatingStep",
     "BuildQueriesStep",
+    "BuildClusterQueriesStep",
     "WebSearchStep",
+    "ClusterWebSearchStep",
+    "ClusterEvidenceEnrichStep",
     "RerankStep",
     "FetchChunksStep",
     "AssembleRetrievalItemsStep",
+    "ClusterAttributionStep",
     "EvidenceCollectStep",
     "EvidenceGatingStep",
     "StanceAnnotateStep",

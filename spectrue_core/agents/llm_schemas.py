@@ -85,6 +85,8 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
                             "ambiguous",
                             "unverified",
                             "partially_verified",
+                            "plausible",
+                            "unlikely",
                         ],
                     },
                     "verdict_score": {"type": "number", "minimum": -1, "maximum": 1},
@@ -135,6 +137,8 @@ SINGLE_CLAIM_SCORING_SCHEMA: dict[str, Any] = {
                 "ambiguous",
                 "unverified",
                 "partially_verified",
+                "plausible",
+                "unlikely",
             ],
         },
         "verdict_score": {"type": "number", "minimum": -1, "maximum": 1},
@@ -753,6 +757,7 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
 
 CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "description": "Per-claim judge output schema (evidence stats are provided in prompt input).",
     "additionalProperties": False,
     "required": [
         "claim_id",

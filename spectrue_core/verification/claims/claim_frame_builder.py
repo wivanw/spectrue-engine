@@ -21,6 +21,7 @@ from typing import Any
 
 from spectrue_core.schema.claim_frame import (
     ClaimFrame,
+    ConfirmationCounts,
     ContextExcerpt,
     ContextMeta,
     EvidenceItemFrame,
@@ -29,7 +30,10 @@ from spectrue_core.utils.text_structure import (
     TextStructure,
     extract_text_structure,
 )
-from spectrue_core.verification.evidence.evidence_stats import build_evidence_stats
+from spectrue_core.verification.evidence.evidence_stats import (
+    build_confirmation_counts,
+    build_evidence_stats,
+)
 from spectrue_core.verification.search.retrieval_trace import (
     create_empty_retrieval_trace,
     format_retrieval_trace,
@@ -138,6 +142,10 @@ def convert_evidence_items(
             quote=ev.get("quote"),
             snippet=ev.get("snippet") or ev.get("content"),
             relevance=ev.get("relevance") or ev.get("score"),
+            content_hash=ev.get("content_hash"),
+            publisher_id=ev.get("publisher_id"),
+            similar_cluster_id=ev.get("similar_cluster_id"),
+            attribution=ev.get("attribution"),
         )
         items.append(item)
 
@@ -153,6 +161,7 @@ def build_claim_frame(
     execution_state: ClaimExecutionState | None = None,
     structure: TextStructure | None = None,
     window_size: int = 1,
+    confirmation_lambda: float | None = None,
 ) -> ClaimFrame:
     """
     Build a complete ClaimFrame for deep analysis.
@@ -181,8 +190,15 @@ def build_claim_frame(
     # Convert evidence items
     evidence_items = convert_evidence_items(claim_id, raw_evidence)
 
-    # Build evidence stats
+    # Build evidence stats + confirmation counts
     evidence_stats = build_evidence_stats(evidence_items)
+    if confirmation_lambda is not None:
+        confirmation_counts = build_confirmation_counts(
+            evidence_items,
+            lambda_weight=confirmation_lambda,
+        )
+    else:
+        confirmation_counts = ConfirmationCounts()
 
     # Build retrieval trace
     if execution_state is not None:
@@ -198,6 +214,7 @@ def build_claim_frame(
         context_meta=context_meta,
         evidence_items=evidence_items,
         evidence_stats=evidence_stats,
+        confirmation_counts=confirmation_counts,
         retrieval_trace=retrieval_trace,
     )
 
@@ -207,6 +224,7 @@ def build_claim_frames_from_pipeline(
     document_text: str,
     evidence_by_claim: dict[str, list[dict[str, Any]]],
     execution_states: dict[str, ClaimExecutionState] | None = None,
+    confirmation_lambda: float | None = None,
 ) -> list[ClaimFrame]:
     """
     Build ClaimFrame objects for all claims from pipeline data.
@@ -241,6 +259,7 @@ def build_claim_frames_from_pipeline(
             raw_evidence=raw_evidence,
             execution_state=exec_state,
             structure=structure,
+            confirmation_lambda=confirmation_lambda,
         )
         frames.append(frame)
 

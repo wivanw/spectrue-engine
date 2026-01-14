@@ -85,7 +85,7 @@ def _format_evidence_summary(summary: EvidenceSummary | None) -> str:
     return "\n".join(lines) if lines else "Summary is empty."
 
 
-def _format_stats_section(frame: ClaimFrame) -> str:
+def _format_stats_section(frame: ClaimFrame, *, include_v2: bool = False) -> str:
     """Format evidence stats for judge prompt."""
     stats = frame.evidence_stats
     lines = [
@@ -96,6 +96,24 @@ def _format_stats_section(frame: ClaimFrame) -> str:
         f"High-trust sources: {stats.high_trust_sources}",
         f"Direct quotes: {stats.direct_quotes}",
     ]
+    if include_v2:
+        lines.extend(
+            [
+                f"Exact duplicates (urls): {stats.exact_dupes_total}",
+                f"Similar clusters: {stats.similar_clusters_total}",
+                f"Unique publishers: {stats.publishers_total}",
+                f"Support precision publishers: {stats.support.precision_publishers}",
+                f"Support corroboration clusters: {stats.support.corroboration_clusters}",
+                f"Refute precision publishers: {stats.refute.precision_publishers}",
+                f"Refute corroboration clusters: {stats.refute.corroboration_clusters}",
+                (
+                    "Confirmation counts: "
+                    f"C_precise={frame.confirmation_counts.C_precise}, "
+                    f"C_corr={frame.confirmation_counts.C_corr}, "
+                    f"C_total={frame.confirmation_counts.C_total}"
+                ),
+            ]
+        )
 
     if stats.conflicting_evidence:
         lines.append("⚠️ Evidence contains contradictions")
@@ -113,6 +131,7 @@ def build_claim_judge_prompt(
     evidence_summary: EvidenceSummary | None = None,
     *,
     ui_locale: str = "en",
+    analysis_mode: str = "deep",
 ) -> str:
     """
     Build prompt for claim judging.
@@ -130,7 +149,7 @@ def build_claim_judge_prompt(
     """
     evidence_section = _format_evidence_for_judge(frame.evidence_items)
     summary_section = _format_evidence_summary(evidence_summary)
-    stats_section = _format_stats_section(frame)
+    stats_section = _format_stats_section(frame, include_v2=(analysis_mode == "deep_v2"))
 
     # Get URLs for sources_used constraint
     available_urls = [item.url for item in frame.evidence_items]
@@ -185,6 +204,9 @@ Claim Language: {frame.claim_language}
 
 ## SUMMARY
 {summary_section}
+
+## EVIDENCE STATS
+{stats_section}
 
 ## OUTPUT FORMAT
 Return JSON with: claim_id, rgba, confidence, verdict, explanation, sources_used, missing_evidence.

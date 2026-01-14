@@ -120,7 +120,12 @@ class BuildQueriesStep:
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         claims = ctx.claims or []
         claims_for_plan = ctx.get_extra("target_claims", claims) or []
-        mode = "deep" if ctx.mode.name == "deep" else "standard"
+        if ctx.mode.name == "deep_v2":
+            mode = "deep_v2"
+        elif ctx.mode.name == "deep":
+            mode = "deep"
+        else:
+            mode = "standard"
 
         profile_name = resolve_profile_name(ctx.search_type)
         policy = default_search_policy()

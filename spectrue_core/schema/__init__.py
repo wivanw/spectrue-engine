@@ -97,7 +97,9 @@ from spectrue_core.schema.claim_frame import (
     ContextExcerpt,
     ContextMeta,
     EvidenceItemFrame,
+    EvidenceStanceStats,
     EvidenceStats,
+    ConfirmationCounts,
     RetrievalHop,
     RetrievalTrace,
     ClaimFrame,
@@ -147,8 +149,9 @@ __all__ = [
     "MetadataConfidence", "SearchLocalePlan", "RetrievalPolicy",
     "ClaimMetadata", "default_claim_metadata",
     # Per-Claim Judging (Deep Analysis)
-    "ContextExcerpt", "ContextMeta", "EvidenceItemFrame", "EvidenceStats",
-    "RetrievalHop", "RetrievalTrace", "ClaimFrame",
+    "ContextExcerpt", "ContextMeta", "EvidenceItemFrame", "EvidenceStanceStats",
+    "EvidenceStats", "ConfirmationCounts", "RetrievalHop", "RetrievalTrace",
+    "ClaimFrame",
     "EvidenceReference", "EvidenceSummary", "RGBAScore",
     "JudgeOutput", "ClaimResult", "DeepAnalysisResult",
     # RGBA Audit Contracts
