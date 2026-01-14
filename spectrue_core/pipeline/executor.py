@@ -70,7 +70,7 @@ async def execute_pipeline(
     It builds the correct pipeline for the mode and executes all steps.
 
     Args:
-        mode_name: "normal", "general", or "deep"
+        mode_name: "normal", "general", "deep", or "deep_v2"
         claims: List of claim dicts to process
         search_mgr: SearchManager for retrieval
         agent: FactCheckerAgent for LLM operations
@@ -202,7 +202,7 @@ async def validate_claims_for_mode(
     Use this for pre-flight validation before expensive operations.
 
     Args:
-        mode_name: "normal" or "deep"
+        mode_name: "normal", "deep", or "deep_v2"
         claims: Claims to validate
 
     Raises:

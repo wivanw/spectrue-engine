@@ -141,7 +141,7 @@ class SearchPlan:
     """Structured query plan for retrieval."""
 
     plan_id: str
-    mode: Literal["standard", "deep"]
+    mode: Literal["standard", "deep", "deep_v2"]
     global_queries: tuple[str, ...] = field(default_factory=tuple)
     per_claim_queries: dict[str, tuple[str, ...]] = field(default_factory=dict)
     trace: dict[str, Any] = field(default_factory=dict)

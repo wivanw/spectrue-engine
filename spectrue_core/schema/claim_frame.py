@@ -69,6 +69,16 @@ class EvidenceItemFrame:
     quote: str | None = None
     snippet: str | None = None
     relevance: float | None = None  # 0..1
+    content_hash: str | None = None
+    publisher_id: str | None = None
+    similar_cluster_id: str | None = None
+    attribution: str | None = None  # precision or corroboration
+
+
+@dataclass(frozen=True)
+class EvidenceStanceStats:
+    precision_publishers: int = 0
+    corroboration_clusters: int = 0
 
 
 @dataclass(frozen=True)
@@ -85,6 +95,11 @@ class EvidenceStats:
     conflicting_evidence: bool = False
     missing_sources: bool = True
     missing_direct_quotes: bool = True
+    exact_dupes_total: int = 0
+    similar_clusters_total: int = 0
+    publishers_total: int = 0
+    support: EvidenceStanceStats = field(default_factory=EvidenceStanceStats)
+    refute: EvidenceStanceStats = field(default_factory=EvidenceStanceStats)
 
     def __post_init__(self) -> None:
         # Derive missing_sources from total_sources if not explicitly set
@@ -92,6 +107,13 @@ class EvidenceStats:
             object.__setattr__(self, "missing_sources", False)
         if self.direct_quotes > 0:
             object.__setattr__(self, "missing_direct_quotes", False)
+
+
+@dataclass(frozen=True)
+class ConfirmationCounts:
+    C_precise: float = 0.0
+    C_corr: float = 0.0
+    C_total: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -135,6 +157,7 @@ class ClaimFrame:
     context_meta: ContextMeta
     evidence_items: tuple[EvidenceItemFrame, ...] = ()
     evidence_stats: EvidenceStats = field(default_factory=EvidenceStats)
+    confirmation_counts: ConfirmationCounts = field(default_factory=ConfirmationCounts)
     retrieval_trace: RetrievalTrace = field(default_factory=RetrievalTrace)
 
 

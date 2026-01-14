@@ -161,7 +161,7 @@ class DAGPipeline:
         if self.mode.name == "normal" and judge_claims_present:
             raise ValueError("Normal mode DAG cannot include judge_claims.")
 
-        if self.mode.name == "deep" and judge_standard_present:
+        if self.mode.name in {"deep", "deep_v2"} and judge_standard_present:
             raise ValueError("Deep mode DAG cannot include judge_standard.")
 
     def _check_cycles(self) -> None:

@@ -196,13 +196,17 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                     pass
                 elif isinstance(raw_rgba, list) and len(raw_rgba) == 4:
                     try:
-                        # Clamp all values to [0, 1]
+                        # Clamp R,B,A to [0,1]. Preserve signed G (can be -1.0).
                         normalized_rgba = [
                             max(0.0, min(1.0, float(raw_rgba[0]))),  # R (danger)
-                            max(0.0, min(1.0, float(raw_rgba[1]))),  # G (veracity)
+                            float(raw_rgba[1]),                      # G (veracity) signed
                             max(0.0, min(1.0, float(raw_rgba[2]))),  # B (style)
                             max(0.0, min(1.0, float(raw_rgba[3]))),  # A (explainability)
                         ]
+                        # Validate G range: allow -1.0 or [0,1]
+                        g = normalized_rgba[1]
+                        if not (g == -1.0 or (0.0 <= g <= 1.0)):
+                            normalized_rgba[1] = -1.0
                         cv["rgba"] = normalized_rgba
                         # Note: verdict.rgba_parsed event removed (data in evidence.llm_output)
                     except (TypeError, ValueError, IndexError):

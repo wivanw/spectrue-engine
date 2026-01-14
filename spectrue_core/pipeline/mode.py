@@ -17,7 +17,7 @@ All mode-specific behavior decisions should reference PipelineMode,
 not scattered if-statements.
 
 Usage:
-    from spectrue_core.pipeline.mode import PipelineMode, NORMAL_MODE, DEEP_MODE
+    from spectrue_core.pipeline.mode import PipelineMode, NORMAL_MODE, DEEP_MODE, DEEP_V2_MODE
 
     mode = NORMAL_MODE
     if mode.allow_batch:
@@ -40,7 +40,7 @@ class PipelineMode:
     of checking string mode names.
 
     Attributes:
-        name: Mode name ("normal" or "deep")
+        name: Mode name ("normal", "deep", or "deep_v2")
         allow_batch: Whether batch claim processing is allowed
         allow_clustering: Whether stance clustering is enabled
         require_single_language: Whether input must be single-language
@@ -49,7 +49,7 @@ class PipelineMode:
         search_depth: Default search depth ("basic" or "advanced")
     """
 
-    name: Literal["normal", "deep"]
+    name: Literal["normal", "deep", "deep_v2"]
     allow_batch: bool
     allow_clustering: bool
     require_single_language: bool
@@ -106,6 +106,21 @@ Use for comprehensive verification where all claims are processed
 with advanced search and stance clustering.
 """
 
+DEEP_V2_MODE = PipelineMode(
+    name="deep_v2",
+    allow_batch=True,
+    allow_clustering=True,
+    require_single_language=False,
+    require_metering=True,
+    max_claims_for_scoring=0,  # unlimited
+    search_depth="advanced",
+)
+"""
+Deep v2 mode: Batch claims, multi-language, clustered retrieval enabled.
+
+Use for comprehensive verification with claim clustering and per-claim judging.
+"""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Mode Registry
@@ -115,6 +130,7 @@ _MODE_REGISTRY: dict[str, PipelineMode] = {
     "normal": NORMAL_MODE,
     "general": NORMAL_MODE,  # alias
     "deep": DEEP_MODE,
+    "deep_v2": DEEP_V2_MODE,
 }
 
 
@@ -123,7 +139,7 @@ def get_mode(name: str) -> PipelineMode:
     Get a PipelineMode by name.
 
     Args:
-        name: Mode name ("normal", "general", "deep")
+        name: Mode name ("normal", "general", "deep", "deep_v2")
 
     Returns:
         The corresponding PipelineMode instance

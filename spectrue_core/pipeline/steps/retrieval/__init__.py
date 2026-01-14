@@ -13,15 +13,23 @@
 """Retrieval steps for the modularized search pipeline."""
 
 from .build_queries import BuildQueriesStep
+from .build_cluster_queries import BuildClusterQueriesStep
 from .web_search import WebSearchStep
+from .cluster_web_search import ClusterWebSearchStep
+from .cluster_evidence_enrich import ClusterEvidenceEnrichStep
 from .rerank import RerankStep
 from .fetch_chunks import FetchChunksStep
 from .assemble_items import AssembleRetrievalItemsStep
+from .cluster_attribution import ClusterAttributionStep
 
 __all__ = [
     "BuildQueriesStep",
+    "BuildClusterQueriesStep",
     "WebSearchStep",
+    "ClusterWebSearchStep",
+    "ClusterEvidenceEnrichStep",
     "RerankStep",
     "FetchChunksStep",
     "AssembleRetrievalItemsStep",
+    "ClusterAttributionStep",
 ]

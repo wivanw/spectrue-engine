@@ -129,6 +129,15 @@ class EvidenceCollectStep:
             global_items: list[dict[str, Any]] = []
             by_claim_items: dict[str, list[dict[str, Any]]] = {}
 
+            evidence_by_claim_override = ctx.get_extra("evidence_by_claim")
+            if isinstance(evidence_by_claim_override, dict) and evidence_by_claim_override:
+                for claim_id, items in evidence_by_claim_override.items():
+                    if not isinstance(items, (list, tuple)):
+                        continue
+                    by_claim_items[str(claim_id)] = [
+                        dict(item) if isinstance(item, dict) else item for item in items
+                    ]
+
             if isinstance(retrieval_items, dict):
                 raw_global = retrieval_items.get("global", []) if self.include_global_pack else []
                 raw_by_claim = retrieval_items.get("by_claim", {})

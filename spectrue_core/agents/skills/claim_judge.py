@@ -56,6 +56,7 @@ class ClaimJudgeSkill:
         evidence_summary: EvidenceSummary | None = None,
         *,
         ui_locale: str = "en",
+        analysis_mode: str = "deep",
     ) -> JudgeOutput:
         """
         Judge a claim and produce RGBA verdict.
@@ -69,7 +70,12 @@ class ClaimJudgeSkill:
             JudgeOutput with RGBA scores and verdict (unchanged from LLM)
         """
         # Build prompt with UI locale for explanation language
-        user_prompt = build_claim_judge_prompt(frame, evidence_summary, ui_locale=ui_locale)
+        user_prompt = build_claim_judge_prompt(
+            frame,
+            evidence_summary,
+            ui_locale=ui_locale,
+            analysis_mode=analysis_mode,
+        )
         system_prompt = build_claim_judge_system_prompt(lang=ui_locale)
 
         Trace.event("claim_judge.start", {
@@ -120,13 +126,35 @@ class ClaimJudgeSkill:
     ) -> JudgeOutput:
         """Parse LLM response into JudgeOutput without modification."""
 
+        def _clamp01(value: Any, default: float) -> float:
+            try:
+                v = float(value)
+            except Exception:
+                return default
+            if v < 0.0:
+                return 0.0
+            if v > 1.0:
+                return 1.0
+            return v
+
+        def _clamp_g(value: Any, default: float) -> float:
+            try:
+                v = float(value)
+            except Exception:
+                return default
+            if v < -1.0:
+                return -1.0
+            if v > 1.0:
+                return 1.0
+            return v
+
         # Extract RGBA scores
         rgba_dict = response.get("rgba", {})
         rgba = RGBAScore(
-            r=float(rgba_dict.get("R", 0.0)),
-            g=float(rgba_dict.get("G", 0.5)),
-            b=float(rgba_dict.get("B", 0.5)),
-            a=float(rgba_dict.get("A", 0.3)),
+            r=_clamp01(rgba_dict.get("R", 0.0), default=0.0),
+            g=_clamp_g(rgba_dict.get("G", 0.5), default=0.5),
+            b=_clamp01(rgba_dict.get("B", 0.5), default=0.5),
+            a=_clamp01(rgba_dict.get("A", 0.3), default=0.3),
         )
 
         # Extract other fields

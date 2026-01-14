@@ -119,6 +119,9 @@ class BuildClaimFramesStep(Step):
     def name(self) -> str:
         return "build_claim_frames"
 
+    def __init__(self, config: Any | None = None):
+        self._config = config
+
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("build_claim_frames")
 
@@ -134,12 +137,20 @@ class BuildClaimFramesStep(Step):
                 Trace.event("build_claim_frames.skip", {"reason": "no_claims"})
                 return ctx.set_extra("deep_claim_ctx", DeepClaimContext())
 
+            confirmation_lambda = None
+            if ctx.mode.name == "deep_v2":
+                from spectrue_core.runtime_config import DeepV2Config
+                runtime = getattr(self._config, "runtime", None)
+                deep_v2_cfg = getattr(runtime, "deep_v2", DeepV2Config())
+                confirmation_lambda = deep_v2_cfg.confirmation_lambda
+
             # Build frames
             frames = build_claim_frames_from_pipeline(
                 claims=claims,
                 document_text=document_text,
                 evidence_by_claim=evidence_by_claim,
                 execution_states=execution_states,
+                confirmation_lambda=confirmation_lambda,
             )
 
             deep_ctx = DeepClaimContext(claim_frames=frames)
@@ -239,12 +250,18 @@ class JudgeClaimsStep(Step):
             # Get UI locale from pipeline context
             # This is the user's interface language from the API request
             ui_locale = ctx.lang or "en"
+            analysis_mode = ctx.mode.name
 
             async def _repair_claim_output(
                 frame: ClaimFrame,
                 summary: EvidenceSummary | None,
             ) -> JudgeOutput:
-                base_prompt = build_claim_judge_prompt(frame, summary, ui_locale=ui_locale)
+                base_prompt = build_claim_judge_prompt(
+                    frame,
+                    summary,
+                    ui_locale=ui_locale,
+                    analysis_mode=analysis_mode,
+                )
                 repair_prompt = (
                     "Your previous response was invalid or missing required fields. "
                     "Return ONLY valid JSON matching the schema with keys: "
@@ -280,7 +297,12 @@ class JudgeClaimsStep(Step):
                         },
                     )
                     # Pass ui_locale to generate explanation in user's language
-                    output = await skill.judge(frame, summary, ui_locale=ui_locale)
+                    output = await skill.judge(
+                        frame,
+                        summary,
+                        ui_locale=ui_locale,
+                        analysis_mode=analysis_mode,
+                    )
                     return frame.claim_id, output, None
                 except Exception as e:
                     root = _root_cause(e)
@@ -425,13 +447,46 @@ class AssembleDeepResultStep(Step):
         try:
             deep_ctx: DeepClaimContext = ctx.extras.get("deep_claim_ctx", DeepClaimContext())
 
-            analysis_mode = "deep"
-            judge_mode = "deep"
+            analysis_mode = "deep_v2" if ctx.mode.name == "deep_v2" else "deep"
+            judge_mode = analysis_mode
 
             claim_results: list[dict[str, Any]] = []
             claim_verdicts: list[dict[str, Any]] = []
 
             from spectrue_core.utils.trust_utils import enrich_sources_with_trust
+
+            def _evidence_stats_payload(frame: ClaimFrame) -> dict[str, Any]:
+                stats = frame.evidence_stats
+                return {
+                    "total_sources": stats.total_sources,
+                    "support_sources": stats.support_sources,
+                    "refute_sources": stats.refute_sources,
+                    "context_sources": stats.context_sources,
+                    "high_trust_sources": stats.high_trust_sources,
+                    "direct_quotes": stats.direct_quotes,
+                    "conflicting_evidence": stats.conflicting_evidence,
+                    "missing_sources": stats.missing_sources,
+                    "missing_direct_quotes": stats.missing_direct_quotes,
+                    "exact_dupes_total": stats.exact_dupes_total,
+                    "similar_clusters_total": stats.similar_clusters_total,
+                    "publishers_total": stats.publishers_total,
+                    "support": {
+                        "precision_publishers": stats.support.precision_publishers,
+                        "corroboration_clusters": stats.support.corroboration_clusters,
+                    },
+                    "refute": {
+                        "precision_publishers": stats.refute.precision_publishers,
+                        "corroboration_clusters": stats.refute.corroboration_clusters,
+                    },
+                }
+
+            def _confirmation_payload(frame: ClaimFrame) -> dict[str, Any]:
+                counts = frame.confirmation_counts
+                return {
+                    "C_precise": counts.C_precise,
+                    "C_corr": counts.C_corr,
+                    "C_total": counts.C_total,
+                }
 
             for frame in deep_ctx.claim_frames:
                 judge_output = deep_ctx.judge_outputs.get(frame.claim_id)
@@ -439,7 +494,7 @@ class AssembleDeepResultStep(Step):
 
                 if error or judge_output is None:
                     error_payload = error or {"error_type": "judge_missing", "message": "Judge output missing"}
-                    claim_results.append({
+                    claim_result = {
                         "claim_id": frame.claim_id,
                         "status": "error",
                         "rgba": None,
@@ -447,7 +502,11 @@ class AssembleDeepResultStep(Step):
                         "explanation": None,
                         "sources_used": [],
                         "error": error_payload,
-                    })
+                    }
+                    if ctx.mode.name == "deep_v2":
+                        claim_result["evidence_stats"] = _evidence_stats_payload(frame)
+                        claim_result["confirmation_counts"] = _confirmation_payload(frame)
+                    claim_results.append(claim_result)
                     continue
 
                 rgba = [
@@ -488,7 +547,7 @@ class AssembleDeepResultStep(Step):
 
                 # Include FULL source objects in claim_results (not just refs)
                 # This allows frontend to display proper tier badges
-                claim_results.append({
+                claim_result = {
                     "claim_id": frame.claim_id,
                     "claim_text": frame.claim_text,
                     "status": "ok",
@@ -496,7 +555,11 @@ class AssembleDeepResultStep(Step):
                     "verdict_score": verdict_score,
                     "explanation": judge_output.explanation,
                     "sources_used": sources_list,  # Full objects, not just refs
-                })
+                }
+                if ctx.mode.name == "deep_v2":
+                    claim_result["evidence_stats"] = _evidence_stats_payload(frame)
+                    claim_result["confirmation_counts"] = _confirmation_payload(frame)
+                claim_results.append(claim_result)
 
                 claim_verdicts.append({
                     "claim_id": frame.claim_id,
@@ -525,12 +588,18 @@ class AssembleDeepResultStep(Step):
             elif isinstance(rgba_audit, dict):
                 rgba_audit_payload = rgba_audit
 
+            deep_analysis_payload = {
+                "claim_results": claim_results,
+            }
+            if ctx.mode.name == "deep_v2":
+                clusters_summary = ctx.get_extra("clusters_summary")
+                if isinstance(clusters_summary, list):
+                    deep_analysis_payload["clusters_summary"] = clusters_summary
+
             final_result = {
                 "analysis_mode": analysis_mode,
                 "judge_mode": judge_mode,
-                "deep_analysis": {
-                    "claim_results": claim_results,
-                },
+                "deep_analysis": deep_analysis_payload,
             }
             if rgba_audit_payload is not None:
                 final_result["rgba_audit"] = rgba_audit_payload

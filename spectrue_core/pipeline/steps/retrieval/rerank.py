@@ -128,7 +128,7 @@ class RerankStep:
 
                     if item.claim_id:
                         by_claim_items.setdefault(str(item.claim_id), []).append(item)
-                        if ctx.mode.name != "deep":
+                        if not ctx.mode.allow_batch:
                             global_items.append(item)
                     else:
                         global_items.append(item)

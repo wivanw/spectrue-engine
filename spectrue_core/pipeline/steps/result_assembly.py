@@ -111,6 +111,21 @@ def _coerce_score(value: object, fallback: float) -> float:
     return fallback
 
 
+def _coerce_unit_score(value: object, fallback: float) -> float:
+    """Coerce a score into the unit interval [0, 1].
+
+    Explainability (A) must never be negative in user-facing RGBA.
+    Internal components may use -1.0 to mean "unknown", but at the
+    assembled result boundary we clamp to a valid UI/domain value.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return fallback
+    v = float(value)
+    if math.isnan(v) or math.isinf(v):
+        return fallback
+    return max(0.0, min(1.0, v))
+
+
 def _build_rgba(verdict: dict, ctx: PipelineContext) -> list[float]:
     rgba = verdict.get("rgba") or ctx.get_extra("rgba")
     if (
@@ -118,7 +133,13 @@ def _build_rgba(verdict: dict, ctx: PipelineContext) -> list[float]:
         and len(rgba) == 4
         and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in rgba)
     ):
-        return [float(x) for x in rgba]
+        # Preserve signed G (veracity) as-is (it may be -1.0 = unverified).
+        # Clamp R/B/A to valid UI/domain ranges.
+        r, g, b, a = (float(x) for x in rgba)
+        r = max(0.0, min(1.0, r))
+        b = max(0.0, min(1.0, b))
+        a = max(0.0, min(1.0, a))
+        return [r, g, b, a]
 
     danger = _coerce_score(verdict.get("danger_score"), -1.0)
     verified = _coerce_score(verdict.get("verified_score"), -1.0)
@@ -129,7 +150,9 @@ def _build_rgba(verdict: dict, ctx: PipelineContext) -> list[float]:
     explainability = verdict.get("explainability_score")
     if not isinstance(explainability, (int, float)) or isinstance(explainability, bool):
         explainability = verdict.get("confidence_score")
-    explainability_score = _coerce_score(explainability, -1.0)
+
+    # A (explainability) is defined on [0, 1]. Never emit negative A.
+    explainability_score = _coerce_unit_score(explainability, 0.0)
 
     return [danger, verified, honesty, explainability_score]
 
@@ -184,7 +207,11 @@ class AssembleStandardResultStep:
                 "analysis": verdict.get("analysis") or verdict.get("rationale"),
                 "verified_score": (_coerce_score(verdict.get("verified_score"), 0.0) + 1.0) / 2.0,  # Normalize [-1, 1] -> [0, 1]
                 "veracity_signed": verdict.get("verified_score"),  # Preserve signed score for debug/backend use
-                "explainability_score": verdict.get("explainability_score"),
+                # A must be in [0, 1] for consumers. Internal -1.0 (unknown) is clamped to 0.0.
+                "explainability_score": _coerce_unit_score(
+                    verdict.get("explainability_score", verdict.get("confidence_score")),
+                    0.0,
+                ),
                 "danger_score": verdict.get("danger_score"),
                 "context_score": verdict.get("context_score"),
                 "style_score": verdict.get("style_score"),

@@ -24,6 +24,7 @@ from spectrue_core.verification.pipeline.pipeline_evidence import (
     EvidenceFlowInput,
     annotate_evidence_stance,
 )
+from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,33 @@ class StanceAnnotateStep:
             )
 
             if annotated:
+                item_meta = ctx.get_extra("evidence_item_meta") or {}
+                doc_meta = ctx.get_extra("evidence_doc_meta") or {}
+                if item_meta or doc_meta:
+                    enriched: list[dict[str, Any]] = []
+                    for item in annotated:
+                        if not isinstance(item, dict):
+                            continue
+                        merged = dict(item)
+                        claim_id = merged.get("claim_id")
+                        raw_url = merged.get("url") or merged.get("link")
+                        canonical = normalize_url(str(raw_url)) if raw_url else None
+                        if claim_id and canonical:
+                            key = f"{claim_id}::{canonical}"
+                            meta = item_meta.get(key)
+                            if isinstance(meta, dict):
+                                for k, v in meta.items():
+                                    if k not in merged or merged.get(k) in (None, ""):
+                                        merged[k] = v
+                        if canonical and canonical in doc_meta:
+                            meta = doc_meta.get(canonical)
+                            if isinstance(meta, dict):
+                                for k, v in meta.items():
+                                    if k not in merged or merged.get(k) in (None, ""):
+                                        merged[k] = v
+                        enriched.append(merged)
+                    annotated = enriched
+
                 Trace.event(
                     "stance_annotate.completed",
                     {"count": len(annotated)},

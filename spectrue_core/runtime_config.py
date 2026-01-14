@@ -337,6 +337,17 @@ class ContentBudgetConfig:
 
 
 @dataclass(frozen=True)
+class DeepV2Config:
+    claim_cluster_quantile: float = 0.7
+    doc_cluster_quantile: float = 0.85
+    confirmation_lambda: float = 0.5
+    representative_min_k: int = 2
+    representative_max_k: int = 3
+    precision_top_k: int = 2
+    corroboration_top_k: int = 3
+
+
+@dataclass(frozen=True)
 class ClaimGraphConfig:
     """
     Hybrid ClaimGraph (B + C) configuration.
@@ -405,6 +416,7 @@ class EngineRuntimeConfig:
     locale: LocalePolicyConfig
     tunables: EngineTunableConfig
     content_budget: ContentBudgetConfig
+    deep_v2: DeepV2Config
     claim_graph: ClaimGraphConfig
     @staticmethod
     def load_from_env() -> "EngineRuntimeConfig":
@@ -527,6 +539,30 @@ class EngineRuntimeConfig:
             ),
         )
 
+        deep_v2 = DeepV2Config(
+            claim_cluster_quantile=_parse_float(
+                os.getenv("DEEP_V2_CLAIM_CLUSTER_QUANTILE"), default=0.7, min_v=0.0, max_v=1.0
+            ),
+            doc_cluster_quantile=_parse_float(
+                os.getenv("DEEP_V2_DOC_CLUSTER_QUANTILE"), default=0.85, min_v=0.0, max_v=1.0
+            ),
+            confirmation_lambda=_parse_float(
+                os.getenv("DEEP_V2_CONFIRM_LAMBDA"), default=0.5, min_v=0.0, max_v=5.0
+            ),
+            representative_min_k=_parse_int(
+                os.getenv("DEEP_V2_REP_MIN_K"), default=2, min_v=1, max_v=5
+            ),
+            representative_max_k=_parse_int(
+                os.getenv("DEEP_V2_REP_MAX_K"), default=3, min_v=1, max_v=6
+            ),
+            precision_top_k=_parse_int(
+                os.getenv("DEEP_V2_PRECISION_TOP_K"), default=2, min_v=1, max_v=10
+            ),
+            corroboration_top_k=_parse_int(
+                os.getenv("DEEP_V2_CORROBORATION_TOP_K"), default=3, min_v=1, max_v=10
+            ),
+        )
+
         # Model assignments (can be overridden via ENV)
         model_claim_extraction = (os.getenv("MODEL_CLAIM_EXTRACTION") or DEFAULT_MODEL_CLAIM_EXTRACTION).strip()
         model_inline_source_verification = (os.getenv("MODEL_INLINE_SOURCE_VERIFICATION") or DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION).strip()
@@ -607,6 +643,7 @@ class EngineRuntimeConfig:
             locale=locale,
             tunables=tunables,
             content_budget=content_budget,
+            deep_v2=deep_v2,
             claim_graph=claim_graph,
         )
 
@@ -687,6 +724,15 @@ class EngineRuntimeConfig:
                 "block_min_chars": int(self.content_budget.block_min_chars),
                 "trace_top_blocks": int(self.content_budget.trace_top_blocks),
                 "absolute_guardrail_chars": int(self.content_budget.absolute_guardrail_chars),
+            },
+            "deep_v2": {
+                "claim_cluster_quantile": float(self.deep_v2.claim_cluster_quantile),
+                "doc_cluster_quantile": float(self.deep_v2.doc_cluster_quantile),
+                "confirmation_lambda": float(self.deep_v2.confirmation_lambda),
+                "representative_min_k": int(self.deep_v2.representative_min_k),
+                "representative_max_k": int(self.deep_v2.representative_max_k),
+                "precision_top_k": int(self.deep_v2.precision_top_k),
+                "corroboration_top_k": int(self.deep_v2.corroboration_top_k),
             },
             "claim_graph": {
                 # enabled flag removed - ClaimGraph always on

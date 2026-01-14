@@ -76,7 +76,7 @@ class PipelineFactory:
         All mode logic is encapsulated here.
 
         Args:
-            mode_name: "normal", "general", or "deep"
+            mode_name: "normal", "general", "deep", or "deep_v2"
             config: SpectrueConfig
 
         Returns:
@@ -92,6 +92,8 @@ class PipelineFactory:
             nodes = self._build_extraction_dag_nodes(config)
         elif mode.name == "normal":
             nodes = self._build_normal_dag_nodes(config)
+        elif mode.name == "deep_v2":
+            nodes = self._build_deep_v2_dag_nodes(config)
         else:
             nodes = self._build_deep_dag_nodes(config)
 
@@ -111,6 +113,7 @@ class PipelineFactory:
         - "normal" -> normal mode
         - "general" -> normal mode
         - "deep" -> deep mode
+        - "deep_v2" -> deep v2 mode
 
         This allows integration with the existing pipeline_builder module.
         """
@@ -118,6 +121,7 @@ class PipelineFactory:
             "normal": "normal",
             "general": "normal",
             "deep": "deep",
+            "deep_v2": "deep_v2",
         }
 
         mode_name = mode_mapping.get(profile_name.lower(), "normal")
@@ -451,7 +455,7 @@ class PipelineFactory:
 
             # Build ClaimFrame for each claim
             StepNode(
-                step=BuildClaimFramesStep(),
+                step=BuildClaimFramesStep(config=config),
                 depends_on=["cluster_evidence"],
             ),
 
@@ -540,6 +544,240 @@ class PipelineFactory:
             # Deep mode MUST return per-claim results from AssembleDeepResultStep.
             # Legacy global fields (danger_score, style_score, etc.) are NOT populated.
 
+        ]
+
+    def _build_deep_v2_dag_nodes(self, config: Any) -> list:
+        """Build DAG nodes for deep v2 mode with clustered retrieval."""
+        from spectrue_core.pipeline.dag import StepNode
+        from spectrue_core.pipeline.steps import (
+            ClaimGraphStep,
+            EvidenceCollectStep,
+            StanceAnnotateStep,
+            ClusterEvidenceStep,
+            AuditClaimsStep,
+            AuditEvidenceStep,
+            AggregateRGBAAuditStep,
+            ExtractClaimsStep,
+            MeteringSetupStep,
+            PrepareInputStep,
+            VerifyInlineSourcesStep,
+            CostSummaryStep,
+            AssertRetrievalTraceStep,
+            AssertDeepJudgingStep,
+            AssertNonEmptyClaimsStep,
+        )
+        from spectrue_core.pipeline.steps.claim_clusters import ClaimClustersStep
+        from spectrue_core.pipeline.steps.retrieval.build_cluster_queries import (
+            BuildClusterQueriesStep,
+        )
+        from spectrue_core.pipeline.steps.retrieval.cluster_web_search import (
+            ClusterWebSearchStep,
+        )
+        from spectrue_core.pipeline.steps.retrieval.cluster_evidence_enrich import (
+            ClusterEvidenceEnrichStep,
+        )
+        from spectrue_core.pipeline.steps.retrieval.cluster_attribution import (
+            ClusterAttributionStep,
+        )
+        from spectrue_core.pipeline.steps.deep_claim import (
+            AssembleDeepResultStep,
+            BuildClaimFramesStep,
+            JudgeClaimsStep,
+            MarkJudgeUnavailableStep,
+            SummarizeEvidenceStep,
+        )
+        from spectrue_core.utils.trace import Trace
+
+        # Trace: deep v2 mode uses claim graph for clustering
+        Trace.event("pipeline.deep_v2_mode.claim_graph.enabled", {
+            "reason": "clustered_retrieval",
+        })
+
+        # Get LLM client from agent
+        llm_client = getattr(self.agent, "_llm", None) or getattr(self.agent, "llm", None)
+
+        return [
+            # ==================== INFRASTRUCTURE ====================
+            StepNode(step=MeteringSetupStep(config=config, agent=self.agent, search_mgr=self.search_mgr)),
+
+            # ==================== INPUT PREPARATION ====================
+            StepNode(
+                step=PrepareInputStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
+                depends_on=["metering_setup"],
+            ),
+
+            # ==================== CLAIM EXTRACTION ====================
+            StepNode(
+                step=ExtractClaimsStep(agent=self.agent),
+                depends_on=["prepare_input"],
+            ),
+
+            # Post-extraction invariant
+            StepNode(
+                step=AssertNonEmptyClaimsStep(),
+                depends_on=["extract_claims"],
+            ),
+
+            # ==================== PARALLEL: INLINE SOURCES + GRAPH ====================
+            StepNode(
+                step=VerifyInlineSourcesStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
+                depends_on=["extract_claims"],
+            ),
+            StepNode(
+                step=ClaimGraphStep(
+                    claim_graph=self.claim_graph,
+                    runtime_config=config.runtime if hasattr(config, "runtime") else None,
+                ),
+                depends_on=["extract_claims"],
+            ),
+
+            # ==================== CLUSTERED RETRIEVAL ====================
+            StepNode(
+                step=ClaimClustersStep(config=config),
+                depends_on=["claim_graph"],
+            ),
+            StepNode(
+                step=BuildClusterQueriesStep(),
+                depends_on=["claim_clusters", "verify_inline_sources"],
+            ),
+            StepNode(
+                step=ClusterWebSearchStep(config=config, search_mgr=self.search_mgr),
+                depends_on=["build_cluster_queries"],
+            ),
+            StepNode(
+                step=ClusterAttributionStep(config=config),
+                depends_on=["cluster_web_search"],
+            ),
+            StepNode(
+                step=ClusterEvidenceEnrichStep(config=config, search_mgr=self.search_mgr),
+                depends_on=["cluster_attribution"],
+            ),
+            StepNode(
+                step=AssertRetrievalTraceStep(),
+                depends_on=["cluster_evidence_enrich"],
+            ),
+
+            # Evidence collection ONLY (NO global scoring for deep mode!)
+            StepNode(
+                step=EvidenceCollectStep(
+                    agent=self.agent,
+                    search_mgr=self.search_mgr,
+                    include_global_pack=False,
+                ),
+                depends_on=["assert_retrieval_trace"],
+            ),
+            StepNode(
+                step=ExtractClaimsStep(
+                    agent=self.agent,
+                    stage="post_evidence",
+                    name="enrich_claims_post_evidence",
+                ),
+                depends_on=["evidence_collect"],
+                optional=True,
+            ),
+
+            # Stance annotation always included
+            StepNode(
+                step=StanceAnnotateStep(agent=self.agent),
+                depends_on=["enrich_claims_post_evidence"],
+                optional=True,
+            ),
+
+            # Clustering always included
+            StepNode(
+                step=ClusterEvidenceStep(agent=self.agent),
+                depends_on=["stance_annotate"],
+                optional=True,
+            ),
+
+            # --- Per-Claim Judging (Deep Mode Only) ---
+
+            # Build ClaimFrame for each claim
+            StepNode(
+                step=BuildClaimFramesStep(config=config),
+                depends_on=["cluster_evidence"],
+            ),
+
+            # Claim-level audit (LLM as auditor only)
+            *(
+                [
+                    StepNode(
+                        step=AuditClaimsStep(llm_client=llm_client),
+                        depends_on=["build_claim_frames"],
+                    ),
+                    StepNode(
+                        step=AuditEvidenceStep(llm_client=llm_client),
+                        depends_on=["audit_claims"],
+                    ),
+                ]
+                if llm_client
+                else []
+            ),
+
+            # Aggregate RGBA audit metrics (deterministic)
+            *(
+                [
+                    StepNode(
+                        step=AggregateRGBAAuditStep(),
+                        depends_on=["audit_evidence"],
+                    )
+                ]
+                if llm_client
+                else [
+                    StepNode(
+                        step=AggregateRGBAAuditStep(),
+                        depends_on=["build_claim_frames"],
+                    )
+                ]
+            ),
+
+            # Summarize evidence per claim (always included if llm_client available)
+            *(
+                [
+                    StepNode(
+                        step=SummarizeEvidenceStep(llm_client=llm_client),
+                        depends_on=["audit_evidence"],
+                    )
+                ]
+                if llm_client
+                else []
+            ),
+
+            # Judge each claim independently (per-claim RGBA)
+            *(
+                [
+                    StepNode(
+                        step=JudgeClaimsStep(llm_client=llm_client),
+                        depends_on=["summarize_evidence"],
+                    )
+                ]
+                if llm_client
+                else [
+                    StepNode(
+                        step=MarkJudgeUnavailableStep(reason="llm_client_missing"),
+                        depends_on=["build_claim_frames"],
+                    )
+                ]
+            ),
+
+            # Assemble deep result (per-claim verdicts, NO global RGBA)
+            StepNode(
+                step=AssembleDeepResultStep(),
+                depends_on=[
+                    "judge_claims" if llm_client else "judge_unavailable",
+                    "aggregate_rgba_audit",
+                ],
+            ),
+
+            StepNode(
+                step=AssertDeepJudgingStep(),
+                depends_on=["assemble_deep_result"],
+            ),
+
+            StepNode(
+                step=CostSummaryStep(),
+                depends_on=["assert_deep_judging"],
+            ),
         ]
 
     def _build_extraction_dag_nodes(self, config: Any) -> list:
