@@ -40,7 +40,6 @@ from spectrue_core.verification.calibration.calibration_registry import Calibrat
 from spectrue_core.verification.claims.claim_selection import pick_ui_main_claim
 from spectrue_core.verification.evidence.evidence_pack import EvidencePack
 from spectrue_core.verification.search.search_policy import (
-    resolve_profile_name,
     resolve_stance_pass_mode,
 )
 from spectrue_core.utils.trace import Trace

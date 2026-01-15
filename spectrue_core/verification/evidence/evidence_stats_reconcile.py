@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any, Iterable
 
 from spectrue_core.scoring.budget_allocation import GlobalBudgetTracker

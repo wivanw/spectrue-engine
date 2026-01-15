@@ -166,7 +166,6 @@ class SpectrueEngine:
                             )
                     finally:
                         # Capture cost and restore meter
-                        fetch_cost = float(engine_ledger.total_credits)
                         web_tool._tavily._meter = prior_meter
 
                 # Single-pipeline deep mode: extract once, verify all claims together

@@ -19,7 +19,6 @@ from typing import Any
 
 from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
-from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
 from spectrue_core.verification.pipeline.pipeline_queries import (

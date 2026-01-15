@@ -408,95 +408,95 @@ async def run_search_flow(
 
         primary_query = inp.search_queries[0] if inp.search_queries else ""
         has_results = False
-            current_topic = tavily_topic
+        current_topic = tavily_topic
 
-            for attempt in range(2):
-                logger.debug(
-                    "Unified Search (Attempt %d): %s (topic=%s)",
-                    attempt + 1,
-                    primary_query[:50],
-                    current_topic,
+        for attempt in range(2):
+            logger.debug(
+                "Unified Search (Attempt %d): %s (topic=%s)",
+                attempt + 1,
+                primary_query[:50],
+                current_topic,
+            )
+
+            try:
+                u_ctx, u_srcs = await search_mgr.search_unified(
+                    primary_query,
+                    topic=current_topic,
+                    intent=inp.article_intent,
+                    article_intent=inp.article_intent,
                 )
-
-                try:
-                    u_ctx, u_srcs = await search_mgr.search_unified(
-                        primary_query,
-                        topic=current_topic,
-                        intent=inp.article_intent,
-                        article_intent=inp.article_intent,
-                    )
-                except Exception as se:
-                    Trace.event(
-                        "pipeline.search.unified_error",
-                        {
-                            "error": str(se)[:200],
-                            "topic": current_topic,
-                            "intent": inp.article_intent,
-                            "query": primary_query[:100],
-                        },
-                    )
-                    logger.warning("[Pipeline] Unified search failed: %s", se)
-                    break
-
-                if not u_srcs:
-                    break
-
-                gate_result = await agent.verify_search_relevance(inp.claims, u_srcs)
-                is_relevant = gate_result.get("is_relevant")
-                gate_status = gate_result.get("status", "RELEVANT")
-
-                # Backward compatibility: explicit boolean rejection should stop the pipeline.
-                if is_relevant is False:
-                    state.hard_reject = True
-                    state.reject_reason = gate_result.get("reason", "irrelevant")
-                    state.final_sources = []
-                    state.final_context = ""
-                    return state
-
-                if gate_status == "RELEVANT":
-                    state.final_context += "\n" + u_ctx
-                    state.final_sources.extend(canonicalize_sources(u_srcs))
-                    has_results = True
-                    break
-
-                logger.warning(
-                    "Semantic Router: REJECTED results (%s). Reason: %s",
-                    gate_status,
-                    gate_result.get("reason"),
-                )
-
-                if attempt == 0:
-                    new_topic = "general" if current_topic == "news" else "news"
-                    logger.debug(
-                        "Refining Search: Switching topic %s -> %s",
-                        current_topic,
-                        new_topic,
-                    )
-                    current_topic = new_topic
-                    continue
-
-                logger.warning(
-                    "Semantic gating failed after 2 attempts. Retaining %d sources as CONTEXT.",
-                    len(u_srcs),
-                )
-                for src in u_srcs:
-                    src["stance"] = "context"
-                    src["gating_status"] = gate_status
-                    src["gating_reason"] = gate_result.get("reason", "")[:100]
-                state.final_context += "\n" + u_ctx
-                state.final_sources.extend(canonicalize_sources(u_srcs))
-                has_results = True
-
+            except Exception as se:
                 Trace.event(
-                    "gating.retained_as_context",
+                    "pipeline.search.unified_error",
                     {
-                        "input_sources": len(u_srcs),
-                        "match_type": gate_result.get("match_type", gate_status),
-                        "reason": gate_result.get("reason", "")[:100],
+                        "error": str(se)[:200],
+                        "topic": current_topic,
+                        "intent": inp.article_intent,
                         "query": primary_query[:100],
                     },
                 )
+                logger.warning("[Pipeline] Unified search failed: %s", se)
                 break
+
+            if not u_srcs:
+                break
+
+            gate_result = await agent.verify_search_relevance(inp.claims, u_srcs)
+            is_relevant = gate_result.get("is_relevant")
+            gate_status = gate_result.get("status", "RELEVANT")
+
+            # Backward compatibility: explicit boolean rejection should stop the pipeline.
+            if is_relevant is False:
+                state.hard_reject = True
+                state.reject_reason = gate_result.get("reason", "irrelevant")
+                state.final_sources = []
+                state.final_context = ""
+                return state
+
+            if gate_status == "RELEVANT":
+                state.final_context += "\n" + u_ctx
+                state.final_sources.extend(canonicalize_sources(u_srcs))
+                has_results = True
+                break
+
+            logger.warning(
+                "Semantic Router: REJECTED results (%s). Reason: %s",
+                gate_status,
+                gate_result.get("reason"),
+            )
+
+            if attempt == 0:
+                new_topic = "general" if current_topic == "news" else "news"
+                logger.debug(
+                    "Refining Search: Switching topic %s -> %s",
+                    current_topic,
+                    new_topic,
+                )
+                current_topic = new_topic
+                continue
+
+            logger.warning(
+                "Semantic gating failed after 2 attempts. Retaining %d sources as CONTEXT.",
+                len(u_srcs),
+            )
+            for src in u_srcs:
+                src["stance"] = "context"
+                src["gating_status"] = gate_status
+                src["gating_reason"] = gate_result.get("reason", "")[:100]
+            state.final_context += "\n" + u_ctx
+            state.final_sources.extend(canonicalize_sources(u_srcs))
+            has_results = True
+
+            Trace.event(
+                "gating.retained_as_context",
+                {
+                    "input_sources": len(u_srcs),
+                    "match_type": gate_result.get("match_type", gate_status),
+                    "reason": gate_result.get("reason", "")[:100],
+                    "query": primary_query[:100],
+                },
+            )
+            break
 
         # Fallback: Google CSE
         if not has_results and search_mgr.tavily_calls > 0:
