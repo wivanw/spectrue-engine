@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Iterable
+from typing import Iterable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline.mode import AnalysisMode
 
 from spectrue_core.schema.claim_metadata import (
     EvidenceChannel,

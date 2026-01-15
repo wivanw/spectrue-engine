@@ -19,11 +19,10 @@ Implements invariants for language consistency:
 import logging
 from typing import Tuple
 
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
-
-from spectrue_core.pipeline.mode import AnalysisMode
 
 
 def detect_claim_language(text: str, fallback: str = "en") -> Tuple[str, float]:

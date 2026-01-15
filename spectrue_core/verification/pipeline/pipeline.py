@@ -10,10 +10,8 @@
 from __future__ import annotations
 import hashlib
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from spectrue_core.verification.search.search_mgr import SearchManager
 from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
 from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.config import SpectrueConfig

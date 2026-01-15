@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext, Step
 from spectrue_core.utils.trace import Trace

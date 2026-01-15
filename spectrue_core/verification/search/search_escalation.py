@@ -36,6 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from spectrue_core.verification.types import SearchDepth
 from spectrue_core.utils.trace import Trace
 
 

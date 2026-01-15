@@ -18,14 +18,12 @@ Extracted from pipeline_evidence.py as part of core logic modularization.
 from __future__ import annotations
 
 import logging
-from typing import Any
-
-logger = logging.getLogger(__name__)
-
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from spectrue_core.pipeline.mode import ScoringMode
+
+logger = logging.getLogger(__name__)
 
 
 CANONICAL_VERDICT_STATES = {
