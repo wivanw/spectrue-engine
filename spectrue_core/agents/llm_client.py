@@ -261,11 +261,9 @@ class LLMClient:
         s = raw.strip()
         # Find first '{' or '['
         start = -1
-        start_ch = ""
         for i, ch in enumerate(s):
             if ch == "{" or ch == "[":
                 start = i
-                start_ch = ch
                 break
         if start < 0:
             return None
