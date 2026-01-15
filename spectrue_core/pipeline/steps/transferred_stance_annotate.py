@@ -145,11 +145,23 @@ class TransferredStanceAnnotateStep(Step):
                 claims=[claim],
             )
 
+            # Ensure event_signature corresponds to the TARGET claim deterministically.
+            md = claim.get("metadata") if isinstance(claim.get("metadata"), dict) else {}
+            ents = claim.get("subject_entities") if isinstance(claim.get("subject_entities"), list) else []
+            ts = md.get("time_signals") if isinstance(md.get("time_signals"), dict) else {}
+            ls = md.get("locale_signals") if isinstance(md.get("locale_signals"), dict) else {}
+            target_sig = {
+                "entities": [str(x).strip()[:48] for x in ents[:5] if x],
+                "time_bucket": str(ts.get("time_bucket") or ts.get("year") or "").strip()[:32],
+                "locale": str(ls.get("country") or ls.get("locale") or "").strip()[:32],
+            }
+
             # result_items are EvidenceItem-like dicts (same shape as sources)
             # Key by (claim_id, normalized_url) for safe replacement
             for ri in result_items or []:
                 if not isinstance(ri, dict):
                     continue
+                ri["event_signature"] = target_sig
                 ru = ri.get("url")
                 if not ru:
                     continue

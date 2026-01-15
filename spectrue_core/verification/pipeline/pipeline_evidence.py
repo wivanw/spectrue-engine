@@ -264,11 +264,43 @@ async def annotate_evidence_stance(
         profile_name = SearchProfileName.GENERAL
 
     stance_pass_mode = resolve_stance_pass_mode(profile_name)
-    return await agent.cluster_evidence(
+    evidence_items = await agent.cluster_evidence(
         claims,
         sources,
         stance_pass_mode=stance_pass_mode,
     )
+
+    # Deterministic event signature stamping for routing.
+    # We inherit signature from the claim that the evidence was annotated against.
+    claim_lookup = {}
+    for idx, c in enumerate(claims or []):
+        if not isinstance(c, dict):
+            continue
+        cid = str(c.get("id") or c.get("claim_id") or f"c{idx+1}")
+        claim_lookup[cid] = c
+
+    for ev in evidence_items or []:
+        if not isinstance(ev, dict):
+            continue
+        cid = ev.get("claim_id")
+        if not cid:
+            continue
+        claim = claim_lookup.get(str(cid))
+        if not isinstance(claim, dict):
+            continue
+
+        md = claim.get("metadata") if isinstance(claim.get("metadata"), dict) else {}
+        ents = claim.get("subject_entities") if isinstance(claim.get("subject_entities"), list) else []
+        ts = md.get("time_signals") if isinstance(md.get("time_signals"), dict) else {}
+        ls = md.get("locale_signals") if isinstance(md.get("locale_signals"), dict) else {}
+
+        ev["event_signature"] = {
+            "entities": [str(x).strip()[:48] for x in ents[:5] if x],
+            "time_bucket": str(ts.get("time_bucket") or ts.get("year") or "").strip()[:32],
+            "locale": str(ls.get("country") or ls.get("locale") or "").strip()[:32],
+        }
+
+    return evidence_items
 
 
 def rebuild_evidence_pack(
