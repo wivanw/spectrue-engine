@@ -101,6 +101,21 @@ class GoogleCSESearchTool:
                 },
             )
             resp.raise_for_status()
+            
+            # Record CSE API cost (Google CSE: $5/1000 requests = 0.005 USD per query)
+            try:
+                from spectrue_core.billing.meter_context import get_current_tavily_meter
+                meter = get_current_tavily_meter()
+                if meter:
+                    # CSE costs ~0.005 USD per query, estimate 1 credit per search
+                    meter.record_search(
+                        credits_used=1.0,
+                        stage="google_cse",
+                        meta={"query": q[:100], "provider": "google_cse"},
+                    )
+            except Exception:
+                pass  # Metering failure is non-critical
+            
             data = resp.json()
 
             items = data.get("items") or []

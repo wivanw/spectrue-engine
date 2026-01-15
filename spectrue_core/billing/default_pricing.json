@@ -7,15 +7,10 @@
   "min_delta_to_show": 5,
   "emit_cost_deltas": false,
   "llm_prices": {
-    "gpt-5-nano-2025-08-07": {
+    "gpt-5-nano": {
       "usd_per_input_token": 0.00000005,
       "usd_per_output_token": 0.0000004,
       "usd_per_reasoning_token": null
-    },
-    "gpt-5": {
-      "usd_per_input_token": 0.00000125,
-      "usd_per_output_token": 0.00001,
-      "usd_per_reasoning_token": 0.00001
     },
     "gpt-5-mini": {
       "usd_per_input_token": 0.00000025,
@@ -31,6 +26,11 @@
       "usd_per_input_token": 0.00000055,
       "usd_per_output_token": 0.00000219,
       "usd_per_reasoning_token": 0.00000219
+    },
+    "gpt-5.2": {
+      "usd_per_input_token": 0.00000125,
+      "usd_per_output_token": 0.00001,
+      "usd_per_reasoning_token": 0.00001
     },
     "text-embedding-3-small": {
       "usd_per_input_token": 0.00000002,

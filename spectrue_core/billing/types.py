@@ -42,4 +42,19 @@ class CreditPricingPolicy:
     llm_prices: dict[str, ModelPrice] = field(default_factory=dict)
 
     def get_model_price(self, model: str) -> ModelPrice | None:
-        return self.llm_prices.get(model)
+        # 1. Exact match
+        if model in self.llm_prices:
+            return self.llm_prices[model]
+
+        # 2. Prefix match (e.g. gpt-5.2-2025 -> gpt-5.2)
+        # Try finding the longest prefix that matches
+        best_match = None
+        for known_model in self.llm_prices:
+            if model.startswith(known_model):
+                if best_match is None or len(known_model) > len(best_match):
+                    best_match = known_model
+        
+        if best_match:
+            return self.llm_prices[best_match]
+
+        return None

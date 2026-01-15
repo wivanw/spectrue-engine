@@ -21,6 +21,7 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.billing.cost_ledger import CostLedger
 from spectrue_core.billing.metering import TavilyMeter
 from spectrue_core.billing.config_loader import load_pricing_policy
+from spectrue_core.pipeline.mode import AnalysisMode
 
 
 # Make language detection deterministic
@@ -78,9 +79,7 @@ class SpectrueEngine:
         self,
         text: str,
         lang: str = "en",
-        analysis_mode: str = "general",
-        # gpt_model removed
-        search_type: str = "advanced",
+        analysis_mode: str | AnalysisMode = AnalysisMode.GENERAL,
         progress_callback=None,
         max_credits: Optional[int] = None,
         sentences: Optional[
@@ -93,8 +92,7 @@ class SpectrueEngine:
         Args:
             text: Text to analyze
             lang: UI language ISO code
-            analysis_mode: "general" or "lite"
-            search_type: "basic" or "advanced"
+            analysis_mode: AnalysisMode enum or string ("general", "deep", "deep_v2")
             progress_callback: Async callable(stage: str)
 
         Returns:
@@ -104,6 +102,13 @@ class SpectrueEngine:
         Trace.start(trace_id, runtime=self.config.runtime)
 
         try:
+            # Normalize analysis_mode to AnalysisMode enum
+            if isinstance(analysis_mode, str):
+                try:
+                    analysis_mode = AnalysisMode(analysis_mode)
+                except ValueError:
+                    analysis_mode = AnalysisMode.GENERAL
+            
             # Use canonical model from config (no override allowed)
             model = self.config.openai_model
 
@@ -118,7 +123,7 @@ class SpectrueEngine:
             Trace.event(
                 "engine.analyze_text.start",
                 {
-                    "analysis_mode": analysis_mode,
+                    "analysis_mode": str(analysis_mode),
                     "text_len": len(text),
                     "model": model,
                 },
@@ -137,7 +142,7 @@ class SpectrueEngine:
 
             fetch_cost = 0.0
 
-            if analysis_mode in ("deep", "deep_v2"):
+            if analysis_mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
                 if progress_callback:
                     await progress_callback("extracting_claims")
 
@@ -168,12 +173,12 @@ class SpectrueEngine:
                 # Step 1: Extract claims from the ENTIRE text once
                 initial_result = await self.verifier.verify_fact(
                     fact=working_text,
-                    search_type=search_type,
                     lang=lang,
                     progress_callback=progress_callback,
                     _content_lang=content_lang,
                     _max_cost=max_credits,
                     extract_claims_only=True,  # Just extract claims, don't verify
+                    external_ledger=engine_ledger,  # Merge costs into engine ledger
                 )
 
                 # Get extracted claims from the initial run
@@ -205,10 +210,9 @@ class SpectrueEngine:
 
                 # Step 2: Single pipeline run with all claims (avoids N+1 pipeline runs)
                 # This replaces the per-claim loop that caused N+1 pipeline runs
-                pipeline_profile = "deep_v2" if analysis_mode == "deep_v2" else "deep"
+                pipeline_profile = analysis_mode.value
                 verification_result = await self.verifier.verify_fact(
                     fact=working_text,  # Full article text for context
-                    search_type=search_type,
                     lang=lang,
                     progress_callback=progress_callback,
                     _content_lang=content_lang,
@@ -217,33 +221,29 @@ class SpectrueEngine:
                     else None,
                     pipeline_profile=pipeline_profile,
                     preloaded_claims=extracted_claims,  # Skip re-extraction
+                    external_ledger=engine_ledger,  # Merge costs into engine ledger
                 )
 
-                verification_cost = float(
-                    (verification_result.get("cost_summary") or {}).get("total_credits")
-                    or verification_result.get("cost")
-                    or 0.0
-                )
-                total_cost = fetch_cost + extraction_cost + verification_cost
+                # All costs are now in engine_ledger (fetch + extraction + verification)
+                total_cost = float(engine_ledger.total_credits)
 
                 deep_analysis = verification_result.get("deep_analysis")
                 if not isinstance(deep_analysis, dict):
                     deep_analysis = {"claim_results": []}
 
+                # Get unified cost summary from engine_ledger
+                cost_summary = engine_ledger.to_summary_dict()
+
                 final = {
-                    "judge_mode": analysis_mode,
+                    "judge_mode": analysis_mode.value,
                     "deep_analysis": deep_analysis,
                     "cost": total_cost,
-                    "cost_summary": verification_result.get("cost_summary")
-                    or {
-                        "total_credits": total_cost,
-                        "total_usd": total_cost * 0.01,
-                    },
+                    "cost_summary": cost_summary,
                     "claims": [c.get("text", "") for c in extracted_claims],
                     "detected_lang": detected_lang,
                     "detected_lang_prob": detected_prob,
                     "search_lang": content_lang,
-                    "analysis_mode": analysis_mode,
+                    "analysis_mode": str(analysis_mode),
                 }
                 if max_credits is not None:
                     final["budget"] = {
@@ -265,12 +265,11 @@ class SpectrueEngine:
             # General mode: single pass
             result = await self.verifier.verify_fact(
                 fact=text,
-                search_type=search_type,
                 lang=lang,
                 progress_callback=progress_callback,
                 _content_lang=content_lang,
                 _max_cost=max_credits,
-                pipeline_profile="normal",  # Use normal profile for general mode
+                pipeline_profile="general",  # Use general profile
             )
             result.pop("_internal", None)
             result["detected_lang"] = detected_lang

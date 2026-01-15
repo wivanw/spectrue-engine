@@ -31,9 +31,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SEARCH_COSTS = {"smart": 100}
-MODEL_COSTS = {"gpt-5-nano": 5, "gpt-5-mini": 20, "gpt-5.2": 100}
-
 SKIP_EXTENSIONS = (".txt", ".xml", ".zip")
 
 class SearchManager:
@@ -209,24 +206,13 @@ class SearchManager:
 
         return "continue", "confidence_medium"
 
-    def estimate_hop_cost(self, *, search_type: str | None = None) -> float:
-        search_key = (search_type or "smart").lower()
-        return float(SEARCH_COSTS.get(search_key, 100))
-
-    def calculate_cost(self, search_type: str) -> int:
-        """Calculate total billed cost based on operations performed."""
-        # Use default model cost (gpt-5-nano)
-        model_cost = int(MODEL_COSTS.get("gpt-5-nano", 5))
-        per_search_cost = int(SEARCH_COSTS.get(search_type, 100))
+    def calculate_cost(self) -> int:
+        # Tavily costs 1 credit per search, CSE is estimated from config
         cse_cost = int(getattr(self.config.runtime.search, "google_cse_cost", 0) or 0)
-        # Cap CSE cost to avoiding surpassing search cost
-        cse_cost = max(0, min(cse_cost, per_search_cost))
+        # Cap CSE cost at 1 (same as Tavily search) to avoid cost explosion
+        cse_cost = max(0, min(cse_cost, 1))
 
-        return (
-            model_cost + 
-            (per_search_cost * self.tavily_calls) + 
-            (cse_cost * self.google_cse_calls)
-        )
+        return (self.tavily_calls + cse_cost * self.google_cse_calls)
 
     def can_afford(self, current_cost: int, max_cost: int | None) -> bool:
         if max_cost is None:

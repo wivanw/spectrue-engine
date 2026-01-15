@@ -92,8 +92,6 @@ class ValidationPipeline:
         self,
         fact: str,
         *,
-        search_type: str = "smart",
-        # gpt_model removed
         preloaded_sources: list | None = None,
         preloaded_context: str | None = None,
         lang: str = "en",
@@ -105,6 +103,7 @@ class ValidationPipeline:
         progress_callback: Any | None = None,
         preloaded_claims: list | None = None,
         extract_claims_only: bool = False,
+        external_ledger: Any | None = None,  # Pre-existing CostLedger from engine
     ) -> dict:
         """
         Execute the validation pipeline using DAG architecture.
@@ -126,11 +125,7 @@ class ValidationPipeline:
                 pass
 
         # Determine Mode
-        mode_name = "normal"
-        
-        # Map search_type="deep" to deep mode for backward compatibility
-        if search_type == "deep":
-            mode_name = "deep"
+        mode_name = "general"
             
         if runtime_config:
             if isinstance(runtime_config, dict):
@@ -144,8 +139,6 @@ class ValidationPipeline:
             ctx = PipelineContext(
                 mode=mode,
                 lang=lang,
-                search_type=search_type,
-                # gpt_model removed
             )
             
             # Populate Context
@@ -163,6 +156,7 @@ class ValidationPipeline:
                 .set_extra("runtime_config", runtime_config)
                 .set_extra("preloaded_claims", preloaded_claims)
                 .set_extra("extract_claims_only", extract_claims_only)
+                .set_extra("external_ledger", external_ledger)
             )
 
             # Build DAG (with extraction logic if needed)

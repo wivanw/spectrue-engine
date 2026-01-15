@@ -64,14 +64,26 @@ class MeteringSetupStep:
 
         try:
             policy = load_pricing_policy()
-            ledger = CostLedger(run_id=current_trace_id())
+            
+            # Use external ledger if provided (allows engine to pass pre-pipeline costs)
+            external_ledger = ctx.get_extra("external_ledger")
+            if external_ledger is not None:
+                ledger = external_ledger
+                Trace.event("metering_setup.using_external_ledger", {
+                    "run_id": ledger.run_id,
+                    "prior_events": len(ledger.events),
+                })
+            else:
+                ledger = CostLedger(run_id=current_trace_id())
+            
             tavily_meter = TavilyMeter(ledger=ledger, policy=policy)
             llm_meter = LLMMeter(ledger=ledger, policy=policy)
             
-            # Set context var so Agent can access metering without explicit param
+            # Set context vars so modules can access metering without explicit param
             # (Fixes "Credits used: 0" issue where default agent meter writes nowhere)
-            from spectrue_core.billing.meter_context import set_current_llm_meter
+            from spectrue_core.billing.meter_context import set_current_llm_meter, set_current_tavily_meter
             set_current_llm_meter(llm_meter)
+            set_current_tavily_meter(tavily_meter)
 
             # Configure embedding metering
             EmbedService.configure(

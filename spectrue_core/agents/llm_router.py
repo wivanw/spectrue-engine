@@ -201,10 +201,23 @@ class LLMRouter:
             temperature=temperature,
         )
 
+    @property
+    def _meter(self) -> Any | None:
+        """Get the current meter."""
+        return getattr(self.openai_client, "_meter", None)
+
+    @_meter.setter
+    def _meter(self, meter: Any | None) -> None:
+        """Set the meter for both underlying clients."""
+        if self.openai_client:
+            self.openai_client._meter = meter
+        if self.chat_client:
+            self.chat_client._meter = meter
+
     async def close(self) -> None:
         """Clean up resources for both clients."""
         if self.openai_client:
             await self.openai_client.close()
-        if self.local_client:
-            await self.local_client.close()
+        if self.chat_client:
+            await self.chat_client.close()
 

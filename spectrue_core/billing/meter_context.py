@@ -16,9 +16,10 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from spectrue_core.billing.metering import LLMMeter
+    from spectrue_core.billing.metering import LLMMeter, TavilyMeter
 
 _current_llm_meter: ContextVar[LLMMeter | None] = ContextVar("current_llm_meter", default=None)
+_current_tavily_meter: ContextVar[TavilyMeter | None] = ContextVar("current_tavily_meter", default=None)
 
 def get_current_llm_meter() -> LLMMeter | None:
     """Get the current LLMMeter from context."""
@@ -27,3 +28,12 @@ def get_current_llm_meter() -> LLMMeter | None:
 def set_current_llm_meter(meter: LLMMeter) -> None:
     """Set the current LLMMeter in context."""
     _current_llm_meter.set(meter)
+
+def get_current_tavily_meter() -> TavilyMeter | None:
+    """Get the current TavilyMeter from context."""
+    return _current_tavily_meter.get()
+
+def set_current_tavily_meter(meter: TavilyMeter) -> None:
+    """Set the current TavilyMeter in context."""
+    _current_tavily_meter.set(meter)
+

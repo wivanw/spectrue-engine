@@ -155,6 +155,28 @@ class EmbeddingClient:
                     input=batch_texts,
                 )
 
+                # Record embedding cost via meter context
+                try:
+                    from spectrue_core.billing.meter_context import get_current_llm_meter
+                    meter = get_current_llm_meter()
+                    if meter:
+                        usage = getattr(response, "usage", None)
+                        usage_dict = None
+                        if usage is not None:
+                            usage_dict = {
+                                "total_tokens": getattr(usage, "total_tokens", None),
+                                "input_tokens": getattr(usage, "prompt_tokens", None),
+                            }
+                        meter.record_embedding(
+                            model=EMBEDDING_MODEL,
+                            stage="claim_graph_embed",
+                            usage=usage_dict,
+                            input_texts=batch_texts,
+                            meta={"batch_size": len(batch_texts), "component": "embedding_client"},
+                        )
+                except Exception:
+                    pass  # Metering failure is non-critical
+
                 for i, embedding_data in enumerate(response.data):
                     idx = batch_indices[i]
                     embedding = embedding_data.embedding

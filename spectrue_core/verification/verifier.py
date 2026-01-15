@@ -42,7 +42,6 @@ class FactVerifier:
     async def verify_fact(
         self,
         fact: str,
-        search_type: str = "advanced",
         lang: str = "en",
         _content_lang: str | None = None,  # Kept for API compatibility but not used
         _max_cost: int | None = None,  # Kept for API compatibility but not used
@@ -54,6 +53,7 @@ class FactVerifier:
         extract_claims_only: bool = False,  # Deep mode - just extract claims
         pipeline_profile: str | None = None,
         preloaded_claims: list | None = None, # Skip extraction if claims provided
+        external_ledger=None,  # Pre-existing CostLedger to merge events into
     ) -> dict:
         """
         Execute verification via ValidationPipeline.
@@ -65,8 +65,6 @@ class FactVerifier:
         
         result = await self.pipeline.execute(
             fact=fact,
-            search_type=search_type,
-            # gpt_model removed
             lang=lang,
             runtime_config=runtime_config,
             progress_callback=progress_callback,
@@ -76,7 +74,9 @@ class FactVerifier:
             source_url=source_url,
             extract_claims_only=extract_claims_only,
             preloaded_claims=preloaded_claims,
+            external_ledger=external_ledger,
         )
         if "audit" not in result:
             result["audit"] = {}
         return result
+

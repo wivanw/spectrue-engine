@@ -466,6 +466,25 @@ class LLMClient:
                                 repair_response = await self.client.chat.completions.create(**repair_params)
                                 repair_content = repair_response.choices[0].message.content or ""
                                 
+                                # Record repair call cost
+                                try:
+                                    meter = self._meter or get_current_llm_meter()
+                                    if meter and repair_response.usage:
+                                        repair_usage = {
+                                            "input_tokens": repair_response.usage.prompt_tokens,
+                                            "output_tokens": repair_response.usage.completion_tokens,
+                                        }
+                                        meter.record_completion(
+                                            model=model,
+                                            stage=f"{stage or trace_kind}_repair",
+                                            usage=repair_usage,
+                                            input_text=repair_prompt,
+                                            output_text=repair_content,
+                                            instructions=None,
+                                        )
+                                except Exception:
+                                    pass  # Metering failure is non-critical
+                                
                                 # Try to parse repaired JSON
                                 repaired_parsed = None
                                 try:

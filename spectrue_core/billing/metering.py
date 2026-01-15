@@ -180,9 +180,16 @@ class LLMMeter:
             reasoning_tokens=int(reasoning_tokens) if reasoning_tokens is not None else None,
         )
 
+        # Detect provider from model name for better analytics
+        detected_provider = self._provider
+        if model.lower().startswith("deepseek"):
+            detected_provider = "deepseek"
+        elif model.lower().startswith("gpt"):
+            detected_provider = "openai"
+
         event = CostEvent(
             stage=stage or self._default_stage,
-            provider=self._provider,
+            provider=detected_provider,
             cost_usd=usd_cost,
             cost_credits=credits_cost,
             run_id=self._ledger.run_id,
@@ -249,9 +256,16 @@ class LLMMeter:
         usd_cost = self._calculator.usd_cost(price=price, input_tokens=int(tokens), output_tokens=0)
         credits_cost = self._calculator.credits_cost(price=price, input_tokens=int(tokens), output_tokens=0)
 
+        # Detect provider from model name for better analytics
+        detected_provider = self._provider
+        if model.lower().startswith("deepseek"):
+            detected_provider = "deepseek"
+        elif model.lower().startswith("gpt") or model.lower().startswith("text-embedding"):
+            detected_provider = "openai"
+
         event = CostEvent(
             stage=stage or "embed",
-            provider=self._provider,
+            provider=detected_provider,
             cost_usd=usd_cost,
             cost_credits=credits_cost,
             run_id=self._ledger.run_id,
