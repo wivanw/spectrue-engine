@@ -4,7 +4,6 @@ from spectrue_core.pipeline.steps.deep_claim import AssembleDeepResultStep, Deep
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.schema.claim_frame import ClaimFrame, JudgeOutput
-from spectrue_core.schema.rgba_audit import RGBAResult
 
 @pytest.mark.asyncio
 async def test_assemble_deep_result_fallback_A():

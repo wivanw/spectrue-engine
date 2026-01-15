@@ -39,48 +39,7 @@ def test_similarity_clusters_stable_ids():
 
 
 def test_confirmation_formula_excludes_duplicates():
-    items = (
-        EvidenceItemFrame(
-            evidence_id="e1",
-            claim_id="c1",
-            url="u1",
-            source_id="s1",
-            stance="SUPPORT",
-            attribution="precision",
-            publisher_id="pub1",
-            source_tier="A",
-        ),
-        EvidenceItemFrame(
-            evidence_id="e2",
-            claim_id="c1",
-            url="u2",
-            source_id="s2",
-            stance="SUPPORT",
-            attribution="precision",
-            publisher_id="pub2",
-            source_tier="A",
-        ),
-        EvidenceItemFrame(
-            evidence_id="e3",
-            claim_id="c1",
-            url="u3",
-            source_id="s3",
-            stance="SUPPORT",
-            attribution="corroboration",
-            similar_cluster_id="sc1",
-            source_tier="A",
-        ),
-        EvidenceItemFrame(
-            evidence_id="e4",
-            claim_id="c1",
-            url="u4",
-            source_id="s4",
-            stance="SUPPORT",
-            attribution="corroboration",
-            similar_cluster_id="sc2",
-            source_tier="A",
-        ),
-    )
+
 
     corr = {
         "precision_publishers_support": 2,

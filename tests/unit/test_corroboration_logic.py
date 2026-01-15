@@ -1,7 +1,5 @@
 import pytest
 from spectrue_core.verification.evidence.dedup_fingerprints import (
-    normalize_publisher,
-    sha256_hex,
     simhash64,
     simhash_bucket_id
 )

@@ -16,6 +16,7 @@ import logging
 import math
 from decimal import Decimal
 from dataclasses import dataclass
+from typing import Any
 
 from spectrue_core.pipeline.contracts import (
     CLAIMS_KEY,
@@ -33,7 +34,7 @@ from spectrue_core.verification.scoring.confirmation_counts import compute_confi
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
-from spectrue_core.pipeline.mode import ScoringMode
+from spectrue_core.pipeline.mode import ScoringMode, AnalysisMode
 
 logger = logging.getLogger(__name__)
 

@@ -16,7 +16,11 @@ for individual claims based on their evidence.
 
 from __future__ import annotations
 
-from spectrue_core.pipeline.mode import AnalysisMode
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline.mode import AnalysisMode
+
 from spectrue_core.schema.claim_frame import (
     ClaimFrame,
     EvidenceItemFrame,
@@ -139,7 +143,7 @@ def build_claim_judge_prompt(
     evidence_summary: EvidenceSummary | None = None,
     *,
     ui_locale: str = "en",
-    analysis_mode: str | AnalysisMode = AnalysisMode.DEEP,
+    analysis_mode: str | AnalysisMode = "deep",
     evidence_stats: dict[str, Any] | None = None,
 ) -> str:
     """
@@ -160,7 +164,7 @@ def build_claim_judge_prompt(
     summary_section = _format_evidence_summary(evidence_summary)
     stats_section = _format_stats_section(
         frame,
-        include_v2=(str(analysis_mode) == str(AnalysisMode.DEEP_V2)),
+        include_v2=(str(analysis_mode) == "deep_v2"),
         evidence_stats=evidence_stats,
     )
 
