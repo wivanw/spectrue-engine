@@ -570,6 +570,7 @@ class PipelineFactory:
             StanceAnnotateStep,
             ClusterEvidenceStep,
             EvidenceSpilloverStep,
+            TransferredStanceAnnotateStep,
             AuditClaimsStep,
             AuditEvidenceStep,
             AggregateRGBAAuditStep,
@@ -724,12 +725,18 @@ class PipelineFactory:
                 depends_on=["cluster_evidence"],
             ),
 
+            # Re-annotate transferred evidence under target claims (top-K, no search)
+            StepNode(
+                step=TransferredStanceAnnotateStep(agent=self.agent, config=config),
+                depends_on=["evidence_spillover"],
+            ),
+
             # --- Per-Claim Judging (Deep Mode Only) ---
 
             # Build ClaimFrame for each claim
             StepNode(
                 step=BuildClaimFramesStep(config=config),
-                depends_on=["evidence_spillover"],
+                depends_on=["transferred_stance_annotate"],
             ),
 
             # Claim-level audit (LLM as auditor only)
