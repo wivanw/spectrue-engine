@@ -92,7 +92,7 @@ class ClaimGraphBuilder:
                 return result
 
             texts = [n.text for n in nodes]
-            embeddings = await self.embedding_client.embed_texts(texts)
+            embeddings = await self.embedding_client.embed_texts(texts, purpose="query")
             sim_matrix = self.embedding_client.build_similarity_matrix(embeddings)
 
             # kNN edges + MST

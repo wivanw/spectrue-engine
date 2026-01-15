@@ -78,7 +78,7 @@ class EmbeddingClient:
         """Generate cache key for text."""
         return f"{EMBEDDING_MODEL}:{_text_hash(text)}"
 
-    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    async def embed_texts(self, texts: list[str], *, purpose: str = "document") -> list[list[float]]:
         """
         Generate embeddings for a list of texts.
         
@@ -88,6 +88,7 @@ class EmbeddingClient:
         
         Args:
             texts: List of texts to embed
+            purpose: Embedding purpose ("document" or "query")
             
         Returns:
             List of embedding vectors (same order as input)
@@ -103,7 +104,7 @@ class EmbeddingClient:
             try:
                 from spectrue_core.utils.embedding_service import EmbedService
                 if EmbedService.is_available():
-                    return EmbedService.embed(texts, purpose="indexing")
+                    return EmbedService.embed(texts, purpose=purpose)
             except ImportError:
                 pass
             # Return zero vectors if no service available

@@ -11,8 +11,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from spectrue_core.engine import SpectrueEngine
-from spectrue_core.pipeline.mode import AnalysisMode, ScoringMode
-from spectrue_core.verification.search import SearchProfileName
+from spectrue_core.pipeline.mode import AnalysisMode
 
 
 @pytest.mark.asyncio

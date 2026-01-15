@@ -186,7 +186,14 @@ class ClusterWebSearchStep:
                 ordered_texts.append(str(text))
 
             embedding_client = EmbeddingClient()
-            embeddings = await embedding_client.embed_texts(ordered_texts)
+            # Document embeddings must not use full page blobs. Use a bounded excerpt.
+            # This is a semantic 'document' embedding, not corpus indexing.
+            ordered_embed_texts: list[str] = []
+            for t in ordered_texts:
+                s = str(t)
+                # Prefer early part; heavy pages often append nav/related content later.
+                ordered_embed_texts.append(s[:8000])
+            embeddings = await embedding_client.embed_texts(ordered_embed_texts, purpose="document")
             sim_matrix = embedding_client.build_similarity_matrix(embeddings)
             cluster_ids = _assign_similarity_clusters(
                 ordered_urls,

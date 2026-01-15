@@ -50,14 +50,24 @@ async def attribute_cluster_evidence(
             str(c.get("normalized_text") or c.get("text") or "")
             for c in claim_list
         ]
-        claim_embeddings = await embedding_client.embed_texts(claim_texts)
+        # Claim texts are query-like.
+        claim_embeddings = await embedding_client.embed_texts(claim_texts, purpose="query")
 
         doc_embeddings = [
             d.get("embedding") for d in docs
         ]
         if any(emb is None for emb in doc_embeddings):
-            doc_texts = [str(d.get("cleaned_text") or "") for d in docs]
-            doc_embeddings = await embedding_client.embed_texts(doc_texts)
+            # Document embeddings must never consume full cleaned_text blobs.
+            # Prefer snippets/excerpts; fall back to a bounded prefix.
+            doc_texts: list[str] = []
+            for d in docs:
+                snippet = d.get("snippet") or ""
+                if isinstance(snippet, str) and snippet.strip():
+                    doc_texts.append(snippet.strip())
+                    continue
+                cleaned = str(d.get("cleaned_text") or "")
+                doc_texts.append(cleaned[:8000])
+            doc_embeddings = await embedding_client.embed_texts(doc_texts, purpose="document")
 
         for idx, claim in enumerate(claim_list):
             claim_id = _claim_id_for(claim, idx)

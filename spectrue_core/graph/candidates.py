@@ -147,7 +147,7 @@ async def generate_candidate_edges(
         return []
 
     texts = [n.text for n in nodes]
-    embeddings = await embedding_client.embed_texts(texts)
+    embeddings = await embedding_client.embed_texts(texts, purpose="query")
     sim_matrix = embedding_client.build_similarity_matrix(embeddings)
 
     knn_edges, _ = build_knn_edges(nodes=nodes, similarity_matrix=sim_matrix, k=getattr(config, "k_sim", len(nodes)))
