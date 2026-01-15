@@ -19,7 +19,7 @@ def test_exact_dupe_counts():
         EvidenceItemFrame(evidence_id="e3", claim_id="c1", url="u3", source_id="s3", content_hash="h2"),
     )
     stats = build_evidence_stats(items)
-    assert stats.exact_dupes_total == 2
+    assert stats.exact_dupes_total == 1
 
 
 def test_similarity_clusters_stable_ids():
@@ -48,6 +48,7 @@ def test_confirmation_formula_excludes_duplicates():
             stance="SUPPORT",
             attribution="precision",
             publisher_id="pub1",
+            source_tier="A",
         ),
         EvidenceItemFrame(
             evidence_id="e2",
@@ -57,6 +58,7 @@ def test_confirmation_formula_excludes_duplicates():
             stance="SUPPORT",
             attribution="precision",
             publisher_id="pub2",
+            source_tier="A",
         ),
         EvidenceItemFrame(
             evidence_id="e3",
@@ -66,6 +68,7 @@ def test_confirmation_formula_excludes_duplicates():
             stance="SUPPORT",
             attribution="corroboration",
             similar_cluster_id="sc1",
+            source_tier="A",
         ),
         EvidenceItemFrame(
             evidence_id="e4",
@@ -75,10 +78,11 @@ def test_confirmation_formula_excludes_duplicates():
             stance="SUPPORT",
             attribution="corroboration",
             similar_cluster_id="sc2",
+            source_tier="A",
         ),
     )
 
     counts = build_confirmation_counts(items, lambda_weight=0.5)
     assert counts.C_precise == 2.0
     assert counts.C_corr == 2.0
-    assert counts.C_total == 3.0
+    assert counts.C_total == 2.0

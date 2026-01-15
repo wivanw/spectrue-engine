@@ -213,12 +213,12 @@ def test_bayesian_evoi_respects_budget_class_ceilings():
     params = TargetBudgetParams()
     
     k_minimal, _ = compute_optimal_target_count(claims, budget_class="minimal")
-    k_standard, _ = compute_optimal_target_count(claims, budget_class="standard")
-    k_deep, _ = compute_optimal_target_count(claims, budget_class="deep")
+    k_balanced, _ = compute_optimal_target_count(claims, budget_class="balanced")
+    k_comprehensive, _ = compute_optimal_target_count(claims, budget_class="comprehensive")
     
     assert k_minimal <= params.budget_ceilings["minimal"]
-    assert k_standard <= params.budget_ceilings["standard"]
-    assert k_deep <= params.budget_ceilings["deep"]
+    assert k_balanced <= params.budget_ceilings["balanced"]
+    assert k_comprehensive <= params.budget_ceilings["comprehensive"]
 
 
 def test_bayesian_evoi_respects_budget_class_floors():
