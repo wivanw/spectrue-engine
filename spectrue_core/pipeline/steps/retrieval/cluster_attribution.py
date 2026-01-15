@@ -17,6 +17,7 @@ from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.retrieval.cluster_attribution import (
@@ -43,7 +44,7 @@ class ClusterAttributionStep:
                 return ctx
 
             runtime = getattr(self.config, "runtime", None)
-            deep_v2_cfg = getattr(runtime, "deep_v2", DeepV2Config())
+            deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
 
             result = await attribute_cluster_evidence(
                 claims=claims,

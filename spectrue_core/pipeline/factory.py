@@ -22,7 +22,7 @@ Usage:
     from spectrue_core.pipeline.factory import PipelineFactory
 
     factory = PipelineFactory(search_mgr=search_mgr, agent=agent)
-    pipeline = factory.build("normal", config=config, pipeline=validation_pipeline)
+    pipeline = factory.build("general", config=config, pipeline=validation_pipeline)
     result = await pipeline.run(ctx)
 """
 
@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from spectrue_core.pipeline.dag import DAGPipeline
 
-from spectrue_core.pipeline.mode import get_mode
+from spectrue_core.pipeline.mode import get_mode, AnalysisMode
 from spectrue_core.pipeline.steps.invariants import (
     AssertNonEmptyClaimsStep,
 )
@@ -64,7 +64,7 @@ class PipelineFactory:
 
     def build(
         self,
-        mode_name: str = "normal", # Default if not specified, though caller usually specifies
+        mode_name: str = "general", # Default if not specified, though caller usually specifies
         *,
         config: Any,
         extraction_only: bool = False,
@@ -76,7 +76,7 @@ class PipelineFactory:
         All mode logic is encapsulated here.
 
         Args:
-            mode_name: "normal", "general", "deep", or "deep_v2"
+            mode_name: "general", "deep", or "deep_v2"
             config: SpectrueConfig
 
         Returns:
@@ -87,12 +87,12 @@ class PipelineFactory:
         mode = get_mode(mode_name)
 
         if extraction_only:
-            mode_name = "normal" # Default mode for context
+            mode_name = AnalysisMode.GENERAL # Default mode for context
             mode = get_mode(mode_name) # Ensure mode object exists
             nodes = self._build_extraction_dag_nodes(config)
-        elif mode.name == "normal":
-            nodes = self._build_normal_dag_nodes(config)
-        elif mode.name == "deep_v2":
+        elif mode.api_analysis_mode == AnalysisMode.GENERAL:
+            nodes = self._build_general_dag_nodes(config)
+        elif mode.api_analysis_mode == AnalysisMode.DEEP_V2:
             nodes = self._build_deep_v2_dag_nodes(config)
         else:
             nodes = self._build_deep_dag_nodes(config)
@@ -109,26 +109,12 @@ class PipelineFactory:
         """
         Build pipeline from a profile name.
 
-        Maps profile names to modes:
-        - "normal" -> normal mode
-        - "general" -> normal mode
-        - "deep" -> deep mode
-        - "deep_v2" -> deep v2 mode
-
-        This allows integration with the existing pipeline_builder module.
+        Delegates to self.build(), relying on get_mode() for validation.
         """
-        mode_mapping = {
-            "normal": "normal",
-            "general": "normal",
-            "deep": "deep",
-            "deep_v2": "deep_v2",
-        }
+        return self.build(profile_name, config=config)
 
-        mode_name = mode_mapping.get(profile_name.lower(), "normal")
-        return self.build(mode_name, config=config)
-
-    def _build_normal_dag_nodes(self, config: Any) -> list:
-        """Build DAG nodes for normal mode."""
+    def _build_general_dag_nodes(self, config: Any) -> list:
+        """Build DAG nodes for general mode."""
         from spectrue_core.pipeline.dag import StepNode
         from spectrue_core.pipeline.steps import (
             ClaimGraphStep,
@@ -312,6 +298,7 @@ class PipelineFactory:
         from spectrue_core.pipeline.steps import (
             # NOTE: ClaimGraphStep NOT imported for deep mode - not needed with process_all_claims=True
             EvidenceCollectStep,
+            EvidenceGatingStep,
             StanceAnnotateStep,
             ClusterEvidenceStep,
             AuditClaimsStep,
@@ -331,6 +318,7 @@ class PipelineFactory:
             AssertRetrievalTraceStep,
             AssertDeepJudgingStep,
         )
+        from spectrue_core.pipeline.steps.invariants import AssertMaxClaimsStep
         from spectrue_core.pipeline.steps.deep_claim import (
             AssembleDeepResultStep,
             BuildClaimFramesStep,
@@ -366,10 +354,15 @@ class PipelineFactory:
                 depends_on=["prepare_input"],
             ),
 
-            # Post-extraction invariant
+            # Post-extraction invariants
             StepNode(
                 step=AssertNonEmptyClaimsStep(),
                 depends_on=["extract_claims"],
+            ),
+            # Safety guard: limit deep mode to prevent cost explosion
+            StepNode(
+                step=AssertMaxClaimsStep(max_claims=50),
+                depends_on=["assert_non_empty_claims"],
             ),
 
             # ==================== PARALLEL: INLINE SOURCES (NO CLAIM GRAPH IN DEEP MODE) ====================
@@ -437,14 +430,20 @@ class PipelineFactory:
                 optional=True,
             ),
 
-            # Stance annotation always included
+            # EVOI gating decision (same as normal mode for cost control)
+            StepNode(
+                step=EvidenceGatingStep(),
+                depends_on=["enrich_claims_post_evidence"],
+            ),
+
+            # Stance annotation (controlled by EVOI gate)
             StepNode(
                 step=StanceAnnotateStep(agent=self.agent),
-                depends_on=["enrich_claims_post_evidence"],
+                depends_on=["evidence_gating"],
                 optional=True,
             ),
 
-            # Clustering always included
+            # Clustering (controlled by EVOI gate)
             StepNode(
                 step=ClusterEvidenceStep(agent=self.agent),
                 depends_on=["stance_annotate"],
@@ -552,6 +551,7 @@ class PipelineFactory:
         from spectrue_core.pipeline.steps import (
             ClaimGraphStep,
             EvidenceCollectStep,
+            EvidenceGatingStep,
             StanceAnnotateStep,
             ClusterEvidenceStep,
             AuditClaimsStep,
@@ -566,6 +566,7 @@ class PipelineFactory:
             AssertDeepJudgingStep,
             AssertNonEmptyClaimsStep,
         )
+        from spectrue_core.pipeline.steps.invariants import AssertMaxClaimsStep
         from spectrue_core.pipeline.steps.claim_clusters import ClaimClustersStep
         from spectrue_core.pipeline.steps.retrieval.build_cluster_queries import (
             BuildClusterQueriesStep,
@@ -612,10 +613,15 @@ class PipelineFactory:
                 depends_on=["prepare_input"],
             ),
 
-            # Post-extraction invariant
+            # Post-extraction invariants
             StepNode(
                 step=AssertNonEmptyClaimsStep(),
                 depends_on=["extract_claims"],
+            ),
+            # Safety guard: limit deep mode to prevent cost explosion
+            StepNode(
+                step=AssertMaxClaimsStep(max_claims=50),
+                depends_on=["assert_non_empty_claims"],
             ),
 
             # ==================== PARALLEL: INLINE SOURCES + GRAPH ====================
@@ -676,14 +682,20 @@ class PipelineFactory:
                 optional=True,
             ),
 
-            # Stance annotation always included
+            # EVOI gating decision (same as normal mode for cost control)
+            StepNode(
+                step=EvidenceGatingStep(),
+                depends_on=["enrich_claims_post_evidence"],
+            ),
+
+            # Stance annotation (controlled by EVOI gate)
             StepNode(
                 step=StanceAnnotateStep(agent=self.agent),
-                depends_on=["enrich_claims_post_evidence"],
+                depends_on=["evidence_gating"],
                 optional=True,
             ),
 
-            # Clustering always included
+            # Clustering (controlled by EVOI gate)
             StepNode(
                 step=ClusterEvidenceStep(agent=self.agent),
                 depends_on=["stance_annotate"],

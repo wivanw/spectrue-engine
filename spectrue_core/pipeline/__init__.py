@@ -27,7 +27,7 @@ Example:
 
     # Execute claims through pipeline
     result = await execute_pipeline(
-        mode_name="normal",
+        mode_name="general",
         claims=claims,
         search_mgr=search_mgr,
         agent=agent,
@@ -36,7 +36,8 @@ Example:
 
 from spectrue_core.pipeline.mode import (
     PipelineMode,
-    NORMAL_MODE,
+    AnalysisMode,
+    GENERAL_MODE,
     DEEP_MODE,
     get_mode,
 )
@@ -68,7 +69,8 @@ from spectrue_core.pipeline.executor import (
 __all__ = [
     # Mode
     "PipelineMode",
-    "NORMAL_MODE",
+    "AnalysisMode",
+    "GENERAL_MODE",
     "DEEP_MODE",
     "get_mode",
     # Core

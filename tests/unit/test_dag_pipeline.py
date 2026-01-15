@@ -16,7 +16,7 @@ Unit tests for DAG Pipeline execution.
 import pytest
 from spectrue_core.pipeline.dag import StepNode, DAGPipeline
 from spectrue_core.pipeline.core import PipelineContext
-from spectrue_core.pipeline.mode import NORMAL_MODE
+from spectrue_core.pipeline.mode import GENERAL_MODE
 from spectrue_core.pipeline.errors import PipelineExecutionError
 
 
@@ -75,7 +75,7 @@ class TestDAGPipelineValidation:
             StepNode(step=MockStep("step1"), depends_on=["nonexistent"]),
         ]
         with pytest.raises(ValueError, match="unknown step"):
-            DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+            DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
 
     def test_dag_detects_simple_cycle(self):
         nodes = [
@@ -83,7 +83,7 @@ class TestDAGPipelineValidation:
             StepNode(step=MockStep("step2"), depends_on=["step1"]),
         ]
         with pytest.raises(ValueError, match="Cycle"):
-            DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+            DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
 
     def test_dag_accepts_valid_dependencies(self):
         nodes = [
@@ -91,7 +91,7 @@ class TestDAGPipelineValidation:
             StepNode(step=MockStep("step2"), depends_on=["step1"]),
             StepNode(step=MockStep("step3"), depends_on=["step1", "step2"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+        dag = DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
         assert len(dag.nodes) == 3
 
 
@@ -104,9 +104,9 @@ class TestDAGPipelineExecution:
     @pytest.mark.asyncio
     async def test_execute_single_step(self):
         nodes = [StepNode(step=MockStep("only_step"))]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+        dag = DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
 
-        ctx = PipelineContext(mode=NORMAL_MODE)
+        ctx = PipelineContext(mode=GENERAL_MODE)
         result = await dag.run(ctx)
 
         assert result.get_extra("only_step") == "only_step_completed"
@@ -118,9 +118,9 @@ class TestDAGPipelineExecution:
             StepNode(step=MockStep("step2"), depends_on=["step1"]),
             StepNode(step=MockStep("step3"), depends_on=["step2"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+        dag = DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
 
-        ctx = PipelineContext(mode=NORMAL_MODE)
+        ctx = PipelineContext(mode=GENERAL_MODE)
         result = await dag.run(ctx)
 
         assert result.get_extra("step1") == "step1_completed"
@@ -135,9 +135,9 @@ class TestDAGPipelineExecution:
             StepNode(step=MockStep("parallel2")),
             StepNode(step=MockStep("parallel3")),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+        dag = DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
 
-        ctx = PipelineContext(mode=NORMAL_MODE)
+        ctx = PipelineContext(mode=GENERAL_MODE)
         result = await dag.run(ctx)
 
         # All completed (order may vary)
@@ -153,9 +153,9 @@ class TestDAGPipelineExecution:
             StepNode(step=FailingStep("failing"), depends_on=["before"], optional=True),
             StepNode(step=MockStep("after"), depends_on=["failing"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+        dag = DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
 
-        ctx = PipelineContext(mode=NORMAL_MODE)
+        ctx = PipelineContext(mode=GENERAL_MODE)
         result = await dag.run(ctx)
 
         assert result.get_extra("before") == "before_completed"
@@ -169,9 +169,9 @@ class TestDAGPipelineExecution:
             StepNode(step=FailingStep("failing"), depends_on=["before"]),
             StepNode(step=MockStep("after"), depends_on=["failing"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+        dag = DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
 
-        ctx = PipelineContext(mode=NORMAL_MODE)
+        ctx = PipelineContext(mode=GENERAL_MODE)
         with pytest.raises(PipelineExecutionError):
             await dag.run(ctx)
 
@@ -188,7 +188,7 @@ class TestTopologicalSort:
             StepNode(step=MockStep("a")),
             StepNode(step=MockStep("b"), depends_on=["a"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+        dag = DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
         layers = dag._topological_sort()
 
         # Layer 0: a (no deps)
@@ -207,7 +207,7 @@ class TestTopologicalSort:
             StepNode(step=MockStep("c"), depends_on=["a"]),
             StepNode(step=MockStep("d"), depends_on=["b", "c"]),
         ]
-        dag = DAGPipeline(mode=NORMAL_MODE, nodes=nodes, validate_mode_contract=False)
+        dag = DAGPipeline(mode=GENERAL_MODE, nodes=nodes, validate_mode_contract=False)
         layers = dag._topological_sort()
 
         # Layer 0: a
@@ -273,25 +273,24 @@ class TestFactoryDAGStructure:
         assert "claim_graph" not in target_selection_node.depends_on, \
             "target_selection should NOT depend on claim_graph in deep mode"
 
-    def test_normal_mode_still_has_claim_graph_node(self):
-        """Normal mode DAG should still contain claim_graph node."""
+    def test_general_mode_still_has_claim_graph_node(self):
+        """General mode DAG should still contain claim_graph node."""
         factory = self._make_factory()
         config = self._make_config()
 
-        nodes = factory._build_normal_dag_nodes(config)
+        nodes = factory._build_general_dag_nodes(config)
 
         node_names = {n.name for n in nodes}
-        assert "claim_graph" in node_names, "Normal mode should have claim_graph node"
+        assert "claim_graph" in node_names, "General mode should have claim_graph node"
 
-    def test_normal_mode_target_selection_depends_on_claim_graph(self):
-        """Normal mode target_selection should depend on claim_graph."""
+    def test_general_mode_target_selection_depends_on_claim_graph(self):
+        """General mode target_selection should depend on claim_graph."""
         factory = self._make_factory()
         config = self._make_config()
 
-        nodes = factory._build_normal_dag_nodes(config)
+        nodes = factory._build_general_dag_nodes(config)
 
         target_selection_node = next((n for n in nodes if n.name == "target_selection"), None)
         assert target_selection_node is not None, "target_selection node should exist"
         assert "claim_graph" in target_selection_node.depends_on, \
-            "target_selection should depend on claim_graph in normal mode"
-
+            "target_selection should depend on claim_graph in general mode"

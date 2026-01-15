@@ -66,7 +66,7 @@ class TestOracleOptimization:
         mock_agent.score_evidence = AsyncMock(return_value={"verified_score": 0.5, "rationale": "test"})
         mock_agent.cluster_evidence = AsyncMock(return_value=[])
 
-        await pipeline.execute(fact="Test fact", search_type="smart", lang="en")
+        await pipeline.execute(fact="Test fact", lang="en")
         
         # Verify calls to check_oracle_hybrid
         # Limit is now 1 candidate to save quota.
@@ -94,7 +94,7 @@ class TestOracleOptimization:
         mock_agent.score_evidence = AsyncMock(return_value={"verified_score": 0.5, "rationale": "test"})
         mock_agent.cluster_evidence = AsyncMock(return_value=[])
         
-        await pipeline.execute(fact="Limit test", search_type="smart", lang="en")
+        await pipeline.execute(fact="Limit test", lang="en")
         
         # Limit is 1
         assert mock_search_mgr.check_oracle_hybrid.call_count == 1
@@ -113,7 +113,7 @@ class TestOracleOptimization:
         mock_agent.score_evidence = AsyncMock(return_value={"verified_score": 0.5, "rationale": "test"})
         mock_agent.cluster_evidence = AsyncMock(return_value=[])
         
-        await pipeline.execute(fact="Fallback test", search_type="smart", lang="en")
+        await pipeline.execute(fact="Fallback test", lang="en")
         
         # Should fallback to core claim 'Claim 1'
         assert mock_search_mgr.check_oracle_hybrid.call_count == 1

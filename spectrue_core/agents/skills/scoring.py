@@ -19,6 +19,8 @@ import hashlib
 import asyncio
 import json
 
+from spectrue_core.pipeline.mode import AnalysisMode
+
 # Structured output schemas
 from spectrue_core.agents.llm_schemas import (
     ANALYSIS_RESPONSE_SCHEMA,
@@ -701,14 +703,11 @@ Return valid JSON now."""
     def _maybe_drop_style_section(self, rationale: str, *, honesty_score: float | None, lang: str | None) -> str:
         return maybe_drop_style_section(rationale, honesty_score=honesty_score, lang=lang)
 
-    async def analyze(self, fact: str, context: str, lang: str, analysis_mode: str = "general") -> dict:
+    async def analyze(self, fact: str, context: str, lang: str, analysis_mode: str | AnalysisMode = AnalysisMode.GENERAL) -> dict:
         """Analyze fact based on context and return structured JSON."""
-
-        prompt_key = 'prompts.aletheia_lite' if analysis_mode == 'lite' else 'prompts.final_analysis'
+        
+        prompt_key = 'prompts.final_analysis'
         prompt_template = get_prompt(lang, prompt_key)
-
-        if not prompt_template and analysis_mode == 'lite':
-             prompt_template = get_prompt(lang, 'prompts.final_analysis')
 
         safe_fact = f"<statement>{sanitize_input(fact)}</statement>"
         safe_context = f"<context>{sanitize_input(context)}</context>"

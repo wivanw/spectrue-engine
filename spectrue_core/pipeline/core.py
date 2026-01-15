@@ -30,7 +30,7 @@ Usage:
             # do work
             return ctx.with_update(result=my_result)
 
-    pipeline = Pipeline(mode=NORMAL_MODE, steps=[MyStep()])
+    pipeline = Pipeline(mode=GENERAL_MODE, steps=[MyStep()])
     result = await pipeline.run(initial_context)
 """
 
@@ -65,7 +65,6 @@ class PipelineContext:
         mode: Pipeline mode configuration
         claims: List of claims to process
         lang: Primary language code
-        search_type: Search type string (legacy compatibility)
         trace: Trace logger for observability
         sources: Accumulated sources from retrieval
         evidence: Evidence pack after processing
@@ -76,8 +75,6 @@ class PipelineContext:
     mode: PipelineMode
     claims: list[dict[str, Any]] = field(default_factory=list)
     lang: str = "en"
-    search_type: str = "general"
-    # gpt_model removed
     trace: Trace | None = None
     sources: list[dict[str, Any]] = field(default_factory=list)
     evidence: dict[str, Any] | None = None
@@ -97,7 +94,6 @@ class PipelineContext:
             "mode": self.mode,
             "claims": self.claims,
             "lang": self.lang,
-            "search_type": self.search_type,
             "trace": self.trace,
             "sources": self.sources,
             "evidence": self.evidence,
@@ -169,7 +165,7 @@ class Pipeline:
 
     Example:
         pipeline = Pipeline(
-            mode=NORMAL_MODE,
+            mode=GENERAL_MODE,
             steps=[
                 AssertSingleClaimStep(),
                 RetrievalStep(),

@@ -167,7 +167,8 @@ class AssembleStandardResultStep:
         try:
             verdict = ctx.verdict or {}
             sources = verdict.get("sources") or ctx.sources or []
-            analysis_mode = "deep" if ctx.mode.name == "deep" else "general"
+            # Use standardized AnalysisMode enum for API responses
+            analysis_mode = ctx.mode.api_analysis_mode
 
             input_doc = ctx.get_extra(INPUT_DOC_KEY)
             if not isinstance(input_doc, InputDoc):

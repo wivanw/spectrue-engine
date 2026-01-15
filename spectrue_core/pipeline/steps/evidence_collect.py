@@ -172,7 +172,7 @@ class EvidenceCollectStep:
                 original_fact=ctx.get_extra("original_fact", ""),
                 lang=ctx.lang,
                 content_lang=ctx.lang,
-                search_type=ctx.search_type,
+                analysis_mode=ctx.mode.api_analysis_mode,
                 progress_callback=progress_callback,
             )
 
@@ -266,13 +266,21 @@ class EvidenceCollectStep:
                     .set_extra(EVIDENCE_INDEX_KEY, evidence_index)
                 )
             else:
-                # Deep mode: only set EvidenceIndex, do NOT pollute ctx.evidence
+                # Deep mode: populate ctx.sources with per-claim sources (flattened)
+                # This allows StanceAnnotateStep to work while avoiding global pack pollution
+                flat_sources = [
+                    item
+                    for items in evidence_by_claim.values()
+                    for item in items
+                    if isinstance(item, dict)
+                ]
                 Trace.event(
-                    "evidence_collect.deep_mode_no_global",
-                    {"claims_count": len(by_claim_contract)},
+                    "evidence_collect.deep_mode_per_claim_sources",
+                    {"claims_count": len(by_claim_contract), "sources_count": len(flat_sources)},
                 )
                 return (
-                    ctx.set_extra("evidence_collection", collection)
+                    ctx.with_update(sources=flat_sources)
+                    .set_extra("evidence_collection", collection)
                     .set_extra("evidence_by_claim", evidence_by_claim)
                     .set_extra(EVIDENCE_INDEX_KEY, evidence_index)
                 )

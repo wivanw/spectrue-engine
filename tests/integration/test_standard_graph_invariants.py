@@ -16,7 +16,7 @@ import pytest
 
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.factory import PipelineFactory
-from spectrue_core.pipeline.mode import NORMAL_MODE
+from spectrue_core.pipeline.mode import GENERAL_MODE
 from spectrue_core.pipeline.steps.result_assembly import AssembleStandardResultStep
 from spectrue_core.pipeline.steps.metering_setup import METERING_SETUP_STEP_NAME
 
@@ -35,7 +35,7 @@ def pipeline_factory():
 
 
 def test_standard_graph_invariants(mock_config, pipeline_factory):
-    pipeline = pipeline_factory.build("normal", config=mock_config)
+    pipeline = pipeline_factory.build("general", config=mock_config)
     names = [node.name for node in pipeline.nodes]
 
     assert METERING_SETUP_STEP_NAME in names
@@ -61,7 +61,7 @@ async def test_standard_result_contract_fields():
             }
         ],
     }
-    ctx = PipelineContext(mode=NORMAL_MODE, claims=[{"id": "c1", "text": "Example claim"}])
+    ctx = PipelineContext(mode=GENERAL_MODE, claims=[{"id": "c1", "text": "Example claim"}])
     ctx = ctx.with_update(verdict=verdict, sources=verdict["sources"])
     ctx = ctx.set_extra("prepared_fact", "Prepared text")
     ctx = ctx.set_extra("cost_summary", {"credits_used": 2})

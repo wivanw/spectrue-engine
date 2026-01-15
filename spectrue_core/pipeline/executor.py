@@ -20,7 +20,7 @@ Usage:
     from spectrue_core.pipeline.executor import execute_pipeline
 
     result = await execute_pipeline(
-        mode="normal",
+        mode="general",
         claims=claims,
         search_mgr=search_mgr,
         agent=agent,
@@ -56,8 +56,6 @@ async def execute_pipeline(
     search_mgr: Any,
     agent: Any,
     lang: str = "en",
-    search_type: str = "general",
-
     max_cost: int | None = None,
     inline_sources: list[dict] | None = None,
     progress_callback: Any | None = None,
@@ -70,12 +68,11 @@ async def execute_pipeline(
     It builds the correct pipeline for the mode and executes all steps.
 
     Args:
-        mode_name: "normal", "general", "deep", or "deep_v2"
+        mode_name: "general", "deep", or "deep_v2"
         claims: List of claim dicts to process
         search_mgr: SearchManager for retrieval
         agent: FactCheckerAgent for LLM operations
         lang: Primary language code
-        search_type: Search type string (legacy compat)
         max_cost: Max cost budget
         inline_sources: Pre-verified inline sources
         progress_callback: Async progress callback
@@ -95,7 +92,6 @@ async def execute_pipeline(
         mode=mode,
         claims=claims,
         lang=lang,
-        search_type=search_type,
         trace=trace,
     )
 
@@ -202,7 +198,7 @@ async def validate_claims_for_mode(
     Use this for pre-flight validation before expensive operations.
 
     Args:
-        mode_name: "normal", "deep", or "deep_v2"
+        mode_name: "general", "deep", or "deep_v2"
         claims: Claims to validate
 
     Raises:

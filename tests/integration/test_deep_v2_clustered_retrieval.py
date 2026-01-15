@@ -50,7 +50,7 @@ async def test_deep_v2_clustered_retrieval_reduces_search_calls():
         {"id": "c3", "text": "Claim three about Y"},
     ]
 
-    ctx_deep = PipelineContext(mode=DEEP_MODE, claims=claims, lang="en", search_type="deep")
+    ctx_deep = PipelineContext(mode=DEEP_MODE, claims=claims, lang="en")
     ctx_deep = ctx_deep.set_extra("prepared_fact", "Some text about X and Y.")
     ctx_deep = ctx_deep.set_extra("input_text", "Some text about X and Y.")
     ctx_deep = ctx_deep.set_extra("target_claims", claims)
@@ -65,7 +65,7 @@ async def test_deep_v2_clustered_retrieval_reduces_search_calls():
     search_mgr.fetch_urls_content_batch.reset_mock()
     call_state["count"] = 0
 
-    ctx_v2 = PipelineContext(mode=DEEP_V2_MODE, claims=claims, lang="en", search_type="deep")
+    ctx_v2 = PipelineContext(mode=DEEP_V2_MODE, claims=claims, lang="en")
     ctx_v2 = ctx_v2.set_extra("prepared_fact", "Some text about X and Y.")
     ctx_v2 = ctx_v2.set_extra("input_text", "Some text about X and Y.")
     ctx_v2 = ctx_v2.set_extra(

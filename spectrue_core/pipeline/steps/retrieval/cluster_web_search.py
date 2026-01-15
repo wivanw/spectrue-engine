@@ -21,6 +21,7 @@ from spectrue_core.graph.embedding_util import EmbeddingClient
 from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.url_utils import get_registrable_domain
@@ -118,13 +119,13 @@ class ClusterWebSearchStep:
                 Trace.event("retrieval.cluster_search.skipped", {"reason": "no_plans"})
                 return ctx
 
-            profile_name = resolve_profile_name(ctx.search_type)
+            profile_name = resolve_profile_name(ctx.mode.name)
             profile = default_search_policy().get_profile(profile_name)
             search_depth = profile.search_depth or "basic"
             max_results = int(profile.max_results or 5)
 
             runtime = getattr(self.config, "runtime", None)
-            deep_v2_cfg = getattr(runtime, "deep_v2", DeepV2Config())
+            deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
 
             url_metadata: dict[str, dict[str, Any]] = {}
             url_variants: dict[str, set[str]] = {}

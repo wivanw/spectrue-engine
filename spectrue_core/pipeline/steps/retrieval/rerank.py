@@ -60,7 +60,7 @@ class RerankStep:
             raw_results: RawSearchResults | None = ctx.get_extra(RAW_SEARCH_RESULTS_KEY)
             plan_id = raw_results.plan_id if raw_results else "plan-unknown"
 
-            profile_name = resolve_profile_name(ctx.search_type)
+            profile_name = resolve_profile_name(ctx.mode.name)
             profile = default_search_policy().get_profile(profile_name)
             rerank_lambda = float(profile.quality_thresholds.rerank_lambda)
             max_results = int(profile.max_results or 0)

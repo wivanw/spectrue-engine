@@ -41,46 +41,56 @@ def _make_claim(claim_id: str) -> dict:
 class TestResolveProfileName:
     """Tests for resolve_profile_name() function."""
 
-    def test_none_returns_main(self):
-        """None input should return 'main' profile."""
-        assert resolve_profile_name(None) == "main"
+    def test_none_returns_general(self):
+        """None input should return 'general' profile."""
+        assert resolve_profile_name(None) == "general"
 
-    def test_empty_string_returns_main(self):
-        """Empty string should return 'main' profile."""
-        assert resolve_profile_name("") == "main"
+    def test_empty_string_returns_general(self):
+        """Empty string should return 'general' profile."""
+        assert resolve_profile_name("") == "general"
 
-    def test_main_returns_main(self):
-        """'main' should return 'main' profile."""
-        assert resolve_profile_name("main") == "main"
-
-    def test_basic_returns_main(self):
-        """'basic' should return 'main' profile."""
-        assert resolve_profile_name("basic") == "main"
+    def test_general_returns_general(self):
+        """'general' should return 'general' profile."""
+        assert resolve_profile_name("general") == "general"
 
     def test_deep_returns_deep(self):
         """'deep' should return 'deep' profile."""
         assert resolve_profile_name("deep") == "deep"
 
-    def test_advanced_returns_deep(self):
-        """'advanced' should return 'deep' profile (M120 fix)."""
-        assert resolve_profile_name("advanced") == "deep"
+    def test_deep_v2_returns_deep(self):
+        """'deep_v2' should return 'deep' profile."""
+        assert resolve_profile_name("deep_v2") == "deep"
 
     def test_case_insensitive(self):
         """Profile name resolution should be case-insensitive."""
         assert resolve_profile_name("DEEP") == "deep"
-        assert resolve_profile_name("Advanced") == "deep"
-        assert resolve_profile_name("MAIN") == "main"
-        assert resolve_profile_name("Basic") == "main"
+        assert resolve_profile_name("DEEP_V2") == "deep"
+        assert resolve_profile_name("GENERAL") == "general"
 
     def test_whitespace_trimmed(self):
         """Whitespace should be trimmed from input."""
         assert resolve_profile_name("  deep  ") == "deep"
-        assert resolve_profile_name("\tadvanced\n") == "deep"
+        assert resolve_profile_name("\tdeep_v2\n") == "deep"
 
-    def test_unknown_returns_main(self):
-        """Unknown profile names should default to 'main'."""
-        assert resolve_profile_name("unknown") == "main"
-        assert resolve_profile_name("custom") == "main"
+    def test_unknown_returns_general(self):
+        """Unknown profile names should default to 'general'."""
+        assert resolve_profile_name("unknown") == "general"
+        assert resolve_profile_name("custom") == "general"
+
+    def test_analysis_mode_enum_general(self):
+        """AnalysisMode.GENERAL enum should return 'general' profile."""
+        from spectrue_core.pipeline.mode import AnalysisMode
+        assert resolve_profile_name(AnalysisMode.GENERAL) == "general"
+
+    def test_analysis_mode_enum_deep(self):
+        """AnalysisMode.DEEP enum should return 'deep' profile."""
+        from spectrue_core.pipeline.mode import AnalysisMode
+        assert resolve_profile_name(AnalysisMode.DEEP) == "deep"
+
+    def test_analysis_mode_enum_deep_v2(self):
+        """AnalysisMode.DEEP_V2 enum should return 'deep' profile."""
+        from spectrue_core.pipeline.mode import AnalysisMode
+        assert resolve_profile_name(AnalysisMode.DEEP_V2) == "deep"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -91,12 +101,12 @@ class TestResolveProfileName:
 class TestBudgetClassForProfile:
     """Tests for budget_class_for_profile() function."""
 
-    def test_main_profile_returns_minimal(self):
-        """Main profile (max_hops=1) should return MINIMAL budget class."""
+    def test_general_profile_returns_minimal(self):
+        """General profile (max_hops=1) should return MINIMAL budget class."""
         policy = default_search_policy()
-        main_profile = policy.get_profile("main")
-        assert main_profile.max_hops == 1
-        assert budget_class_for_profile(main_profile) == BudgetClass.MINIMAL
+        general_profile = policy.get_profile("general")
+        assert general_profile.max_hops == 1
+        assert budget_class_for_profile(general_profile) == BudgetClass.MINIMAL
 
     def test_deep_profile_returns_deep(self):
         """Deep profile (max_hops=3) should return DEEP budget class (M120 fix)."""
@@ -152,19 +162,19 @@ class TestSearchPolicyIntegration:
     """Integration tests for search policy → execution plan."""
 
     def test_search_policy_profiles_diverge(self):
-        """Main and deep profiles should produce different execution plans."""
+        """General and deep profiles should produce different execution plans."""
         orchestrator = ClaimOrchestrator()
         claims = [_make_claim("c1")]
 
         policy = default_search_policy()
-        main_profile = policy.get_profile("main")
+        general_profile = policy.get_profile("general")
         deep_profile = policy.get_profile("deep")
 
-        main_plan = orchestrator.build_plan(
+        general_plan = orchestrator.build_plan(
             claims,
-            budget_class=budget_class_for_profile(main_profile),
+            budget_class=budget_class_for_profile(general_profile),
         )
-        main_plan = apply_search_policy_to_plan(main_plan, profile=main_profile)
+        general_plan = apply_search_policy_to_plan(general_plan, profile=general_profile)
 
         deep_plan = orchestrator.build_plan(
             claims,
@@ -172,22 +182,22 @@ class TestSearchPolicyIntegration:
         )
         deep_plan = apply_search_policy_to_plan(deep_plan, profile=deep_profile)
 
-        main_phases = main_plan.get_phases("c1")
+        general_phases = general_plan.get_phases("c1")
         deep_phases = deep_plan.get_phases("c1")
 
-        assert len(main_phases) < len(deep_phases)
+        assert len(general_phases) < len(deep_phases)
 
-        main_depths = {p.search_depth for p in main_phases}
+        general_depths = {p.search_depth for p in general_phases}
         deep_depths = {p.search_depth for p in deep_phases}
-        assert main_depths != deep_depths
+        assert general_depths != deep_depths
 
-        main_max_results = max(p.max_results for p in main_phases)
+        general_max_results = max(p.max_results for p in general_phases)
         deep_max_results = max(p.max_results for p in deep_phases)
-        assert main_max_results < deep_max_results
+        assert general_max_results < deep_max_results
 
-    def test_advanced_search_type_gets_deep_budget(self):
-        """search_type='advanced' should resolve to deep profile with DEEP budget."""
-        profile_name = resolve_profile_name("advanced")
+    def test_deep_v2_analysis_mode_gets_deep_budget(self):
+        """analysis_mode='deep_v2' should resolve to deep profile with DEEP budget."""
+        profile_name = resolve_profile_name("deep_v2")
         assert profile_name == "deep"
 
         policy = default_search_policy()
@@ -198,10 +208,10 @@ class TestSearchPolicyIntegration:
         assert profile.max_hops == 3
         assert profile.max_results == 7
 
-    def test_basic_search_type_gets_minimal_budget(self):
-        """search_type='basic' should resolve to main profile with MINIMAL budget."""
-        profile_name = resolve_profile_name("basic")
-        assert profile_name == "main"
+    def test_general_analysis_mode_gets_minimal_budget(self):
+        """analysis_mode='general' should resolve to general profile with MINIMAL budget."""
+        profile_name = resolve_profile_name("general")
+        assert profile_name == "general"
 
         policy = default_search_policy()
         profile = policy.get_profile(profile_name)
@@ -281,14 +291,14 @@ def test_search_policy_profiles_diverge():
     claims = [_make_claim("c1")]
 
     policy = default_search_policy()
-    main_profile = policy.get_profile("main")
+    general_profile = policy.get_profile("general")
     deep_profile = policy.get_profile("deep")
 
-    main_plan = orchestrator.build_plan(
+    general_plan = orchestrator.build_plan(
         claims,
-        budget_class=budget_class_for_profile(main_profile),
+        budget_class=budget_class_for_profile(general_profile),
     )
-    main_plan = apply_search_policy_to_plan(main_plan, profile=main_profile)
+    general_plan = apply_search_policy_to_plan(general_plan, profile=general_profile)
 
     deep_plan = orchestrator.build_plan(
         claims,
@@ -296,15 +306,15 @@ def test_search_policy_profiles_diverge():
     )
     deep_plan = apply_search_policy_to_plan(deep_plan, profile=deep_profile)
 
-    main_phases = main_plan.get_phases("c1")
+    general_phases = general_plan.get_phases("c1")
     deep_phases = deep_plan.get_phases("c1")
 
-    assert len(main_phases) < len(deep_phases)
+    assert len(general_phases) < len(deep_phases)
 
-    main_depths = {p.search_depth for p in main_phases}
+    general_depths = {p.search_depth for p in general_phases}
     deep_depths = {p.search_depth for p in deep_phases}
-    assert main_depths != deep_depths
+    assert general_depths != deep_depths
 
-    main_max_results = max(p.max_results for p in main_phases)
+    general_max_results = max(p.max_results for p in general_phases)
     deep_max_results = max(p.max_results for p in deep_phases)
-    assert main_max_results < deep_max_results
+    assert general_max_results < deep_max_results

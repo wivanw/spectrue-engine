@@ -28,6 +28,7 @@ import trafilatura
 from spectrue_core.analysis.content_budgeter import ContentBudgeter, TrimResult
 from spectrue_core.runtime_config import ContentBudgetConfig
 from spectrue_core.utils.trace import Trace
+from spectrue_core.pipeline.mode import AnalysisMode
 
 logger = logging.getLogger(__name__)
 
@@ -350,8 +351,8 @@ class TextAnalyzer:
         segments = self.segment_sentences(text, lang)
         return [s.text for s in segments]
 
-    async def analyze_text(self, sentences: List[str], search_type: str, lang: str, 
-                          progress_callback: Optional[Callable] = None, analysis_mode: str = "general",
+    async def analyze_text(self, sentences: List[str], lang: str, 
+                          progress_callback: Optional[Callable] = None, analysis_mode: str | AnalysisMode = AnalysisMode.GENERAL,
                           global_context: str = None, global_sources: list = None,
                           content_lang: str = None) -> dict:  # Added content_lang
         """
@@ -360,8 +361,6 @@ class TextAnalyzer:
         
         Args:
             sentences: List of text sentences to analyze
-            search_type: Type of search (basic/advanced)
-            gpt_model: LLM model to use
             lang: UI language code
             progress_callback: Optional callback for progress updates
             analysis_mode: Analysis mode (general/lite)
@@ -382,17 +381,16 @@ class TextAnalyzer:
             # Pass progress_callback for first sentence (General Mode has 1 sentence)
             callback = progress_callback if idx == 0 else None
 
-            # Context: previous sentence (if exists) to help with coreference resolution
-            # e.g. "It is red." -> "The car is red."
-            context_text = sentences[idx-1] if idx > 0 else ""
-
             # Pass content_lang to verify_fact
+            # Removed unsupported context_text argument
             res = await self.verifier.verify_fact(
-                sent, search_type, lang, analysis_mode, callback, 
-                context_text=context_text,
+                fact=sent, 
+                lang=lang,
+                pipeline_profile=str(analysis_mode),
+                progress_callback=callback, 
                 preloaded_context=global_context,
                 preloaded_sources=global_sources,
-                content_lang=content_lang  # M31
+                _content_lang=content_lang  # M31 - changed to _content_lang to match signature
             )
             return idx, res
 

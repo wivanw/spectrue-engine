@@ -288,8 +288,8 @@ def create_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--profile", "-p",
-        default="normal",
-        help="Pipeline profile to use (default: normal)",
+        default="general",
+        help="Pipeline profile to use (default: general)",
     )
     run_parser.add_argument(
         "--budget", "-b",

@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.schema.rgba_audit import RGBAResult, RGBAMetric
 
 INPUT_DOC_KEY = "input_doc"
@@ -141,7 +142,7 @@ class SearchPlan:
     """Structured query plan for retrieval."""
 
     plan_id: str
-    mode: Literal["standard", "deep", "deep_v2"]
+    mode: AnalysisMode | str
     global_queries: tuple[str, ...] = field(default_factory=tuple)
     per_claim_queries: dict[str, tuple[str, ...]] = field(default_factory=dict)
     trace: dict[str, Any] = field(default_factory=dict)

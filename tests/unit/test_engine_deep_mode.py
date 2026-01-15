@@ -65,7 +65,6 @@ async def test_deep_mode_single_pipeline_run_multi_claims(mock_config):
             "Claim 1. Claim 2. Claim 3.",
             lang="en",
             analysis_mode="deep",
-            search_type="deep",
         )
 
     assert mock_verifier.verify_fact.call_count == 2

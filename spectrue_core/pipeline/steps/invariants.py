@@ -544,12 +544,12 @@ def get_invariant_steps_for_mode(mode_name: str) -> list[Any]:
     Get the standard invariant steps for a mode.
 
     Args:
-        mode_name: "normal" or "deep"
+        mode_name: "general" or "deep"
 
     Returns:
         List of invariant step instances
     """
-    if mode_name == "normal":
+    if mode_name == "general":
         return [
             AssertNonEmptyClaimsStep(),
             AssertSingleClaimStep(),

@@ -16,6 +16,7 @@ for individual claims based on their evidence.
 
 from __future__ import annotations
 
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.schema.claim_frame import (
     ClaimFrame,
     EvidenceItemFrame,
@@ -131,7 +132,7 @@ def build_claim_judge_prompt(
     evidence_summary: EvidenceSummary | None = None,
     *,
     ui_locale: str = "en",
-    analysis_mode: str = "deep",
+    analysis_mode: str | AnalysisMode = AnalysisMode.DEEP,
 ) -> str:
     """
     Build prompt for claim judging.
@@ -149,7 +150,7 @@ def build_claim_judge_prompt(
     """
     evidence_section = _format_evidence_for_judge(frame.evidence_items)
     summary_section = _format_evidence_summary(evidence_summary)
-    stats_section = _format_stats_section(frame, include_v2=(analysis_mode == "deep_v2"))
+    stats_section = _format_stats_section(frame, include_v2=(str(analysis_mode) == str(AnalysisMode.DEEP_V2)))
 
     # Get URLs for sources_used constraint
     available_urls = [item.url for item in frame.evidence_items]

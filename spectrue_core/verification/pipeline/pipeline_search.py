@@ -41,7 +41,6 @@ class SearchFlowInput:
     fact: str
     lang: str
     # gpt_model removed
-    search_type: str
     max_cost: int | None
     article_intent: str
     search_queries: list[str]
@@ -51,7 +50,6 @@ class SearchFlowInput:
     inline_sources: list[dict] = field(default_factory=list)
     # Pipeline profile selection
     pipeline: str | None = None
-    """Pipeline profile name (e.g., 'normal', 'deep'). If None, uses search_type mapping."""
     pipeline_overrides: dict | None = None
     """Per-run overrides for pipeline profile settings."""
 
@@ -92,14 +90,12 @@ async def run_search_flow(
     # Preflight invariant validation for Step-based pipeline
     # ─────────────────────────────────────────────────────────────────────────
     # Run invariant checks before expensive operations (search, LLM calls).
-    # For "normal" mode, this validates single-claim and single-language.
+    # For "general" mode, this validates single-claim and single-language.
     # On violation, logs warning and continues (non-blocking in Phase 5).
     #
     # Future: After Phase 5 stabilizes, this will return early with error.
     # ─────────────────────────────────────────────────────────────────────────
-    mode_for_validation = inp.pipeline or (
-        "deep" if inp.search_type == "deep" else "normal"
-    )
+    mode_for_validation = inp.pipeline or "general"
 
     try:
         from spectrue_core.pipeline import validate_claims_for_mode, PipelineViolation
@@ -144,8 +140,6 @@ async def run_search_flow(
                 search_mgr=search_mgr,
                 agent=agent,
                 lang=inp.lang,
-                search_type=inp.search_type,
-                # gpt_model removed
                 max_cost=inp.max_cost,
                 inline_sources=inp.inline_sources,
                 progress_callback=inp.progress_callback,
@@ -186,7 +180,7 @@ async def run_search_flow(
             use_step_pipeline = False
 
     policy = default_search_policy()
-    profile_name = resolve_profile_name(inp.search_type)
+    profile_name = resolve_profile_name(inp.pipeline or "general")
     profile = policy.get_profile(profile_name)
     search_mgr.set_policy_profile(profile)
 
@@ -276,8 +270,6 @@ async def run_search_flow(
                 use_retrieval_loop=True,
                 policy_profile=profile,
                 can_add_search=can_add_search,
-                # gpt_model removed
-                search_type=inp.search_type,
                 max_cost=inp.max_cost,
                 inline_sources=inp.inline_sources,
                 agent=agent,
@@ -416,10 +408,6 @@ async def run_search_flow(
 
         primary_query = inp.search_queries[0] if inp.search_queries else ""
         has_results = False
-
-        if primary_query and can_add_search(
-            inp.search_type, inp.max_cost
-        ):
             current_topic = tavily_topic
 
             for attempt in range(2):

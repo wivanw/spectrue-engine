@@ -60,6 +60,7 @@ from spectrue_core.verification.evidence_verdict_processing import (
 
 # Bayesian update logic (M119)
 from spectrue_core.verification.evidence.bayesian_update import apply_bayesian_update
+from spectrue_core.pipeline.mode import AnalysisMode
 
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ class EvidenceFlowInput:
     original_fact: str
     lang: str
     content_lang: str | None
-    search_type: str
+    analysis_mode: AnalysisMode
     progress_callback: ProgressCallback | None
     prior_belief: BeliefState | None = None
     context_graph: ClaimContextGraph | None = None
@@ -132,7 +133,7 @@ async def collect_evidence(
         await inp.progress_callback("ai_analysis")
 
     # Use default model for cost calculation
-    current_cost = search_mgr.calculate_cost(inp.search_type)
+    current_cost = search_mgr.calculate_cost()
 
     sources = canonicalize_sources(sources)
 
@@ -254,7 +255,13 @@ async def annotate_evidence_stance(
         return []
     if inp.progress_callback:
         await inp.progress_callback("stance_annotation")
-    profile_name = resolve_profile_name(inp.search_type)
+    
+    # Map analysis_mode to profile
+    if inp.analysis_mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
+        profile_name = "deep"
+    else:
+        profile_name = "general"
+
     stance_pass_mode = resolve_stance_pass_mode(profile_name)
     return await agent.cluster_evidence(
         claims,

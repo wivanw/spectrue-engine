@@ -22,7 +22,7 @@ Tests:
 
 import pytest
 from spectrue_core.pipeline import (
-    NORMAL_MODE,
+    GENERAL_MODE,
     DEEP_MODE,
     get_mode,
     PipelineContext,
@@ -38,19 +38,19 @@ from spectrue_core.pipeline.steps import (
 class TestPipelineMode:
     """Tests for PipelineMode dataclass."""
 
-    def test_normal_mode_is_frozen(self):
-        """NORMAL_MODE should be immutable."""
+    def test_general_mode_is_frozen(self):
+        """GENERAL_MODE should be immutable."""
         with pytest.raises(Exception):  # FrozenInstanceError
-            NORMAL_MODE.allow_batch = True
+            GENERAL_MODE.allow_batch = True
 
-    def test_normal_mode_properties(self):
-        """Normal mode should have expected invariant values."""
-        assert NORMAL_MODE.name == "normal"
-        assert NORMAL_MODE.allow_batch is False
-        assert NORMAL_MODE.allow_clustering is False
-        assert NORMAL_MODE.require_single_language is True
-        assert NORMAL_MODE.max_claims_for_scoring == 1
-        assert NORMAL_MODE.search_depth == "basic"
+    def test_general_mode_properties(self):
+        """General mode should have expected invariant values."""
+        assert GENERAL_MODE.name == "general"
+        assert GENERAL_MODE.allow_batch is False
+        assert GENERAL_MODE.allow_clustering is False
+        assert GENERAL_MODE.require_single_language is True
+        assert GENERAL_MODE.max_claims_for_scoring == 1
+        assert GENERAL_MODE.search_depth == "basic"
 
     def test_deep_mode_properties(self):
         """Deep mode should have expected invariant values."""
@@ -61,15 +61,10 @@ class TestPipelineMode:
         assert DEEP_MODE.max_claims_for_scoring == 0  # unlimited
         assert DEEP_MODE.search_depth == "advanced"
 
-    def test_get_mode_normal(self):
-        """get_mode should return NORMAL_MODE for 'normal'."""
-        mode = get_mode("normal")
-        assert mode is NORMAL_MODE
-
-    def test_get_mode_general_alias(self):
-        """get_mode should treat 'general' as alias for 'normal'."""
+    def test_get_mode_general(self):
+        """get_mode should return GENERAL_MODE for 'general'."""
         mode = get_mode("general")
-        assert mode is NORMAL_MODE
+        assert mode is GENERAL_MODE
 
     def test_get_mode_deep(self):
         """get_mode should return DEEP_MODE for 'deep'."""
@@ -83,7 +78,7 @@ class TestPipelineMode:
 
     def test_mode_str_representation(self):
         """Mode should have readable str representation."""
-        assert str(NORMAL_MODE) == "PipelineMode(normal)"
+        assert str(GENERAL_MODE) == "PipelineMode(general)"
         assert str(DEEP_MODE) == "PipelineMode(deep)"
 
 
@@ -94,7 +89,7 @@ class TestAssertSingleClaimStep:
     async def test_passes_with_single_claim(self):
         """Step should pass when exactly one claim is present."""
         ctx = PipelineContext(
-            mode=NORMAL_MODE,
+            mode=GENERAL_MODE,
             claims=[{"id": "c1", "text": "Test claim"}],
         )
         step = AssertSingleClaimStep()
@@ -104,7 +99,7 @@ class TestAssertSingleClaimStep:
     @pytest.mark.asyncio
     async def test_fails_with_no_claims(self):
         """Step should fail when no claims are present."""
-        ctx = PipelineContext(mode=NORMAL_MODE, claims=[])
+        ctx = PipelineContext(mode=GENERAL_MODE, claims=[])
         step = AssertSingleClaimStep()
         with pytest.raises(PipelineViolation) as exc_info:
             await step.run(ctx)
@@ -116,7 +111,7 @@ class TestAssertSingleClaimStep:
     async def test_fails_with_multiple_claims(self):
         """Step should fail when multiple claims are present."""
         ctx = PipelineContext(
-            mode=NORMAL_MODE,
+            mode=GENERAL_MODE,
             claims=[
                 {"id": "c1", "text": "Claim 1"},
                 {"id": "c2", "text": "Claim 2"},
@@ -137,7 +132,7 @@ class TestAssertSingleLanguageStep:
     async def test_passes_with_single_language(self):
         """Step should pass when all claims have same language."""
         ctx = PipelineContext(
-            mode=NORMAL_MODE,
+            mode=GENERAL_MODE,
             claims=[{"id": "c1", "lang": "en", "text": "Test"}],
             lang="en",
         )
@@ -149,7 +144,7 @@ class TestAssertSingleLanguageStep:
     async def test_passes_with_no_claim_lang_uses_context_lang(self):
         """Step should use context lang when claims don't specify."""
         ctx = PipelineContext(
-            mode=NORMAL_MODE,
+            mode=GENERAL_MODE,
             claims=[{"id": "c1", "text": "Test"}],  # No lang field
             lang="uk",
         )
@@ -161,7 +156,7 @@ class TestAssertSingleLanguageStep:
     async def test_fails_with_multiple_languages(self):
         """Step should fail when claims have different languages."""
         ctx = PipelineContext(
-            mode=NORMAL_MODE,
+            mode=GENERAL_MODE,
             claims=[
                 {"id": "c1", "lang": "en", "text": "English claim"},
                 {"id": "c2", "lang": "uk", "text": "Українська заява"},
@@ -223,13 +218,13 @@ class TestPipelineViolation:
             invariant="test_invariant",
             expected=1,
             actual=3,
-            details={"mode": "normal"},
+            details={"mode": "general"},
         )
         trace_dict = exc.to_trace_dict()
         assert trace_dict["error"] == "pipeline_violation"
         assert trace_dict["step_name"] == "test_step"
         assert trace_dict["invariant"] == "test_invariant"
-        assert trace_dict["details"]["mode"] == "normal"
+        assert trace_dict["details"]["mode"] == "general"
 
 
 class TestPipelineContext:
@@ -237,7 +232,7 @@ class TestPipelineContext:
 
     def test_with_update_returns_new_context(self):
         """with_update should return new context, not mutate."""
-        ctx = PipelineContext(mode=NORMAL_MODE, claims=[{"id": "c1"}])
+        ctx = PipelineContext(mode=GENERAL_MODE, claims=[{"id": "c1"}])
         new_ctx = ctx.with_update(claims=[{"id": "c2"}])
 
         assert ctx.claims == [{"id": "c1"}]  # Original unchanged
@@ -245,7 +240,7 @@ class TestPipelineContext:
 
     def test_set_extra_returns_new_context(self):
         """set_extra should return new context with extra field."""
-        ctx = PipelineContext(mode=NORMAL_MODE)
+        ctx = PipelineContext(mode=GENERAL_MODE)
         new_ctx = ctx.set_extra("foo", "bar")
 
         assert ctx.get_extra("foo") is None  # Original unchanged
@@ -253,5 +248,5 @@ class TestPipelineContext:
 
     def test_get_extra_default(self):
         """get_extra should return default when key missing."""
-        ctx = PipelineContext(mode=NORMAL_MODE)
+        ctx = PipelineContext(mode=GENERAL_MODE)
         assert ctx.get_extra("missing", "default") == "default"

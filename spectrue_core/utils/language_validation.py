@@ -118,19 +118,19 @@ def validate_claims_language_consistency(
     claims: list[dict],
     expected_lang: str,
     *,
-    pipeline_mode: str = "normal",
+    pipeline_mode: str = "general",
     min_confidence: float = 0.7,
 ) -> Tuple[bool, list[dict]]:
     """
     Validate language consistency across all claims.
     
-    In normal mode (single-claim), any mismatch is a violation.
+    In general mode (single-claim), any mismatch is a violation.
     In deep mode (multi-claim), log mismatches but allow processing.
     
     Args:
         claims: List of claim dicts
         expected_lang: Expected language code
-        pipeline_mode: 'normal' or 'deep'
+        pipeline_mode: 'general' or 'deep'
         min_confidence: Minimum confidence for detection
         
     Returns:
@@ -156,8 +156,8 @@ def validate_claims_language_consistency(
                 "detected_lang": detected_lang,
             })
 
-    # In normal mode, any mismatch is critical
-    if pipeline_mode == "normal" and mismatches:
+    # In general mode, any mismatch is critical
+    if pipeline_mode == "general" and mismatches:
         Trace.event(
             "pipeline.language_violation",
             {

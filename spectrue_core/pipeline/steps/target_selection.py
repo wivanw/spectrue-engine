@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,8 @@ class TargetSelectionStep:
             }.get(ctx.mode.search_depth, "standard")
 
             # For normal mode, anchor must be in targets
-            anchor_for_selection = anchor_claim_id if ctx.mode.name == "normal" else None
+            is_normal_mode = ctx.mode.api_analysis_mode == AnalysisMode.GENERAL
+            anchor_for_selection = anchor_claim_id if is_normal_mode else None
 
             # DEEP MODE: Verify ALL claims (no target selection limits)
             # Mode logic moved to factory.py via process_all_claims constructor param

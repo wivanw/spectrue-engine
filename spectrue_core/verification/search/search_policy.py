@@ -177,26 +177,36 @@ class SearchPolicy:
     profiles: dict[str, SearchPolicyProfile]
 
     def get_profile(self, name: str) -> SearchPolicyProfile:
-        return self.profiles.get(name, self.profiles["main"])
+        return self.profiles.get(name, self.profiles["general"])
 
 
-def resolve_profile_name(raw: str | None) -> str:
+def resolve_profile_name(mode: "AnalysisMode | str | None") -> str:
     """
-    Map search type to policy profile name.
+    Map AnalysisMode to search policy profile name.
     
-    Mapping:
-    - "deep", "advanced" → "deep" profile
-    - "main", "basic", None → "main" profile
+    Args:
+        mode: AnalysisMode enum or string value
+        
+    Returns:
+        "deep" for DEEP/DEEP_V2 modes, "general" otherwise
     """
-    if not raw:
-        return "main"
-    normalized = str(raw).strip().lower()
-    # Map both "deep" and "advanced" to deep profile
-    if normalized in ("deep", "advanced"):
+    # Lazy import to avoid circular dependency
+    from spectrue_core.pipeline.mode import AnalysisMode
+    
+    if mode is None:
+        return "general"
+    
+    # Handle AnalysisMode enum directly
+    if isinstance(mode, AnalysisMode):
+        if mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
+            return "deep"
+        return "general"
+    
+    # Handle string (for backward compatibility)
+    normalized = str(mode).strip().lower()
+    if normalized in (AnalysisMode.DEEP.value, AnalysisMode.DEEP_V2.value):
         return "deep"
-    if normalized in ("main", "basic"):
-        return "main"
-    return "main"
+    return "general"
 
 
 def default_search_policy() -> SearchPolicy:
@@ -220,8 +230,8 @@ def default_search_policy() -> SearchPolicy:
         EvidenceChannel.LOW_RELIABILITY.value: UsePolicy.LEAD_ONLY,
     }
     profiles = {
-        "main": SearchPolicyProfile(
-            name="main",
+        "general": SearchPolicyProfile(
+            name="general",
             search_depth="basic",
             max_results=3,
             max_hops=1,
@@ -292,7 +302,7 @@ def decide_claim_policy(metadata: ClaimMetadata | None) -> ClaimPolicyDecision:
 
 
 def resolve_stance_pass_mode(profile_name: str) -> str:
-    normalized = (profile_name or "main").strip().lower()
+    normalized = (profile_name or "general").strip().lower()
     return "two_pass" if normalized == "deep" else "single"
 
 

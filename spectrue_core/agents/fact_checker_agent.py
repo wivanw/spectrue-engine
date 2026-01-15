@@ -23,6 +23,7 @@ from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
 # Per-claim judging skills (deep analysis mode)
 from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
 from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
+from spectrue_core.pipeline.mode import AnalysisMode
 import logging
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,7 @@ class FactCheckerAgent:
     def detect_evidence_gaps(self, pack: EvidencePack) -> list[str]:
         return self.scoring_skill.detect_evidence_gaps(pack)
 
-    async def analyze(self, fact: str, context: str, lang: str, analysis_mode: str = "general") -> dict:
+    async def analyze(self, fact: str, context: str, lang: str, analysis_mode: str | AnalysisMode = AnalysisMode.GENERAL) -> dict:
         # Delegate to scoring skill for final analysis (it has the logic)
         return await self.scoring_skill.analyze(fact, context, lang, analysis_mode=analysis_mode)
 

@@ -14,6 +14,7 @@ from typing import Any
 
 from spectrue_core.graph.claim_clusters import build_claim_clusters
 from spectrue_core.pipeline.core import PipelineContext, Step
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.utils.trace import Trace
 
@@ -39,7 +40,7 @@ class ClaimClustersStep(Step):
 
         graph_result = ctx.get_extra("graph_result")
         runtime = getattr(self.config, "runtime", None)
-        deep_v2_cfg = getattr(runtime, "deep_v2", DeepV2Config())
+        deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
 
         clusters = build_claim_clusters(
             claims=claims,
@@ -58,7 +59,8 @@ class ClaimClustersStep(Step):
             if not isinstance(claim, dict):
                 continue
             claim_id = str(claim.get("id") or claim.get("claim_id") or f"c{idx + 1}")
-            claim_lookup[claim_id] = claim
+            # Create a copy to avoid mutating original claims (immutability contract)
+            claim_lookup[claim_id] = dict(claim)
 
         for cluster in clusters:
             cluster_claims[cluster.cluster_id] = []
@@ -67,6 +69,7 @@ class ClaimClustersStep(Step):
                 claim = claim_lookup.get(claim_id)
                 if claim is None:
                     continue
+                # Modify the copy, not the original
                 claim["cluster_id"] = cluster.cluster_id
                 cluster_map[claim_id] = cluster.cluster_id
                 cluster_claims[cluster.cluster_id].append(claim)

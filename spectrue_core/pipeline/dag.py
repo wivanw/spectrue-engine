@@ -22,7 +22,7 @@ Usage:
     from spectrue_core.pipeline.dag import DAGPipeline, StepNode
 
     pipeline = DAGPipeline(
-        mode=NORMAL_MODE,
+        mode=GENERAL_MODE,
         nodes=[
             StepNode(step=MeteringSetupStep(config)),
             StepNode(step=ExtractClaimsStep(agent), depends_on=["metering_setup"]),
@@ -49,7 +49,7 @@ from spectrue_core.pipeline.execution_state import (
     DAGExecutionState,
     LayerExecutionState,
 )
-from spectrue_core.pipeline.mode import PipelineMode
+from spectrue_core.pipeline.mode import PipelineMode, AnalysisMode
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -158,10 +158,10 @@ class DAGPipeline:
                 "DAG cannot include both judge_standard and judge_claims steps."
             )
 
-        if self.mode.name == "normal" and judge_claims_present:
-            raise ValueError("Normal mode DAG cannot include judge_claims.")
+        if self.mode.api_analysis_mode == AnalysisMode.GENERAL and judge_claims_present:
+            raise ValueError("General mode DAG cannot include judge_claims.")
 
-        if self.mode.name in {"deep", "deep_v2"} and judge_standard_present:
+        if self.mode.api_analysis_mode in {AnalysisMode.DEEP, AnalysisMode.DEEP_V2} and judge_standard_present:
             raise ValueError("Deep mode DAG cannot include judge_standard.")
 
     def _check_cycles(self) -> None:
@@ -395,7 +395,6 @@ class DAGPipeline:
                 mode=current_ctx.mode,
                 claims=merged_claims,
                 lang=current_ctx.lang,
-                search_type=current_ctx.search_type,
                 trace=current_ctx.trace,
                 sources=merged_sources,
                 evidence=merged_evidence,

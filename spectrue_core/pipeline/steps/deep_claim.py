@@ -36,6 +36,7 @@ from spectrue_core.pipeline.contracts import (
     RGBAAuditResultPayload,
 )
 from spectrue_core.pipeline.core import PipelineContext, Step
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.schema.claim_frame import (
     ClaimFrame,
     EvidenceSummary,
@@ -138,10 +139,10 @@ class BuildClaimFramesStep(Step):
                 return ctx.set_extra("deep_claim_ctx", DeepClaimContext())
 
             confirmation_lambda = None
-            if ctx.mode.name == "deep_v2":
+            if ctx.mode.api_analysis_mode == AnalysisMode.DEEP_V2:
                 from spectrue_core.runtime_config import DeepV2Config
                 runtime = getattr(self._config, "runtime", None)
-                deep_v2_cfg = getattr(runtime, "deep_v2", DeepV2Config())
+                deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
                 confirmation_lambda = deep_v2_cfg.confirmation_lambda
 
             # Build frames
@@ -250,7 +251,7 @@ class JudgeClaimsStep(Step):
             # Get UI locale from pipeline context
             # This is the user's interface language from the API request
             ui_locale = ctx.lang or "en"
-            analysis_mode = ctx.mode.name
+            analysis_mode = ctx.mode.api_analysis_mode
 
             async def _repair_claim_output(
                 frame: ClaimFrame,
@@ -447,8 +448,9 @@ class AssembleDeepResultStep(Step):
         try:
             deep_ctx: DeepClaimContext = ctx.extras.get("deep_claim_ctx", DeepClaimContext())
 
-            analysis_mode = "deep_v2" if ctx.mode.name == "deep_v2" else "deep"
-            judge_mode = analysis_mode
+            # Use standardized AnalysisMode enum for API responses
+            analysis_mode = ctx.mode.api_analysis_mode
+            judge_mode = str(analysis_mode)  # "deep" or "deep_v2"
 
             claim_results: list[dict[str, Any]] = []
             claim_verdicts: list[dict[str, Any]] = []
@@ -503,7 +505,7 @@ class AssembleDeepResultStep(Step):
                         "sources_used": [],
                         "error": error_payload,
                     }
-                    if ctx.mode.name == "deep_v2":
+                    if ctx.mode.api_analysis_mode == AnalysisMode.DEEP_V2:
                         claim_result["evidence_stats"] = _evidence_stats_payload(frame)
                         claim_result["confirmation_counts"] = _confirmation_payload(frame)
                     claim_results.append(claim_result)
@@ -556,7 +558,7 @@ class AssembleDeepResultStep(Step):
                     "explanation": judge_output.explanation,
                     "sources_used": sources_list,  # Full objects, not just refs
                 }
-                if ctx.mode.name == "deep_v2":
+                if ctx.mode.api_analysis_mode == AnalysisMode.DEEP_V2:
                     claim_result["evidence_stats"] = _evidence_stats_payload(frame)
                     claim_result["confirmation_counts"] = _confirmation_payload(frame)
                 claim_results.append(claim_result)
@@ -591,7 +593,7 @@ class AssembleDeepResultStep(Step):
             deep_analysis_payload = {
                 "claim_results": claim_results,
             }
-            if ctx.mode.name == "deep_v2":
+            if ctx.mode.api_analysis_mode == AnalysisMode.DEEP_V2:
                 clusters_summary = ctx.get_extra("clusters_summary")
                 if isinstance(clusters_summary, list):
                     deep_analysis_payload["clusters_summary"] = clusters_summary

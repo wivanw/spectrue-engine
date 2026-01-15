@@ -98,14 +98,26 @@ Off-topic detection must be deterministic and must rely only on structured claim
 
 ---
 
-## I7. LLM is Auditor, Not Scorer
-**Invariant:** LLM output is **audit labeling** only, not final RGBA scoring.
+## I7. LLM is Auditor, Not Scorer (Standard Mode)
+**Invariant:** In **standard mode**, LLM output is **audit labeling** only, not final RGBA scoring.
 
 LLM provides structured labels for:
 - claim-level audit (truth conditions, failure modes, assertion strength, risk facets, honesty facets)
 - evidence-level audit (stance, directness, specificity, quote integrity, extraction confidence, novelty vs copy)
 
-LLM must never output RGBA values.
+In standard mode, LLM must never output RGBA values directly.
+
+### Deep Mode Exception
+
+In **deep mode** (v1 and v2), the claim judge LLM output IS the final per-claim verdict:
+- `JudgeOutput.rgba` → returned 1:1 to frontend without postprocessing
+- `JudgeOutput.verdict` → returned unchanged
+- Only validation applied: `sources_used` must be subset of `evidence_items` (FR-009)
+
+This exception is intentional: deep mode prioritizes per-claim granularity over deterministic aggregation.
+If LLM fails after repair-retry, claim gets `status: "error"` with `rgba: null` (no fallback 0.5).
+
+See `docs/DEEP_MODE.md` for full deep mode contract.
 
 ---
 

@@ -17,6 +17,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
@@ -70,7 +71,7 @@ class BuildClusterQueriesStep:
                 Trace.event("retrieval.cluster_plan.skipped", {"reason": "no_clusters"})
                 return ctx
 
-            profile_name = resolve_profile_name(ctx.search_type)
+            profile_name = resolve_profile_name(ctx.mode.name)
             profile = default_search_policy().get_profile(profile_name)
 
             full_text = ctx.get_extra("prepared_fact", "") or ctx.get_extra("input_text", "")
@@ -136,7 +137,7 @@ class BuildClusterQueriesStep:
             plan_id = uuid.uuid4().hex[:10]
             plan = SearchPlan(
                 plan_id=plan_id,
-                mode="deep_v2",
+                mode=AnalysisMode.DEEP_V2.value,
                 global_queries=tuple(all_queries),
                 per_claim_queries={},
                 trace={

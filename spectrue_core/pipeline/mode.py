@@ -18,16 +18,38 @@ not scattered if-statements.
 
 Usage:
     from spectrue_core.pipeline.mode import PipelineMode, NORMAL_MODE, DEEP_MODE, DEEP_V2_MODE
+    from spectrue_core.pipeline.mode import AnalysisMode
 
     mode = NORMAL_MODE
     if mode.allow_batch:
         # handle batch
+
+    # Get API-facing analysis mode name
+    api_mode = mode.api_analysis_mode  # Returns AnalysisMode.GENERAL
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Literal
+
+
+class AnalysisMode(str, Enum):
+    """API-facing analysis mode names.
+    
+    This is the single source of truth for analysis_mode values
+    in API responses. Maps internal pipeline mode names to
+    frontend-compatible names.
+    
+    Mapping:
+        - internal "general" → API "general"
+        - internal "deep" → API "deep"
+        - internal "deep_v2" → API "deep_v2"
+    """
+    GENERAL = "general"  # Standard single-claim analysis
+    DEEP = "deep"        # Multi-claim per-claim RGBA
+    DEEP_V2 = "deep_v2"  # Clustered retrieval + evidence stats
 
 
 @dataclass(frozen=True)
@@ -40,7 +62,7 @@ class PipelineMode:
     of checking string mode names.
 
     Attributes:
-        name: Mode name ("normal", "deep", or "deep_v2")
+        name: Mode name ("general", "deep", or "deep_v2")
         allow_batch: Whether batch claim processing is allowed
         allow_clustering: Whether stance clustering is enabled
         require_single_language: Whether input must be single-language
@@ -49,7 +71,7 @@ class PipelineMode:
         search_depth: Default search depth ("basic" or "advanced")
     """
 
-    name: Literal["normal", "deep", "deep_v2"]
+    name: Literal["general", "deep", "deep_v2"]
     allow_batch: bool
     allow_clustering: bool
     require_single_language: bool
@@ -69,13 +91,24 @@ class PipelineMode:
             f"search_depth={self.search_depth!r})"
         )
 
+    @property
+    def api_analysis_mode(self) -> AnalysisMode:
+        """Get API-facing analysis mode name.
+        
+        Maps internal mode name to frontend-compatible AnalysisMode enum.
+        Use this for all API responses instead of raw mode.name.
+        """
+        try:
+            return AnalysisMode(self.name)
+        except ValueError:
+            return AnalysisMode.GENERAL
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Canonical Mode Instances
 # ─────────────────────────────────────────────────────────────────────────────
 
-NORMAL_MODE = PipelineMode(
-    name="normal",
+GENERAL_MODE = PipelineMode(
+    name="general",  # Renamed from 'normal' to match AnalysisMode
     allow_batch=False,
     allow_clustering=False,
     require_single_language=True,
@@ -84,7 +117,7 @@ NORMAL_MODE = PipelineMode(
     search_depth="basic",
 )
 """
-Normal mode: Single claim, single language, no clustering.
+General mode: Single claim, single language, no clustering.
 
 Use for standard fact-checking requests where a single primary
 claim is verified with basic search depth.
@@ -127,8 +160,7 @@ Use for comprehensive verification with claim clustering and per-claim judging.
 # ─────────────────────────────────────────────────────────────────────────────
 
 _MODE_REGISTRY: dict[str, PipelineMode] = {
-    "normal": NORMAL_MODE,
-    "general": NORMAL_MODE,  # alias
+    "general": GENERAL_MODE,
     "deep": DEEP_MODE,
     "deep_v2": DEEP_V2_MODE,
 }
@@ -139,7 +171,7 @@ def get_mode(name: str) -> PipelineMode:
     Get a PipelineMode by name.
 
     Args:
-        name: Mode name ("normal", "general", "deep", "deep_v2")
+        name: Mode name ("general", "deep", "deep_v2")
 
     Returns:
         The corresponding PipelineMode instance

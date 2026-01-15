@@ -31,6 +31,7 @@ from spectrue_core.schema.claim_frame import (
     RGBAScore,
 )
 from spectrue_core.utils.trace import Trace
+from spectrue_core.pipeline.mode import AnalysisMode
 
 
 class ClaimJudgeSkill:
@@ -56,7 +57,7 @@ class ClaimJudgeSkill:
         evidence_summary: EvidenceSummary | None = None,
         *,
         ui_locale: str = "en",
-        analysis_mode: str = "deep",
+        analysis_mode: str | AnalysisMode = AnalysisMode.DEEP,
     ) -> JudgeOutput:
         """
         Judge a claim and produce RGBA verdict.
@@ -74,7 +75,7 @@ class ClaimJudgeSkill:
             frame,
             evidence_summary,
             ui_locale=ui_locale,
-            analysis_mode=analysis_mode,
+            analysis_mode=str(analysis_mode),
         )
         system_prompt = build_claim_judge_system_prompt(lang=ui_locale)
 

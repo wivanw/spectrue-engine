@@ -19,6 +19,7 @@ from typing import Any
 
 from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
 from spectrue_core.verification.pipeline.pipeline_queries import (
@@ -120,14 +121,11 @@ class BuildQueriesStep:
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         claims = ctx.claims or []
         claims_for_plan = ctx.get_extra("target_claims", claims) or []
-        if ctx.mode.name == "deep_v2":
-            mode = "deep_v2"
-        elif ctx.mode.name == "deep":
-            mode = "deep"
-        else:
-            mode = "standard"
+        # Use api_analysis_mode for consistent mode string
+        mode = str(ctx.mode.api_analysis_mode)
 
-        profile_name = resolve_profile_name(ctx.search_type)
+        
+        profile_name = resolve_profile_name(ctx.mode.name)
         policy = default_search_policy()
         profile = policy.get_profile(profile_name)
 

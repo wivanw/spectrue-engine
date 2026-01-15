@@ -73,7 +73,6 @@ class TestDeepScoringPipeline:
 
     @pytest.mark.asyncio
     async def test_deep_mode_triggers_per_claim_scoring(self, pipeline, mock_agent, mock_search_mgr):
-        """Verify that search_type='deep' triggers per-claim independent scoring."""
         # Setup: 3 claims
         claims = [
             {"id": "c1", "text": "Claim 1", "search_queries": ["q1"]},
@@ -99,7 +98,6 @@ class TestDeepScoringPipeline:
         # Execute in DEEP mode via pipeline
         await pipeline.execute(
             fact="Test Fact",
-            search_type="deep",
             lang="en"
         )
 
@@ -110,14 +108,13 @@ class TestDeepScoringPipeline:
 
     @pytest.mark.asyncio
     async def test_smart_mode_uses_batch_scoring(self, pipeline, mock_agent, mock_search_mgr):
-        """Verify that search_type='smart' uses standard batch scoring (not parallel)."""
         # Setup: 3 claims
         claims = [
             {"id": "c1", "text": "Claim 1", "search_queries": ["q1"]},
         ]
         mock_agent.extract_claims.return_value = (claims, False, "news", "")
         
-        # smart mode uses "normal" profile which uses standard score_evidence
+        # smart mode uses "general" profile which uses standard score_evidence
         mock_agent.score_evidence.return_value = {
             "verified_score": 0.8, 
             "claim_verdicts": [
@@ -129,13 +126,12 @@ class TestDeepScoringPipeline:
             "explainability_score": 0.8,
         }
 
-        # Execute in SMART mode (maps to "normal" profile)
+        # Execute in SMART mode (maps to "general" profile)
         await pipeline.execute(
             fact="Test Fact",
-            search_type="smart",
             lang="en"
         )
 
-        # Smart mode uses "normal" profile = standard score_evidence
+        # Smart mode uses "general" profile = standard score_evidence
         assert mock_agent.score_evidence.call_count == 1
         assert mock_agent.score_evidence_parallel.call_count == 0
