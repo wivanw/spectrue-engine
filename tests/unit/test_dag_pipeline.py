@@ -244,7 +244,7 @@ class TestFactoryDAGStructure:
         return config
 
     def test_deep_mode_has_no_claim_graph_node(self):
-        """Deep mode DAG SHOULD contain a claim_graph node (updated M118)."""
+        """Deep mode DAG should NOT contain a claim_graph node (skipped in M118)."""
         from unittest.mock import patch
         
         factory = self._make_factory()
@@ -254,10 +254,10 @@ class TestFactoryDAGStructure:
             nodes = factory._build_deep_dag_nodes(config)
 
         node_names = {n.name for n in nodes}
-        assert "claim_graph" in node_names, "Deep mode should have claim_graph node"
+        assert "claim_graph" not in node_names, "Deep mode should skip claim_graph node"
 
     def test_deep_mode_target_selection_depends_on_extract_claims(self):
-        """Deep mode target_selection should depend on claim_cluster."""
+        """Deep mode target_selection should depend on assert_max_claims."""
         from unittest.mock import patch
         
         factory = self._make_factory()
@@ -268,8 +268,8 @@ class TestFactoryDAGStructure:
 
         target_selection_node = next((n for n in nodes if n.name == "target_selection"), None)
         assert target_selection_node is not None, "target_selection node should exist"
-        assert "claim_cluster" in target_selection_node.depends_on, \
-            "target_selection should depend on claim_cluster in deep mode"
+        assert "assert_max_claims" in target_selection_node.depends_on, \
+            "target_selection should depend on assert_max_claims in deep mode"
 
     def test_general_mode_still_has_claim_graph_node(self):
         """General mode DAG should still contain claim_graph node."""

@@ -76,10 +76,10 @@ async def test_deep_mode_single_pipeline_run_multi_claims(mock_config):
 
     assert first_call.get("extract_claims_only") is True
     assert second_call.get("preloaded_claims") == claims
-    assert second_call.get("pipeline_profile") == SearchProfileName.DEEP
+    assert second_call.get("pipeline_profile") == "deep_v2"
 
-    assert result["analysis_mode"] == AnalysisMode.DEEP
+    assert result["analysis_mode"] == AnalysisMode.DEEP_V2
     assert result["claims"] == ["Claim 1", "Claim 2", "Claim 3"]
-    assert result["judge_mode"] == ScoringMode.DEEP
+    assert result["judge_mode"] == "deep_v2"
     assert "deep_analysis" in result
     assert "verified_score" not in result
