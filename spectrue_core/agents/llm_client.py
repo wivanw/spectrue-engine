@@ -31,6 +31,8 @@ from openai import AsyncOpenAI
 from spectrue_core.billing.metering import LLMMeter
 from spectrue_core.billing.meter_context import get_current_llm_meter
 from spectrue_core.utils.trace import Trace
+from spectrue_core.llm.errors import LLMFailureKind
+from spectrue_core.llm.errors import LLMCallError
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +248,102 @@ class LLMClient:
         self._sem = asyncio.Semaphore(8)  # Concurrency limit
         self._meter = meter
 
+    @staticmethod
+    def _extract_first_json(raw: str) -> str | None:
+        """
+        Deterministically extract the first JSON object/array from raw text.
+        Balanced brace/bracket scanner that respects quoted strings and escapes.
+        Returns a substring that should be valid JSON, or None.
+        """
+        if not raw:
+            return None
+
+        s = raw.strip()
+        # Find first '{' or '['
+        start = -1
+        start_ch = ""
+        for i, ch in enumerate(s):
+            if ch == "{" or ch == "[":
+                start = i
+                start_ch = ch
+                break
+        if start < 0:
+            return None
+
+        stack = []
+        in_str = False
+        esc = False
+        quote_ch = ""
+        for j in range(start, len(s)):
+            ch = s[j]
+
+            if in_str:
+                if esc:
+                    esc = False
+                    continue
+                if ch == "\\":
+                    esc = True
+                    continue
+                if ch == quote_ch:
+                    in_str = False
+                    quote_ch = ""
+                continue
+
+            # Not in string
+            if ch == '"' or ch == "'":
+                in_str = True
+                quote_ch = ch
+                continue
+
+            if ch == "{" or ch == "[":
+                stack.append(ch)
+                continue
+            if ch == "}" or ch == "]":
+                if not stack:
+                    # Unbalanced close; ignore
+                    continue
+                top = stack[-1]
+                if (top == "{" and ch == "}") or (top == "[" and ch == "]"):
+                    stack.pop()
+                    if not stack:
+                        # Completed first JSON region
+                        return s[start : j + 1].strip()
+                else:
+                    # Mismatched; keep scanning
+                    continue
+
+        return None
+
+    @staticmethod
+    def _json_loads_with_salvage(raw: str) -> tuple[Any | None, bool]:
+        """
+        Try json.loads(raw). If it fails, try salvage extraction and parse again.
+        Returns (obj, salvaged_bool). obj=None if still failing.
+        """
+        if not raw:
+            return None, False
+        try:
+            return json.loads(raw), False
+        except Exception:
+            pass
+
+        extracted = LLMClient._extract_first_json(raw)
+        if not extracted:
+            return None, False
+        try:
+            return json.loads(extracted), True
+        except Exception:
+            return None, False
+
+    def _max_attempts_for_kind(self, default_attempts: int, kind: LLMFailureKind | None) -> int:
+        """
+        Retry policy by failure kind.
+        INVALID_JSON tends not to converge with repeated attempts on the same provider.
+        """
+        if kind == LLMFailureKind.INVALID_JSON:
+            return 1
+        return default_attempts
+
     def _model_supports_structured_outputs(self, model: str) -> bool:
         """Check if model supports OpenAI Structured Outputs (json_schema mode)."""
         # OpenAI models that support structured outputs
@@ -352,8 +450,13 @@ class LLMClient:
         })
 
         last_error: Exception | None = None
+        effective_max_attempts = self.max_retries
 
         for attempt in range(self.max_retries):
+            # Check effective retry limit based on error kind
+            if attempt >= effective_max_attempts:
+                break
+
             start_time = time.time()
             try:
                 async with self._sem:
@@ -383,47 +486,39 @@ class LLMClient:
                 # Parse JSON if requested
                 parsed = None
                 if json_output_requested:
-                    try:
-                        parsed = json.loads(content)
-                    except json.JSONDecodeError as e:
-                        logger.warning("[LLMClient] Chat Completions JSON parse failed: %s", e)
+                    parsed, salvaged = self._json_loads_with_salvage(content)
+                    
+                    if parsed is None:
+                        # Mark as INVALID_JSON for retry policy + upstream fallback
+                        e = RuntimeError(f"LLM JSON parse failed. Content: {content[:200]}...")
                         Trace.event(
-                            f"{trace_kind}.json_parse_error",
+                            f"{trace_kind}.json_parse_failed",
                             {
                                 "model": model,
-                                "error": str(e),
+                                "trace_key": trace_kind,
+                                "attempt": attempt + 1,
+                                "kind": "invalid_json",
                                 "content_head": content[:500],
+                                "payload_hash": payload_hash,
+                            },
+                        )
+                        logger.warning("[LLMClient] Chat Completions JSON parse failed: raw not parseable (attempt=%s)", attempt + 1)
+                        raise LLMCallError(
+                            message=f"LLM JSON parse failed: {str(e)}",
+                            kind=LLMFailureKind.INVALID_JSON,
+                        ) from e
+
+                    if salvaged:
+                        Trace.event(
+                            f"{trace_kind}.json_recovered_from_prefix",
+                            {
+                                "model": model,
+                                "trace_key": trace_kind,
+                                "attempt": attempt + 1,
                                 "payload_hash": payload_hash,
                                 "api_mode": "chat_completions",
                             },
                         )
-                        # Try to extract JSON from markdown code block
-                        if "```json" in content:
-                            try:
-                                json_block = content.split("```json")[1].split("```")[0]
-                                parsed = json.loads(json_block.strip())
-                            except (IndexError, json.JSONDecodeError):
-                                pass
-                        # Try to find first { and extract JSON (for reasoning models with thinking tokens)
-                        if parsed is None:
-                            first_brace = content.find("{")
-                            if first_brace != -1:
-                                try:
-                                    json_candidate = content[first_brace:]
-                                    parsed = json.loads(json_candidate)
-                                    Trace.event(
-                                        f"{trace_kind}.json_recovered_from_prefix",
-                                        {
-                                            "model": model,
-                                            "prefix_stripped": content[:first_brace][:100],
-                                            "payload_hash": payload_hash,
-                                            "api_mode": "chat_completions",
-                                        },
-                                    )
-                                except json.JSONDecodeError:
-                                    pass
-                        if parsed is None:
-                            raise ValueError(f"LLM JSON parse failed: {e}") from e
 
                     # Validate against schema if provided
                     if response_schema and parsed is not None:
@@ -486,17 +581,7 @@ class LLMClient:
                                     pass  # Metering failure is non-critical
                                 
                                 # Try to parse repaired JSON
-                                repaired_parsed = None
-                                try:
-                                    repaired_parsed = json.loads(repair_content)
-                                except json.JSONDecodeError:
-                                    # Try prefix extraction
-                                    first_brace = repair_content.find("{")
-                                    if first_brace != -1:
-                                        try:
-                                            repaired_parsed = json.loads(repair_content[first_brace:])
-                                        except json.JSONDecodeError:
-                                            pass
+                                repaired_parsed, _ = self._json_loads_with_salvage(repair_content)
                                 
                                 if repaired_parsed is not None:
                                     # Validate repaired output
@@ -745,8 +830,13 @@ class LLMClient:
         })
 
         last_error: Exception | None = None
+        effective_max_attempts = self.max_retries
 
         for attempt in range(self.max_retries):
+            # Check effective retry limit based on error kind
+            if attempt >= effective_max_attempts:
+                break
+
             start_time = time.time()
             try:
                 async with self._sem:
@@ -775,57 +865,38 @@ class LLMClient:
                 # Parse JSON if requested
                 parsed = None
                 if json_output_requested:
-                    try:
-                        parsed = json.loads(content)
-                    except json.JSONDecodeError as e:
-                        logger.warning("[LLMClient] JSON parse failed: %s", e)
-                        # Log detailed parse error with context
-                        error_context = content[max(0, e.pos - 50):e.pos + 50] if e.pos else content[:200]
+                    parsed, salvaged = self._json_loads_with_salvage(content)
+                    
+                    if parsed is None:
+                         # Mark as INVALID_JSON for retry policy + upstream fallback
+                        e = RuntimeError(f"LLM JSON parse failed. Content: {content[:200]}...")
                         Trace.event(
-                            f"{trace_kind}.json_parse_error",
+                            f"{trace_kind}.json_parse_failed",
                             {
                                 "model": model,
-                                "error": str(e),
-                                "error_position": e.pos,
-                                "error_context": error_context,
-                                "content_length": len(content),
+                                "trace_key": trace_kind,
+                                "attempt": attempt + 1,
+                                "kind": "invalid_json",
                                 "content_head": content[:500],
                                 "payload_hash": payload_hash,
                             },
                         )
-                        # Try to extract JSON from markdown code block
-                        if "```json" in content:
-                            try:
-                                json_block = content.split("```json")[1].split("```")[0]
-                                parsed = json.loads(json_block.strip())
-                                Trace.event(
-                                    f"{trace_kind}.json_recovered_from_markdown",
-                                    {"model": model, "payload_hash": payload_hash},
-                                )
-                            except (IndexError, json.JSONDecodeError) as md_e:
-                                Trace.event(
-                                    f"{trace_kind}.json_markdown_recovery_failed",
-                                    {"model": model, "error": str(md_e), "payload_hash": payload_hash},
-                                )
-                        # Try to find first { and extract JSON (for models with thinking tokens)
-                        if parsed is None:
-                            first_brace = content.find("{")
-                            if first_brace != -1:
-                                try:
-                                    json_candidate = content[first_brace:]
-                                    parsed = json.loads(json_candidate)
-                                    Trace.event(
-                                        f"{trace_kind}.json_recovered_from_prefix",
-                                        {
-                                            "model": model,
-                                            "prefix_stripped": content[:first_brace][:100],
-                                            "payload_hash": payload_hash,
-                                        },
-                                    )
-                                except json.JSONDecodeError:
-                                    pass
-                        if parsed is None:
-                            raise ValueError(f"LLM JSON parse failed: {e}") from e
+                        logger.warning("[LLMClient] JSON parse failed: raw not parseable (attempt=%s)", attempt + 1)
+                        raise LLMCallError(
+                            message=f"LLM JSON parse failed: {str(e)}",
+                            kind=LLMFailureKind.INVALID_JSON,
+                        ) from e
+
+                    if salvaged:
+                        Trace.event(
+                            f"{trace_kind}.json_recovered_from_prefix",
+                            {
+                                "model": model,
+                                "trace_key": trace_kind,
+                                "attempt": attempt + 1,
+                                "payload_hash": payload_hash,
+                            },
+                        )
 
                     if response_schema:
                         schema_errors = _validate_schema(parsed, response_schema)
@@ -929,18 +1000,36 @@ class LLMClient:
 
                 return result
 
+            except LLMCallError as e:
+                last_error = e
+                # Adjust effective attempts after first typed failure
+                if attempt == 0:
+                    effective_max_attempts = self._max_attempts_for_kind(self.max_retries, e.kind)
+                logger.warning("[LLMClient] Attempt %d failed: %s", attempt + 1, e)
+                if attempt + 1 >= effective_max_attempts:
+                     Trace.event(f"{trace_kind}.error", {
+                        "model": model,
+                        "attempt": attempt + 1,
+                        "error": str(e),
+                        "kind": e.kind.value,
+                        "payload_hash": payload_hash
+                    })
+               
             except Exception as e:
                 last_error = e
-                error_str = str(e)[:200]
-                is_connection_error = "connection" in error_str.lower() or "timeout" in error_str.lower()
+                # Unknown errors: keep default retry budget
                 logger.warning("[LLMClient] Attempt %d failed: %s", attempt + 1, e)
-                Trace.event(f"{trace_kind}.error", {
-                    "model": model,
-                    "attempt": attempt + 1,
-                    "error": error_str,
-                    "is_connection_error": is_connection_error,
-                    "payload_hash": payload_hash
-                })
+                if attempt + 1 >= effective_max_attempts:
+                     error_str = str(e)[:200]
+                     is_connection_error = "connection" in error_str.lower() or "timeout" in error_str.lower()
+                     Trace.event(f"{trace_kind}.error", {
+                        "model": model,
+                        "attempt": attempt + 1,
+                        "error": error_str,
+                        "is_connection_error": is_connection_error,
+                        "payload_hash": payload_hash
+                    })
+
 
         # All retries exhausted - emit provider_down event
         Trace.event(f"{trace_kind}.provider_down", {
