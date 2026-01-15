@@ -141,6 +141,62 @@ def _score_for_transfer(src: dict[str, Any]) -> float:
     return rel + stance_boost + quote_boost
 
 
+def _claim_topic_signature(claim: dict[str, Any]) -> set[str]:
+    """
+    Deterministic topic signature for routing priors.
+    Uses only structured fields (no text parsing).
+    """
+    sig: set[str] = set()
+
+    # Legacy category fields
+    tg = claim.get("topic_group")
+    tk = claim.get("topic_key")
+    if tg:
+        sig.add(f"topic_group:{str(tg).strip()[:64]}")
+    if tk:
+        sig.add(f"topic_key:{str(tk).strip()[:64]}")
+
+    # Orchestration metadata topic_tags (if present)
+    md = claim.get("metadata")
+    if isinstance(md, dict):
+        tags = md.get("topic_tags")
+        if isinstance(tags, list):
+            for t in tags[:16]:
+                if t:
+                    sig.add(str(t).strip()[:64])
+
+    # Entities / seed terms (bounded)
+    se = claim.get("subject_entities")
+    if isinstance(se, list):
+        for e in se[:5]:
+            if e:
+                sig.add(f"ent:{str(e).strip()[:64]}")
+
+    st = claim.get("retrieval_seed_terms")
+    if isinstance(st, list):
+        for s in st[:5]:
+            if s:
+                sig.add(f"seed:{str(s).strip()[:64]}")
+
+    return sig
+
+
+def _topic_overlap_boost(origin_claim: dict[str, Any], target_claim: dict[str, Any]) -> float:
+    """
+    Soft prior: if origin/target claims share topic signature, boost score slightly.
+    No filtering. Purely ranking.
+    """
+    a = _claim_topic_signature(origin_claim)
+    b = _claim_topic_signature(target_claim)
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if inter <= 0:
+        return 0.0
+    # Bounded linear boost (deterministic, not a threshold)
+    return min(0.10, 0.02 * inter)
+
+
 def _stable_key(src: dict[str, Any]) -> tuple[str, str]:
     """
     Deterministic tie-breaker key.
@@ -231,6 +287,7 @@ class EvidenceSpilloverStep(Step):
                     existing_urls.add(normalize_url(str(url)))
 
             candidates: list[tuple[float, str, dict[str, Any]]] = []
+            topic_boost_used = 0
             for peer_id in peers:
                 if peer_id == target_id:
                     continue
@@ -248,7 +305,13 @@ class EvidenceSpilloverStep(Step):
                     url = src.get("url")
                     if url and normalize_url(str(url)) in existing_urls:
                         continue
-                    candidates.append((_score_for_transfer(src), peer_id, src))
+                    
+                    origin_claim = claim_lookup.get(peer_id)
+                    base = _score_for_transfer(src)
+                    boost = _topic_overlap_boost(origin_claim, target_claim) if origin_claim else 0.0
+                    if boost > 0:
+                        topic_boost_used += 1
+                    candidates.append((base + boost, peer_id, src))
 
             if not candidates:
                 continue
@@ -288,6 +351,7 @@ class EvidenceSpilloverStep(Step):
                     "cluster_id": clid,
                     "count": len(chosen_urls),
                     "urls": chosen_urls[:5],  # cap
+                    "topic_boost_used": topic_boost_used,
                 },
             )
 
