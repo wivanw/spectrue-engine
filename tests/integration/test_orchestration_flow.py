@@ -647,7 +647,7 @@ async def test_progressive_widening_skip_search_for_none_target():
     }
     
     # Build execution plan
-    plan = orchestrator.build_execution_plan([claim], BudgetClass.DEEP)
+    plan = orchestrator.build_execution_plan([claim], BudgetClass.COMPREHENSIVE)
     
     # Assert: No phases for none-target claim  
     phases = plan.get_phases("horoscope_1")
@@ -803,7 +803,7 @@ async def test_waterfall_phase_ordering():
     claims = [make_claim("c1"), make_claim("c2")]
     
     orchestrator = ClaimOrchestrator()
-    plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+    plan = orchestrator.build_execution_plan(claims, BudgetClass.BALANCED)
     
     runner = PhaseRunner(search_mgr, max_concurrent=2)
     await runner.run_all_claims(claims, plan)

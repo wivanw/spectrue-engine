@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Iterable
 
 from spectrue_core.schema.claim_metadata import (
@@ -19,7 +20,37 @@ from spectrue_core.schema.claim_metadata import (
     ClaimMetadata,
 )
 from spectrue_core.verification.orchestration.execution_plan import ClaimPolicyDecision, PolicyMode
-from spectrue_core.pipeline.mode import AnalysisMode
+from spectrue_core.verification.types import (
+    SearchDepth,
+    SearchProfileName,
+    StancePassMode,
+)
+
+
+# Re-export for backward compatibility
+__all__ = [
+    "SearchDepth",
+    "SearchProfileName",
+    "StancePassMode",
+    "QualityThresholds",
+    "LocalePolicy",
+    "LocaleStrategy",
+    "SufficiencyThresholds",
+    "BudgetPolicy",
+    "SafetyKnobs",
+    "StopConditions",
+    "SearchPolicyProfile",
+    "SearchPolicy",
+    "resolve_profile_name",
+    "default_search_policy",
+    "decide_claim_policy",
+    "resolve_stance_pass_mode",
+    "filter_search_results",
+    "rerank_search_results",
+    "prefer_fallback_results",
+    "should_fallback_news_to_general",
+    "build_context_from_sources",
+]
 
 
 @dataclass(frozen=True)
@@ -177,11 +208,13 @@ class SearchPolicyProfile:
 class SearchPolicy:
     profiles: dict[str, SearchPolicyProfile]
 
-    def get_profile(self, name: str) -> SearchPolicyProfile:
-        return self.profiles.get(name, self.profiles["general"])
+    def get_profile(self, name: SearchProfileName | str) -> SearchPolicyProfile:
+        # Convert enum to string if needed
+        key = name.value if isinstance(name, SearchProfileName) else name
+        return self.profiles.get(key, self.profiles[SearchProfileName.GENERAL.value])
 
 
-def resolve_profile_name(mode: "AnalysisMode | str | None") -> str:
+def resolve_profile_name(mode: "AnalysisMode | str | None") -> SearchProfileName:
     """
     Map AnalysisMode to search policy profile name.
     
@@ -189,25 +222,25 @@ def resolve_profile_name(mode: "AnalysisMode | str | None") -> str:
         mode: AnalysisMode enum or string value
         
     Returns:
-        "deep" for DEEP/DEEP_V2 modes, "general" otherwise
+        SearchProfileName.DEEP for DEEP/DEEP_V2 modes, SearchProfileName.GENERAL otherwise
     """
     # Lazy import to avoid circular dependency
     from spectrue_core.pipeline.mode import AnalysisMode
     
     if mode is None:
-        return "general"
+        return SearchProfileName.GENERAL
     
     # Handle AnalysisMode enum directly
     if isinstance(mode, AnalysisMode):
         if mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
-            return "deep"
-        return "general"
+            return SearchProfileName.DEEP
+        return SearchProfileName.GENERAL
     
     # Handle string (for backward compatibility)
     normalized = str(mode).strip().lower()
     if normalized in (AnalysisMode.DEEP.value, AnalysisMode.DEEP_V2.value):
-        return "deep"
-    return "general"
+        return SearchProfileName.DEEP
+    return SearchProfileName.GENERAL
 
 
 def default_search_policy() -> SearchPolicy:
@@ -231,12 +264,12 @@ def default_search_policy() -> SearchPolicy:
         EvidenceChannel.LOW_RELIABILITY.value: UsePolicy.LEAD_ONLY,
     }
     profiles = {
-        "general": SearchPolicyProfile(
-            name="general",
-            search_depth="basic",
+        SearchProfileName.GENERAL.value: SearchPolicyProfile(
+            name=SearchProfileName.GENERAL.value,
+            search_depth=SearchDepth.BASIC.value,
             max_results=3,
             max_hops=1,
-            stance_pass_mode="single",
+            stance_pass_mode=StancePassMode.SINGLE.value,
             channels_allowed=main_channels,
             use_policy_by_channel=use_policy_by_channel,
             locale_policy=LocalePolicy(primary=None, fallback=None),
@@ -246,12 +279,12 @@ def default_search_policy() -> SearchPolicy:
                 min_diversity=0.0,
             ),
         ),
-        "deep": SearchPolicyProfile(
-            name="deep",
-            search_depth="advanced",
+        SearchProfileName.DEEP.value: SearchPolicyProfile(
+            name=SearchProfileName.DEEP.value,
+            search_depth=SearchDepth.ADVANCED.value,
             max_results=7,
             max_hops=3,
-            stance_pass_mode="two_pass",
+            stance_pass_mode=StancePassMode.TWO_PASS.value,
             channels_allowed=deep_channels,
             use_policy_by_channel=use_policy_by_channel,
             locale_policy=LocalePolicy(primary=None, fallback=None),
@@ -302,9 +335,25 @@ def decide_claim_policy(metadata: ClaimMetadata | None) -> ClaimPolicyDecision:
     return ClaimPolicyDecision(mode=PolicyMode.FULL, reason_codes=["default_worthiness"])
 
 
-def resolve_stance_pass_mode(profile_name: str) -> str:
-    normalized = (profile_name or "general").strip().lower()
-    return "two_pass" if normalized == "deep" else "single"
+def resolve_stance_pass_mode(profile_name: SearchProfileName | str) -> StancePassMode:
+    """
+    Resolve stance pass mode from profile name.
+    
+    Args:
+        profile_name: SearchProfileName enum or string
+        
+    Returns:
+        StancePassMode enum (TWO_PASS for deep profile, SINGLE otherwise)
+    """
+    # Handle enum or string input
+    if isinstance(profile_name, SearchProfileName):
+        normalized = profile_name.value
+    else:
+        normalized = (profile_name or SearchProfileName.GENERAL.value).strip().lower()
+    
+    if normalized == SearchProfileName.DEEP.value:
+        return StancePassMode.TWO_PASS
+    return StancePassMode.SINGLE
 
 
 def rerank_search_results(

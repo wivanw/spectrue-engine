@@ -25,6 +25,7 @@ from spectrue_core.verification.evidence.evidence_stance import (
     check_has_direct_evidence,
     assign_claim_rgba,
 )
+from spectrue_core.pipeline.mode import ScoringMode
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -315,7 +316,7 @@ class TestAssignClaimRgba:
             global_r=0.2,
             global_b=0.5,
             global_a=0.8,
-            judge_mode="deep",
+            judge_mode=ScoringMode.DEEP,
         )
         # Should keep original RGBA
         assert claim_verdict["rgba"] == [0.1, 0.9, 0.7, 0.6]
@@ -331,7 +332,7 @@ class TestAssignClaimRgba:
             global_r=0.2,
             global_b=0.5,
             global_a=0.8,
-            judge_mode="standard",
+            judge_mode=ScoringMode.STANDARD,
         )
         # Should have computed RGBA
         assert "rgba" in claim_verdict
@@ -348,7 +349,7 @@ class TestAssignClaimRgba:
             global_r=0.2,
             global_b=0.5,
             global_a=0.8,
-            judge_mode="deep",
+            judge_mode=ScoringMode.DEEP,
         )
         # Should mark as error
         assert claim_verdict.get("rgba_error") == "missing_from_llm"
@@ -365,7 +366,7 @@ class TestAssignClaimRgba:
             global_r=0.2,
             global_b=0.5,
             global_a=0.8,
-            judge_mode="deep",
+            judge_mode=ScoringMode.DEEP,
         )
         # Should not add rgba_error for error claims
         assert "rgba_error" not in claim_verdict
@@ -382,7 +383,7 @@ class TestAssignClaimRgba:
             global_r=0.2,
             global_b=0.5,
             global_a=0.8,
-            judge_mode="standard",
+            judge_mode=ScoringMode.STANDARD,
         )
         # Should have computed new RGBA
         rgba = claim_verdict.get("rgba")

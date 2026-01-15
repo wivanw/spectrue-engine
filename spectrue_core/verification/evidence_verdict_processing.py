@@ -30,6 +30,11 @@ from spectrue_core.verification.evidence.evidence_stance import (
     assign_claim_rgba,
     enrich_claim_sources,
 )
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline.mode import ScoringMode
+
 from spectrue_core.verification.evidence.evidence_explainability import (
     compute_explainability_tier_adjustment,
 )
@@ -222,7 +227,7 @@ def enrich_all_claim_verdicts(
     pack: dict[str, Any],
     enrich_sources_with_trust: Any,
     global_rgba: tuple[float, float, float, float],
-    judge_mode: str,
+    scoring_mode: "ScoringMode" | str,
 ) -> None:
     """
     Enrich all claim verdicts with sources and RGBA.
@@ -232,7 +237,7 @@ def enrich_all_claim_verdicts(
         pack: Evidence pack with all sources
         enrich_sources_with_trust: Function to enrich sources
         global_rgba: Tuple of (R, G, B, A) global scores
-        judge_mode: "deep" or "standard"
+        scoring_mode: ScoringMode.STANDARD or ScoringMode.DEEP (or string for compatibility)
     """
     all_scored = pack.get("scored_sources") or []
     all_context = pack.get("context_sources") or []
@@ -253,6 +258,6 @@ def enrich_all_claim_verdicts(
             global_r=global_r,
             global_b=global_b,
             global_a=global_a,
-            judge_mode=judge_mode,
+            judge_mode=scoring_mode,
         )
 

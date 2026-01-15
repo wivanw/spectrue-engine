@@ -93,7 +93,7 @@ class JudgeStandardStep:
                 {"verified_score": result.get("verified_score")},
             )
 
-            judgments = Judgments(standard=result, deep=tuple())
+            judgments = Judgments(standard=result, per_claim_results=tuple())
 
             return (
                 ctx.with_update(verdict=result)

@@ -323,6 +323,8 @@ Your task is to map each Search Source to its BEST matching Claim AND Assertion.
       "stance": "SUPPORT",
       "relevance": 0.9,
       "quote": "Direct quote from text...",
+      "evidence_role": "direct", // direct | indirect | mention_only
+      "covers": ["location", "entity"], // list of claim components covered
       "reason": "Explain why..."
     }}
   ]

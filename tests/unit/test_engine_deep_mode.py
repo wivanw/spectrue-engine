@@ -11,6 +11,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from spectrue_core.engine import SpectrueEngine
+from spectrue_core.pipeline.mode import AnalysisMode, ScoringMode
+from spectrue_core.verification.search import SearchProfileName
 
 
 @pytest.mark.asyncio
@@ -64,7 +66,7 @@ async def test_deep_mode_single_pipeline_run_multi_claims(mock_config):
         result = await engine.analyze_text(
             "Claim 1. Claim 2. Claim 3.",
             lang="en",
-            analysis_mode="deep",
+            analysis_mode=AnalysisMode.DEEP,
         )
 
     assert mock_verifier.verify_fact.call_count == 2
@@ -74,10 +76,10 @@ async def test_deep_mode_single_pipeline_run_multi_claims(mock_config):
 
     assert first_call.get("extract_claims_only") is True
     assert second_call.get("preloaded_claims") == claims
-    assert second_call.get("pipeline_profile") == "deep"
+    assert second_call.get("pipeline_profile") == SearchProfileName.DEEP
 
-    assert result["analysis_mode"] == "deep"
+    assert result["analysis_mode"] == AnalysisMode.DEEP
     assert result["claims"] == ["Claim 1", "Claim 2", "Claim 3"]
-    assert result["judge_mode"] == "deep"
+    assert result["judge_mode"] == ScoringMode.DEEP
     assert "deep_analysis" in result
     assert "verified_score" not in result

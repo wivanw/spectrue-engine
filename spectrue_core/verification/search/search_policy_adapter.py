@@ -143,12 +143,12 @@ def budget_class_for_profile(profile: SearchPolicyProfile) -> BudgetClass:
     """
     max_hops = profile.max_hops
     if max_hops is None:
-        return BudgetClass.STANDARD
+        return BudgetClass.BALANCED
     if max_hops <= 1:
         return BudgetClass.MINIMAL
     if max_hops >= 3:
-        return BudgetClass.DEEP
-    return BudgetClass.STANDARD
+        return BudgetClass.COMPREHENSIVE
+    return BudgetClass.BALANCED
 
 
 def _normalize_channel_token(token: str) -> str:

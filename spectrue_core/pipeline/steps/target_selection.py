@@ -59,10 +59,11 @@ class TargetSelectionStep:
             if ctx.get_extra("oracle_hit") or ctx.get_extra("final_result"):
                 return ctx.set_extra("target_claims", []).set_extra("search_candidates", [])
 
-            # Derive budget_class from mode
+            # Derive budget_class from mode.search_depth
+            # NOTE: "intensive" = expanded search budget, NOT "deep mode" (per-claim analysis)
             budget_class = {
                 "basic": "minimal",
-                "advanced": "deep",
+                "advanced": "intensive",
             }.get(ctx.mode.search_depth, "standard")
 
             # For normal mode, anchor must be in targets

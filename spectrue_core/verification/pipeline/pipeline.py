@@ -10,9 +10,10 @@
 from __future__ import annotations
 import hashlib
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from spectrue_core.verification.search.search_mgr import SearchManager
+if TYPE_CHECKING:
+    from spectrue_core.verification.search.search_mgr import SearchManager
 from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
 from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.config import SpectrueConfig
@@ -40,7 +41,11 @@ class ValidationPipeline:
         )
         EmbedService.configure(openai_api_key=getattr(config, "openai_api_key", None))
         # Pass oracle_skill to SearchManager for hybrid mode (or use injected mgr)
-        self.search_mgr = search_mgr or SearchManager(config, oracle_validator=agent.oracle_skill)
+        if search_mgr:
+            self.search_mgr = search_mgr
+        else:
+            from spectrue_core.verification.search.search_mgr import SearchManager
+            self.search_mgr = SearchManager(config, oracle_validator=agent.oracle_skill)
         # Optional translation service for Oracle result localization
         self.translation_service = translation_service
 

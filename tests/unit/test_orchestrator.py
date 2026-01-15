@@ -91,7 +91,7 @@ class TestRealityClaims:
     """Test phase generation for reality-checking claims."""
     
     def test_reality_claim_deep_budget_gets_4_phases(self, orchestrator):
-        """T13: Reality claim with DEEP budget → 4 phases (A/B/C/D)."""
+        """T13: Reality claim with COMPREHENSIVE budget → 4 phases (A/B/C/D)."""
         claims = [make_claim(
             "c1",
             verification_target=VerificationTarget.REALITY,
@@ -99,7 +99,7 @@ class TestRealityClaims:
             fallback_locales=["en"],
         )]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.DEEP)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.COMPREHENSIVE)
         
         phases = plan.get_phases("c1")
         phase_ids = [p.phase_id for p in phases]
@@ -109,10 +109,10 @@ class TestRealityClaims:
         assert phase_ids == ["A", "B", "C", "D"], f"Expected [A, B, C, D], got {phase_ids}"
     
     def test_reality_claim_standard_budget_gets_2_phases(self, orchestrator):
-        """Reality claim with STANDARD budget → 2 phases (A/B)."""
+        """Reality claim with BALANCED budget → 2 phases (A/B)."""
         claims = [make_claim("c1", verification_target=VerificationTarget.REALITY)]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.BALANCED)
         
         phases = plan.get_phases("c1")
         phase_ids = [p.phase_id for p in phases]
@@ -148,7 +148,7 @@ class TestNoneClaims:
             claim_role=ClaimRole.CONTEXT,
         )]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.DEEP)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.COMPREHENSIVE)
         
         phases = plan.get_phases("c1")
         
@@ -162,7 +162,7 @@ class TestNoneClaims:
             metadata_confidence=MetadataConfidence.LOW,
         )]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.DEEP)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.COMPREHENSIVE)
         
         phases = plan.get_phases("c1")
         phase_ids = [p.phase_id for p in phases]
@@ -186,7 +186,7 @@ class TestFailOpen:
             metadata_confidence=MetadataConfidence.LOW,
         )]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.BALANCED)
         
         phases = plan.get_phases("c1")
         phase_ids = [p.phase_id for p in phases]
@@ -204,7 +204,7 @@ class TestFailOpen:
             metadata_confidence=MetadataConfidence.HIGH,
         )]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.BALANCED)
         
         phases = plan.get_phases("c1")
         phase_ids = [p.phase_id for p in phases]
@@ -226,7 +226,7 @@ class TestAttributionClaims:
             verification_target=VerificationTarget.ATTRIBUTION,
         )]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.BALANCED)
         
         phases = plan.get_phases("c1")
         phase_ids = [p.phase_id for p in phases]
@@ -249,7 +249,7 @@ class TestMultipleClaims:
             make_claim("c3", verification_target=VerificationTarget.ATTRIBUTION),
         ]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.BALANCED)
         
         # c1 (reality): should have A, B
         c1_phases = [p.phase_id for p in plan.get_phases("c1")]
@@ -286,7 +286,7 @@ class TestEdgeCases:
     
     def test_empty_claims_list(self, orchestrator):
         """Empty claims list → empty plan."""
-        plan = orchestrator.build_execution_plan([], BudgetClass.STANDARD)
+        plan = orchestrator.build_execution_plan([], BudgetClass.BALANCED)
         
         assert plan.total_phases == 0
         assert plan.max_depth == 0
@@ -308,7 +308,7 @@ class TestEdgeCases:
             # metadata=None (not set)
         )]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.BALANCED)
         
         phases = plan.get_phases("c1")
         assert len(phases) > 0, "Claim without metadata should still get phases"
@@ -322,7 +322,7 @@ class TestEdgeCases:
             fallback_locales=["en"],  # Same as primary
         )]
         
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.DEEP)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.COMPREHENSIVE)
         
         phases = plan.get_phases("c1")
         phase_ids = [p.phase_id for p in phases]

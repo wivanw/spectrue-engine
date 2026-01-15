@@ -10,6 +10,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.config import SpectrueConfig
 
 @pytest.fixture
@@ -36,7 +37,7 @@ async def test_analyze_calls_llm_client_responses(mock_llm_client):
     config = SpectrueConfig(openai_api_key="sk-test", tavily_api_key="test", openai_model="gpt-5-nano")
     agent = FactCheckerAgent(config)
     
-    result = await agent.analyze("Test fact", "Test context", "en", analysis_mode="general")
+    result = await agent.analyze("Test fact", "Test context", "en", analysis_mode=AnalysisMode.GENERAL)
     
     assert result == mock_response
     

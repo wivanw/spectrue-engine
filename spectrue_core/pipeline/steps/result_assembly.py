@@ -29,6 +29,7 @@ from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
+from spectrue_core.pipeline.mode import ScoringMode
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +202,7 @@ class AssembleStandardResultStep:
             final_result = {
                 "status": verdict.get("status", "ok"),
                 "analysis_mode": analysis_mode,
-                "judge_mode": verdict.get("judge_mode", "standard"),
+                "judge_mode": verdict.get("judge_mode", ScoringMode.STANDARD.value),
                 "rgba": rgba,
                 "sources": sources,
                 "rationale": verdict.get("rationale"),
@@ -286,12 +287,12 @@ class AssembleStandardResultStep:
             Trace.event(
                 "final_result.keys",
                 {
-                    "judge_mode": final_result.get("judge_mode", "standard"),
+                    "judge_mode": final_result.get("judge_mode", ScoringMode.STANDARD.value),
                     "keys": sorted(final_result.keys()),
                 },
             )
 
-            Trace.event("result_assembly.completed", {"judge_mode": "standard"})
+            Trace.event("result_assembly.completed", {"judge_mode": ScoringMode.STANDARD.value})
 
             return ctx.set_extra("final_result", final_result)
 

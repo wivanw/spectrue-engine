@@ -118,6 +118,7 @@ class PipelineFactory:
         from spectrue_core.pipeline.dag import StepNode
         from spectrue_core.pipeline.steps import (
             ClaimGraphStep,
+            ClaimClusterStep,
             EvidenceCollectStep,
             EvidenceGatingStep,
             StanceAnnotateStep,
@@ -179,9 +180,13 @@ class PipelineFactory:
             StepNode(
                 step=ClaimGraphStep(
                     claim_graph=self.claim_graph,
-                    runtime_config=config.runtime if hasattr(config, 'runtime') else None,
+                    runtime_config=config.runtime if hasattr(config, "runtime") else None,
                 ),
                 depends_on=["extract_claims"],
+            ),
+            StepNode(
+                step=ClaimClusterStep(),
+                depends_on=["claim_graph"],
             ),
 
             # Oracle fast path (optional)
@@ -194,7 +199,7 @@ class PipelineFactory:
             # Target selection (anchor-based for normal mode)
             StepNode(
                 step=TargetSelectionStep(process_all_claims=False),
-                depends_on=["claim_graph", "oracle_flow", "semantic_gating"],
+                depends_on=["claim_cluster", "oracle_flow", "semantic_gating"],
             ),
 
             # Search retrieval (atomic steps)
@@ -296,7 +301,8 @@ class PipelineFactory:
         """Build DAG nodes for deep mode with per-claim judging."""
         from spectrue_core.pipeline.dag import StepNode
         from spectrue_core.pipeline.steps import (
-            # NOTE: ClaimGraphStep NOT imported for deep mode - not needed with process_all_claims=True
+            ClaimGraphStep,
+            ClaimClusterStep,
             EvidenceCollectStep,
             EvidenceGatingStep,
             StanceAnnotateStep,
@@ -365,18 +371,27 @@ class PipelineFactory:
                 depends_on=["assert_non_empty_claims"],
             ),
 
-            # ==================== PARALLEL: INLINE SOURCES (NO CLAIM GRAPH IN DEEP MODE) ====================
+            # ==================== PARALLEL: INLINE SOURCES + GRAPH ====================
             StepNode(
                 step=VerifyInlineSourcesStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
                 depends_on=["extract_claims"],
             ),
-            # NOTE: ClaimGraphStep removed - deep mode processes ALL claims (process_all_claims=True)
-            # Graph-based pruning is unnecessary when we verify everything.
+            StepNode(
+                step=ClaimGraphStep(
+                    claim_graph=self.claim_graph,
+                    runtime_config=config.runtime if hasattr(config, "runtime") else None,
+                ),
+                depends_on=["extract_claims"],
+            ),
+            StepNode(
+                step=ClaimClusterStep(),
+                depends_on=["claim_graph"],
+            ),
 
             # ==================== TARGET SELECTION (ALL CLAIMS) ====================
             StepNode(
                 step=TargetSelectionStep(process_all_claims=True),
-                depends_on=["extract_claims"],  # Direct dependency, no claim_graph
+                depends_on=["claim_cluster"],  # Now depends on cluster metadata
             ),
 
             # Search retrieval (atomic steps)

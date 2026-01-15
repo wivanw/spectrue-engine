@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.orchestration.execution_plan import BudgetClass
 
 logger = logging.getLogger(__name__)
 
@@ -59,18 +60,18 @@ class TargetBudgetParams:
     min_evoi_threshold: float = 0.05
 
     # Hard ceiling per budget class (safety net)
-    # Maps to BudgetClass enum: MINIMAL, STANDARD, DEEP
+    # Maps to BudgetClass enum: MINIMAL, BALANCED, COMPREHENSIVE
     budget_ceilings: dict[str, int] = field(default_factory=lambda: {
-        "minimal": 3,
-        "standard": 5,
-        "deep": 30,
+        BudgetClass.MINIMAL.value: 3,
+        BudgetClass.BALANCED.value: 5,
+        BudgetClass.COMPREHENSIVE.value: 30,
     })
 
     # Hard floor per budget class (minimum targets)
     budget_floors: dict[str, int] = field(default_factory=lambda: {
-        "minimal": 1,
-        "standard": 2,
-        "deep": 3,
+        BudgetClass.MINIMAL.value: 1,
+        BudgetClass.BALANCED.value: 2,
+        BudgetClass.COMPREHENSIVE.value: 3,
     })
 
 

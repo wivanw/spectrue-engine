@@ -37,6 +37,7 @@ from enum import Enum
 from typing import Any
 
 from spectrue_core.schema.claim_metadata import EvidenceChannel, UsePolicy
+from spectrue_core.verification.types import SearchDepth
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -53,10 +54,10 @@ class BudgetClass(str, Enum):
     MINIMAL = "minimal"
     """Only Phase A. Fastest, cheapest. For low-priority claims."""
 
-    STANDARD = "standard"
+    BALANCED = "balanced"
     """Phases A + B. Balanced cost/coverage. Default."""
 
-    DEEP = "deep"
+    COMPREHENSIVE = "comprehensive"
     """All phases (A/B/C/D). Maximum coverage. For high-priority claims."""
 
 
@@ -151,7 +152,7 @@ def phase_a(locale: str) -> Phase:
             EvidenceChannel.AUTHORITATIVE,
             EvidenceChannel.REPUTABLE_NEWS,
         ],
-        search_depth="basic",
+        search_depth=SearchDepth.BASIC.value,
         max_results=3,
         is_expensive=False,
         description=f"Primary search: {locale}, authoritative+reputable, k=3",
@@ -172,7 +173,7 @@ def phase_a_light(locale: str = "en") -> Phase:
         phase_id="A-light",
         locale=locale,
         channels=[EvidenceChannel.AUTHORITATIVE],
-        search_depth="basic",
+        search_depth=SearchDepth.BASIC.value,
         max_results=2,
         is_expensive=False,
         description=f"Fail-open minimal: {locale}, authoritative only, k=2",
@@ -192,7 +193,7 @@ def phase_a_origin(locale: str) -> Phase:
             EvidenceChannel.AUTHORITATIVE,
             EvidenceChannel.REPUTABLE_NEWS,
         ],
-        search_depth="basic",
+        search_depth=SearchDepth.BASIC.value,
         max_results=3,
         is_expensive=False,
         description=f"Origin search: {locale}, finding original source",
@@ -213,7 +214,7 @@ def phase_b(locale: str) -> Phase:
             EvidenceChannel.REPUTABLE_NEWS,
             EvidenceChannel.LOCAL_MEDIA,
         ],
-        search_depth="advanced",
+        search_depth=SearchDepth.ADVANCED.value,
         max_results=5,
         is_expensive=True,
         description=f"Expanded search: {locale}, +local media, k=5",
@@ -234,7 +235,7 @@ def phase_c(locale: str) -> Phase:
             EvidenceChannel.AUTHORITATIVE,
             EvidenceChannel.REPUTABLE_NEWS,
         ],
-        search_depth="basic",
+        search_depth=SearchDepth.BASIC.value,
         max_results=3,
         is_expensive=False,
         description=f"Fallback locale search: {locale}, k=3",
@@ -258,7 +259,7 @@ def phase_d(locale: str = "en") -> Phase:
             EvidenceChannel.SOCIAL,
             EvidenceChannel.LOW_RELIABILITY,
         ],
-        search_depth="advanced",
+        search_depth=SearchDepth.ADVANCED.value,
         max_results=7,
         is_expensive=True,
         description=f"Last resort: {locale}, all channels, k=7",
@@ -283,13 +284,13 @@ class ExecutionPlan:
                 "c1": [phase_a("en"), phase_b("en")],  # Fact claim
                 "c2": [phase_a_light("en")],           # Prediction (fail-open)
             },
-            budget_class=BudgetClass.STANDARD
+            budget_class=BudgetClass.BALANCED
         )
     """
     claim_phases: dict[str, list[Phase]] = field(default_factory=dict)
     """Mapping of claim_id to list of phases."""
 
-    budget_class: BudgetClass = BudgetClass.STANDARD
+    budget_class: BudgetClass = BudgetClass.BALANCED
     """Budget classification used to build this plan."""
 
     # Pipeline profile metadata

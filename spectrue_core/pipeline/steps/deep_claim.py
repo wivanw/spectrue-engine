@@ -29,6 +29,7 @@ from spectrue_core.agents.skills.claim_judge_prompts import (
     build_claim_judge_system_prompt,
 )
 from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
+from spectrue_core.pipeline.mode import ScoringMode
 from spectrue_core.pipeline.contracts import (
     JUDGMENTS_KEY,
     RGBA_AUDIT_KEY,
@@ -450,7 +451,7 @@ class AssembleDeepResultStep(Step):
 
             # Use standardized AnalysisMode enum for API responses
             analysis_mode = ctx.mode.api_analysis_mode
-            judge_mode = str(analysis_mode)  # "deep" or "deep_v2"
+            judge_mode = ScoringMode.DEEP.value
 
             claim_results: list[dict[str, Any]] = []
             claim_verdicts: list[dict[str, Any]] = []
@@ -612,12 +613,12 @@ class AssembleDeepResultStep(Step):
             Trace.event(
                 "final_result.keys",
                 {
-                    "judge_mode": final_result.get("judge_mode", "deep"),
+                    "judge_mode": final_result.get("judge_mode", ScoringMode.DEEP.value),
                     "keys": sorted(final_result.keys()),
                 },
             )
 
-            judgments = Judgments(standard=None, deep=tuple(claim_results))
+            judgments = Judgments(standard=None, per_claim_results=tuple(claim_results))
 
             return (
                 ctx.with_update(verdict=verdict)

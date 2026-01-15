@@ -301,6 +301,9 @@ class ClaimMetadata:
     is_key_claim: bool = False
     """True when graph ranking marks the claim as key."""
 
+    topic_tags: list[str] = field(default_factory=list)
+    """Thematic tags for the claim (e.g., 'Economy', 'War')."""
+
     def __post_init__(self) -> None:
         # Clamp check_worthiness to [0, 1]
         self.check_worthiness = max(0.0, min(1.0, self.check_worthiness))
@@ -463,6 +466,7 @@ class ClaimMetadata:
             time_sensitive=bool(data.get("time_sensitive", False)),
             retrieval_policy=retrieval_policy,
             metadata_confidence=metadata_confidence,
+            topic_tags=data.get("topic_tags") or [],
         )
 
 

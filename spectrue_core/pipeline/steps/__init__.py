@@ -21,6 +21,7 @@ from .prepare_input import PrepareInputStep
 from .extract_claims import ExtractClaimsStep
 from .verify_inline_sources import VerifyInlineSourcesStep
 from .claim_graph import ClaimGraphStep
+from .claim_cluster import ClaimClusterStep
 from .claim_clusters import ClaimClustersStep
 from .target_selection import TargetSelectionStep
 from .evaluate_semantic_gating import EvaluateSemanticGatingStep
@@ -64,6 +65,7 @@ __all__ = [
     "ExtractClaimsStep",
     "VerifyInlineSourcesStep",
     "ClaimGraphStep",
+    "ClaimClusterStep",
     "ClaimClustersStep",
     "TargetSelectionStep",
     "EvaluateSemanticGatingStep",

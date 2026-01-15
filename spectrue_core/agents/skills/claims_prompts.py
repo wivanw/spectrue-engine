@@ -450,7 +450,7 @@ Time zone references are NOT location claims!
 
 ```json
 {{
-  "article_intent": "news|evergreen|official|opinion|prediction",
+  "article_intent": "news|evergreen|official|opinion|prediction|unknown|other",
   "claims": [
     {{
       "id": "c1",
@@ -621,7 +621,7 @@ If you cannot provide entity + time anchors, do NOT emit the claim.
 
 ```json
 {{
-  "article_intent": "news|opinion|official|prediction",
+  "article_intent": "news|evergreen|opinion|official|prediction|unknown|other",
   "claims": [
     {{
       "claim_text": "Original language exact quote",

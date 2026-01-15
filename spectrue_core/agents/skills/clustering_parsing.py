@@ -245,6 +245,8 @@ def _context_fallback_result(r: dict) -> SearchResult:
         assertion_key=None,
         content_status=r.get("content_status", "available"),
         evidence_tier=r.get("evidence_tier"),
+        evidence_role="mention_only",
+        covers=[],
     )
 
 
@@ -351,6 +353,13 @@ def postprocess_evidence_matrix(
         stance = (match.get("stance") or "IRRELEVANT").upper()
         relevance = float(match.get("relevance", 0.0) or 0.0)
         quote = match.get("quote")
+
+        # --- Evidence metadata (typed, non-heuristic) ---
+        evidence_role = match.get("evidence_role", "indirect")
+        covers = match.get("covers", [])
+        # Rule (deterministic, non-heuristic): quote present -> role is direct
+        if quote and str(quote).strip():
+            evidence_role = "direct"
 
         if i in unreadable_indices:
             relevance = min(relevance, 0.1)
@@ -461,6 +470,9 @@ def postprocess_evidence_matrix(
                 assertion_key=akey,
                 content_status=r.get("content_status", "available"),
                 evidence_tier=r.get("evidence_tier"),
+                # Evidence metadata
+                evidence_role=evidence_role,  # type: ignore
+                covers=covers,
                 # Bayesian posterior (M113+)
                 p_support=posterior.p_support,
                 p_refute=posterior.p_refute,

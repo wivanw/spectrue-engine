@@ -37,7 +37,7 @@ SEARCH_INTENTS = [
     "forecast",
 ]
 
-ARTICLE_INTENTS = ["news", "evergreen", "official", "opinion", "prediction"]
+ARTICLE_INTENTS = ["news", "evergreen", "official", "opinion", "prediction", "unknown", "other"]
 
 DOMAIN_MAPPING = {
     "Politics": ClaimDomain.POLITICS,

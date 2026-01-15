@@ -21,6 +21,8 @@ Tests:
 """
 
 import pytest
+from spectrue_core.verification.search import SearchDepth
+from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.pipeline import (
     GENERAL_MODE,
     DEEP_MODE,
@@ -45,30 +47,30 @@ class TestPipelineMode:
 
     def test_general_mode_properties(self):
         """General mode should have expected invariant values."""
-        assert GENERAL_MODE.name == "general"
+        assert GENERAL_MODE.name == AnalysisMode.GENERAL
         assert GENERAL_MODE.allow_batch is False
         assert GENERAL_MODE.allow_clustering is False
         assert GENERAL_MODE.require_single_language is True
         assert GENERAL_MODE.max_claims_for_scoring == 1
-        assert GENERAL_MODE.search_depth == "basic"
+        assert GENERAL_MODE.search_depth == SearchDepth.BASIC.value
 
     def test_deep_mode_properties(self):
         """Deep mode should have expected invariant values."""
-        assert DEEP_MODE.name == "deep"
+        assert DEEP_MODE.name == AnalysisMode.DEEP
         assert DEEP_MODE.allow_batch is True
         assert DEEP_MODE.allow_clustering is True
         assert DEEP_MODE.require_single_language is False
         assert DEEP_MODE.max_claims_for_scoring == 0  # unlimited
-        assert DEEP_MODE.search_depth == "advanced"
+        assert DEEP_MODE.search_depth == SearchDepth.ADVANCED.value
 
     def test_get_mode_general(self):
         """get_mode should return GENERAL_MODE for 'general'."""
-        mode = get_mode("general")
+        mode = get_mode(AnalysisMode.GENERAL)
         assert mode is GENERAL_MODE
 
     def test_get_mode_deep(self):
         """get_mode should return DEEP_MODE for 'deep'."""
-        mode = get_mode("deep")
+        mode = get_mode(AnalysisMode.DEEP)
         assert mode is DEEP_MODE
 
     def test_get_mode_invalid_raises(self):

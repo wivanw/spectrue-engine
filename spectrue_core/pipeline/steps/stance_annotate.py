@@ -25,6 +25,7 @@ from spectrue_core.verification.pipeline.pipeline_evidence import (
     annotate_evidence_stance,
 )
 from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
+from spectrue_core.verification.evidence.evidence_stats import EvidenceStats
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +120,19 @@ class StanceAnnotateStep:
                     "stance_annotate.completed",
                     {"count": len(annotated)},
                 )
+
+                # --- Collect EvidenceStats (M119 iteration 1) ---
+                evidence_stats = EvidenceStats()
+                for ev in annotated:
+                    evidence_stats.observe(ev)
+
+                Trace.event("evidence.stats", evidence_stats.to_dict())
+
                 return (
                     ctx.with_update(sources=annotated)
                     .set_extra("stance_annotations", annotated)
                     .set_extra("evidence_by_claim", _group_sources_by_claim(annotated))
+                    .set_extra("evidence_stats", evidence_stats)
                 )
 
             return ctx

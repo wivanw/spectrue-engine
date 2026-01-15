@@ -22,6 +22,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline.mode import ScoringMode
+
 
 CANONICAL_VERDICT_STATES = {
     "supported",
@@ -169,7 +174,7 @@ def assign_claim_rgba(
     global_r: float,
     global_b: float,
     global_a: float,
-    judge_mode: str,
+    judge_mode: ScoringMode | str,
 ) -> None:
     """
     Assign RGBA to claim verdict based on mode.
@@ -182,13 +187,17 @@ def assign_claim_rgba(
         global_r: Global danger score
         global_b: Global bias score
         global_a: Global explainability score
-        judge_mode: "deep" or "standard"
+        judge_mode: ScoringMode enum or string
     """
     from spectrue_core.utils.trace import Trace
     
     cid = claim_verdict.get("claim_id", "unknown")
     g_score = float(claim_verdict.get("verdict_score", 0.5) or 0.5)
     existing_rgba = claim_verdict.get("rgba")
+    
+    # Handle enum or string input
+    from spectrue_core.pipeline.mode import ScoringMode
+    mode_value = judge_mode.value if isinstance(judge_mode, ScoringMode) else judge_mode
     
     has_valid_rgba = (
         isinstance(existing_rgba, list)
@@ -203,12 +212,12 @@ def assign_claim_rgba(
             "cv.rgba_assigned",
             {
                 "claim_id": cid,
-                "judge_mode": judge_mode,
+                "judge_mode": mode_value,
                 "source": "llm",
                 "rgba": existing_rgba,
             },
         )
-    elif judge_mode == "deep":
+    elif mode_value == ScoringMode.DEEP.value:
         # Deep mode but no RGBA from LLM - error handling
         if claim_verdict.get("status") == "error":
             # Expected: error claim has no RGBA
@@ -216,7 +225,7 @@ def assign_claim_rgba(
                 "cv.rgba_assigned",
                 {
                     "claim_id": cid,
-                    "judge_mode": "deep",
+                    "judge_mode": mode_value,
                     "source": "error",
                     "rgba": None,
                     "error_type": claim_verdict.get("error_type"),
@@ -230,7 +239,7 @@ def assign_claim_rgba(
                 "cv.rgba_assigned",
                 {
                     "claim_id": cid,
-                    "judge_mode": "deep",
+                    "judge_mode": mode_value,
                     "source": "missing",
                     "rgba": None,
                     "error": "Deep mode claim missing RGBA from judge",
@@ -251,7 +260,7 @@ def assign_claim_rgba(
         # Log tier-factor info only when it's actually applied
         trace_data = {
             "claim_id": cid,
-            "judge_mode": judge_mode,
+            "judge_mode": mode_value,
             "source": "fallback",
             "rgba": claim_verdict["rgba"],
         }

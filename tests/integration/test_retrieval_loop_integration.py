@@ -27,7 +27,7 @@ from spectrue_core.schema.claim_metadata import (
 )
 from spectrue_core.verification.orchestration.execution_plan import ExecutionPlan, phase_a, phase_b
 from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-from spectrue_core.verification.search.search_policy import SearchPolicyProfile
+from spectrue_core.verification.search.search_policy import SearchDepth, SearchPolicyProfile, SearchProfileName
 
 
 @pytest.mark.asyncio
@@ -65,9 +65,9 @@ async def test_two_hop_loop_reaches_sufficiency():
     from spectrue_core.verification.search.search_policy import QualityThresholds
 
     profile = SearchPolicyProfile(
-        name="deep",
+        name=SearchProfileName.DEEP.value,
         max_hops=3,
-        search_depth="advanced",
+        search_depth=SearchDepth.ADVANCED.value,
         max_results=5,
         channels_allowed=[EvidenceChannel.AUTHORITATIVE, EvidenceChannel.REPUTABLE_NEWS],
         # Disable coverage check since mock sources don't have relevance_score

@@ -7,6 +7,8 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
+from enum import Enum
+
 from spectrue_core.schema import (
     AssertionVerdict,
     ClaimVerdict,
@@ -16,8 +18,12 @@ from spectrue_core.schema import (
     VerdictState,
 )
 from spectrue_core.agents.skills.scoring_sanitization import maybe_drop_style_section, strip_internal_source_markers
+from spectrue_core.pipeline.mode import ScoringMode
 from spectrue_core.utils.trace import Trace
 import logging
+
+logger = logging.getLogger(__name__)
+
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +39,22 @@ def safe_score(val, default: float = -1.0) -> float:
     return max(0.0, min(1.0, f))
 
 
-def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -> dict:
+def clamp_score_evidence_result(result: dict, *, scoring_mode: ScoringMode | str = ScoringMode.STANDARD) -> dict:
     """
-    Normalize/validate LLM scoring result.
+    Clamp and validate RGBA scores from LLM judge output.
     
     Args:
-        result: Raw LLM output dict
-        judge_mode: "standard" or "deep"
-            - "standard": Apply normalization, defaults, thresholds
-            - "deep": Minimal validation only, preserve LLM output 1:1
+        result: Raw judge output dictionary
+        scoring_mode: ScoringMode.STANDARD (full validation) or ScoringMode.DEEP (per-claim, minimal)
+        
+    Returns:
+        Validated result with clamped scores
     """
-    # Deep mode: minimal validation, no defaults/normalization
-    is_deep = judge_mode == "deep"
-
-    Trace.event("score_evidence.parsed_keys", {"keys": sorted(result.keys()), "judge_mode": judge_mode})
+    # Handle both enum and string for backward compatibility
+    mode_value = scoring_mode.value if isinstance(scoring_mode, ScoringMode) else scoring_mode
+    is_deep_scoring = mode_value == ScoringMode.DEEP.value
+    
+    Trace.event("score_evidence.parsed_keys", {"keys": sorted(result.keys()), "scoring_mode": mode_value})
 
     if "verified_score" in result:
         result["verified_score"] = safe_score(result["verified_score"], default=-1.0)
@@ -93,8 +101,8 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
             if isinstance(cv, dict):
                 cid = cv.get("claim_id")
 
-                # Deep mode: skip normalization for claims with status=error
-                if is_deep and cv.get("status") == "error":
+                # Deep scoring: skip normalization for claims with status=error
+                if is_deep_scoring and cv.get("status") == "error":
                     Trace.event(
                         "verdict.deep_error_claim_skipped",
                         {"claim_id": cid, "error_type": cv.get("error_type")},
@@ -104,8 +112,8 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                 # Track schema issues for this claim
                 claim_schema_issues: dict[str, str] = {}
 
-                # Deep mode: preserve LLM verdict_score without default
-                if is_deep:
+                # Deep scoring: preserve LLM verdict_score without default
+                if is_deep_scoring:
                     raw_vs = cv.get("verdict_score")
                     if raw_vs is None:
                         claim_schema_issues["verdict_score"] = "missing"
@@ -138,7 +146,7 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                         "verdict.claim_schema_mismatch",
                         {
                             "claim_id": cid,
-                            "judge_mode": judge_mode,
+                            "judge_mode": mode_value,
                             "issues": claim_schema_issues,
                             "received_keys": list(cv.keys()),
                         },
@@ -148,8 +156,8 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                 # p = cv.get("verdict_score", 0.5) if not is_deep else cv.get("verdict_score", -1.0)
 
                 # --- (1) Normalize verdict_state from p ---
-                # Deep mode: skip this normalization, preserve LLM output
-                if not is_deep:
+                # Deep scoring: skip this normalization, preserve LLM output
+                if not is_deep_scoring:
                     # Contract: p >= 0.6 → supported, p <= 0.4 → refuted
                     # p < 0 -> unverified (insufficient)
                     raw_state = str(cv.get("verdict_state") or "").lower().strip()
@@ -169,7 +177,7 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                 # --- (2) Normalize verdict (UI label) from p ---
                 # Deep mode: skip this normalization, preserve LLM output
                 raw_verdict = str(cv.get("verdict") or "").lower().strip()
-                if not is_deep and raw_verdict not in CANONICAL_VERDICTS:
+                if not is_deep_scoring and raw_verdict not in CANONICAL_VERDICTS:
                     # Normalize to canonical UI label (verdict.label_noncanonical event removed)
                     if p < 0:
                         cv["verdict"] = "unverified"
@@ -182,7 +190,7 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
 
                 # --- (3) Semantic contract: insufficient evidence = -1.0 (was 0.5) ---
                 # Deep mode: skip this normalization, preserve LLM output
-                if not is_deep:
+                if not is_deep_scoring:
                     vs = str(cv.get("verdict_state") or "").lower().strip()
                     if vs in {"insufficient_evidence", "insufficient evidence", "insufficient", "unverified"}:
                         if cv["verdict_score"] != -1.0:
@@ -191,7 +199,7 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                 # --- (4) Validate and normalize per-claim RGBA ---
                 # Deep mode: if RGBA is None (error claim), don't touch it
                 raw_rgba = cv.get("rgba")
-                if raw_rgba is None and is_deep:
+                if raw_rgba is None and is_deep_scoring:
                     # Deep mode error claim - leave rgba as None
                     pass
                 elif isinstance(raw_rgba, list) and len(raw_rgba) == 4:
@@ -211,7 +219,7 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                         # Note: verdict.rgba_parsed event removed (data in evidence.llm_output)
                     except (TypeError, ValueError, IndexError):
                         # Invalid rgba format
-                        if is_deep:
+                        if is_deep_scoring:
                             # Deep mode: trace error, keep rgba as None (no fallback)
                             cv["rgba"] = None
                             Trace.event(
@@ -234,7 +242,7 @@ def clamp_score_evidence_result(result: dict, *, judge_mode: str = "standard") -
                             )
                 else:
                     # No rgba or wrong format
-                    if is_deep:
+                    if is_deep_scoring:
                         # Deep mode: keep as None (no fallback)
                         pass
                     else:

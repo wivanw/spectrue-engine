@@ -10,6 +10,7 @@
 import pytest
 
 from spectrue_core.verification.pipeline.pipeline_evidence import run_evidence_flow, EvidenceFlowInput
+from spectrue_core.pipeline.mode import AnalysisMode
 
 
 class _DummyAgent:
@@ -101,6 +102,7 @@ async def test_normal_profile_allows_multiple_claims():
             lang="uk",
             content_lang="uk",
             progress_callback=None,
+            analysis_mode=AnalysisMode.GENERAL,
             
         ),
         claims=claims,

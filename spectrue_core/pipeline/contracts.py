@@ -411,18 +411,18 @@ class DeepClaimResult:
 
 @dataclass(frozen=True, slots=True)
 class Judgments:
-    """Judgment outputs for standard or deep modes.
+    """Judgment outputs for standard or per-claim modes.
 
-    Mutually exclusive: either standard or deep is populated, not both.
+    Mutually exclusive: either standard or per_claim_results is populated, not both.
     """
 
     standard: StandardJudgment | None = None
-    deep: tuple[DeepClaimResult, ...] = field(default_factory=tuple)
+    per_claim_results: tuple[DeepClaimResult, ...] = field(default_factory=tuple)
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "standard": self.standard.to_payload() if self.standard else None,
-            "deep": [result.to_payload() for result in self.deep],
+            "per_claim_results": [result.to_payload() for result in self.per_claim_results],
         }
 
 

@@ -19,6 +19,7 @@ from spectrue_core.pipeline.factory import PipelineFactory
 from spectrue_core.pipeline.mode import GENERAL_MODE
 from spectrue_core.pipeline.steps.result_assembly import AssembleStandardResultStep
 from spectrue_core.pipeline.steps.metering_setup import METERING_SETUP_STEP_NAME
+from spectrue_core.pipeline.mode import ScoringMode
 
 
 @pytest.fixture
@@ -47,7 +48,7 @@ def test_standard_graph_invariants(mock_config, pipeline_factory):
 @pytest.mark.asyncio
 async def test_standard_result_contract_fields():
     verdict = {
-        "judge_mode": "standard",
+        "judge_mode": ScoringMode.STANDARD,
         "rgba": [0.1, 0.2, 0.3, 0.4],
         "rationale": "Example rationale",
         "sources": [{"url": "https://example.com", "title": "Example"}],
@@ -69,7 +70,7 @@ async def test_standard_result_contract_fields():
     result_ctx = await AssembleStandardResultStep().run(ctx)
     final_result = result_ctx.get_extra("final_result")
 
-    assert final_result["judge_mode"] == "standard"
+    assert final_result["judge_mode"] == ScoringMode.STANDARD
     assert final_result["text"] == "Prepared text"
     assert isinstance(final_result["details"], list)
     assert final_result["anchor_claim"]["id"] == "c1"

@@ -23,6 +23,8 @@ from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
 
+from spectrue_core.pipeline.mode import AnalysisMode
+
 
 def detect_claim_language(text: str, fallback: str = "en") -> Tuple[str, float]:
     """
@@ -118,7 +120,7 @@ def validate_claims_language_consistency(
     claims: list[dict],
     expected_lang: str,
     *,
-    pipeline_mode: str = "general",
+    pipeline_mode: AnalysisMode | str = AnalysisMode.GENERAL,
     min_confidence: float = 0.7,
 ) -> Tuple[bool, list[dict]]:
     """
@@ -130,7 +132,7 @@ def validate_claims_language_consistency(
     Args:
         claims: List of claim dicts
         expected_lang: Expected language code
-        pipeline_mode: 'general' or 'deep'
+        pipeline_mode: AnalysisMode enum or string ('general' or 'deep')
         min_confidence: Minimum confidence for detection
         
     Returns:
@@ -156,12 +158,18 @@ def validate_claims_language_consistency(
                 "detected_lang": detected_lang,
             })
 
+    # Handle enum or string input
+    if hasattr(pipeline_mode, "value"):
+        mode_value = pipeline_mode.value
+    else:
+        mode_value = str(pipeline_mode)
+
     # In general mode, any mismatch is critical
-    if pipeline_mode == "general" and mismatches:
+    if mode_value == AnalysisMode.GENERAL.value and mismatches:
         Trace.event(
             "pipeline.language_violation",
             {
-                "mode": pipeline_mode,
+                "mode": mode_value,
                 "expected_lang": expected_lang,
                 "mismatch_count": len(mismatches),
                 "mismatches": mismatches,

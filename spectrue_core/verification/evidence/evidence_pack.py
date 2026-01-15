@@ -420,6 +420,10 @@ class SearchResult(TypedDict, total=False):
     evidence_refs: list[str]        # Source URLs or references
     stance_confidence: str | None   # "low" for low-tier SUPPORT
 
+    # Evidence metadata (typed, non-heuristic)
+    evidence_role: Literal["direct", "indirect", "mention_only"] | None
+    covers: list[str] | None
+
     # Assertion-level mapping
     assertion_key: str | None       # Which assertion this evidence maps to (e.g., "event.location.city")
 

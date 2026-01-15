@@ -20,6 +20,25 @@ different source/search result formats).
 from __future__ import annotations
 
 from typing import Any, TypedDict
+from enum import Enum
+
+
+class SearchProfileName(str, Enum):
+    """Search policy profile names."""
+    GENERAL = "general"  # Single claim, basic search
+    DEEP = "deep"        # Multi-claim, intensive search
+
+
+class SearchDepth(str, Enum):
+    """Search depth levels for retrieval."""
+    BASIC = "basic"        # Fast, limited results
+    ADVANCED = "advanced"  # Thorough, more results
+
+
+class StancePassMode(str, Enum):
+    """Stance detection pass modes."""
+    SINGLE = "single"      # Single pass (faster)
+    TWO_PASS = "two_pass"  # Two-pass refinement (more accurate)
 
 
 class Source(TypedDict, total=False):

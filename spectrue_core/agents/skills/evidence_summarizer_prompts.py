@@ -16,7 +16,10 @@ evidence items by stance and identifies gaps.
 
 from __future__ import annotations
 
-from spectrue_core.schema.claim_frame import ClaimFrame, EvidenceItemFrame
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.schema.claim_frame import ClaimFrame, EvidenceItemFrame
 
 
 def _format_evidence_item(item: EvidenceItemFrame, index: int) -> str:

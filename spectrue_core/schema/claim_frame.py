@@ -237,7 +237,7 @@ class DeepAnalysisResult:
     
     Contains only per-claim results with no aggregate verdict.
     """
-    analysis_mode: str = "deep"
+    analysis_mode: str = "deep"  # AnalysisMode.DEEP.value
     claim_results: tuple[ClaimResult, ...] = ()
 
 

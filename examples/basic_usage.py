@@ -17,6 +17,7 @@ to verify a text claim.
 import asyncio
 from spectrue_core.engine import SpectrueEngine
 from spectrue_core.config import SpectrueConfig
+from spectrue_core.pipeline.mode import AnalysisMode
 
 
 async def main():
@@ -39,7 +40,7 @@ async def main():
     result = await engine.analyze_text(
         text=text,
         lang="en",
-        mode="deep"
+        mode=AnalysisMode.DEEP
     )
     
     # Print results

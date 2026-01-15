@@ -22,6 +22,7 @@ Key Design Principles:
 """
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import Field
 
@@ -213,6 +214,35 @@ class EvidenceItem(SchemaModel):
 
     evidence_tier: str = ""
     """A, A', B, C, D tier classification (if computed)."""
+
+    # --- Evidence metadata (typed, non-heuristic) ---
+    evidence_role: Literal["direct", "indirect", "mention_only"] = "indirect"
+    """Classification of the evidence's role in supporting/refuting the claim."""
+
+    # What parts of the claim this evidence covers
+    covers: list[
+        Literal[
+            "entity",
+            "time",
+            "location",
+            "quantity",
+            "attribution",
+            "causal",
+            "other",
+        ]
+    ] = []
+    """List of claim components (facets) that this evidence explicitly addresses."""
+
+    # Event compatibility signature (for routing)
+    event_signature: dict | None = None
+    """Semantic signature for event-level search and routing."""
+
+    # Provenance
+    provenance: Literal["direct", "transferred"] = "direct"
+    """Original source vs evidence shared/transferred from another claim."""
+
+    origin_claim_id: str | None = None
+    """Original claim_id if this evidence was transferred."""
 
     def is_actionable(self) -> bool:
         """Check if this evidence can be used for verdict."""

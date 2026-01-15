@@ -28,8 +28,8 @@ Waterfall Phases:
 
 Budget Classes:
 - MINIMAL: Phase A only
-- STANDARD: Phases A + B
-- DEEP: All phases (A/B/C/D)
+- BALANCED: Phases A + B
+- COMPREHENSIVE: All phases (A/B/C/D)
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ class ClaimOrchestrator:
     
     Example:
         orchestrator = ClaimOrchestrator()
-        plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+        plan = orchestrator.build_execution_plan(claims, BudgetClass.BALANCED)
     """
 
     def __init__(self) -> None:
@@ -83,7 +83,7 @@ class ClaimOrchestrator:
     def build_execution_plan(
         self,
         claims: list[Claim],
-        budget_class: BudgetClass = BudgetClass.STANDARD,
+        budget_class: BudgetClass = BudgetClass.BALANCED,
     ) -> ExecutionPlan:
         """
         Build an ExecutionPlan from claims.
@@ -165,14 +165,14 @@ class ClaimOrchestrator:
     def build_plan(
         self,
         claims: list[Claim],
-        budget_class: str | BudgetClass = BudgetClass.STANDARD,
+        budget_class: str | BudgetClass = BudgetClass.BALANCED,
     ) -> ExecutionPlan:
         """Alias for build_execution_plan to match pipeline call."""
         if isinstance(budget_class, str):
             try:
                 budget_class = BudgetClass(budget_class)
             except ValueError:
-                budget_class = BudgetClass.STANDARD
+                budget_class = BudgetClass.BALANCED
 
         return self.build_execution_plan(claims, budget_class)
 
@@ -273,12 +273,12 @@ class ClaimOrchestrator:
             # Only Phase A
             phases.append(phase_a(locale))
 
-        elif budget_class == BudgetClass.STANDARD:
+        elif budget_class == BudgetClass.BALANCED:
             # Phases A + B
             phases.append(phase_a(locale))
             phases.append(phase_b(locale))
 
-        elif budget_class == BudgetClass.DEEP:
+        elif budget_class == BudgetClass.COMPREHENSIVE:
             # All phases: A → B → C → D
             phases.append(phase_a(locale))
             phases.append(phase_b(locale))
@@ -312,10 +312,10 @@ class ClaimOrchestrator:
         phases.append(phase_a_origin(locale))
 
         # Standard expansion based on budget
-        if budget_class in (BudgetClass.STANDARD, BudgetClass.DEEP):
+        if budget_class in (BudgetClass.BALANCED, BudgetClass.COMPREHENSIVE):
             phases.append(phase_b(locale))
 
-        if budget_class == BudgetClass.DEEP:
+        if budget_class == BudgetClass.COMPREHENSIVE:
             if fallback_locale != locale:
                 phases.append(phase_c(fallback_locale))
             phases.append(phase_d(locale))
@@ -346,7 +346,7 @@ class ClaimOrchestrator:
         phases.append(phase_a(locale))
 
         # Only expand on higher budgets
-        if budget_class == BudgetClass.DEEP:
+        if budget_class == BudgetClass.COMPREHENSIVE:
             phases.append(phase_b(locale))
             if fallback_locale != locale:
                 phases.append(phase_c(fallback_locale))

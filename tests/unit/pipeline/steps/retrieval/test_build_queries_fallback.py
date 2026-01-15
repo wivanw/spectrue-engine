@@ -33,6 +33,7 @@ def mock_pipeline_context():
     ]
     ctx.mode = MagicMock()
     ctx.mode.name = "standard"
+    ctx.mode.api_analysis_mode = "general"
     ctx.get_extra = MagicMock(side_effect=lambda key, default=None: {
         "target_claims": ctx.claims,
         "prepared_fact": "Test fact with entities",
@@ -53,6 +54,9 @@ def mock_empty_claims_context():
             "text": "Test claim without entities",
         }
     ]
+    ctx.mode = MagicMock()
+    ctx.mode.name = "standard"
+    ctx.mode.api_analysis_mode = "general"
     ctx.get_extra = MagicMock(side_effect=lambda key, default=None: {
         "target_claims": ctx.claims,
         "prepared_fact": "",

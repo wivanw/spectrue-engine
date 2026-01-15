@@ -117,7 +117,7 @@ async def main():
     print("-" * 40)
     
     orchestrator = ClaimOrchestrator()
-    plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+    plan = orchestrator.build_execution_plan(claims, BudgetClass.BALANCED)
     
     for claim in claims:
         claim_id = claim["id"]

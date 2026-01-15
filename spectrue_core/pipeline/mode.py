@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
+from spectrue_core.verification.types import SearchDepth
+
 
 class AnalysisMode(str, Enum):
     """API-facing analysis mode names.
@@ -50,6 +52,15 @@ class AnalysisMode(str, Enum):
     GENERAL = "general"  # Standard single-claim analysis
     DEEP = "deep"        # Multi-claim per-claim RGBA
     DEEP_V2 = "deep_v2"  # Clustered retrieval + evidence stats
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class ScoringMode(str, Enum):
+    """Scoring validation modes."""
+    STANDARD = "standard"  # Full validation and clamping
+    DEEP = "deep"          # Per-claim judging, minimal validation
 
 
 @dataclass(frozen=True)
@@ -114,7 +125,7 @@ GENERAL_MODE = PipelineMode(
     require_single_language=True,
     require_metering=True,
     max_claims_for_scoring=1,
-    search_depth="basic",
+    search_depth=SearchDepth.BASIC.value,
 )
 """
 General mode: Single claim, single language, no clustering.
@@ -130,7 +141,7 @@ DEEP_MODE = PipelineMode(
     require_single_language=False,
     require_metering=True,
     max_claims_for_scoring=0,  # unlimited
-    search_depth="advanced",
+    search_depth=SearchDepth.ADVANCED.value,
 )
 """
 Deep mode: Batch claims, multi-language, clustering enabled.
@@ -146,7 +157,7 @@ DEEP_V2_MODE = PipelineMode(
     require_single_language=False,
     require_metering=True,
     max_claims_for_scoring=0,  # unlimited
-    search_depth="advanced",
+    search_depth=SearchDepth.ADVANCED.value,
 )
 """
 Deep v2 mode: Batch claims, multi-language, clustered retrieval enabled.

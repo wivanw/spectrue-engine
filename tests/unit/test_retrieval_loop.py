@@ -27,7 +27,7 @@ from spectrue_core.schema.claim_metadata import (
 )
 from spectrue_core.verification.orchestration.execution_plan import ExecutionPlan, phase_a
 from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-from spectrue_core.verification.search.search_policy import SearchPolicyProfile
+from spectrue_core.verification.search.search_policy import SearchDepth, SearchPolicyProfile, SearchProfileName
 
 
 @pytest.mark.asyncio
@@ -43,9 +43,9 @@ async def test_hop_limit_enforced_main_profile():
 
 
     profile = SearchPolicyProfile(
-        name="main",
+        name=SearchProfileName.GENERAL.value,
         max_hops=1,
-        search_depth="basic",
+        search_depth=SearchDepth.BASIC.value,
         max_results=3,
         channels_allowed=[EvidenceChannel.AUTHORITATIVE],
     )
@@ -90,9 +90,9 @@ async def test_stop_when_followup_query_fails():
 
 
     profile = SearchPolicyProfile(
-        name="deep",
+        name=SearchProfileName.DEEP.value,
         max_hops=2,
-        search_depth="advanced",
+        search_depth=SearchDepth.ADVANCED.value,
         max_results=5,
         channels_allowed=[EvidenceChannel.REPUTABLE_NEWS],
     )

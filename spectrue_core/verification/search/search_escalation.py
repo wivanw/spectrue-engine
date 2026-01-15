@@ -536,7 +536,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
     return [
         EscalationPass(
             pass_id="A",
-            search_depth="basic",
+            search_depth=SearchDepth.BASIC.value,
             max_results=3,
             topic=None,  # Use claim-derived topic
             include_domains_relaxed=False,
@@ -545,7 +545,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
         ),
         EscalationPass(
             pass_id="B",
-            search_depth="basic",
+            search_depth=SearchDepth.BASIC.value,
             max_results=5,
             topic=None,
             include_domains_relaxed=False,
@@ -554,7 +554,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
         ),
         EscalationPass(
             pass_id="C",
-            search_depth="advanced",
+            search_depth=SearchDepth.ADVANCED.value,
             max_results=5,
             topic=None,
             include_domains_relaxed=False,
@@ -563,7 +563,7 @@ def get_escalation_ladder() -> list[EscalationPass]:
         ),
         EscalationPass(
             pass_id="D",
-            search_depth="basic",
+            search_depth=SearchDepth.BASIC.value,
             max_results=5,
             topic=None,
             include_domains_relaxed=True,  # include_domains will be None

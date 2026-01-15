@@ -19,7 +19,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from spectrue_core.verification.search.search_mgr import SearchManager
-from spectrue_core.verification.search.search_policy import SearchPolicyProfile, QualityThresholds
+from spectrue_core.verification.search.search_policy import SearchPolicyProfile, QualityThresholds, SearchProfileName
 
 
 @pytest.mark.asyncio
@@ -27,7 +27,7 @@ async def test_search_unified_rerank_keeps_cosmology_results(mock_config):
     mock_config.google_fact_check_key = "test-google-fact-key"
     search_mgr = SearchManager(mock_config)
     profile = SearchPolicyProfile(
-        name="deep",
+        name=SearchProfileName.DEEP.value,
         max_results=10,
         quality_thresholds=QualityThresholds(rerank_lambda=0.7),
     )

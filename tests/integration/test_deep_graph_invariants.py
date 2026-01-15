@@ -27,6 +27,7 @@ from spectrue_core.schema.claim_frame import (
     JudgeOutput,
     RGBAScore,
 )
+from spectrue_core.pipeline.mode import ScoringMode
 
 
 @pytest.fixture
@@ -92,7 +93,7 @@ async def test_deep_result_contract_fields():
     result_ctx = await AssembleDeepResultStep().run(ctx)
     final_result = result_ctx.get_extra("final_result")
 
-    assert final_result["judge_mode"] == "deep"
+    assert final_result["judge_mode"] == ScoringMode.DEEP
     assert "deep_analysis" in final_result
     assert len(final_result["deep_analysis"]["claim_results"]) == 2
     assert "rgba" not in final_result

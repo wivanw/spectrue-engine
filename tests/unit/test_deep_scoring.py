@@ -24,7 +24,9 @@ class TestDeepScoringPipeline:
         # Mock other required methods to avoid failures
         agent.cluster_evidence = AsyncMock(return_value=[])
         agent.verify_search_relevance = AsyncMock(return_value={"is_relevant": True})
+        agent.verify_search_relevance = AsyncMock(return_value={"is_relevant": True})
         agent.verify_inline_source_relevance = AsyncMock(return_value={"is_relevant": True})
+        agent.enrich_claims_post_evidence = AsyncMock(return_value=[])
         return agent
 
     @pytest.fixture
@@ -36,6 +38,8 @@ class TestDeepScoringPipeline:
         mgr.can_afford = MagicMock(return_value=True)
         mgr.reset_metrics = MagicMock()
         mgr.apply_evidence_acquisition_ladder = AsyncMock(return_value=[])
+        mgr.search_phase = AsyncMock(return_value=(None, []))
+        mgr.fetch_urls_content_batch = AsyncMock(return_value={})
         mgr.estimate_hop_cost = MagicMock(return_value=10)
         # Mock web_tool._tavily._meter for meter swap logic in pipeline
         mgr.web_tool = MagicMock()
@@ -67,7 +71,7 @@ class TestDeepScoringPipeline:
                 
                 # Mock EmbedService to avoid OpenAI calls
                 with patch("spectrue_core.utils.embedding_service.EmbedService"):
-                    pipeline = ValidationPipeline(config=mock_config, agent=mock_agent)
+                    pipeline = ValidationPipeline(config=mock_config, agent=mock_agent, search_mgr=mock_search_mgr)
                     # Manually attach registry if needed, but __init__ does it
                     return pipeline
 
@@ -98,7 +102,8 @@ class TestDeepScoringPipeline:
         # Execute in DEEP mode via pipeline
         await pipeline.execute(
             fact="Test Fact",
-            lang="en"
+            lang="en",
+            runtime_config={"profile": "deep"}
         )
 
         # Deep mode uses per-claim judging via JudgeClaimsStep, avoiding batch score_evidence

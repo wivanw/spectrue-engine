@@ -278,3 +278,35 @@ class GraphResult:
             "cost_usd": round(self.cost_usd, 4),
             "confidence_scalar": round(self.confidence_scalar, 3),
         }
+
+    def connected_components(self) -> list[list[str]]:
+        """
+        Group claim IDs into connected components based on typed edges.
+        
+        Returns:
+            List of lists of claim IDs.
+        """
+        if not self.typed_edges:
+            return [[cid] for cid in self.pre_meta.keys()]
+
+        adj = {cid: set() for cid in self.pre_meta.keys()}
+        for edge in self.typed_edges:
+            adj.setdefault(edge.src_id, set()).add(edge.dst_id)
+            adj.setdefault(edge.dst_id, set()).add(edge.src_id)
+
+        visited = set()
+        components = []
+        for cid in adj:
+            if cid not in visited:
+                component = []
+                stack = [cid]
+                visited.add(cid)
+                while stack:
+                    curr = stack.pop()
+                    component.append(curr)
+                    for neighbor in adj.get(curr, set()):
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            stack.append(neighbor)
+                components.append(component)
+        return components

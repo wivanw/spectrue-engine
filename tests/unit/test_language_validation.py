@@ -16,6 +16,7 @@ from spectrue_core.utils.language_validation import (
     validate_claim_language,
     validate_claims_language_consistency,
 )
+from spectrue_core.pipeline.mode import AnalysisMode
 
 
 class TestDetectClaimLanguage:
@@ -76,7 +77,7 @@ class TestValidateClaimsLanguageConsistency:
             {"id": "c2", "text": "Міністерство фінансів опублікувало звіт"},
         ]
         is_valid, mismatches = validate_claims_language_consistency(
-            claims, "uk", pipeline_mode="deep"
+            claims, "uk", pipeline_mode=AnalysisMode.DEEP
         )
         assert is_valid is True
         assert len(mismatches) == 0
@@ -87,7 +88,7 @@ class TestValidateClaimsLanguageConsistency:
             {"id": "c1", "text": "The president signed the new law yesterday"},
         ]
         is_valid, mismatches = validate_claims_language_consistency(
-            claims, "uk", pipeline_mode="normal"
+            claims, "uk", pipeline_mode=AnalysisMode.GENERAL
         )
         assert is_valid is False
         assert len(mismatches) == 1
@@ -99,7 +100,7 @@ class TestValidateClaimsLanguageConsistency:
             {"id": "c2", "text": "The president signed the law"},  # English mixed in
         ]
         is_valid, mismatches = validate_claims_language_consistency(
-            claims, "uk", pipeline_mode="deep"
+            claims, "uk", pipeline_mode=AnalysisMode.DEEP
         )
         # Deep mode allows mismatches (just logs them)
         assert is_valid is True
@@ -109,7 +110,7 @@ class TestValidateClaimsLanguageConsistency:
     def test_empty_claims_is_valid(self):
         """Empty claims list should be valid."""
         is_valid, mismatches = validate_claims_language_consistency(
-            [], "uk", pipeline_mode="normal"
+            [], "uk", pipeline_mode=AnalysisMode.GENERAL
         )
         assert is_valid is True
         assert len(mismatches) == 0

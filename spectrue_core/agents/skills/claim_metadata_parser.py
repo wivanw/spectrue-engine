@@ -176,6 +176,19 @@ def parse_claim_metadata(
     check_worthiness = float(rc.get("check_worthiness", 0.5))
     check_worthiness = max(0.0, min(1.0, check_worthiness))
 
+    from spectrue_core.utils.topic_tags import build_topic_tags
+
+    topic_tags = build_topic_tags(
+        topic_group=rc.get("topic_group"),
+        topic_key=rc.get("topic_key"),
+        subject_entities=rc.get("subject_entities") or [],
+        retrieval_seed_terms=rc.get("retrieval_seed_terms") or [],
+        verification_target=verification_target.value,
+        claim_role=claim_role.value,
+        locale_signals=locale_signals,
+        time_signals=time_signals,
+    )
+
     return ClaimMetadata(
         verification_target=verification_target,
         claim_role=claim_role,
@@ -186,4 +199,5 @@ def parse_claim_metadata(
         time_sensitive=time_sensitive,
         retrieval_policy=retrieval_policy,
         metadata_confidence=metadata_confidence,
+        topic_tags=topic_tags,
     )

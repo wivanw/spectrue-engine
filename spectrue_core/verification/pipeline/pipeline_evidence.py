@@ -40,6 +40,7 @@ from spectrue_core.verification.calibration.calibration_registry import Calibrat
 from spectrue_core.verification.claims.claim_selection import pick_ui_main_claim
 from spectrue_core.verification.evidence.evidence_pack import EvidencePack
 from spectrue_core.verification.search.search_policy import (
+    SearchProfileName,
     resolve_stance_pass_mode,
 )
 from spectrue_core.utils.trace import Trace
@@ -56,6 +57,7 @@ from spectrue_core.verification.evidence_verdict_processing import (
     process_claim_verdicts,
     enrich_all_claim_verdicts,
 )
+from spectrue_core.pipeline.mode import ScoringMode
 
 # Bayesian update logic (M119)
 from spectrue_core.verification.evidence.bayesian_update import apply_bayesian_update
@@ -257,9 +259,9 @@ async def annotate_evidence_stance(
     
     # Map analysis_mode to profile
     if inp.analysis_mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
-        profile_name = "deep"
+        profile_name = SearchProfileName.DEEP
     else:
-        profile_name = "general"
+        profile_name = SearchProfileName.GENERAL
 
     stance_pass_mode = resolve_stance_pass_mode(profile_name)
     return await agent.cluster_evidence(
@@ -339,7 +341,8 @@ async def score_evidence_collection(
         result = await agent.score_evidence(pack, lang=inp.lang)
 
     # Track judge mode for downstream logic
-    result["judge_mode"] = "deep" if use_parallel_scoring else "standard"
+    # Track judge mode for downstream logic
+    result["judge_mode"] = ScoringMode.DEEP.value if use_parallel_scoring else ScoringMode.STANDARD.value
 
     if str(result.get("status", "")).lower() == "error":
         result["status"] = "error"
@@ -434,7 +437,7 @@ async def score_evidence_collection(
             pack,
             enrich_sources_with_trust,
             (global_r, 0.0, global_b, global_a),  # G will be set per-claim
-            result.get("judge_mode", "standard"),
+            result.get("judge_mode", ScoringMode.STANDARD.value),
         )
 
         changed = apply_dependency_penalties(claim_verdicts, claims)
