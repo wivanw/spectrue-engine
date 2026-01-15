@@ -60,6 +60,35 @@ def _dot(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
+def _mean_pool(vectors: list[list[float]]) -> list[float]:
+    """Compute mean pooling of a list of vectors."""
+    if not vectors:
+        return []
+    if not vectors[0]:
+        return []
+    
+    dim = len(vectors[0])
+    avg = [0.0] * dim
+    for vec in vectors:
+        if len(vec) != dim:
+            continue
+        for i, val in enumerate(vec):
+            avg[i] += val
+    
+    count = len(vectors)
+    if count == 0:
+        return [0.0] * dim
+        
+    return [x / count for x in avg]
+
+
+def _chunk_text(text: str, chunk_size: int = 8000) -> list[str]:
+    """Split text into chunks of max chunk_size characters."""
+    if not text:
+        return []
+    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+
 class EmbedService:
     """
     Singleton embedding service using OpenAI embeddings.
@@ -165,14 +194,27 @@ class EmbedService:
         return batches
 
     @classmethod
-    def embed(cls, texts: list[str]) -> list[list[float]]:
+    def embed(
+        cls, 
+        texts: list[str], 
+        *, 
+        purpose: str = "quote"  # "quote" | "document" | "query"
+    ) -> list[list[float]]:
         """
         Embed a list of texts via OpenAI.
+        
+        Args:
+            texts: List of strings to embed.
+            purpose: Semantic intent:
+                - "quote"/"query": Short text (sentence/paragraph). Limit: 2000 chars.
+                - "document"/"indexing": Large text. Limit: 8000 chars (safe chunking).
 
         Returns:
             List of embedding vectors (same order as input).
             Embeddings are L2-normalized for cosine similarity via dot product.
         """
+        import inspect
+
         if not texts:
             return []
 
@@ -183,6 +225,23 @@ class EmbedService:
         zero_norm_texts = 0
         fill_none_texts = 0
 
+        # Define limits based on purpose
+        # "quote" should be atomic. "document" can be chunky.
+        match purpose:
+            case "quote" | "query":
+                # Strict limit for atomic units. 
+                # If exceeded, it means upstream splitting failed.
+                soft_limit = 2000
+            case "document":
+                # Larger limit for docs, but still constrained by model window (8192 tokens)
+                soft_limit = 8000
+            case "indexing":
+                # Massive limit for full corpus indexing. Relies on internal chunking/pooling.
+                soft_limit = 2_000_000
+            case _:
+                # Default strict
+                soft_limit = 1000
+
         for i, text in enumerate(texts):
             if not text or not str(text).strip():
                 results[i] = [0.0] * EMBEDDING_DIMENSIONS
@@ -190,6 +249,54 @@ class EmbedService:
                 continue
 
             cleaned = str(text).strip()
+            
+            # Contract Enforcement: Check soft limit violation
+            if len(cleaned) > soft_limit:
+                 # Diagnose caller
+                try:
+                    stack = inspect.stack()
+                    # frame 0 is this, 1 is caller
+                    caller_frame = stack[1]
+                    caller_name = f"{caller_frame.filename.split('/')[-1]}:{caller_frame.function}:{caller_frame.lineno}"
+                except Exception:
+                    caller_name = "unknown"
+
+                logger.warning(
+                    "[Embeddings] ⚠️ Contract Violation: purpose='%s' text length=%d > %d. Caller: %s. Proceeding with chunking fallback.",
+                    purpose, len(cleaned), soft_limit, caller_name
+                )
+            
+            # Handle large texts via Chunking + Average Pooling
+            # Limit is ~8192 tokens. For dense text/Cyrillic, 1 char ~ 1 token.
+            # Using 8000 chars as HARD SAFETY limit for API 400 prevention.
+            HARD_LIMIT = 8000
+            
+            if len(cleaned) > HARD_LIMIT:
+                cache_key = cls._cache_key(cleaned)
+                if cache_key in cls._cache:
+                    results[i] = cls._cache[cache_key]
+                else:
+                    # Recursive chunk processing
+                    chunks = _chunk_text(cleaned, HARD_LIMIT)
+                    logger.debug(
+                        "[Embeddings] Chunking large text length=%d into %d chunks", 
+                        len(cleaned), len(chunks)
+                    )
+                    
+                    # Embed chunks (recursive with same purpose to allow drill-down or default)
+                    # Use 'document' purpose for chunks to suppress warnings for the recursive call if they are large? 
+                    # Actually chunks are guaranteed < 8000. So OK.
+                    chunk_vecs = cls.embed(chunks, purpose="document")
+                    
+                    # Mean pool and normalize
+                    avg_vec = _mean_pool(chunk_vecs)
+                    final_vec = _normalize(avg_vec)
+                    
+                    # Cache the aggregated vector
+                    cls._cache[cache_key] = final_vec
+                    results[i] = final_vec
+                continue
+
             cache_key = cls._cache_key(cleaned)
             if cache_key in cls._cache:
                 results[i] = cls._cache[cache_key]
@@ -283,9 +390,9 @@ class EmbedService:
         return final_results
 
     @classmethod
-    def embed_single(cls, text: str) -> list[float]:
+    def embed_single(cls, text: str, *, purpose: str = "quote") -> list[float]:
         """Embed a single text. Returns a 1D vector."""
-        result = cls.embed([text])
+        result = cls.embed([text], purpose=purpose)
         return result[0] if len(result) > 0 else []
 
     @classmethod
@@ -299,7 +406,8 @@ class EmbedService:
         if not text_a or not text_b:
             return 0.0
 
-        vecs = cls.embed([text_a, text_b])
+        # Usually comparing short texts (claims, sentences)
+        vecs = cls.embed([text_a, text_b], purpose="quote")
         if len(vecs) < 2:
             return 0.0
 
@@ -317,7 +425,8 @@ class EmbedService:
             return [0.0] * len(candidates)
 
         all_texts = [query] + candidates
-        vecs = cls.embed(all_texts)
+        # Query and candidates are usually short
+        vecs = cls.embed(all_texts, purpose="query")
 
         if len(vecs) < 2:
             return [0.0] * len(candidates)
@@ -351,19 +460,54 @@ class EmbedService:
 
 def split_sentences(text: str, max_sentences: int = 50) -> list[str]:
     """
-    Simple sentence splitter for quote extraction.
-
-    Uses basic punctuation rules. Not perfect but fast.
+    Robust sentence splitter for quote extraction.
+    
+    Strategies:
+    1. Split by newlines (paragraphs).
+    2. Split by punctuation (.!?).
+    3. Hard chop if segment > 2000 chars (prevents huge blobs).
     """
     import re
-
+    
     if not text:
         return []
 
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-
-    return sentences[:max_sentences]
+    # 1. Split by newlines first (logical paragraphs)
+    # This handles cases where text is a list of headers without punctuation.
+    paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+    
+    final_sentences = []
+    final_sentences = []
+    MAX_CHARS_PER_SEGMENT = 1000
+    
+    for p in paragraphs:
+        if len(final_sentences) >= max_sentences:
+            break
+            
+        # 2. Split by punctuation
+        # Using a safer regex that doesn't consume the delimiter
+        # But keeping consistent with previous logic: split ON whitespace AFTER punctuation
+        sents = re.split(r"(?<=[.!?])\s+", p)
+        
+        for s in sents:
+            s_clean = s.strip()
+            if len(s_clean) < 20:  # Skip tiny fragments
+                continue
+            
+            # 3. Hard limit check
+            if len(s_clean) > MAX_CHARS_PER_SEGMENT:
+                # If a "sentence" is huge, it's likely not a sentence but unparsed blob.
+                # Chunk it blindly into quote-sized pieces.
+                # Reuse _chunk_text helper if available, or slice manually
+                chunks = [s_clean[i:i+MAX_CHARS_PER_SEGMENT] for i in range(0, len(s_clean), MAX_CHARS_PER_SEGMENT)]
+                final_sentences.extend(chunks)
+            else:
+                final_sentences.append(s_clean)
+                
+            if len(final_sentences) >= max_sentences:
+                break
+                
+    return final_sentences[:max_sentences]
 
 
 def extract_best_quote(
@@ -494,7 +638,7 @@ def extract_best_quotes_batch(
         return [None] * len(items)
 
     # Single batch embedding call
-    embeddings = EmbedService.embed(flat_texts)
+    embeddings = EmbedService.embed(flat_texts, purpose="quote")
 
     if not embeddings:
         return [None] * len(items)

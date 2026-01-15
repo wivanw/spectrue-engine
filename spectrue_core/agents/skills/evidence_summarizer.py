@@ -159,12 +159,13 @@ class EvidenceSummarizerSkill:
             )
 
             stance = (item.stance or "").upper()
-            if stance == "SUPPORT":
-                supporting.append(ref)
-            elif stance == "REFUTE":
-                refuting.append(ref)
-            else:
-                contextual.append(ref)
+            match stance:
+                case "SUPPORT":
+                    supporting.append(ref)
+                case "REFUTE":
+                    refuting.append(ref)
+                case _:
+                    contextual.append(ref)
 
         return EvidenceSummary(
             supporting_evidence=tuple(supporting),

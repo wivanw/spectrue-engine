@@ -109,6 +109,12 @@ class SpectrueEngine:
                 except ValueError:
                     analysis_mode = AnalysisMode.GENERAL
             
+            # TESTING: Map 'deep' to 'deep_v2' during testing period
+            # TODO: Remove this mapping when deep mode is fully deprecated
+            if analysis_mode == AnalysisMode.DEEP:
+                analysis_mode = AnalysisMode.DEEP_V2
+                Trace.event("engine.mode_remapped", {"from": "deep", "to": "deep_v2"})
+            
             # Use canonical model from config (no override allowed)
             model = self.config.openai_model
 

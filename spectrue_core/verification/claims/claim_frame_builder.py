@@ -26,20 +26,17 @@ from spectrue_core.schema.claim_frame import (
     ContextMeta,
     EvidenceItemFrame,
 )
-from spectrue_core.utils.text_structure import (
-    TextStructure,
-    extract_text_structure,
-)
 from spectrue_core.verification.evidence.evidence_stats import (
-    build_confirmation_counts,
     build_evidence_stats,
 )
+from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
 from spectrue_core.verification.search.retrieval_trace import (
     create_empty_retrieval_trace,
     format_retrieval_trace,
 )
 from spectrue_core.verification.orchestration.execution_plan import ClaimExecutionState
 from spectrue_core.verification.retrieval.fixed_pipeline import source_id_for_url
+from spectrue_core.utils.text_structure import TextStructure, extract_text_structure
 
 
 def _generate_evidence_id(claim_id: str, url: str, index: int) -> str:
@@ -162,6 +159,7 @@ def build_claim_frame(
     structure: TextStructure | None = None,
     window_size: int = 1,
     confirmation_lambda: float | None = None,
+    corroboration: dict[str, Any] | None = None,
 ) -> ClaimFrame:
     """
     Build a complete ClaimFrame for deep analysis.
@@ -192,12 +190,17 @@ def build_claim_frame(
 
     # Build evidence stats + confirmation counts
     evidence_stats = build_evidence_stats(evidence_items)
-    if confirmation_lambda is not None:
-        confirmation_counts = build_confirmation_counts(
-            evidence_items,
-            lambda_weight=confirmation_lambda,
+    
+    # Use deterministic confirmation counts if corroboration is available
+    if confirmation_lambda is not None and corroboration:
+        vals = compute_confirmation_counts(corroboration, lam=confirmation_lambda)
+        confirmation_counts = ConfirmationCounts(
+            C_precise=vals["C_precise"],
+            C_corr=vals["C_corr"],
+            C_total=vals["C_total"],
         )
     else:
+        # Fallback to empty context
         confirmation_counts = ConfirmationCounts()
 
     # Build retrieval trace
@@ -225,6 +228,7 @@ def build_claim_frames_from_pipeline(
     evidence_by_claim: dict[str, list[dict[str, Any]]],
     execution_states: dict[str, ClaimExecutionState] | None = None,
     confirmation_lambda: float | None = None,
+    corroboration_by_claim: dict[str, dict[str, Any]] | None = None,
 ) -> list[ClaimFrame]:
     """
     Build ClaimFrame objects for all claims from pipeline data.
@@ -250,6 +254,7 @@ def build_claim_frames_from_pipeline(
 
         raw_evidence = evidence_by_claim.get(claim_id, [])
         exec_state = execution_states.get(claim_id) if execution_states else None
+        corr = corroboration_by_claim.get(claim_id) if corroboration_by_claim else None
 
         frame = build_claim_frame(
             claim_id=claim_id,
@@ -260,6 +265,7 @@ def build_claim_frames_from_pipeline(
             execution_state=exec_state,
             structure=structure,
             confirmation_lambda=confirmation_lambda,
+            corroboration=corr,
         )
         frames.append(frame)
 

@@ -255,27 +255,31 @@ def clamp_score_evidence_result(result: dict, *, scoring_mode: ScoringMode | str
 def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdict:
     def parse_status(s: str) -> VerdictStatus:
         s_lower = (s or "").lower()
-        if s_lower in ("verified", "confirmed"):
-            return VerdictStatus.VERIFIED
-        if s_lower in ("refuted", "false"):
-            return VerdictStatus.REFUTED
-        if s_lower == "partially_verified":
-            return VerdictStatus.PARTIALLY_VERIFIED
-        if s_lower == "unverified":
-            return VerdictStatus.UNVERIFIED
-        return VerdictStatus.AMBIGUOUS
+        match s_lower:
+            case "verified" | "confirmed":
+                return VerdictStatus.VERIFIED
+            case "refuted" | "false":
+                return VerdictStatus.REFUTED
+            case "partially_verified":
+                return VerdictStatus.PARTIALLY_VERIFIED
+            case "unverified":
+                return VerdictStatus.UNVERIFIED
+            case _:
+                return VerdictStatus.AMBIGUOUS
 
     def parse_state(s: str | None) -> VerdictState:
         s_lower = (s or "").lower().strip()
-        if s_lower in ("supported", "support"):
-            return VerdictState.SUPPORTED
-        if s_lower in ("refuted", "refute"):
-            return VerdictState.REFUTED
-        if s_lower in ("conflicted", "conflict"):
-            return VerdictState.CONFLICTED
-        if s_lower in ("insufficient_evidence", "insufficient evidence", "insufficient"):
-            return VerdictState.INSUFFICIENT_EVIDENCE
-        return VerdictState.INSUFFICIENT_EVIDENCE
+        match s_lower:
+            case "supported" | "support":
+                return VerdictState.SUPPORTED
+            case "refuted" | "refute":
+                return VerdictState.REFUTED
+            case "conflicted" | "conflict":
+                return VerdictState.CONFLICTED
+            case "insufficient_evidence" | "insufficient evidence" | "insufficient":
+                return VerdictState.INSUFFICIENT_EVIDENCE
+            case _:
+                return VerdictState.INSUFFICIENT_EVIDENCE
 
     claim_verdicts: list[ClaimVerdict] = []
     raw_claims = raw.get("claim_verdicts", [])

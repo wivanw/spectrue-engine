@@ -25,7 +25,11 @@ from spectrue_core.pipeline.contracts import (
     InputDoc,
     RGBAAuditResultPayload,
 )
-from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.pipeline.core import (
+    PipelineContext,
+    Step,
+)
+from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
@@ -173,10 +177,13 @@ def _build_rgba(verdict: dict, ctx: PipelineContext) -> list[float]:
 
 
 @dataclass
-class AssembleStandardResultStep:
+class AssembleStandardResultStep(Step):
     """Assemble standard-mode payload by mapping prior step outputs."""
 
     name: str = "assemble_standard_result"
+
+    def __init__(self, config: Any | None = None):
+        self._config = config
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
@@ -267,6 +274,18 @@ class AssembleStandardResultStep:
                 corr = ctx.get_extra("corroboration_by_claim") or {}
                 if isinstance(corr, dict) and cid and isinstance(corr.get(cid), dict):
                     cv["corroboration"] = corr[cid]
+
+                    # Deterministic blended confirmations (does NOT affect verdict)
+                    # Use value from runtime config if available
+                    from spectrue_core.runtime_config import DeepV2Config
+                    runtime = getattr(self._config, "runtime", None)
+                    deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
+                    lam = deep_v2_cfg.confirmation_lambda
+
+                    cv["confirmation_counts"] = compute_confirmation_counts(
+                        corr[cid],
+                        lam=lam,
+                    )
 
                 enriched_verdicts.append(cv)
 

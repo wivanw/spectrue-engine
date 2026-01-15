@@ -257,7 +257,7 @@ def _assign_semantic_clusters(claims: list[dict], threshold: float = 0.75) -> No
         return
 
     try:
-        embeddings = EmbedService.embed(texts)
+        embeddings = EmbedService.embed(texts, purpose="query")
         if len(embeddings) == 0:
             return
 

@@ -86,7 +86,9 @@ def _format_evidence_summary(summary: EvidenceSummary | None) -> str:
     return "\n".join(lines) if lines else "Summary is empty."
 
 
-def _format_stats_section(frame: ClaimFrame, *, include_v2: bool = False) -> str:
+def _format_stats_section(
+    frame: ClaimFrame, *, include_v2: bool = False, evidence_stats: dict[str, Any] | None = None
+) -> str:
     """Format evidence stats for judge prompt."""
     stats = frame.evidence_stats
     lines = [
@@ -116,6 +118,11 @@ def _format_stats_section(frame: ClaimFrame, *, include_v2: bool = False) -> str
             ]
         )
 
+    if isinstance(evidence_stats, dict) and evidence_stats:
+        lines.append("\nDetailed Evidence Stats (structured):")
+        for k, v in evidence_stats.items():
+            lines.append(f"  - {k}: {v}")
+
     if stats.conflicting_evidence:
         lines.append("⚠️ Evidence contains contradictions")
 
@@ -133,6 +140,7 @@ def build_claim_judge_prompt(
     *,
     ui_locale: str = "en",
     analysis_mode: str | AnalysisMode = AnalysisMode.DEEP,
+    evidence_stats: dict[str, Any] | None = None,
 ) -> str:
     """
     Build prompt for claim judging.
@@ -150,7 +158,11 @@ def build_claim_judge_prompt(
     """
     evidence_section = _format_evidence_for_judge(frame.evidence_items)
     summary_section = _format_evidence_summary(evidence_summary)
-    stats_section = _format_stats_section(frame, include_v2=(str(analysis_mode) == str(AnalysisMode.DEEP_V2)))
+    stats_section = _format_stats_section(
+        frame,
+        include_v2=(str(analysis_mode) == str(AnalysisMode.DEEP_V2)),
+        evidence_stats=evidence_stats,
+    )
 
     # Get URLs for sources_used constraint
     available_urls = [item.url for item in frame.evidence_items]

@@ -28,6 +28,7 @@ from spectrue_core.agents.skills.claim_judge_prompts import (
     build_claim_judge_prompt,
     build_claim_judge_system_prompt,
 )
+from spectrue_core.verification.scoring.judge_evidence_stats import build_judge_evidence_stats
 from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
 from spectrue_core.pipeline.mode import ScoringMode
 from spectrue_core.pipeline.contracts import (
@@ -134,6 +135,7 @@ class BuildClaimFramesStep(Step):
             document_text = ctx.extras.get("clean_text", "") or ctx.extras.get("input_text", "") or ctx.extras.get("prepared_fact", "")
             evidence_by_claim = ctx.extras.get("evidence_by_claim", {})
             execution_states = ctx.extras.get("execution_states", {})
+            corroboration_by_claim = ctx.get_extra("corroboration_by_claim")
 
             if not claims:
                 Trace.event("build_claim_frames.skip", {"reason": "no_claims"})
@@ -153,6 +155,7 @@ class BuildClaimFramesStep(Step):
                 evidence_by_claim=evidence_by_claim,
                 execution_states=execution_states,
                 confirmation_lambda=confirmation_lambda,
+                corroboration_by_claim=corroboration_by_claim if isinstance(corroboration_by_claim, dict) else None,
             )
 
             deep_ctx = DeepClaimContext(claim_frames=frames)
@@ -254,6 +257,9 @@ class JudgeClaimsStep(Step):
             ui_locale = ctx.lang or "en"
             analysis_mode = ctx.mode.api_analysis_mode
 
+            corr_by_claim = ctx.get_extra("corroboration_by_claim") or {}
+            est_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
+
             async def _repair_claim_output(
                 frame: ClaimFrame,
                 summary: EvidenceSummary | None,
@@ -299,11 +305,18 @@ class JudgeClaimsStep(Step):
                         },
                     )
                     # Pass ui_locale to generate explanation in user's language
+                    evidence_stats = build_judge_evidence_stats(
+                        claim_id=frame.claim_id,
+                        corroboration_by_claim=corr_by_claim if isinstance(corr_by_claim, dict) else None,
+                        evidence_stats_by_claim=est_by_claim if isinstance(est_by_claim, dict) else None,
+                    )
+
                     output = await skill.judge(
                         frame,
                         summary,
                         ui_locale=ui_locale,
                         analysis_mode=analysis_mode,
+                        evidence_stats=evidence_stats,
                     )
                     return frame.claim_id, output, None
                 except Exception as e:
@@ -443,6 +456,9 @@ class AssembleDeepResultStep(Step):
     def name(self) -> str:
         return "assemble_deep_result"
 
+    def __init__(self, config: Any | None = None):
+        self._config = config
+
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("assemble_deep_result")
 
@@ -484,6 +500,27 @@ class AssembleDeepResultStep(Step):
                 }
 
             def _confirmation_payload(frame: ClaimFrame) -> dict[str, Any]:
+                # Deep v2: use deterministic confirmation counts
+                # Use value from runtime config if available
+                from spectrue_core.runtime_config import DeepV2Config
+                from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
+                
+                runtime = getattr(self._config, "runtime", None)
+                deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
+                lam = deep_v2_cfg.confirmation_lambda
+                
+                corr_meta = ctx.get_extra("corroboration_by_claim") or {}
+                cid = frame.claim_id
+                
+                if isinstance(corr_meta, dict) and cid in corr_meta:
+                    vals = compute_confirmation_counts(corr_meta[cid], lam=lam)
+                    return {
+                        "C_precise": vals["C_precise"],
+                        "C_corr": vals["C_corr"],
+                        "C_total": vals["C_total"],
+                    }
+
+                # Fallback to frame counts (if already calculated)
                 counts = frame.confirmation_counts
                 return {
                     "C_precise": counts.C_precise,
@@ -583,10 +620,15 @@ class AssembleDeepResultStep(Step):
                     claim_result["confirmation_counts"] = _confirmation_payload(frame)
                 claim_results.append(claim_result)
 
+                # Clamp A score for display to avoid -1.0
+                safe_rgba = list(rgba)
+                if len(safe_rgba) == 4 and isinstance(safe_rgba[3], (int, float)):
+                    safe_rgba[3] = max(0.0, min(1.0, float(safe_rgba[3])))
+
                 claim_verdicts.append({
                     "claim_id": frame.claim_id,
                     "text": frame.claim_text,
-                    "rgba": rgba,
+                    "rgba": safe_rgba,
                     "verdict_score": verdict_score,
                     "verdict": judge_output.verdict,
                     "confidence": judge_output.confidence,
@@ -651,19 +693,20 @@ class AssembleDeepResultStep(Step):
             Trace.phase_end("assemble_deep_result")
 
 
-def get_deep_claim_steps(llm_client: LLMClient) -> list[Step]:
+def get_deep_claim_steps(llm_client: LLMClient, config: Any | None = None) -> list[Step]:
     """
     Get all steps for deep claim processing.
     
     Args:
         llm_client: LLM client for skill calls
+        config: Runtime configuration
     
     Returns:
         List of steps in execution order
     """
     return [
-        BuildClaimFramesStep(),
+        BuildClaimFramesStep(config=config),
         SummarizeEvidenceStep(llm_client),
         JudgeClaimsStep(llm_client),
-        AssembleDeepResultStep(),
+        AssembleDeepResultStep(config=config),
     ]

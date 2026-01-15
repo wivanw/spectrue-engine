@@ -103,7 +103,7 @@ class EmbeddingClient:
             try:
                 from spectrue_core.utils.embedding_service import EmbedService
                 if EmbedService.is_available():
-                    return EmbedService.embed(texts)
+                    return EmbedService.embed(texts, purpose="indexing")
             except ImportError:
                 pass
             # Return zero vectors if no service available

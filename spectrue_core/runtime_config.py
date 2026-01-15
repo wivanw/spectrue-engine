@@ -340,7 +340,7 @@ class ContentBudgetConfig:
 class DeepV2Config:
     claim_cluster_quantile: float = 0.7
     doc_cluster_quantile: float = 0.85
-    confirmation_lambda: float = 0.5
+    confirmation_lambda: float = 0.35
     representative_min_k: int = 2
     representative_max_k: int = 3
     precision_top_k: int = 2
@@ -550,7 +550,7 @@ class EngineRuntimeConfig:
                 os.getenv("DEEP_V2_DOC_CLUSTER_QUANTILE"), default=0.85, min_v=0.0, max_v=1.0
             ),
             confirmation_lambda=_parse_float(
-                os.getenv("DEEP_V2_CONFIRM_LAMBDA"), default=0.5, min_v=0.0, max_v=5.0
+                os.getenv("DEEP_V2_CONFIRM_LAMBDA"), default=0.35, min_v=0.0, max_v=5.0
             ),
             representative_min_k=_parse_int(
                 os.getenv("DEEP_V2_REP_MIN_K"), default=2, min_v=1, max_v=5

@@ -16,7 +16,6 @@ from typing import Any, TYPE_CHECKING, Tuple
 if TYPE_CHECKING:
     from spectrue_core.schema.claim_frame import (
         EvidenceStats as FrameEvidenceStats,
-        ConfirmationCounts,
         EvidenceItemFrame
     )
 
@@ -111,20 +110,21 @@ def build_evidence_stats(evidence_items: Tuple["EvidenceItemFrame", ...]) -> "Fr
 
         # Stance counting
         stance = (item.stance or "").upper()
-        if stance in ("SUPPORT", "SUP"):
-            support_sources += 1
-            if item.publisher_id:
-                support_publishers.add(item.publisher_id)
-            if item.similar_cluster_id:
-                support_clusters.add(item.similar_cluster_id)
-        elif stance in ("REFUTE", "REF"):
-            refute_sources += 1
-            if item.publisher_id:
-                refute_publishers.add(item.publisher_id)
-            if item.similar_cluster_id:
-                refute_clusters.add(item.similar_cluster_id)
-        else:
-            context_sources += 1
+        match stance:
+            case "SUPPORT" | "SUP":
+                support_sources += 1
+                if item.publisher_id:
+                    support_publishers.add(item.publisher_id)
+                if item.similar_cluster_id:
+                    support_clusters.add(item.similar_cluster_id)
+            case "REFUTE" | "REF":
+                refute_sources += 1
+                if item.publisher_id:
+                    refute_publishers.add(item.publisher_id)
+                if item.similar_cluster_id:
+                    refute_clusters.add(item.similar_cluster_id)
+            case _:
+                context_sources += 1
 
         # Quality signals
         if item.quote:
@@ -155,48 +155,4 @@ def build_evidence_stats(evidence_items: Tuple["EvidenceItemFrame", ...]) -> "Fr
             precision_publishers=len(refute_publishers),
             corroboration_clusters=len(refute_clusters),
         ),
-    )
-
-
-def build_confirmation_counts(
-    evidence_items: Tuple["EvidenceItemFrame", ...], 
-    lambda_weight: float = 0.5
-) -> "ConfirmationCounts":
-    """
-    Build ConfirmationCounts (C-scores) from evidence items.
-    """
-    from spectrue_core.schema.claim_frame import ConfirmationCounts
-
-    c_precise = 0.0
-    c_corr = 0.0
-    
-    # Simple heuristic accumulation based on stance and tier
-    # Real implementation would use probabilistic mixing
-    for item in evidence_items:
-        stance = (item.stance or "").upper()
-        if stance in ("SUPPORT", "REFUTE"):
-            weight = 1.0
-            tier = (item.source_tier or "").upper()
-            if tier == "A":
-                weight = 1.0
-            elif tier == "B":
-                weight = 0.7
-            else:
-                weight = 0.4
-            
-            # Attribute to precise or corr based on unknown logic, 
-            # for now split evenly or based on attribution type?
-            # Assuming attribution="precision" vs "corroboration"
-            attr = item.attribution or "corroboration"
-            if attr == "precision":
-                c_precise += weight
-            else:
-                c_corr += weight
-
-    c_total = (lambda_weight * c_precise) + ((1 - lambda_weight) * c_corr)
-
-    return ConfirmationCounts(
-        C_precise=c_precise,
-        C_corr=c_corr,
-        C_total=c_total
     )

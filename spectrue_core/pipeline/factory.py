@@ -90,12 +90,14 @@ class PipelineFactory:
             mode_name = AnalysisMode.GENERAL # Default mode for context
             mode = get_mode(mode_name) # Ensure mode object exists
             nodes = self._build_extraction_dag_nodes(config)
-        elif mode.api_analysis_mode == AnalysisMode.GENERAL:
-            nodes = self._build_general_dag_nodes(config)
-        elif mode.api_analysis_mode == AnalysisMode.DEEP_V2:
-            nodes = self._build_deep_v2_dag_nodes(config)
         else:
-            nodes = self._build_deep_dag_nodes(config)
+            match mode.api_analysis_mode:
+                case AnalysisMode.GENERAL:
+                    nodes = self._build_general_dag_nodes(config)
+                case AnalysisMode.DEEP_V2:
+                    nodes = self._build_deep_v2_dag_nodes(config)
+                case _:
+                    nodes = self._build_deep_dag_nodes(config)
 
         logger.debug(
             "[PipelineFactory] Built DAG pipeline with %d nodes: %s",
@@ -282,7 +284,7 @@ class PipelineFactory:
 
             # Final assembly
             StepNode(
-                step=AssembleStandardResultStep(),
+                step=AssembleStandardResultStep(config=config),
                 depends_on=["judge_standard"],
             ),
 
@@ -301,8 +303,8 @@ class PipelineFactory:
         """Build DAG nodes for deep mode with per-claim judging."""
         from spectrue_core.pipeline.dag import StepNode
         from spectrue_core.pipeline.steps import (
-            ClaimGraphStep,
-            ClaimClusterStep,
+            # NOTE: ClaimGraphStep and ClaimClusterStep intentionally NOT imported
+            # Deep mode skips graph building since process_all_claims=True
             EvidenceCollectStep,
             EvidenceGatingStep,
             StanceAnnotateStep,
@@ -371,27 +373,20 @@ class PipelineFactory:
                 depends_on=["assert_non_empty_claims"],
             ),
 
-            # ==================== PARALLEL: INLINE SOURCES + GRAPH ====================
+            # ==================== PARALLEL: INLINE SOURCES ====================
+            # NOTE: ClaimGraph and ClaimCluster are SKIPPED in deep mode
+            # because process_all_claims=True means target selection doesn't use graph metrics.
+            # This saves ~32s of ClaimGraph build + LLM edge_typing costs.
             StepNode(
                 step=VerifyInlineSourcesStep(agent=self.agent, search_mgr=self.search_mgr, config=config),
                 depends_on=["extract_claims"],
             ),
-            StepNode(
-                step=ClaimGraphStep(
-                    claim_graph=self.claim_graph,
-                    runtime_config=config.runtime if hasattr(config, "runtime") else None,
-                ),
-                depends_on=["extract_claims"],
-            ),
-            StepNode(
-                step=ClaimClusterStep(),
-                depends_on=["claim_graph"],
-            ),
 
             # ==================== TARGET SELECTION (ALL CLAIMS) ====================
+            # Directly depends on assert_max_claims since we skip claim graph
             StepNode(
                 step=TargetSelectionStep(process_all_claims=True),
-                depends_on=["claim_cluster"],  # Now depends on cluster metadata
+                depends_on=["assert_max_claims"],
             ),
 
             # Search retrieval (atomic steps)
@@ -537,7 +532,7 @@ class PipelineFactory:
 
             # Assemble deep result (per-claim verdicts, NO global RGBA)
             StepNode(
-                step=AssembleDeepResultStep(),
+                step=AssembleDeepResultStep(config=config),
                 depends_on=[
                     "judge_claims" if llm_client else "judge_unavailable",
                     "aggregate_rgba_audit",
@@ -822,7 +817,7 @@ class PipelineFactory:
 
             # Assemble deep result (per-claim verdicts, NO global RGBA)
             StepNode(
-                step=AssembleDeepResultStep(),
+                step=AssembleDeepResultStep(config=config),
                 depends_on=[
                     "judge_claims" if llm_client else "judge_unavailable",
                     "aggregate_rgba_audit",

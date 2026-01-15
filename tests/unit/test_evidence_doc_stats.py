@@ -7,9 +7,9 @@
 from spectrue_core.pipeline.steps.retrieval.cluster_web_search import _assign_similarity_clusters
 from spectrue_core.schema.claim_frame import EvidenceItemFrame
 from spectrue_core.verification.evidence.evidence_stats import (
-    build_confirmation_counts,
     build_evidence_stats,
 )
+from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
 
 
 def test_exact_dupe_counts():
@@ -82,7 +82,11 @@ def test_confirmation_formula_excludes_duplicates():
         ),
     )
 
-    counts = build_confirmation_counts(items, lambda_weight=0.5)
-    assert counts.C_precise == 2.0
-    assert counts.C_corr == 2.0
-    assert counts.C_total == 2.0
+    corr = {
+        "precision_publishers_support": 2,
+        "corroboration_clusters_support": 2,
+    }
+    counts = compute_confirmation_counts(corr, lam=0.5)
+    assert counts["C_precise"] == 2.0
+    assert counts["C_corr"] == 2.0
+    assert counts["C_total"] == 3.0  # 2 + 0.5 * 2 = 3.0 with lam=0.5

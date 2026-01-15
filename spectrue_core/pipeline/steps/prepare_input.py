@@ -59,6 +59,11 @@ class PrepareInputStep:
         )
         from spectrue_core.runtime_config import ContentBudgetConfig
 
+        # Skip if already prepared (prevents duplicate processing in deep pipeline with preloaded claims)
+        if ctx.get_extra("input_prepared"):
+            Trace.event("prepare_input.skipped", {"reason": "already_prepared"})
+            return ctx
+
         try:
             # Get fact from claims or context
             fact = ctx.get_extra("raw_fact", "")
@@ -172,6 +177,7 @@ class PrepareInputStep:
                 .set_extra("prepared_sources", final_sources)
                 .set_extra("inline_sources", inline_sources_list)
                 .set_extra(INPUT_DOC_KEY, input_doc)
+                .set_extra("input_prepared", True)
             )
 
         except Exception as e:

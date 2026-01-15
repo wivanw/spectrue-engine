@@ -9,6 +9,11 @@ fr:
       Texte de l'affirmation : "{claim_text}"
       Langue de l'affirmation : {claim_language}
 
+      Vous recevrez :
+      - affirmation
+      - preuves (extraits/citations/passages)
+      - statistiques des preuves (compteurs structurés)
+
       ## CONTEXTE ORIGINAL
 
       {context_text}
@@ -31,7 +36,12 @@ fr:
       1. **Évaluation des preuves** : Que disent réellement les sources ? Cite des sources/domaines spécifiques.
       2. **Vérification de manipulation** : Cherche le "cherry-picking", le contexte manquant, le sensationnalisme, le langage chargé.
       3. **Identification des lacunes** : Quelles preuves manquent ? Sois explicite sur les limites.
-      4. **Verdict** : Base-toi UNIQUEMENT sur les preuves. Si les preuves sont insuffisantes, dis-le — utilise -1 pour les scores.
+      4. **Statistiques et structure des preuves** :
+         Utilise evidence_stats UNIQUEMENT pour :
+         - distinguer la redondance (exact_content_groups) de l'indépendance (precision_publishers_*)
+         - mentionner les lacunes de couverture (direct_anchors / covered_slots / unique_domains)
+         Ne traite PAS ces compteurs comme des preuves en soi.
+      5. **Verdict** : Base-toi UNIQUEMENT sur les preuves. Si les preuves sont insuffisantes, dis-le — utilise -1 pour les scores.
 
       ## GUIDE DE NOTATION RGBA
 

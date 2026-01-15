@@ -13,6 +13,11 @@ en:
       Claim Text: "{claim_text}"
       Claim Language: {claim_language}
 
+      You will receive:
+      - claim
+      - evidence (snippets/quotes/excerpts)
+      - evidence_stats (structured counters)
+
       ## ORIGINAL CONTEXT
 
       {context_text}
@@ -35,7 +40,12 @@ en:
       1. **Evidence Assessment**: What do sources actually say? Name specific sources/domains.
       2. **Manipulation Check**: Look for cherry-picking, missing context, sensationalism, loaded language.
       3. **Gaps Identification**: What evidence is missing? Be explicit about limitations.
-      4. **Verdict**: Base ONLY on evidence. If evidence is insufficient, say so — use -1 for scores.
+      4. **Evidence Stats & Structure**:
+         Use evidence_stats ONLY to:
+         - distinguish redundancy (exact_content_groups) from independence (precision_publishers_*)
+         - mention coverage gaps (direct_anchors / covered_slots / unique_domains)
+         Do NOT treat these counters as proof by themselves.
+      5. **Verdict**: Base ONLY on evidence. If evidence is insufficient, say so — use -1 for scores.
 
       ## RGBA SCORING GUIDANCE
 

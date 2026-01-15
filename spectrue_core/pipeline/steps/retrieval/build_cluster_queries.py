@@ -75,7 +75,15 @@ class BuildClusterQueriesStep:
             profile = default_search_policy().get_profile(profile_name)
 
             full_text = ctx.get_extra("prepared_fact", "") or ctx.get_extra("input_text", "")
-            anchors = extract_all_anchors(full_text)
+            
+            # Reuse cached anchors if already extracted by claim extraction step
+            cached_anchors = ctx.get_extra("extracted_anchors")
+            if cached_anchors is not None:
+                anchors = cached_anchors
+                Trace.event("claims.coverage.anchors.cached", {"count": len(anchors)})
+            else:
+                anchors = extract_all_anchors(full_text)
+            
             fact_fallback = _fallback_fact(ctx)
 
             cluster_plans: list[dict[str, Any]] = []

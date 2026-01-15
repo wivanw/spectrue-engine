@@ -40,7 +40,7 @@ class CostEvent:
             "stage": self.stage,
             "provider": self.provider,
             "cost_usd": float(self.cost_usd),
-            "cost_credits": float(self.cost_credits),  # Serialize as float for JSON
+            "cost_credits": round(float(self.cost_credits), 6),  # Round to avoid FP artifacts
             "run_id": self.run_id,
             "timestamp": self.timestamp.isoformat(),
             "meta": dict(self.meta),
@@ -70,11 +70,11 @@ class RunCostSummary:
         return {
             "run_id": self.run_id,
             "total_usd": float(self.total_usd),
-            "total_credits": float(self.total_credits),  # Serialize as float for JSON
+            "total_credits": round(float(self.total_credits), 6),  # Round to avoid FP artifacts
             "by_stage_usd": dict(self.by_stage_usd),
-            "by_stage_credits": {k: float(v) for k, v in self.by_stage_credits.items()},
+            "by_stage_credits": {k: round(float(v), 6) for k, v in self.by_stage_credits.items()},
             "by_provider_usd": dict(self.by_provider_usd),
-            "by_provider_credits": {k: float(v) for k, v in self.by_provider_credits.items()},
+            "by_provider_credits": {k: round(float(v), 6) for k, v in self.by_provider_credits.items()},
             "events": [event.to_dict() for event in self.events],
             "phase_usage": list(self.phase_usage),
             "reason_summaries": list(self.reason_summaries),

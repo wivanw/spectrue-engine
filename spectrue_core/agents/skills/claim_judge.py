@@ -32,6 +32,7 @@ from spectrue_core.schema.claim_frame import (
 )
 from spectrue_core.utils.trace import Trace
 from spectrue_core.pipeline.mode import AnalysisMode
+from spectrue_core.verification.scoring.judge_normalize import normalize_verdict_enum
 
 
 class ClaimJudgeSkill:
@@ -58,6 +59,7 @@ class ClaimJudgeSkill:
         *,
         ui_locale: str = "en",
         analysis_mode: str | AnalysisMode = AnalysisMode.DEEP,
+        evidence_stats: dict[str, Any] | None = None,
     ) -> JudgeOutput:
         """
         Judge a claim and produce RGBA verdict.
@@ -76,6 +78,7 @@ class ClaimJudgeSkill:
             evidence_summary,
             ui_locale=ui_locale,
             analysis_mode=str(analysis_mode),
+            evidence_stats=evidence_stats,
         )
         system_prompt = build_claim_judge_system_prompt(lang=ui_locale)
 
@@ -160,7 +163,8 @@ class ClaimJudgeSkill:
 
         # Extract other fields
         confidence = float(response.get("confidence", 0.3))
-        verdict = str(response.get("verdict", "NEI"))
+        # Normalize verdict to canonical enum (SUPPORT/REFUTE/MIXED/NEI)
+        verdict = normalize_verdict_enum(response.get("verdict"))
         explanation = str(response.get("explanation", ""))
 
         # Extract sources_used and missing_evidence

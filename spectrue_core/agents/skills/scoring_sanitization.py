@@ -53,22 +53,23 @@ def maybe_drop_style_section(rationale: str, *, honesty_score: float | None, lan
         return rationale
 
     lc = (lang or "").lower()
-    if lc == "uk":
-        labels = ["Стиль та контекст:"]
-    elif lc == "ru":
-        labels = ["Стиль и контекст:"]
-    elif lc == "es":
-        labels = ["Estilo y Contexto:"]
-    elif lc == "de":
-        labels = ["Stil und Kontext:"]
-    elif lc == "fr":
-        labels = ["Style et Contexte:"]
-    elif lc == "ja":
-        labels = ["文体と文脈:"]
-    elif lc == "zh":
-        labels = ["风格与语境:"]
-    else:
-        labels = ["Style and Context:"]
+    match lc:
+        case "uk":
+            labels = ["Стиль та контекст:"]
+        case "ru":
+            labels = ["Стиль и контекст:"]
+        case "es":
+            labels = ["Estilo y Contexto:"]
+        case "de":
+            labels = ["Stil und Kontext:"]
+        case "fr":
+            labels = ["Style et Contexte:"]
+        case "ja":
+            labels = ["文体と文脈:"]
+        case "zh":
+            labels = ["风格与语境:"]
+        case _:
+            labels = ["Style and Context:"]
 
     s = rationale
     for label in labels:

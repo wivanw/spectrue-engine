@@ -103,6 +103,15 @@ class ExtractClaimsStep:
                 anchor_claim = max(claims, key=lambda c: float(c.get("importance", 0.5)))
                 anchor_claim_id = str(anchor_claim.get("id", "c1"))
                 
+                # Extract anchors for downstream steps (even with preloaded claims)
+                from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
+                fact = ctx.get_extra("prepared_fact") or ctx.get_extra("raw_fact", "")
+                cached_anchors = ctx.get_extra("extracted_anchors")
+                if cached_anchors is None:
+                    anchors = extract_all_anchors(fact)
+                else:
+                    anchors = cached_anchors
+                
                 Trace.event(
                     "extract_claims.completed",
                     {
@@ -121,6 +130,7 @@ class ExtractClaimsStep:
                     .set_extra("eligible_claims", claims)
                     .set_extra("_extracted_claims", claims)
                     .set_extra(CLAIMS_KEY, claims_contract)
+                    .set_extra("extracted_anchors", anchors)  # Cache for downstream
                 )
             
             fact = ctx.get_extra("prepared_fact") or ctx.get_extra("raw_fact", "")
@@ -129,10 +139,21 @@ class ExtractClaimsStep:
             if progress_callback:
                 await progress_callback("extracting_claims")
 
+            # Pre-extract anchors and cache them for downstream steps (build_queries, build_cluster_queries)
+            # This prevents duplicate anchor extraction and trace events
+            from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
+            cached_anchors = ctx.get_extra("extracted_anchors")
+            if cached_anchors is None:
+                anchors = extract_all_anchors(fact)
+                # Store anchors in a local variable to pass to context later
+            else:
+                anchors = cached_anchors
+
             # Delegate to agent wrapper
             result_tuple = await self.agent.extract_claims(
                 text=fact,
                 lang=ctx.lang,
+                anchors=anchors,
             )
             claims, check_oracle, intent, fast_query = result_tuple
             if not claims:
@@ -203,6 +224,7 @@ class ExtractClaimsStep:
                 .set_extra("fast_query", fast_query)
                 .set_extra("search_queries", [fast_query] if fast_query else [fact])
                 .set_extra(CLAIMS_KEY, claims_contract)
+                .set_extra("extracted_anchors", anchors)  # Cache for downstream steps
             )
 
         except Exception as e:

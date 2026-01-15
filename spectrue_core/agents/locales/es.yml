@@ -9,6 +9,11 @@ es:
       Texto de la afirmación: "{claim_text}"
       Idioma de la afirmación: {claim_language}
 
+      Recibirás:
+      - afirmación
+      - evidencia (fragmentos/citas/extractos)
+      - estadísticas de evidencia (contadores estructurados)
+
       ## CONTEXTO ORIGINAL
 
       {context_text}
@@ -31,7 +36,12 @@ es:
       1. **Evaluación de Evidencia**: ¿Qué dicen realmente las fuentes? Nombra fuentes/dominios específicos.
       2. **Verificación de Manipulación**: Busca cherry-picking, contexto faltante, sensacionalismo, lenguaje cargado.
       3. **Identificación de Brechas**: ¿Qué evidencia falta? Sé explícito sobre las limitaciones.
-      4. **Veredicto**: Básate ÚNICAMENTE en la evidencia. Si la evidencia es insuficiente, dilo — usa -1 para las puntuaciones.
+      4. **Estadísticas y estructura de evidencia**:
+         Usa evidence_stats ÚNICAMENTE para:
+         - distinguir la redundancia (exact_content_groups) de la independencia (precision_publishers_*)
+         - mencionar brechas de cobertura (direct_anchors / covered_slots / unique_domains)
+         NO trates estos contadores como pruebas por sí mismos.
+      5. **Veredicto**: Básate ÚNICAMENTE en la evidencia. Si la evidencia es insuficiente, dilo — usa -1 para las puntuaciones.
 
       ## GUÍA DE PUNTUACIÓN RGBA
 

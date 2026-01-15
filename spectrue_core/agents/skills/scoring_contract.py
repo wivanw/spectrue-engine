@@ -265,20 +265,21 @@ def build_stance_matrix_instructions(*, num_sources: int, pass_type: str) -> str
         normalized = STANCE_PASS_SINGLE
 
     pass_rules = ""
-    if normalized == STANCE_PASS_SUPPORT_ONLY:
-        pass_rules = """PASS MODE: SUPPORT_ONLY
+    match normalized:
+        case "SUPPORT_ONLY":
+            pass_rules = """PASS MODE: SUPPORT_ONLY
 - You MUST NOT output REFUTE or MIXED.
 - Output SUPPORT only if a direct quote/span explicitly supports the claim/assertion.
 - If support is unclear or only contextual, output CONTEXT (or IRRELEVANT if unrelated).
 """
-    elif normalized == STANCE_PASS_REFUTE_ONLY:
-        pass_rules = """PASS MODE: REFUTE_ONLY
+        case "REFUTE_ONLY":
+            pass_rules = """PASS MODE: REFUTE_ONLY
 - You MUST NOT output SUPPORT or MIXED.
 - Output REFUTE only if a direct quote/span explicitly contradicts the claim/assertion.
 - If contradiction is unclear or only contextual, output CONTEXT (or IRRELEVANT if unrelated).
 """
-    else:
-        pass_rules = """PASS MODE: SINGLE_PASS (balanced)
+        case _:
+            pass_rules = """PASS MODE: SINGLE_PASS (balanced)
 - SUPPORT if the source reports the same facts/discovery as the claim, even if paraphrased or summarized.
 - SUPPORT if the source is about the same scientific topic and confirms the key details.
 - News articles covering the same research paper or discovery = SUPPORT (not CONTEXT).
@@ -314,21 +315,21 @@ Your task is to map each Search Source to its BEST matching Claim AND Assertion.
 
 ## Output JSON Schema
 ```json
-{
+{{
   "matrix": [
-    {
+    {{
       "source_index": 0,
       "claim_id": "c1",
-      "assertion_key": "event.location.city", // or null 
+      "assertion_key": "event.location.city",
       "stance": "SUPPORT",
       "relevance": 0.9,
       "quote": "Direct quote from text...",
-      "evidence_role": "direct", // direct | indirect | mention_only
-      "covers": ["entity","time","location","quantity","attribution","causal","other"], // components covered
+      "evidence_role": "direct",
+      "covers": ["entity","time","location","quantity","attribution","causal","other"],
       "reason": "Explain why..."
-    }
+    }}
   ]
-}
+}}
 ```
 """
 

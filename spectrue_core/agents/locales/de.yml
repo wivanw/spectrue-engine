@@ -9,6 +9,11 @@ de:
       Text der Behauptung: "{claim_text}"
       Sprache der Behauptung: {claim_language}
 
+      Du erhältst:
+      - Behauptung
+      - Beweise (Snippets/Zitate/Auszüge)
+      - Beweisstatistik (strukturierte Zähler)
+
       ## URSPRÜNGLICHER KONTEXT
 
       {context_text}
@@ -31,7 +36,12 @@ de:
       1. **Beweisbewertung**: Was sagen die Quellen tatsächlich? Nenne spezifische Quellen/Domains.
       2. **Manipulationsprüfung**: Achte auf Rosinenpickerei (Cherry-Picking), fehlenden Kontext, Sensationalismus, emotionale Sprache.
       3. **Lückenidentifikation**: Welche Beweise fehlen? Sei explizit bezüglich der Einschränkungen.
-      4. **Urteil**: Basieren NUR auf Beweisen. Wenn Beweise unzureichend sind, sage es – verwende -1 für Scores.
+      4. **Beweisstatistik & Struktur**:
+         Verwende evidence_stats NUR um:
+         - Redundanz (exact_content_groups) von Unabhängigkeit (precision_publishers_*) zu unterscheiden
+         - Abdeckungslücken (direct_anchors / covered_slots / unique_domains) zu erwähnen
+         Behandle diese Zähler NICHT als Beweise an sich.
+      5. **Urteil**: Basieren NUR auf Beweisen. Wenn Beweise unzureichend sind, sage es – verwende -1 für Scores.
 
       ## RGBA-BEWERTUNGSLEITFADEN
 

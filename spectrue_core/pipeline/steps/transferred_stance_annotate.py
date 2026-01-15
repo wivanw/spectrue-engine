@@ -136,11 +136,24 @@ class TransferredStanceAnnotateStep(Step):
                 },
             )
 
-            # annotate_evidence_stance expects sources + claims (batch)
+            # annotate_evidence_stance expects sources + claims (batch) + inp
             # We send a single-claim batch to bind stance to this claim.
+            # Create minimal EvidenceFlowInput for stance annotation
+            from spectrue_core.verification.pipeline.pipeline_evidence import EvidenceFlowInput
+            fact_text = ctx.get_extra("prepared_fact") or ctx.get_extra("input_text") or ""
+            stance_inp = EvidenceFlowInput(
+                fact=fact_text,
+                original_fact=fact_text,
+                lang=ctx.lang or "en",
+                content_lang=ctx.lang,
+                analysis_mode=AnalysisMode.DEEP_V2,
+                progress_callback=None,
+            )
+            
             total_pairs += len(chosen)
             result_items = await annotate_evidence_stance(
                 agent=self.agent,
+                inp=stance_inp,
                 sources=chosen,
                 claims=[claim],
             )

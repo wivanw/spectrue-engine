@@ -62,6 +62,11 @@ class MeteringSetupStep:
         from spectrue_core.utils.embedding_service import EmbedService
         from spectrue_core.verification.pipeline.pipeline_metering import create_progress_callback
 
+        # Skip if already initialized (prevents duplicate setup in deep pipeline with preloaded claims)
+        if ctx.get_extra("metering_initialized"):
+            Trace.event("metering_setup.skipped", {"reason": "already_initialized"})
+            return ctx
+
         try:
             policy = load_pricing_policy()
             
@@ -138,6 +143,7 @@ class MeteringSetupStep:
                 .set_extra("progress_emitter", progress_emitter)
                 .set_extra("pricing_policy", policy)
                 .set_extra("progress_callback", wrapped_cb)
+                .set_extra("metering_initialized", True)
             )
 
         except Exception as e:

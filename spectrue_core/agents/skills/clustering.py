@@ -156,10 +156,11 @@ class ClusteringSkill(BaseSkill):
             )
             for r in clustered_results:
                 r["pass_type"] = pass_type
-                if r.get("stance") == "support":
-                    r["quote_span"] = r.get("key_snippet") or (r.get("quote_matches") or [None])[0]
-                if r.get("stance") == "refute":
-                    r["contradiction_span"] = r.get("key_snippet") or (r.get("quote_matches") or [None])[0]
+                match r.get("stance"):
+                    case "support":
+                        r["quote_span"] = r.get("key_snippet") or (r.get("quote_matches") or [None])[0]
+                    case "refute":
+                        r["contradiction_span"] = r.get("key_snippet") or (r.get("quote_matches") or [None])[0]
             return clustered_results
 
         try:
@@ -194,10 +195,11 @@ class ClusteringSkill(BaseSkill):
                          # If no quote found by LLM, use snippet as backup quote
                          if not res.get("quote") and not res.get("quote_span"):
                               res["quote"] = (original.get("snippet") or "")[:500]
-                              if final_stance == "support":
-                                  res["quote_span"] = res["quote"]
-                              elif final_stance == "refute":
-                                  res["contradiction_span"] = res["quote"]
+                              match final_stance:
+                                  case "support":
+                                      res["quote_span"] = res["quote"]
+                                  case "refute":
+                                      res["contradiction_span"] = res["quote"]
                          count_restored += 1
 
                      # FIX: Always propagate is_primary flag if present (even if stance wasn't restored)

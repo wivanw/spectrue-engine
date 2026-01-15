@@ -65,10 +65,11 @@ def count_stance_evidence(
         stance = str(item.get("stance") or "").lower()
         tier = item.get("tier")
         
-        if stance in ("support", "sup", "supported"):
-            n_support += 1
-        elif stance in ("refute", "ref", "refuted"):
-            n_refute += 1
+        match stance:
+            case "support" | "sup" | "supported":
+                n_support += 1
+            case "refute" | "ref" | "refuted":
+                n_refute += 1
         
         # Track best tier
         if tier and (

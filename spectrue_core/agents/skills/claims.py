@@ -18,6 +18,7 @@ from spectrue_core.verification.claims.coverage_anchors import (
 )
 from spectrue_core.llm.fallback import call_with_fallback
 import re
+from typing import Any
 from spectrue_core.agents.llm_schemas import (
     CLAIM_RETRIEVAL_SCHEMA,
     VERIFIABLE_CORE_CLAIM_SCHEMA,
@@ -363,6 +364,7 @@ class ClaimExtractionSkill(BaseSkill):
         text: str,
         *,
         chunks: list[TextChunk] | None = None,
+        anchors: list[Any] | None = None,
         lang: str = "en",
         max_claims: int = 5,
     ) -> tuple[list[Claim], bool, ArticleIntent, str]:
@@ -386,7 +388,8 @@ class ClaimExtractionSkill(BaseSkill):
         try:
             # --- Stage 0: Extract Deterministic Anchors ---
             # Extract anchors from full text for coverage guarantee
-            anchors = extract_all_anchors(text)
+            if anchors is None:
+                anchors = extract_all_anchors(text)
             anchor_ids = get_anchor_ids(anchors)
             
             Trace.event("claim_extraction.anchors", {

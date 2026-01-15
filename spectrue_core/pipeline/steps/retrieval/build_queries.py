@@ -132,9 +132,17 @@ class BuildQueriesStep:
         fact_fallback = _fallback_fact(ctx)
 
         # CEGS MVP Integration: Use doc-level query planning (A)
-        # Extract anchors from full text if available
+        # Extract anchors from full text if available (with caching)
         full_text = ctx.get_extra("prepared_fact", "") or ctx.get_extra("input_text", "")
-        anchors = extract_all_anchors(full_text)
+        
+        # Reuse cached anchors if already extracted by claim extraction step
+        cached_anchors = ctx.get_extra("extracted_anchors")
+        if cached_anchors is not None:
+            anchors = cached_anchors
+            Trace.event("claims.coverage.anchors.cached", {"count": len(anchors)})
+        else:
+            anchors = extract_all_anchors(full_text)
+            # Note: anchor trace event is emitted inside extract_all_anchors
         
         # Ensure claims are dicts
         safe_claims = [c for c in claims_for_plan if isinstance(c, dict)]

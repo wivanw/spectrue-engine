@@ -29,15 +29,17 @@ def _normalize_tier(*, tier_raw: str | None, source_type: str | None) -> str:
     if tier_raw:
         return str(tier_raw).strip().upper()
     stype = (source_type or "").strip().lower()
-    if stype == "primary":
-        return "A"
-    if stype == "official":
-        return "A'"
-    if stype == "independent_media":
-        return "B"
-    if stype == "social":
-        return "D"
-    return "C"
+    match stype:
+        case "primary":
+            return "A"
+        case "official":
+            return "A'"
+        case "independent_media":
+            return "B"
+        case "social":
+            return "D"
+        case _:
+            return "C"
 
 
 def _tier_rank(tier: str) -> int:
@@ -337,18 +339,21 @@ def build_evidence_pack(
             tier = (s.get("evidence_tier") or "").strip().upper()
             is_trusted = bool(s.get("is_trusted"))
 
-            if tier == "A":
-                source_type = "primary"
-            elif tier == "A'":
-                source_type = "official"
-            elif tier == "B" or is_trusted:
-                # Trusted domains are independent media
-                source_type = "independent_media"
-            elif tier == "D":
-                source_type = "social"
-            else:
-                # Default to aggregator for unknown/C tier
-                source_type = "aggregator"
+            match tier:
+                case "A":
+                    source_type = "primary"
+                case "A'":
+                    source_type = "official"
+                case "B":
+                    source_type = "independent_media"
+                case _ if is_trusted:
+                    # Trusted domains are independent media
+                    source_type = "independent_media"
+                case "D":
+                    source_type = "social"
+                case _:
+                    # Default to aggregator for unknown/C tier
+                    source_type = "aggregator"
 
             stance = s.get("stance", "unclear")
 
@@ -566,14 +571,15 @@ def build_evidence_pack(
             source_type=r.get("source_type"),
         )
         stance_raw = str(r.get("stance") or "").lower()
-        if stance_raw in ("support",):
-            stance = "SUPPORT"
-        elif stance_raw in ("refute", "contradict"):
-            stance = "REFUTE"
-        elif stance_raw in ("irrelevant",):
-            stance = "IRRELEVANT"
-        else:
-            stance = "CONTEXT"
+        match stance_raw:
+            case "support":
+                stance = "SUPPORT"
+            case "refute" | "contradict":
+                stance = "REFUTE"
+            case "irrelevant":
+                stance = "IRRELEVANT"
+            case _:
+                stance = "CONTEXT"
 
         quote = r.get("quote_span") or r.get("contradiction_span") or r.get("key_snippet")
         if stance in ("SUPPORT", "REFUTE") and not quote:
@@ -584,16 +590,17 @@ def build_evidence_pack(
             temporal_flag = "unknown"
 
         source_type = str(r.get("source_type") or "").lower()
-        if source_type in ("primary", "official"):
-            channel = "authoritative"
-        elif source_type in ("independent_media",):
-            channel = "reputable_news"
-        elif source_type in ("social",):
-            channel = "social"
-        elif source_type in ("aggregator",):
-            channel = "local_media"
-        else:
-            channel = "low_reliability"
+        match source_type:
+            case "primary" | "official":
+                channel = "authoritative"
+            case "independent_media":
+                channel = "reputable_news"
+            case "social":
+                channel = "social"
+            case "aggregator":
+                channel = "local_media"
+            case _:
+                channel = "low_reliability"
 
         domain = r.get("domain") or get_registrable_domain(r.get("url") or "")
         if domain:
