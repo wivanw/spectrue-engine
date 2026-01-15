@@ -12,6 +12,11 @@ from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
+from spectrue_core.verification.evidence.slot_maps import (
+    merge_covers,
+    required_slots_for_verification_target,
+    slots_from_assertion_key,
+)
 
 
 def _group_sources_by_claim(sources: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -89,6 +94,36 @@ def _compatible_for_claim(src: dict[str, Any], fact_keys: set[str], context_keys
         return akey in context_keys
 
     return False
+
+
+def _extract_verification_target(claim: dict[str, Any]) -> str:
+    """
+    Extract verification_target from claim metadata (schema-driven).
+    Handles both flattened and nested representations.
+    """
+    md = claim.get("metadata")
+    if isinstance(md, dict) and md.get("verification_target"):
+        return str(md.get("verification_target"))
+    if claim.get("verification_target"):
+        return str(claim.get("verification_target"))
+    return ""
+
+
+def _covers_ok_for_claim(src: dict[str, Any], claim: dict[str, Any]) -> bool:
+    """
+    Deterministic compatibility using slots:
+    required_slots(verification_target) must intersect evidence covers.
+    """
+    vt = _extract_verification_target(claim)
+    required = required_slots_for_verification_target(vt)
+    if not required:
+        return True
+
+    akey = str(src.get("assertion_key") or "")
+    derived = slots_from_assertion_key(akey)
+    covers = merge_covers(src.get("covers"), derived)
+
+    return bool(covers & required)
 
 
 def _score_for_transfer(src: dict[str, Any]) -> float:
@@ -176,6 +211,7 @@ class EvidenceSpilloverStep(Step):
         transferred_items: list[dict[str, Any]] = []
         transferred_total = 0
         touched_claims = 0
+        rejected_slot = 0
 
         for target_id, target_claim in claim_lookup.items():
             clid = cluster_map.get(target_id)
@@ -204,6 +240,10 @@ class EvidenceSpilloverStep(Step):
                     if not _is_transfer_candidate(src):
                         continue
                     if not _compatible_for_claim(src, fact_keys, context_keys):
+                        continue
+                    # Compatibility v3: required slots for claim's verification_target
+                    if not _covers_ok_for_claim(src, target_claim):
+                        rejected_slot += 1
                         continue
                     url = src.get("url")
                     if url and normalize_url(str(url)) in existing_urls:
@@ -264,6 +304,7 @@ class EvidenceSpilloverStep(Step):
                 "transferred": transferred_total,
                 "touched_claims": touched_claims,
                 "top_k": top_k,
+                "rejected_slot": rejected_slot,
             },
         )
 
