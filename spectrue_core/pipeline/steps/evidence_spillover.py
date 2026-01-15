@@ -280,10 +280,18 @@ class EvidenceSpilloverStep(Step):
         for cid, clid in cluster_map.items():
             cluster_to_ids.setdefault(clid, []).append(cid)
 
+        # Trace counters for rejections
+        rejections = {
+            "not_candidate": 0,    # excluded by _is_transfer_candidate
+            "compat_assertion": 0, # excluded by _compatible_for_claim (key/dim)
+            "required_slots": 0,   # excluded by _covers_ok_for_claim (Comp v3)
+            "event_signature": 0,  # excluded by _event_ok_for_claim (Comp v5)
+            "dedup": 0,            # excluded by existing_urls
+        }
+
         transferred_items: list[dict[str, Any]] = []
         transferred_total = 0
         touched_claims = 0
-        rejected_slot = 0
 
         for target_id, target_claim in claim_lookup.items():
             clid = cluster_map.get(target_id)
@@ -311,18 +319,22 @@ class EvidenceSpilloverStep(Step):
                     if not isinstance(src, dict):
                         continue
                     if not _is_transfer_candidate(src):
+                        rejections["not_candidate"] += 1
                         continue
                     if not _compatible_for_claim(src, fact_keys, context_keys):
+                        rejections["compat_assertion"] += 1
                         continue
                     # Compatibility v3: required slots for claim's verification_target
                     if not _covers_ok_for_claim(src, target_claim):
-                        rejected_slot += 1
+                        rejections["required_slots"] += 1
                         continue
                     # Compatibility v5: event signature (if present) must be consistent
                     if not _event_ok_for_claim(src, target_claim):
+                        rejections["event_signature"] += 1
                         continue
                     url = src.get("url")
                     if url and normalize_url(str(url)) in existing_urls:
+                        rejections["dedup"] += 1
                         continue
                     
                     origin_claim = claim_lookup.get(peer_id)
@@ -387,7 +399,7 @@ class EvidenceSpilloverStep(Step):
                 "transferred": transferred_total,
                 "touched_claims": touched_claims,
                 "top_k": top_k,
-                "rejected_slot": rejected_slot,
+                "rejections": rejections,
             },
         )
 

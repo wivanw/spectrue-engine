@@ -1,6 +1,7 @@
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from spectrue_core.utils.trace import Trace
 
 from spectrue_core.pipeline.steps.evidence_spillover import (
     EvidenceSpilloverStep,
@@ -60,6 +61,7 @@ async def test_evidence_spillover_gated_by_event_signature():
     origin_ok = {
         "id": "origin_ok",
         "subject_entities": ["Topic A"],
+        "metadata": {"time_signals": {"time_bucket": "2024"}},
         "verification_target": "none"
     }
     
@@ -97,8 +99,19 @@ async def test_evidence_spillover_gated_by_event_signature():
     config.runtime.deep_v2.corroboration_top_k = 10
     
     step = EvidenceSpilloverStep(config=config)
-    result = await step.run(ctx)
     
+    with patch.object(Trace, "event") as mock_trace:
+        result = await step.run(ctx)
+        
+        # Verify trace call
+        calls = [c for c in mock_trace.call_args_list if c[0][0] == "evidence_spillover.completed"]
+        assert len(calls) == 1
+        payload = calls[0][0][1]
+        assert payload["transferred"] == 1
+        assert "rejections" in payload
+        assert payload["rejections"]["event_signature"] == 3
+        assert payload["rejections"]["not_candidate"] == 0
+
     transferred = [s for s in result.sources if s.get("provenance") == "transferred" and s["claim_id"] == "target"]
     
     # Only ok.com should be transferred to target

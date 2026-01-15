@@ -270,6 +270,25 @@ async def annotate_evidence_stance(
         stance_pass_mode=stance_pass_mode,
     )
 
+    # Mapping of claim components for normalization (v5-final-2)
+    KNOWN_COVERS = {"entity", "time", "location", "quantity", "attribution", "causal", "other"}
+
+    for ev in evidence_items or []:
+        if not isinstance(ev, dict):
+            continue
+
+        # Parse and normalize 'covers' field from LLM output (ClusteringSkill)
+        raw_covers = ev.get("covers")
+        normalized_covers = []
+        if isinstance(raw_covers, list):
+            for c in raw_covers:
+                c_norm = str(c).strip().lower()
+                if c_norm in KNOWN_COVERS:
+                    normalized_covers.append(c_norm)
+
+        # If LLM failed or returned garbage, keep empty (spillover will fallback to assertion_key)
+        ev["covers"] = list(set(normalized_covers))
+
     # Deterministic event signature stamping for routing.
     # We inherit signature from the claim that the evidence was annotated against.
     claim_lookup = {}
