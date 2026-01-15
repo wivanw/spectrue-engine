@@ -40,6 +40,7 @@ from .evidence_collect import EvidenceCollectStep
 from .evidence_gating import EvidenceGatingStep
 from .stance_annotate import StanceAnnotateStep
 from .cluster_evidence import ClusterEvidenceStep
+from .evidence_spillover import EvidenceSpilloverStep
 from .audit_claims import AuditClaimsStep
 from .audit_evidence import AuditEvidenceStep
 from .aggregate_rgba_audit import AggregateRGBAAuditStep
@@ -82,6 +83,7 @@ __all__ = [
     "EvidenceGatingStep",
     "StanceAnnotateStep",
     "ClusterEvidenceStep",
+    "EvidenceSpilloverStep",
     "AuditClaimsStep",
     "AuditEvidenceStep",
     "AggregateRGBAAuditStep",

@@ -569,6 +569,7 @@ class PipelineFactory:
             EvidenceGatingStep,
             StanceAnnotateStep,
             ClusterEvidenceStep,
+            EvidenceSpilloverStep,
             AuditClaimsStep,
             AuditEvidenceStep,
             AggregateRGBAAuditStep,
@@ -717,12 +718,18 @@ class PipelineFactory:
                 optional=True,
             ),
 
+            # Spillover routing inside claim clusters (no new search / no new LLM calls)
+            StepNode(
+                step=EvidenceSpilloverStep(config=config),
+                depends_on=["cluster_evidence"],
+            ),
+
             # --- Per-Claim Judging (Deep Mode Only) ---
 
             # Build ClaimFrame for each claim
             StepNode(
                 step=BuildClaimFramesStep(config=config),
-                depends_on=["cluster_evidence"],
+                depends_on=["evidence_spillover"],
             ),
 
             # Claim-level audit (LLM as auditor only)
