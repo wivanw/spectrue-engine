@@ -1,5 +1,4 @@
 
-from typing import Any
 import pytest
 from unittest.mock import MagicMock
 
@@ -8,7 +7,6 @@ from spectrue_core.pipeline.steps.evidence_spillover import (
 )
 from spectrue_core.verification.evidence.event_signature import (
     claim_event_signature,
-    evidence_event_signature,
     signature_compatible,
     EventSignature
 )

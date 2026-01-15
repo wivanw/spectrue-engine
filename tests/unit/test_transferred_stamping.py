@@ -1,5 +1,4 @@
 
-from typing import Any
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
@@ -18,7 +17,7 @@ async def test_transferred_stance_annotate_overwrites_signature():
     # But wait, TransferredStanceAnnotateStep calls annotate_evidence_stance(agent=self.agent, ...)
     
     # We can use patch to mock annotate_evidence_stance
-    with MagicMock() as mock_annotate:
+    with MagicMock():
         import spectrue_core.pipeline.steps.transferred_stance_annotate as step_module
         step_module.annotate_evidence_stance = AsyncMock(return_value=[
             {"claim_id": "target", "url": "http://example.com/1", "stance": "SUPPORT"}
