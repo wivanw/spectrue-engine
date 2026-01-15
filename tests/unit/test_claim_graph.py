@@ -41,7 +41,7 @@ class DummyEmbeddingClient:
     def __init__(self, sim_matrix):
         self.sim_matrix = sim_matrix
 
-    async def embed_texts(self, texts):
+    async def embed_texts(self, texts, **kwargs):
         return [[0.0] * 3 for _ in texts]
 
     def build_similarity_matrix(self, embeddings):
