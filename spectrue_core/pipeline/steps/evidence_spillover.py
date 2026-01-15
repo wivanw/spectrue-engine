@@ -17,6 +17,11 @@ from spectrue_core.verification.evidence.slot_maps import (
     required_slots_for_verification_target,
     slots_from_assertion_key,
 )
+from spectrue_core.verification.evidence.event_signature import (
+    claim_event_signature,
+    evidence_event_signature,
+    signature_compatible,
+)
 
 
 def _group_sources_by_claim(sources: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -124,6 +129,17 @@ def _covers_ok_for_claim(src: dict[str, Any], claim: dict[str, Any]) -> bool:
     covers = merge_covers(src.get("covers"), derived)
 
     return bool(covers & required)
+
+
+def _event_ok_for_claim(src: dict[str, Any], claim: dict[str, Any]) -> bool:
+    """
+    Deterministic gate using event signatures:
+    - build signature from claim metadata
+    - compare with evidence signature if present
+    """
+    c_sig = claim_event_signature(claim)
+    e_sig = evidence_event_signature(src)
+    return signature_compatible(c_sig, e_sig)
 
 
 def _score_for_transfer(src: dict[str, Any]) -> float:
@@ -301,6 +317,9 @@ class EvidenceSpilloverStep(Step):
                     # Compatibility v3: required slots for claim's verification_target
                     if not _covers_ok_for_claim(src, target_claim):
                         rejected_slot += 1
+                        continue
+                    # Compatibility v5: event signature (if present) must be consistent
+                    if not _event_ok_for_claim(src, target_claim):
                         continue
                     url = src.get("url")
                     if url and normalize_url(str(url)) in existing_urls:
