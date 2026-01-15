@@ -582,6 +582,9 @@ class PipelineFactory:
             AssertRetrievalTraceStep,
             AssertDeepJudgingStep,
             AssertNonEmptyClaimsStep,
+            EvidenceStatsStep,
+            EvidenceDedupStep,
+            EvidenceCorroborationStep,
         )
         from spectrue_core.pipeline.steps.invariants import AssertMaxClaimsStep
         from spectrue_core.pipeline.steps.claim_clusters import ClaimClustersStep
@@ -730,13 +733,29 @@ class PipelineFactory:
                 step=TransferredStanceAnnotateStep(agent=self.agent, config=config),
                 depends_on=["evidence_spillover"],
             ),
+            
+            # Deterministic per-claim evidence stats (for explainability A fallback)
+            StepNode(
+                step=EvidenceDedupStep(),
+                depends_on=["transferred_stance_annotate"],
+            ),
+
+            StepNode(
+                step=EvidenceCorroborationStep(),
+                depends_on=["evidence_dedup"],
+            ),
+
+            StepNode(
+                step=EvidenceStatsStep(),
+                depends_on=["evidence_corroboration"],
+            ),
 
             # --- Per-Claim Judging (Deep Mode Only) ---
 
             # Build ClaimFrame for each claim
             StepNode(
                 step=BuildClaimFramesStep(config=config),
-                depends_on=["transferred_stance_annotate"],
+                depends_on=["evidence_stats"],
             ),
 
             # Claim-level audit (LLM as auditor only)

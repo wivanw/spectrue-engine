@@ -244,6 +244,11 @@ class EvidenceItem(SchemaModel):
     origin_claim_id: str | None = None
     """Original claim_id if this evidence was transferred."""
 
+    # --- Dedup / corroboration metadata ---
+    publisher_id: str = ""          # normalized domain/publisher id
+    content_hash: str = ""          # sha256 of normalized text payload (exact dup group)
+    similar_cluster_id: str = ""    # simhash bucket id (near-dup cluster)
+
     def is_actionable(self) -> bool:
         """Check if this evidence can be used for verdict."""
         return (

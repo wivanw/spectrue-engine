@@ -137,6 +137,20 @@ def _build_rgba(verdict: dict, ctx: PipelineContext) -> list[float]:
         # Preserve signed G (veracity) as-is (it may be -1.0 = unverified).
         # Clamp R/B/A to valid UI/domain ranges.
         r, g, b, a = (float(x) for x in rgba)
+
+        # Deep v2: if A is invalid (<0), use deterministic fallback from evidence stats.
+        # This does NOT override a valid judge A; it only prevents "broken" A.
+        if a < 0:
+            stats_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
+            cid = str(verdict.get("claim_id") or verdict.get("id") or "")
+            st = stats_by_claim.get(cid) if isinstance(stats_by_claim, dict) else None
+            if isinstance(st, dict):
+                a_det = st.get("A_deterministic")
+                try:
+                    a = float(a_det)
+                except Exception:
+                    a = 0.0
+
         r = max(0.0, min(1.0, r))
         b = max(0.0, min(1.0, b))
         a = max(0.0, min(1.0, a))
@@ -248,6 +262,12 @@ class AssembleStandardResultStep:
                     if fallback_txt:
                         cv = dict(cv)
                         cv["text"] = fallback_txt
+                
+                # Deep v2: attach corroboration counters (debug/UX optional)
+                corr = ctx.get_extra("corroboration_by_claim") or {}
+                if isinstance(corr, dict) and cid and isinstance(corr.get(cid), dict):
+                    cv["corroboration"] = corr[cid]
+
                 enriched_verdicts.append(cv)
 
             # Standard mode contract:
