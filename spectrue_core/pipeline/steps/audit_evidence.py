@@ -80,7 +80,8 @@ class AuditEvidenceStep:
                         "message": str(payload),
                     }
 
-            errors["evidence_audit"] = evidence_errors
+            if evidence_errors:
+                errors["evidence_audit"] = evidence_errors
 
             Trace.event(
                 "evidence_audit.complete",

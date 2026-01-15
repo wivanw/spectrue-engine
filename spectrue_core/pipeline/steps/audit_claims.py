@@ -71,7 +71,8 @@ class AuditClaimsStep:
                         "message": str(payload),
                     }
 
-            errors["claim_audit"] = claim_errors
+            if claim_errors:
+                errors["claim_audit"] = claim_errors
 
             Trace.event(
                 "claim_audit.complete",

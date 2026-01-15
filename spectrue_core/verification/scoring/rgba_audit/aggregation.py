@@ -184,7 +184,8 @@ def aggregate_rgba_audit(
     claim_audits_list = _coerce_claim_audits(list(claim_audits))
     evidence_audits_list = _coerce_evidence_audits(list(evidence_audits))
 
-    has_audit_errors = bool(audit_errors)
+    # Robust check for errors: only TRUE if there's actually a non-empty error dict
+    has_audit_errors = any(bool(v) for v in audit_errors.values()) if audit_errors else False
     has_claim_audits = bool(claim_audits_list)
     has_evidence_audits = bool(evidence_audits_list)
 
