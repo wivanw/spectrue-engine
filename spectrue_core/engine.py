@@ -140,7 +140,6 @@ class SpectrueEngine:
             prior_meter = getattr(web_tool._tavily, "_meter", None)
             web_tool._tavily._meter = tavily_meter
 
-            fetch_cost = 0.0
 
             if analysis_mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
                 if progress_callback:
