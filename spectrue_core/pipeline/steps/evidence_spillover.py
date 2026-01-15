@@ -59,6 +59,9 @@ def _is_transfer_candidate(src: dict[str, Any]) -> bool:
     stance = str(src.get("stance") or "").upper()
     if stance in {"IRRELEVANT"}:
         return False
+    # Prevent cascade: transferred items must not be used as donors.
+    if src.get("provenance") == "transferred":
+        return False
     # Require an anchor for downstream explainability/judge
     if src.get("quote") or src.get("quote_span") or src.get("contradiction_span"):
         return True
@@ -101,6 +104,20 @@ def _score_for_transfer(src: dict[str, Any]) -> float:
     stance_boost = 0.05 if stance in {"SUPPORT", "REFUTE"} else 0.0
     quote_boost = 0.05 if (src.get("quote") or src.get("quote_span") or src.get("contradiction_span")) else 0.0
     return rel + stance_boost + quote_boost
+
+
+def _stable_key(src: dict[str, Any]) -> tuple[str, str]:
+    """
+    Deterministic tie-breaker key.
+    We use normalized URL (primary) + domain (secondary).
+    """
+    url = src.get("url") or ""
+    dom = src.get("domain") or ""
+    try:
+        nurl = normalize_url(str(url)) if url else ""
+    except Exception:
+        nurl = str(url)
+    return (nurl, str(dom))
 
 
 @dataclass
@@ -196,21 +213,43 @@ class EvidenceSpilloverStep(Step):
             if not candidates:
                 continue
 
-            candidates.sort(key=lambda t: t[0], reverse=True)
+            # Stable deterministic ordering:
+            # 1) score desc
+            # 2) normalized url asc
+            # 3) origin claim id asc
+            candidates.sort(
+                key=lambda t: (
+                    -t[0],
+                    _stable_key(t[2])[0],
+                    str(t[1]),
+                )
+            )
             chosen = candidates[:top_k]
             if chosen:
                 touched_claims += 1
 
+            chosen_urls = []
             for _, origin_id, src in chosen:
                 url = src.get("url")
                 if url:
                     existing_urls.add(normalize_url(str(url)))
+                    chosen_urls.append(normalize_url(str(url)))
                 merged = dict(src)
                 merged["claim_id"] = target_id
                 merged["provenance"] = "transferred"
                 merged["origin_claim_id"] = origin_id
                 transferred_items.append(merged)
                 transferred_total += 1
+
+            Trace.event(
+                "evidence_spillover.chosen",
+                {
+                    "claim_id": target_id,
+                    "cluster_id": clid,
+                    "count": len(chosen_urls),
+                    "urls": chosen_urls[:5],  # cap
+                },
+            )
 
         if not transferred_items:
             Trace.event("evidence_spillover.completed", {"transferred": 0, "touched_claims": 0, "top_k": top_k})

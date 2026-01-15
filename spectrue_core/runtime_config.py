@@ -346,6 +346,9 @@ class DeepV2Config:
     precision_top_k: int = 2
     corroboration_top_k: int = 3
 
+    # Re-stance for transferred evidence
+    restace_transferred_top_k: int = 2
+
 
 @dataclass(frozen=True)
 class ClaimGraphConfig:
@@ -560,6 +563,9 @@ class EngineRuntimeConfig:
             ),
             corroboration_top_k=_parse_int(
                 os.getenv("DEEP_V2_CORROBORATION_TOP_K"), default=3, min_v=1, max_v=10
+            ),
+            restace_transferred_top_k=_parse_int(
+                os.getenv("DEEP_V2_RESTANCE_TRANSFERRED_TOP_K"), default=2, min_v=1, max_v=5
             ),
         )
 

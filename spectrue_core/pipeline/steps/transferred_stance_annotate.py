@@ -31,10 +31,23 @@ def _pick_top_k_transferred(items: list[dict[str, Any]], k: int) -> list[dict[st
         except Exception:
             return 0.0
 
+    # Stable deterministic ordering:
+    # 1) relevance_score desc
+    # 2) normalized url asc
+    # 3) origin_claim_id asc
+    def stable_sort_key(x: dict[str, Any]) -> tuple[float, str, str]:
+        url = x.get("url") or ""
+        try:
+            nurl = normalize_url(str(url)) if url else ""
+        except Exception:
+            nurl = str(url)
+        oc = str(x.get("origin_claim_id") or "")
+        return (-score(x), nurl, oc)
+
+    ranked = sorted(items, key=stable_sort_key)
+    out: list[dict[str, Any]] = []
     # Dedup by normalized URL within a claim
     seen: set[str] = set()
-    ranked = sorted(items, key=score, reverse=True)
-    out: list[dict[str, Any]] = []
     for it in ranked:
         if len(out) >= k:
             break
@@ -113,6 +126,15 @@ class TransferredStanceAnnotateStep(Step):
             chosen = _pick_top_k_transferred(items, top_k)
             if not chosen:
                 continue
+
+            Trace.event(
+                "transferred_stance.chosen",
+                {
+                    "claim_id": cid,
+                    "count": len(chosen),
+                    "urls": [normalize_url(str(x.get("url"))) for x in chosen if x.get("url")][:5],
+                },
+            )
 
             # annotate_evidence_stance expects sources + claims (batch)
             # We send a single-claim batch to bind stance to this claim.
