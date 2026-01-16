@@ -122,6 +122,15 @@ def _redact_medical(s: str) -> str:
 
 
 
+def _is_secret_hint(key_hint: str | None) -> bool:
+    if not key_hint:
+        return False
+    k = key_hint.lower()
+    # Explicitly check for high-entropy secrets. 
+    # We do NOT match generic "key" to avoid false positives on non-secret keys (topic_key, etc).
+    return any(x in k for x in ("password", "secret", "token", "api_key", "apikey", "access_key", "accesskey", "authorization", "bearer"))
+
+
 def _sanitize(
     obj: Any,
     *,
@@ -130,6 +139,13 @@ def _sanitize(
     max_dict: int = 200,
     key_hint: str | None = None,
 ) -> Any:
+    # Early redaction based on key hint to prevent recursion/hashing of secrets
+    if _is_secret_hint(key_hint):
+        return {
+            "redacted": True,
+            "key_hint": key_hint,
+        }
+
     max_override = _trace_max_override_var.get()
     if max_override is not None:
         max_str = max_override
@@ -147,32 +163,20 @@ def _sanitize(
         if safe_mode:
             # Check if this is a sensitive (large text) key for truncation purposes
             is_sensitive_text = False
-            is_secret_field = False
             if key_hint:
                 k = key_hint.lower()
                 # Broad match for sensitive text keys (prompts, content, etc.)
                 if any(x in k for x in ("input_text", "response_text", "article", "content", "text", "prompt", "raw_html", "snippet")):
                     is_sensitive_text = True
                 
-                # Check for secret-like fields that should not be hashed
-                if any(x in k for x in ("password", "secret", "token", "api_key", "apikey", "access_key", "accesskey", "key")):
-                    is_secret_field = True
-
             # Determine limit
             limit = _trace_max_head_var.get() if is_sensitive_text else _trace_max_inline_var.get()
 
             if len(s) > limit:
                 # Safe mode:
-                # - Secret-like keys: do not hash or expose content at all
                 # - Sensitive keys (prompt/content/text/etc): head-only + sha256 (no tail)
                 # - Non-sensitive keys: keep head+tail + sha256 for debugging
                 
-                if is_secret_field:
-                    return {
-                        "len": len(s),
-                        "redacted": True,
-                    }
-                    
                 out = {
                     "len": len(s),
                     "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest(),
@@ -186,19 +190,6 @@ def _sanitize(
         # Legacy/Unsafe Mode (keep existing behavior for backward compat if flag is off)
         if len(s) <= max_str:
             return s
-            
-        # Check for secret fields even in unsafe/legacy path
-        is_secret_field = False
-        if key_hint:
-            k_hint = key_hint.lower()
-            if any(x in k_hint for x in ("password", "secret", "token", "api_key", "apikey", "access_key", "accesskey", "key")):
-                is_secret_field = True
-                
-        if is_secret_field:
-            return {
-                "len": len(s),
-                "redacted": True,
-            }
             
         head_tail_len = min(300, max_str // 2)
         return {
