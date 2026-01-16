@@ -297,7 +297,14 @@ def build_evidence_pack(
 
     # If clustering ran and returned a list (even empty), use it.
     # Only fallback to raw sources if it returned None (error/timeout).
-    default_claim_id = anchor_claim_id or (claims[0].get("id") if claims else "c1")
+    # IMPORTANT: Never silently attribute evidence to an arbitrary claim (e.g. "first claim").
+    # That behavior can mis-route global/clustered evidence into "c1" in multi-claim articles,
+    # making the real target claim appear to have "no sources" downstream.
+    default_claim_id = None
+    if anchor_claim_id:
+        default_claim_id = anchor_claim_id
+    elif len(claims) == 1:
+        default_claim_id = claims[0].get("id")
     if search_results_clustered is not None:
         search_results = search_results_clustered
         logger.debug("Using clustered evidence: %d items", len(search_results))
@@ -315,7 +322,7 @@ def build_evidence_pack(
                     r["source_type"] = "primary"
                 elif r.get("is_trusted"):
                     r["source_type"] = "independent_media"
-            if not r.get("claim_id"):
+            if not r.get("claim_id") and default_claim_id:
                 r["claim_id"] = default_claim_id
                 Trace.event(
                     "evidence.claim_id.missing",
@@ -359,7 +366,7 @@ def build_evidence_pack(
 
             # Build SearchResult
             search_result = SearchResult(
-                claim_id=default_claim_id,
+                claim_id=(s.get("claim_id") or default_claim_id),
                 url=url,
                 domain=domain,
                 title=s.get("title", ""),
@@ -379,7 +386,9 @@ def build_evidence_pack(
             search_results.append(search_result)
 
     for r in search_results:
-        claim_id = r.get("claim_id", "c1")
+        claim_id = r.get("claim_id")
+        if not claim_id:
+            continue
         if not time_sensitive_by_claim.get(claim_id):
             continue
         status = str(r.get("timeliness_status") or "").lower()
@@ -614,7 +623,7 @@ def build_evidence_pack(
             channel=channel,  # type: ignore[arg-type]
             tier=tier,  # type: ignore[arg-type]
             tier_reason=None,
-            claim_id=r.get("claim_id") or "c1",
+            claim_id=r.get("claim_id") or default_claim_id,
             stance=stance,  # type: ignore[arg-type]
             quote=quote,
             relevance=float(r.get("relevance_score", 0.0) or 0.0),
@@ -624,7 +633,7 @@ def build_evidence_pack(
             raw_text_chars=len(r.get("content_excerpt") or ""),
         ))
 
-        claim_id = r.get("claim_id") or "c1"
+        claim_id = r.get("claim_id") or default_claim_id or "__global__"
         claim_stats = per_claim_stats.setdefault(
             str(claim_id),
             {"support": 0, "refute": 0, "context": 0, "with_quote": 0},
@@ -668,7 +677,8 @@ def build_evidence_pack(
         context_sources=context_sources, # M78.1: For transparency/UX
         metrics=evidence_metrics,
         constraints=constraints,
-        claim_id=(claims[0].get("id") if claims else "c1"),
+        # UI/main-claim hint for the pack: prefer the explicit anchor when available.
+        claim_id=(default_claim_id or (claims[0].get("id") if claims else "c1")),
         items=evidence_items,
         stats=stats,
         global_cap=global_cap,
