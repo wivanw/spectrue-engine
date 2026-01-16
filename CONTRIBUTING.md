@@ -120,3 +120,30 @@ All source files must contain the following copyright header:
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 ```
+
+## 7. Architectural Invariants & Safety
+
+To keep Spectrue reliable, every contribution must respect these invariants. **Breaking them will cause PR rejection.**
+
+### 🛑 The "Do Not Break" List
+
+1.  **I0: Single Source of Truth**
+    *   Do not duplicate logic for "Deep Mode" vs "Standard Mode" unless absolutely necessary.
+    *   If you fix a bug in scoring, fix it in the core `scoring/` module, not in a `utils` helper.
+
+2.  **I8: No Magical 0.5s**
+    *   **Never** return `0.5` (or any heuristic value) for "Unknown" or "Error".
+    *   Use `None`, `null`, or explicit Status enums (`INSUFFICIENT_EVIDENCE`).
+    *   Uncertainty is a signal, not a missing value.
+
+3.  **I10: Outcome-Driven Escalation**
+    *   Do not hardcode "Always search BBC".
+    *   Use the **Evidence Acquisition Ladder (EAL)**.
+    *   Escalation relies on *observed* results (e.g., "0 relevant sources found"), not *predicted* difficulty.
+
+### Safety Guidelines
+
+-   **Extensions**: If adding a new search provider, ensure it maps to the standard `EvidenceItem` schema. Do not leak provider-specific fields into the core logic.
+-   **Tracing**: If you add complex logic, **you must emit a trace event**. If it's not in the trace, it didn't happen.
+-   **Cost**: Always use the `meter` context when calling LLMs or APIs. Unmetered calls are forbidden.
+
