@@ -123,10 +123,10 @@ def _redact_medical(s: str) -> str:
 
 
 
-def _is_secret_hint(key_hint: str | None) -> bool:
-    if not key_hint:
+def _is_secret_hint(field_name: str | None) -> bool:
+    if not field_name:
         return False
-    k = key_hint.lower()
+    k = field_name.lower()
     # Explicitly check for high-entropy secrets and common secret field names.
     # We now also match generic "key" to ensure API keys like Google CSE's "key" are redacted.
     return any(
@@ -142,9 +142,10 @@ def _is_secret_hint(key_hint: str | None) -> bool:
             "authorization",
             "bearer",
             "key",
+            "pwd",
+            "credential",
         )
     )
-
 
 def _sanitize(
     obj: Any,
@@ -152,13 +153,13 @@ def _sanitize(
     max_str: int | None = None,
     max_list: int = 100,
     max_dict: int = 200,
-    key_hint: str | None = None,
+    field_name: str | None = None,
 ) -> Any:
-    # Early redaction based on key hint to prevent recursion/hashing of secrets
-    if _is_secret_hint(key_hint):
+    # Early redaction based on field name to prevent recursion/hashing of secrets
+    if _is_secret_hint(field_name):
         return {
             "redacted": True,
-            "key_hint": key_hint,
+            "field_name": field_name,
         }
 
     max_override = _trace_max_override_var.get()
@@ -179,8 +180,8 @@ def _sanitize(
             # Check if this is a sensitive (large text) key for truncation purposes
             is_sensitive_text = False
 
-            if key_hint:
-                k = key_hint.lower()
+            if field_name:
+                k = field_name.lower()
                 # Broad match for sensitive text keys (prompts, content, etc.)
                 if any(x in k for x in ("input_text", "response_text", "article", "content", "text", "prompt", "raw_html", "snippet")):
                     is_sensitive_text = True
@@ -194,7 +195,7 @@ def _sanitize(
                 # - Non-sensitive keys: keep head+tail + sha256 for debugging
                 out = {
                     "len": len(s),
-                    "hmac_sha256": hmac.new(b"trace-v1", s.encode("utf-8"), hashlib.sha256).hexdigest(),
+                    "hmac_sha3_256": hmac.new(b"trace-v1", s.encode("utf-8"), hashlib.sha3_256).hexdigest(),
                     "head": s[:limit],
                 }
                 if not is_sensitive_text:
@@ -209,7 +210,7 @@ def _sanitize(
         head_tail_len = min(300, max_str // 2)
         return {
             "len": len(s),
-            "hmac_sha256": hmac.new(b"trace-v1", s.encode("utf-8"), hashlib.sha256).hexdigest(),
+            "hmac_sha3_256": hmac.new(b"trace-v1", s.encode("utf-8"), hashlib.sha3_256).hexdigest(),
             "head": s[:head_tail_len],
             "tail": s[-head_tail_len:] if head_tail_len else "",
         }
@@ -232,10 +233,10 @@ def _sanitize(
             if k_lower in ("authorization", "api_key", "key", "openai_api_key", "tavily_api_key"):
                 out[key] = "***"
             else:
-                # Pass key_hint down
-                out[key] = _sanitize(v, max_str=max_str, max_list=max_list, max_dict=max_dict, key_hint=key)
+                # Pass field_name down
+                out[key] = _sanitize(v, max_str=max_str, max_list=max_list, max_dict=max_dict, field_name=key)
         return out
-    return _sanitize(str(obj), max_str=max_str, max_list=max_list, max_dict=max_dict, key_hint=key_hint)
+    return _sanitize(str(obj), max_str=max_str, max_list=max_list, max_dict=max_dict, field_name=field_name)
 
 
 def _trace_dir() -> Path:

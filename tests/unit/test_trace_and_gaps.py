@@ -59,7 +59,7 @@ def test_trace_keeps_tail_snippet_and_hash(monkeypatch, tmp_path):
         assert prompt_payload.get("len") == len(long_text)
         assert "head" in prompt_payload
         assert "tail" not in prompt_payload  # CRITICAL ASSERTION for M75
-        assert prompt_payload.get("hmac_sha256")
+        assert prompt_payload.get("hmac_sha3_256")
         
         # Verify head content
         assert prompt_payload["head"].startswith("start-")

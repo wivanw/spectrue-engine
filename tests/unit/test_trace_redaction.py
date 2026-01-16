@@ -168,8 +168,8 @@ class TestHashPreservation:
         
         # Should be truncated with hash
         assert isinstance(result, dict)
-        assert "hmac_sha256" in result
-        assert len(result["hmac_sha256"]) == 64  # SHA256 hex length
+        assert "hmac_sha3_256" in result
+        assert len(result["hmac_sha3_256"]) == 64  # SHA3-256 hex length
         assert "head" in result
         assert "tail" in result
         # Head should contain redacted version
