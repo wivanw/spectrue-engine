@@ -15,7 +15,7 @@ import re
 import time
 from dataclasses import dataclass
 import hashlib
-import hmac
+
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Any
