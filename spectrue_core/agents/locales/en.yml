@@ -1,90 +1,107 @@
 en:
   prompts:
-    final_analysis: |
-      TODAY'S DATE: {date}
 
-      YOU ARE AN INFORMATION ANALYSIS EXPERT. Your task is to verify a claim using critical thinking and the provided context.
 
-      ### WORKING WITH SOURCES (TIER SYSTEM)
-      Use the following hierarchy to assess information reliability, but **always analyze the content**:
-      - **Tier 1 (High Authority):** Sources marked [TRUSTED] — Reuters, BBC, AP, AFP, Nature, NASA, WHO, etc. The [TRUSTED] tag in context indicates authority. If confirmed by Tier 1, Verified Score → 0.95-1.0.
-      - **Tier 2 (Reliable Niche Sources):** Space.com, Ars Technica, The Verge, specialized scientific publications. They are reliable in their field. Verified Score → 0.8-0.9 if confirmed.
-      - **Tier 3 (Needs Verification):** Social media, blogs, unknown sites. Require correlation with higher tiers. Verified Score → 0.5-0.7.
 
-      ### CRITICAL THINKING (M29)
-      1. **DO NOT AUTOMATICALLY REJECT** information just because it's absent from Tier 1. If a specialized publication (Space.com, Science Daily) reports a scientific story — it's a valid source for that topic.
-      2. **Evaluate CONTENT:** Is the fact logical? Does it contradict known science? Is there corroboration from other sources?
-      3. **Breaking News:** Tier 1 agencies may not cover niche events in time. This doesn't mean the event is fake.
-      4. **CONTEXT MARKER:** Sources with [TRUSTED] tag have higher priority, but are not the only criterion.
 
-      ### INPUT DATA
-      CLAIM: "{fact}"
-      
-      SEARCH CONTEXT:
-      {context}
+    claim_judge: |
+      You are a fact-checking judge. Evaluate the following claim based on the provided evidence and produce a verdict.
 
-      ### REASONING ALGORITHM
-      1. Find sources in context that confirm or refute the claim.
-      2. Assess source authority: [TRUSTED] tags, known domains, topic specificity.
-      3. Compare details in the claim with facts in sources.
-      4. If Tier 1 is silent but Tier 2 confirms — accept with Score 0.8-0.9.
-      5. Form JSON.
+      ## CLAIM TO JUDGE
 
-      ### RESPONSE FORMAT (JSON)
-      You must return valid JSON with the following fields:
+      Claim ID: {claim_id}
+      Claim Text: "{claim_text}"
+      Claim Language: {claim_language}
+
+      You will receive:
+      - claim
+      - evidence (snippets/quotes/excerpts)
+      - evidence_stats (structured counters)
+
+      ## ORIGINAL CONTEXT
+
+      {context_text}
+
+      ## EVIDENCE ITEMS
+
+      {evidence_section}
+
+      ## EVIDENCE SUMMARY (Pre-analyzed)
+
+      {summary_section}
+
+      ## EVIDENCE STATISTICS
+
+      {stats_section}
+
+      ## JUDGMENT METHODOLOGY
+
+      Follow this evaluation process:
+      1. **Evidence Assessment**: What do sources actually say? Name specific sources/domains.
+      2. **Manipulation Check**: Look for cherry-picking, missing context, sensationalism, loaded language.
+      3. **Gaps Identification**: What evidence is missing? Be explicit about limitations.
+      4. **Evidence Stats & Structure**:
+         Use evidence_stats ONLY to:
+         - distinguish redundancy (exact_content_groups) from independence (precision_publishers_*)
+         - mention coverage gaps (direct_anchors / covered_slots / unique_domains)
+         Do NOT treat these counters as proof by themselves.
+      5. **Verdict**: Base ONLY on evidence. If evidence is insufficient, say so — use -1 for scores.
+
+      ## RGBA SCORING GUIDANCE
+
+      **R (Danger: 0.0-1.0 or -1)**: Harm potential
+        - 0.0-0.2 = Harmless
+        - 0.5-0.8 = Medical/financial misinfo
+        - 0.8-1.0 = Dangerous incitement
+        - **-1** = Cannot assess
+
+      **G (Veracity: 0.0-1.0 or -1)**: Factual accuracy — MUST match verdict!
+        - 0.0-0.2 = **Strong refutation**
+        - 0.4-0.6 = **Insufficient evidence** / conflicting
+        - 0.8-1.0 = **Strong confirmation**
+        - **-1** = Cannot determine (NEI)
+
+      **B (Honesty: 0.0-1.0 or -1)**: Presentation quality/faith
+        - 0.0-0.3 = Misleading/Propaganda
+        - 0.5-0.7 = Cherry-picking
+        - 0.9-1.0 = Neutral/Balanced
+        - **-1** = Cannot assess
+
+      **A (Explainability: 0.0-1.0 or -1)**: Evidence strength
+        - 0.0-0.2 = No evidence
+        - 0.6-0.8 = Direct quotes
+        - 0.8-1.0 = Multiple independent quotes
+        - **-1** = No relevant evidence
+
+      **Verdict**: Based on G score:
+        - **"Supported"** → 0.7-1.0
+        - **"Refuted"** → 0.0-0.3
+        - **"Mixed"** → 0.3-0.7
+        - **"NEI"** → -1 (Not Enough Info)
+        - **"Unverifiable"** → -1
+
+      **Confidence**: 0.0-1.0 (lower if sources weak/conflicting)
+
+      **Explanation**: STRUCTURED format in {claim_language}:
+        - Line 1: "Evidence:" - cite sources
+        - Line 2: "Gaps:" - what is missing
+        - Line 3: "Verdict:" - conclusion
+        - Line 4: "Style:" - ONLY if B < 0.7
+
+      **sources_used**: URLs from this list used in reasoning:
+      {urls_list}
+
+      ## OUTPUT FORMAT (JSON)
       {{
-        "thought_process": "Analysis of sources and facts...",
-        "verified_score": 0.0-1.0, // 1.0 - confirmed by Tier 1, 0.8-0.9 - Tier 2, 0.5-0.7 - only Tier 3, 0.0 - debunked
-        "danger_score": 0.0-1.0,   // Harm potential (medical, financial advice)
-        "context_score": 0.0-1.0,  // Absence of context manipulation
-        "style_score": 0.0-1.0,    // Tone neutrality
-        "confidence_score": 0.0-1.0, // Your confidence based on source quality
-        "rationale": "REQUIRED: Start with specific source names. Examples: 'According to Space.com and Nature...', 'As reported by The Verge...'. Include key dates or figures. Do NOT write 'sources confirm'. 1-2 sentences."
+        "claim_id": "{claim_id}",
+        "rgba": {{ "R": 0.0, "G": 0.0, "B": 0.0, "A": 0.0 }},
+        "confidence": 0.5,
+        "verdict": "Supported|Refuted|NEI|Mixed",
+        "explanation": "...",
+        "sources_used": [],
+        "missing_evidence": []
       }}
 
-      ### EXAMPLE (Few-Shot)
-      Claim: "NASA discovered a new moon of Jupiter."
-      Context: "Source: [TRUSTED] NASA JPL\n...\nSource: Space.com\n..."
-      Response: {{
-        "thought_process": "Found confirmation in NASA JPL [TRUSTED] and Space.com (Tier 2). Fact verified.",
-        "verified_score": 1.0,
-        "danger_score": 0.0,
-        "context_score": 1.0,
-        "style_score": 1.0,
-        "confidence_score": 1.0,
-        "rationale": "NASA's official site and Space.com confirm the discovery of a new Jupiter moon during the Europa Clipper mission."
-      }}
-
-      Claim: "A rotating solar gas filament was detected."
-      Context: "Source: Space.com\nContent: Scientists have observed a rotating filament...\n---\nSource: Astronomy Magazine\nContent: New observations reveal..."
-      Response: {{
-        "thought_process": "No Tier 1 sources, but Space.com and Astronomy Magazine are authoritative in astronomy. Accepting with Score 0.85.",
-        "verified_score": 0.85,
-        "danger_score": 0.0,
-        "context_score": 1.0,
-        "style_score": 1.0,
-        "confidence_score": 0.8,
-        "rationale": "According to Space.com and Astronomy Magazine, scientists have indeed observed a rotating gas filament. While major agencies haven't covered this yet, niche astronomy outlets are reliable for this topic."
-      }}
-
-      Your JSON:
-
-    aletheia_lite: |
-      You are an AI for fact-checking. Analyze the claim based on the provided context.
-
-      ### METHODOLOGY
-      1. **Linguistic Analysis:** Check for vague wording or manipulation. (Affects `style_score`)
-      2. **Source Credibility:** Sources marked [TRUSTED] have higher priority. Niche publications (Space.com, Ars Technica) are reliable in their field. (Affects `context_score` and `verified_score`)
-      3. **Fact Verification:** Determine if the claim is factually accurate. (Affects `verified_score`)
-
-      ### RESPONSE FORMAT (JSON)
-      The `rationale` field should be a clear explanation (2-3 sentences) covering:
-      1. What is claimed.
-      2. What the evidence shows.
-      3. Your conclusion.
-
-      Be direct and factual. Avoid metaphors or dramatic language. Do NOT use internal terms like 'Tier 1/2'. Instead, use 'leading media', 'official sources', 'specialized publications', etc.
-
-      ### INPUT DATA
-      CLAIM: {fact}
-      CONTEXT: {context}
+  ui:
+    popup:
+      not_available: "Not available"

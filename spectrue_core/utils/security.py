@@ -6,14 +6,6 @@
 # it under the terms of the GNU Affero General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-#
-# Spectrue Engine is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with Spectrue Engine. If not, see <https://www.gnu.org/licenses/>.
 
 import hashlib
 import re
@@ -35,12 +27,12 @@ def sanitize_input(text: str) -> str:
         return ""
     # Remove control chars (0-31) except tab (9), newline (10), carriage return (13)
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
-    
+
     # Neutralize XML closing tags if used in prompts
     # Assuming we use <statement>, <context> tags
     text = text.replace("</statement>", "< /statement>")
     text = text.replace("</context>", "< /context>")
-    
+
     return text.strip()
 
 
@@ -50,12 +42,12 @@ def redact_log_data(data: dict) -> dict:
     """
     if not isinstance(data, dict):
         return data
-        
+
     safe_data = data.copy()
     sensitive_keys = {"email", "phone", "token", "authorization", "password", "secret", "key"}
-    
+
     for key in list(safe_data.keys()):
         if str(key).lower() in sensitive_keys:
             safe_data[key] = "[REDACTED]"
-            
+
     return safe_data

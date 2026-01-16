@@ -6,311 +6,306 @@
 # it under the terms of the GNU Affero General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-#
-# Spectrue Engine is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with Spectrue Engine. If not, see <https://www.gnu.org/licenses/>.
 
-import os
-import json
-from openai import AsyncOpenAI
-from spectrue_core.agents.prompts import get_prompt
-from spectrue_core.utils.security import sanitize_input
+from spectrue_core.verification.evidence.evidence_pack import Claim, EvidencePack, ArticleIntent
 from spectrue_core.config import SpectrueConfig
-import asyncio
-from datetime import datetime
+from spectrue_core.runtime_config import EngineRuntimeConfig
+from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.agents.llm_router import LLMRouter
+from spectrue_core.agents.skills.claims import ClaimExtractionSkill
+from spectrue_core.agents.skills.clustering import ClusteringSkill
+from spectrue_core.agents.skills.scoring import ScoringSkill
+from spectrue_core.agents.skills.query import QuerySkill
+from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
+from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
+from spectrue_core.agents.skills.relevance import RelevanceSkill
+from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
+# Per-claim judging skills (deep analysis mode)
+from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
+from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
+from spectrue_core.pipeline.mode import AnalysisMode
+import logging
 
+logger = logging.getLogger(__name__)
 
 class FactCheckerAgent:
+    """
+    Main agent Facade using composed Skills.
+    """
     def __init__(self, config: SpectrueConfig = None):
         self.config = config
-        api_key = config.openai_api_key if config else os.getenv("OPENAI_API_KEY")
-        
-        self.client = AsyncOpenAI(api_key=api_key)
-        
-        try:
-            t = float(os.getenv("OPENAI_TIMEOUT", "60"))
-            if not (5 <= t <= 300):
-                t = 60.0
-        except Exception:
-            t = 60.0
-        self.timeout = t
-        try:
-            c = int(os.getenv("OPENAI_CONCURRENCY", "6"))
-        except Exception:
-            c = 6
-        c = max(1, min(c, 16))
-        self._sem = asyncio.Semaphore(c)
+        self.runtime = (config.runtime if config else None) or EngineRuntimeConfig.load_from_env()
+        api_key = config.openai_api_key if config else None
 
-    async def analyze(self, fact: str, context: str, gpt_model: str, lang: str, analysis_mode: str = "general") -> dict:
-        """Анализирует факт на основе контекста и возвращает структурированный JSON."""
+        # Create OpenAI client (Responses API)
+        openai_client = LLMClient(
+            openai_api_key=api_key,
+            default_timeout=float(self.runtime.llm.nano_timeout_sec),
+            max_retries=3,
+        )
 
-        prompt_key = 'prompts.aletheia_lite' if analysis_mode == 'lite' else 'prompts.final_analysis'
-        prompt_template = get_prompt(lang, prompt_key)
-        
-        # Fallback to default prompt if lite is not available or empty
-        if not prompt_template and analysis_mode == 'lite':
-             prompt_template = get_prompt(lang, 'prompts.final_analysis')
+        # Create DeepSeek client (Native API compatible with Chat Completions)
+        deepseek_client = None
+        if self.runtime.llm.deepseek_base_url and self.runtime.llm.deepseek_api_key:
+            deepseek_client = LLMClient(
+                openai_api_key=self.runtime.llm.deepseek_api_key,
+                base_url=self.runtime.llm.deepseek_base_url,
+                default_timeout=float(self.runtime.llm.cluster_timeout_sec),
+                max_retries=3,
+            )
 
-        # Wrap inputs in tags and sanitize to prevent injection
-        safe_fact = f"<statement>{sanitize_input(fact)}</statement>"
-        safe_context = f"<context>{sanitize_input(context)}</context>"
-        
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        # date kwarg is ignored if not present in template, safe to add
-        prompt = prompt_template.format(fact=safe_fact, context=safe_context, date=current_date)
-        
-        # Debug: Log the prompt
-        print(f"--- Prompt for {gpt_model} ({lang}) ---")
-        print(prompt)
-        print("--- End Prompt ---")
-        
-        messages = [{"role": "user", "content": prompt}]
+        # Create router that directs models to appropriate clients
+        self.llm_client = LLMRouter(
+            openai_client=openai_client,
+            chat_client=deepseek_client,
+            chat_model_names=list(self.runtime.llm.deepseek_model_names) if deepseek_client else [],
+        )
 
-        # Temperature configuration for minimal creativity (strict factual analysis)
-        # gpt-5-nano doesn't support temperature parameter (as of 2025-11)
-        # gpt-5-nano/mini and o1 models don't support temperature parameter (or require default 1)
-        models_without_temperature = ["gpt-5-nano", "gpt-5-mini", "gpt-5", "o1-mini", "o1-preview"]
-        use_temperature = gpt_model not in models_without_temperature and not gpt_model.startswith("o1-")
-        
-        api_params = {
-            "model": gpt_model,
-            "response_format": {"type": "json_object"},
-            "messages": messages,
-            "timeout": self.timeout
-        }
-        
-        # Optimize speed for reasoning models
-        if "gpt-5" in gpt_model or "o1" in gpt_model:
-            api_params["reasoning_effort"] = "low"
-            # GPT-5 and o1 models don't support temperature parameter
-            use_temperature = False
-        
-        # Add temperature only if supported by the model
-        if use_temperature:
-            api_params["temperature"] = 0  # Deterministic for fact-checking
+        # Expose LLM client for pipeline steps
+        self._llm = self.llm_client
 
-        try:
-            print(f"[GPT] Calling {gpt_model} with {len(prompt)} chars prompt...")
-            async with self._sem:
-                response = await self.client.chat.completions.create(**api_params)
-            
-            raw_content = response.choices[0].message.content
-            print(f"[GPT] Got response: {len(raw_content)} chars")
-            print(f"[GPT] Response preview: {raw_content[:300]}...")
-            
-            # Parse the JSON response
-            result = json.loads(raw_content)
-            print(f"[GPT] ✓ JSON parsed successfully. Keys: {list(result.keys())}")
-            
-            # Handle Chain-of-Thought filtering (support both keys)
-            thought_process = result.pop("thought_process", None) or result.pop("_thought_process", None)
-            if thought_process:
-                print(f"[Aletheia-X Thought]: {thought_process}")
-            
-            # Fix rationale if it's an object (Radical Candor prompt side-effect)
-            if "rationale" in result and isinstance(result["rationale"], (dict, list)):
-                if isinstance(result["rationale"], dict):
-                    # Convert dict to formatted string
-                    lines = []
-                    for k, v in result["rationale"].items():
-                        # Capitalize key for better display
-                        key_display = k.replace('_', ' ').title()
-                        lines.append(f"**{key_display}:** {v}")
-                    result["rationale"] = "\n\n".join(lines)
-                elif isinstance(result["rationale"], list):
-                     result["rationale"] = "\n".join([str(item) for item in result["rationale"]])
-            
-            print(f"[GPT] Scores: V={result.get('verified_score', 0):.2f}, D={result.get('danger_score', 0):.2f}, Conf={result.get('confidence_score', 0):.2f}")
-            return result
-        except json.JSONDecodeError as e:
-            print(f"[GPT] ✗ JSON parse error: {e}")
-            print(f"[GPT] Raw content was: {raw_content[:500] if 'raw_content' in locals() else 'N/A'}")
-            return {
-                "verified_score": 0.5,
-                "context_score": 0.5,
-                "danger_score": 0.0,
-                "style_score": 0.5,
-                "confidence_score": 0.2,
-                "rationale_key": "errors.agent_call_failed"
-            }
-        except Exception as e:
-            print(f"[GPT] ✗ Error calling {gpt_model}: {e}")
-            # Возвращаем дефолтные значения, включая низкую уверенность
-            return {
-                "verified_score": 0.5,
-                "context_score": 0.5,
-                "danger_score": 0.0,
-                "style_score": 0.5,
-                "confidence_score": 0.2, # <-- Низкая уверенность при ошибке
-                "rationale_key": "errors.agent_call_failed"
-            }
+        self.claims_skill = ClaimExtractionSkill(self.config, self.llm_client)
+        self.clustering_skill = ClusteringSkill(self.config, self.llm_client)
+        self.scoring_skill = ScoringSkill(self.config, self.llm_client)
+        self.query_skill = QuerySkill(self.config, self.llm_client)
+        self.article_cleaner = ArticleCleanerSkill(self.config, self.llm_client)
+        # Oracle validation skill for hybrid mode
+        self.oracle_skill = OracleValidationSkill(self.config, self.llm_client)
+        # Relevance skill for semantic gating
+        self.relevance_skill = RelevanceSkill(self.config, self.llm_client)
+        # Edge Typing for ClaimGraph C-stage
+        self.edge_typing_skill = EdgeTypingSkill(self.config, self.llm_client)
+        # Per-claim judging skills (deep analysis mode)
+        self.evidence_summarizer_skill = EvidenceSummarizerSkill(self.llm_client)
+        self.claim_judge_skill = ClaimJudgeSkill(self.llm_client)
 
-    async def generate_search_queries(
-        self, 
-        fact: str, 
-        context: str = "", 
+
+    async def extract_claims(
+        self, text: str, *, lang: str = "en", max_claims: int = 20, anchors: list | None = None
+    ) -> tuple[list[Claim], bool, ArticleIntent, str]:
+        """Extract claims with article intent for Oracle triggering."""
+        return await self.claims_skill.extract_claims(
+            text, lang=lang, max_claims=max_claims, anchors=anchors
+        )
+
+    async def enrich_claims_post_evidence(
+        self,
+        claims: list[Claim],
+        *,
         lang: str = "en",
-        content_lang: str = None  # M31: Content language from detection
-    ) -> list[str]:
+        evidence_by_claim: dict[str, list[dict]] | None = None,
+    ) -> list[Claim]:
+        return await self.claims_skill.enrich_claims_post_evidence(
+            claims,
+            lang=lang,
+            evidence_by_claim=evidence_by_claim,
+        )
+
+    async def cluster_evidence(
+        self,
+        claims: list[Claim],
+        search_results: list[dict],
+        *,
+        stance_pass_mode: str = "single",
+    ) -> list:
+        return await self.clustering_skill.cluster_evidence(
+            claims,
+            search_results,
+            stance_pass_mode=stance_pass_mode,
+        )
+
+    async def score_evidence(self, pack: EvidencePack, *, lang: str = "en") -> dict:
+        # Use default config model
+        return await self.scoring_skill.score_evidence(pack, lang=lang)
+
+    async def score_evidence_parallel(
+        self, pack: EvidencePack, *, lang: str = "en", max_concurrency: int = 5
+    ) -> dict:
+        """Score evidence with parallel per-claim LLM calls (for deep mode)."""
+        return await self.scoring_skill.score_evidence_parallel(
+            pack, lang=lang, max_concurrency=max_concurrency
+        )
+
+    def detect_evidence_gaps(self, pack: EvidencePack) -> list[str]:
+        return self.scoring_skill.detect_evidence_gaps(pack)
+
+    async def analyze(self, fact: str, context: str, lang: str, analysis_mode: str | AnalysisMode = AnalysisMode.GENERAL) -> dict:
+        # Delegate to scoring skill for final analysis (it has the logic)
+        return await self.scoring_skill.analyze(fact, context, lang, analysis_mode=analysis_mode)
+
+    async def generate_search_queries(self, fact: str, context: str = "", lang: str = "en", content_lang: str = None) -> list[str]:
+        return await self.query_skill.generate_search_queries(
+            fact, context, lang, content_lang
+        )
+
+    async def clean_article(self, raw_text: str) -> str:
+        """Clean article text using LLM Nano."""
+        return await self.article_cleaner.clean_article(raw_text)
+
+    async def verify_search_relevance(self, claims: list[Claim], search_results: list[dict]) -> dict:
+        """Verify if search results are semantically relevant to claims."""
+        return await self.relevance_skill.verify_search_relevance(claims, search_results)
+
+    async def evaluate_semantic_gating(self, claims: list) -> bool:
         """
-        Generate search queries using GPT-5 Nano.
+        Evaluate semantic gating policy (e.g. reject unverifiable content).
+        Returns True if allowed, False if rejected.
+        """
+        # Delegate to relevance skill or scoring skill if available. 
+        # For now, default to True (allow) unless filtering logic is restored/implemented.
+        # Tests will mock this to return False.
+        if hasattr(self.relevance_skill, "evaluate_semantic_gating"):
+             return await self.relevance_skill.evaluate_semantic_gating(claims)
+        return True
+
+
+    async def verify_oracle_relevance(self, user_fact: str, oracle_claim: str, oracle_rating: str) -> bool:
+        """
+        Check if the Oracle result is semantically relevant to the user's fact.
+        Prevents false positives where keywords match but the topic differs (e.g. comet news vs comet alien fake).
+        """
+        # Quick length check
+        if not user_fact or not oracle_claim:
+            return False
+
+        prompt = f"""Compare the User Query with the Fact-Check Result.
         
-        M31: 3-tier query generation:
-        - Query 1: Always English (global coverage)
-        - Query 2: Content language if != EN (source language)
-        - Query 3: UI language if != EN and != content_lang (user preference)
+User Query: "{user_fact[:1000]}"
+Fact-Check Claim: "{oracle_claim[:1000]}" (Rated: {oracle_rating})
+
+Task:
+Determine if the Fact-Check is discussing the SAME specific claim or event as the User Query.
+- If the User Query is about a normal event (e.g. "comet approaching Earth") and the Fact-Check is debunking a wild/fake story about it (e.g. "aliens found on comet"), they are DIFFERENT (Relevance: NO).
+- If the User Query IS the fake story (e.g. "aliens on comet?"), then it IS RELEVANT (Relevance: YES).
+- If the User Query is vague, but the Fact-Check is the primary context, it's relevant.
+
+Output JSON: {{ "is_relevant": true/false, "reason": "..." }}
+"""
+        try:
+            from spectrue_core.utils.trace import Trace
+            result = await self.llm_client.call_json(
+                model="gpt-5-nano",
+                input=prompt,
+                instructions="You are a relevance checking assistant.",
+                reasoning_effort="low",
+                timeout=10.0,
+                trace_kind="oracle_verification"
+            )
+            is_relevant = bool(result.get("is_relevant", False))
+            Trace.event("oracle.verification", {
+                "user_fact": user_fact[:50], 
+                "oracle_claim": oracle_claim[:50], 
+                "is_relevant": is_relevant
+            })
+            if not is_relevant:
+                 logger.debug("[Agent] Oracle hit rejected by LLM: %s", result.get("reason"))
+            return is_relevant
+
+        except Exception as e:
+            logger.warning("[Agent] Oracle verification failed: %s. Assuming relevant.", e)
+            return True
+
+    async def verify_inline_source_relevance(
+        self, 
+        claims: list[dict], 
+        inline_source: dict,
+        article_excerpt: str = ""
+    ) -> dict:
+        """
+        Check if an inline source is relevant to the extracted claims.
         
+        T7: Inline sources are URLs found in article text that reference external sources.
+        They may be primary sources (e.g., official statement being quoted) or just
+        contextual links (e.g., author's social media).
+        
+        Args:
+            claims: List of extracted claims from the article
+            inline_source: Source dict with 'url', 'title', 'domain' keys
+            article_excerpt: First ~500 chars of article for context
+            
         Returns:
-            List of 2-3 queries depending on language overlap
+            dict with 'is_relevant', 'is_primary', 'reason', 'verification_skipped' keys
         """
-        import json
-        import re
-        
-        # M31: Determine which languages to generate
-        content_lang = content_lang or lang  # Fallback to UI lang
-        
-        languages_needed = []
-        
-        # Always include English
-        languages_needed.append(("en", "English", "global"))
-        
-        # Add content language if different from English
-        if content_lang != "en":
-            lang_names = {
-                "en": "English", "uk": "Ukrainian", "ru": "Russian",
-                "de": "German", "es": "Spanish", "fr": "French",
-                "ja": "Japanese", "zh": "Chinese"
+        from spectrue_core.utils.trace import Trace
+
+        # Short-circuit: if inline source verification is disabled
+        if not self.runtime.llm.enable_inline_source_verification:
+            return {
+                "is_relevant": True,
+                "is_primary": False,
+                "reason": "inline_verification_disabled",
+                "verification_skipped": True,
             }
-            lang_name = lang_names.get(content_lang, content_lang.title())
-            languages_needed.append((content_lang, lang_name, "content"))
-        
-        # Add UI language if different from both
-        if lang not in ["en", content_lang]:
-            lang_names = {
-                "en": "English", "uk": "Ukrainian", "ru": "Russian",
-                "de": "German", "es": "Spanish", "fr": "French",
-                "ja": "Japanese", "zh": "Chinese"
-            }
-            lang_name = lang_names.get(lang, lang.title())
-            languages_needed.append((lang, lang_name, "ui"))
-        
-        # Limit to 3 queries max
-        languages_needed = languages_needed[:3]
-        
-        print(f"[M31] Generating {len(languages_needed)} queries for languages: {[l[0] for l in languages_needed]}")
-        
-        # Clean input
-        clean_fact = re.sub(r'http\S+', '', fact[:800]).replace("\n", " ").strip()
-        clean_context = context[:500].replace("\n", " ").strip() if context else ""
-        
-        # Build prompt for multi-language generation
-        language_instructions = "\n".join([
-            f"{i+1}. {name} ({code}) - {purpose} search"
-            for i, (code, name, purpose) in enumerate(languages_needed)
+
+        if not claims or not inline_source:
+            return {"is_relevant": False, "is_primary": False, "reason": "empty_input"}
+
+        url = inline_source.get("url", "")
+        domain = inline_source.get("domain", "")
+        anchor = inline_source.get("title", "") or inline_source.get("anchor", "")
+
+        # Format claims for prompt
+        claims_text = "\n".join([
+            f"- {c.get('text', '')}" for c in claims[:5]
         ])
-        
-        prompt = f"""Generate exactly {len(languages_needed)} search queries to fact-check this claim.
 
-RULES:
-1. Extract KEY entities: names, numbers, organizations, dates
-2. Keep queries concise (5-10 words each)
-3. Focus on the MAIN claim only
-4. Each query MUST be in its specified language
+        # Simplified prompt without if/then rules
+        prompt = f"""Analyze if this source URL is a PRIMARY SOURCE for the claims.
 
-LANGUAGES NEEDED:
-{language_instructions}
+Article Excerpt:
+"{article_excerpt[:500]}"
 
-OUTPUT FORMAT (JSON only):
-{{"queries": [{", ".join([f'"{lang[1].lower()} query"' for lang in languages_needed])}]}}
+Claims:
+{claims_text}
 
-CLAIM: {clean_fact}
-CONTEXT: {clean_context if clean_context else "None"}"""
+Source:
+- URL: {url}
+- Domain: {domain}
+- Anchor: "{anchor}"
+
+Evaluate:
+1. Is this source RELEVANT to any claim?
+2. Is this source PRIMARY (the original issuer of the information) or SECONDARY (coverage/reporting about it)?
+
+A PRIMARY source is where the information originated (official statement, original document, author's own platform).
+A SECONDARY source reports or discusses information from elsewhere.
+
+Output JSON: {{ "is_relevant": true/false, "is_primary": true/false, "reason": "one sentence explanation" }}
+"""
 
         try:
-            print(f"[GPT-5-Nano] Generating {len(languages_needed)} queries for: {clean_fact[:80]}...")
-            async with self._sem:
-                response = await self.client.chat.completions.create(
-                    model="gpt-5-nano",
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    # Note: GPT-5 models don't support temperature parameter
-                    timeout=30
-                )
-            
-            raw = response.choices[0].message.content
-            print(f"[GPT-5-Nano] Raw response: {raw[:200]}...")
-            
-            result = json.loads(raw)
-            queries = result.get("queries", [])
-            
-            if queries and len(queries) >= 1:
-                # Filter out URLs and too-short queries
-                valid = [q for q in queries if isinstance(q, str) and 5 < len(q) < 150 and "http" not in q.lower()]
-                if valid:
-                    # Pad with duplicates if needed
-                    while len(valid) < len(languages_needed):
-                        valid.append(valid[0])
-                    
-                    # Log with language tags
-                    for (lang_code, _, purpose), query in zip(languages_needed, valid):
-                        print(f"[M31] Generated {purpose} query ({lang_code}): {query[:80]}")
-                    
-                    print(f"[GPT-5-Nano] ✓ Generated {len(valid[:len(languages_needed)])} queries")
-                    return valid[:len(languages_needed)]
-            
-            print("[GPT-5-Nano] No valid queries in response, using fallback")
-            return self._smart_fallback(fact, lang, content_lang)
-            
+            result = await self.llm_client.call_json(
+                model=self.runtime.llm.model_inline_source_verification,
+                input=prompt,
+                instructions="You are a source classification assistant. Distinguish primary sources (original issuers) from secondary coverage.",
+                reasoning_effort="low",
+                timeout=10.0,
+                trace_kind="inline_source_verification",
+            )
+
+            is_relevant = bool(result.get("is_relevant", False))
+            is_primary = bool(result.get("is_primary", False))
+            reason = result.get("reason", "")
+
+            Trace.event("inline_source.verification", {
+                "url": url[:60],
+                "domain": domain,
+                "is_relevant": is_relevant,
+                "is_primary": is_primary,
+                "reason": reason
+            })
+
+            if is_primary:
+                logger.debug("[Agent] Inline source PRIMARY: %s", domain)
+            elif not is_relevant:
+                logger.debug("[Agent] Inline source rejected: %s - %s", domain, reason[:60])
+
+            return {
+                "is_relevant": is_relevant,
+                "is_primary": is_primary,
+                "reason": reason
+            }
+
         except Exception as e:
-            print(f"[GPT-5-Nano] ✗ Query generation error: {e}")
-            return self._smart_fallback(fact, lang, content_lang)
-    
-    def _smart_fallback(self, fact: str, lang: str = "en", content_lang: str = None) -> list[str]:
-        """
-        Smart fallback: Extract keywords from claim.
-        M31: Returns 2-3 queries based on language overlap.
-        """
-        import re
-        
-        content_lang = content_lang or lang
-        
-        # Find numbers
-        numbers = re.findall(r'\b\d+(?:\.\d+)?\b', fact)
-        
-        # Find Latin words (potential English/scientific terms)
-        latin_words = re.findall(r'\b[A-Za-z]{3,}\b', fact)
-        
-        keywords = []
-        
-        # Add acronyms (like NIST, NASA, GPS)
-        acronyms = [w for w in latin_words if w.isupper() and len(w) >= 2]
-        keywords.extend(acronyms[:3])
-        
-        # Add other Latin words
-        other_latin = [w for w in latin_words if not w.isupper() and len(w) >= 4]
-        keywords.extend(other_latin[:5])
-        
-        # Add key numbers
-        keywords.extend(numbers[:2])
-        
-        queries = []
-        
-        # Query 1: English keywords
-        en_query = " ".join(keywords[:8]) if keywords else fact[:50].strip()
-        queries.append(en_query)
-        
-        # Query 2: Content language (if != EN)
-        if content_lang != "en":
-            queries.append(fact[:100].strip())
-        
-        # Query 3: UI language (if different from both)
-        if lang not in ["en", content_lang]:
-            queries.append(fact[:100].strip())
-        
-        print(f"[M31] Smart fallback: {len(queries)} queries for langs: en, {content_lang}, {lang}")
-        return queries
+            logger.warning("[Agent] Inline source verification failed: %s. Marking as secondary.", e)
+            return {"is_relevant": True, "is_primary": False, "reason": f"verification_error: {e}"}

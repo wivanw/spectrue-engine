@@ -6,17 +6,12 @@
 # it under the terms of the GNU Affero General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-#
-# Spectrue Engine is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with Spectrue Engine. If not, see <https://www.gnu.org/licenses/>.
 
 import yaml
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Словарь для хранения всех загруженных переводов
 _PROMPTS = {}
@@ -35,14 +30,14 @@ def load_prompts(locales_dir: Path = None):
                      Defaults to 'locales' next to this file.
     """
     global _PROMPTS, LOCALES_PATH
-    
+
     if locales_dir:
         LOCALES_PATH = Path(locales_dir)
-        
+
     if not LOCALES_PATH.is_dir():
         # Only print error if it's the default path. If custom path fails, user should handle it.
         if locales_dir is None:
-             print(f"Warning: Locales directory not found at {LOCALES_PATH}")
+             logger.warning("Locales directory not found at %s", LOCALES_PATH)
         return
 
     for f in LOCALES_PATH.glob("*.yml"):
@@ -53,18 +48,18 @@ def load_prompts(locales_dir: Path = None):
                 if data and isinstance(data, dict) and lang in data:
                     _PROMPTS[lang] = data[lang]
             except yaml.YAMLError as e:
-                print(f"YAML parsing failed for {f.name}: {e}")
+                logger.warning("YAML parsing failed for %s: %s", f.name, e)
 
-    print(f"✅ Loaded prompts for languages: {list(_PROMPTS.keys())}")
+    logger.debug("Loaded prompts for languages: %s", list(_PROMPTS.keys()))
 
 
 def get_prompt(lang: str, key: str) -> str:
     """Безопасно получает промпт по ключу, с фолбэком на английский."""
-    
+
     # Auto-load if empty (lazy loading)
     if not _PROMPTS:
         load_prompts()
-    
+
     key_parts = key.split('.')
 
     # Сначала пытаемся найти на нужном языке

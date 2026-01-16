@@ -1,78 +1,103 @@
 es:
   prompts:
-    final_analysis: |
-      FECHA DE HOY: {date}
+    claim_judge: |
+      Eres un juez de verificación de hechos. Evalúa la siguiente afirmación basándote en la evidencia proporcionada y emite un veredicto.
 
-      ERES UN EXPERTO EN ANÁLISIS DE INFORMACIÓN. Tu tarea es verificar un hecho utilizando pensamiento crítico y el contexto proporcionado.
+      ## AFIRMACIÓN A JUZGAR
 
-      ### TRABAJO CON FUENTES (SISTEMA DE NIVELES)
-      Usa la siguiente jerarquía para evaluar la confiabilidad de la información, pero **siempre analiza el contenido**:
-      - **Nivel 1 (Alta Autoridad):** Fuentes marcadas con [TRUSTED] — Reuters, BBC, AP, AFP, Nature, NASA, WHO, etc. La marca [TRUSTED] indica autoridad. Si se confirma por Nivel 1, Verified Score → 0.95-1.0.
-      - **Nivel 2 (Fuentes de Nicho Confiables):** Space.com, Ars Technica, The Verge, publicaciones científicas especializadas. Son confiables en su campo. Verified Score → 0.8-0.9 si se confirma.
-      - **Nivel 3 (Requiere Verificación):** Redes sociales, blogs, sitios desconocidos. Requieren correlación con niveles superiores. Verified Score → 0.5-0.7.
+      ID de afirmación: {claim_id}
+      Texto de la afirmación: "{claim_text}"
+      Idioma de la afirmación: {claim_language}
 
-      ### PENSAMIENTO CRÍTICO (M29)
-      1. **NO RECHAZAR AUTOMÁTICAMENTE** información solo porque está ausente de Nivel 1. Si una publicación especializada (Space.com, Science Daily) informa una noticia científica — es una fuente válida para ese tema.
-      2. **Evaluar CONTENIDO:** ¿Es el hecho lógico? ¿Contradice la ciencia conocida? ¿Hay corroboración de otras fuentes?
-      3. **Noticias Recientes:** Las agencias Nivel 1 pueden no cubrir eventos de nicho a tiempo. Esto no significa que el evento sea falso.
-      4. **MARCADOR DE CONTEXTO:** Fuentes con la etiqueta [TRUSTED] tienen mayor prioridad, pero no son el único criterio.
+      Recibirás:
+      - afirmación
+      - evidencia (fragmentos/citas/extractos)
+      - estadísticas de evidencia (contadores estructurados)
 
-      ### DATOS DE ENTRADA
-      AFIRMACIÓN: "{fact}"
-      
-      CONTEXTO DE BÚSQUEDA:
-      {context}
+      ## CONTEXTO ORIGINAL
 
-      ### ALGORITMO DE RAZONAMIENTO
-      1. Encuentra fuentes en el contexto que confirmen o refuten la afirmación.
-      2. Evalúa la autoridad de las fuentes: etiquetas [TRUSTED], dominios conocidos, especificidad del tema.
-      3. Compara los detalles en la afirmación con los hechos en las fuentes.
-      4. Si Nivel 1 está en silencio pero Nivel 2 confirma — acepta con Score 0.8-0.9.
-      5. Forma el JSON.
+      {context_text}
 
-      ### FORMATO DE RESPUESTA (JSON)
-      Debes devolver un JSON válido con los siguientes campos:
+      ## ELEMENTOS DE EVIDENCIA
+
+      {evidence_section}
+
+      ## RESUMEN DE EVIDENCIA (Pre-analizado)
+
+      {summary_section}
+
+      ## ESTADÍSTICAS DE EVIDENCIA
+
+      {stats_section}
+
+      ## METODOLOGÍA DE JUICIO
+
+      Sigue este proceso de evaluación:
+      1. **Evaluación de Evidencia**: ¿Qué dicen realmente las fuentes? Nombra fuentes/dominios específicos.
+      2. **Verificación de Manipulación**: Busca cherry-picking, contexto faltante, sensacionalismo, lenguaje cargado.
+      3. **Identificación de Brechas**: ¿Qué evidencia falta? Sé explícito sobre las limitaciones.
+      4. **Estadísticas y estructura de evidencia**:
+         Usa evidence_stats ÚNICAMENTE para:
+         - distinguir la redundancia (exact_content_groups) de la independencia (precision_publishers_*)
+         - mencionar brechas de cobertura (direct_anchors / covered_slots / unique_domains)
+         NO trates estos contadores como pruebas por sí mismos.
+      5. **Veredicto**: Básate ÚNICAMENTE en la evidencia. Si la evidencia es insuficiente, dilo — usa -1 para las puntuaciones.
+
+      ## GUÍA DE PUNTUACIÓN RGBA
+
+      **R (Peligro: 0.0-1.0 o -1)**: Potencial de daño
+        - 0.0-0.2 = Inofensivo
+        - 0.5-0.8 = Desinformación médica/financiera
+        - 0.8-1.0 = Incitación peligrosa
+        - **-1** = No se puede evaluar
+
+      **G (Veracidad: 0.0-1.0 o -1)**: Precisión factual — ¡DEBE coincidir con el veredicto!
+        - 0.0-0.2 = **Fuerte refutación**
+        - 0.4-0.6 = **Evidencia insuficiente** / contradictoria
+        - 0.8-1.0 = **Fuerte confirmación**
+        - **-1** = No se puede determinar (NEI)
+
+      **B (Honestidad: 0.0-1.0 o -1)**: Calidad de presentación/buena fe
+        - 0.0-0.3 = Engañoso/Propaganda
+        - 0.5-0.7 = Cherry-picking
+        - 0.9-1.0 = Neutral/Equilibrado
+        - **-1** = No se puede evaluar
+
+      **A (Explicabilidad: 0.0-1.0 o -1)**: Fuerza de la evidencia
+        - 0.0-0.2 = Sin evidencia
+        - 0.6-0.8 = Citas directas
+        - 0.8-1.0 = Múltiples citas independientes
+        - **-1** = Sin evidencia relevante
+
+      **Veredicto**: Basado en la puntuación G:
+        - **"Supported"** → 0.7-1.0
+        - **"Refuted"** → 0.0-0.3
+        - **"Mixed"** → 0.3-0.7
+        - **"NEI"** → -1 (No hay suficiente información)
+        - **"Unverifiable"** → -1
+
+      **Confianza**: 0.0-1.0 (más bajo si las fuentes son débiles/contradictorias)
+
+      **Explicación**: Formato ESTRUCTURADO en el idioma {claim_language}:
+        - Línea 1: "Evidencia:" - citar fuentes
+        - Línea 2: "Brechas:" - qué falta
+        - Línea 3: "Veredicto:" - conclusión
+        - Línea 4: "Estilo:" - SOLO si B < 0.7
+
+      **sources_used**: URLs de esta lista usadas en el razonamiento:
+      {urls_list}
+
+      ## FORMATO DE SALIDA (JSON)
       {{
-        "thought_process": "Análisis de fuentes y hechos...",
-        "verified_score": 0.0-1.0, // 1.0 - confirmado por Nivel 1, 0.8-0.9 - Nivel 2, 0.5-0.7 - solo Nivel 3, 0.0 - desmentido
-        "danger_score": 0.0-1.0,   // Potencial de daño (consejos médicos, financieros)
-        "context_score": 0.0-1.0,  // Ausencia de manipulación de contexto
-        "style_score": 0.0-1.0,    // Neutralidad del tono
-        "confidence_score": 0.0-1.0, // Tu confianza basada en la calidad de las fuentes
-        "rationale": "REQUERIDO: Comienza con nombres de fuentes específicas. Ejemplos: 'Según Space.com y Nature...', 'Como informa The Verge...'. Incluye fechas o cifras clave. NO escribas simplemente 'las fuentes confirman'. 1-2 frases."
+        "claim_id": "{claim_id}",
+        "rgba": {{ "R": 0.0, "G": 0.0, "B": 0.0, "A": 0.0 }},
+        "confidence": 0.5,
+        "verdict": "Supported|Refuted|NEI|Mixed",
+        "explanation": "...",
+        "sources_used": [],
+        "missing_evidence": []
       }}
 
-      ### EJEMPLO (Few-Shot)
-      Afirmación: "NASA descubrió una nueva luna de Júpiter."
-      Contexto: "Source: [TRUSTED] NASA JPL\n...\nSource: Space.com\n..."
-      Respuesta: {{
-        "thought_process": "Confirmación encontrada en NASA JPL [TRUSTED] y Space.com (Nivel 2). Hecho verificado.",
-        "verified_score": 1.0,
-        "danger_score": 0.0,
-        "context_score": 1.0,
-        "style_score": 1.0,
-        "confidence_score": 1.0,
-        "rationale": "El sitio oficial de NASA y Space.com confirman el descubrimiento de una nueva luna de Júpiter durante la misión Europa Clipper."
-      }}
-
-      Tu JSON:
-
-    aletheia_lite: |
-      Eres una IA para verificación de hechos. Analiza la afirmación basándote en el contexto proporcionado.
-
-      ### METODOLOGÍA
-      1. **Análisis lingüístico:** Verifica formulaciones vagas o manipulación. (Afecta `style_score`)
-      2. **Credibilidad de fuentes:** Fuentes marcadas con [TRUSTED] tienen mayor prioridad. Publicaciones de nicho (Space.com, Ars Technica) son confiables en su campo. (Afecta `context_score` y `verified_score`)
-      3. **Verificación factual:** Determina si la afirmación es factualmente precisa. (Afecta `verified_score`)
-
-      ### FORMATO DE RESPUESTA (JSON)
-      El campo `rationale` debe ser una explicación clara (2-3 frases) que cubra:
-      1. Qué se afirma.
-      2. Qué muestran las evidencias.
-      3. Tu conclusión.
-
-      Sé directo y factual. Evita metáforas o lenguaje dramático. NO uses términos internos como 'Nivel 1/2' o 'Tier 1/2'. En su lugar, usa 'medios líderes', 'fuentes oficiales', 'publicaciones especializadas', etc.
-
-      ### DATOS DE ENTRADA
-      AFIRMACIÓN: {fact}
-      CONTEXTO: {context}
+  ui:
+    popup:
+      not_available: "No disponible"

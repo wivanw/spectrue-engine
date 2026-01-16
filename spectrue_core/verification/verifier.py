@@ -1,0 +1,82 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+"""
+FactVerifier - Main facade for fact verification.
+
+This is the new, clean implementation that replaces the legacy FactVerifierComposite.
+Uses ValidationPipeline for all verification logic.
+"""
+
+from spectrue_core.config import SpectrueConfig
+from spectrue_core.verification.pipeline import ValidationPipeline
+from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class FactVerifier:
+    """
+    Main facade for the Fact Verification Waterfall.
+    
+    Uses composition with ValidationPipeline for clean architecture.
+    """
+
+    def __init__(self, config: SpectrueConfig = None, translation_service=None):
+        self.config = config
+        self.agent = FactCheckerAgent(config)
+        # Optional translation_service for Oracle result localization
+        self.pipeline = ValidationPipeline(config, self.agent, translation_service=translation_service)
+
+    async def fetch_url_content(self, url: str) -> str | None:
+        """Fetch URL content securely via configured search provider (no local requests)."""
+        return await self.pipeline.search_mgr.fetch_url_content(url)
+
+    async def verify_fact(
+        self,
+        fact: str,
+        lang: str = "en",
+        _content_lang: str | None = None,  # Kept for API compatibility but not used
+        _max_cost: int | None = None,  # Kept for API compatibility but not used
+        preloaded_context: str | None = None,
+        preloaded_sources: list | None = None,
+        progress_callback=None,
+        needs_cleaning: bool = False,
+        source_url: str | None = None,
+        extract_claims_only: bool = False,  # Deep mode - just extract claims
+        pipeline_profile: str | None = None,
+        preloaded_claims: list | None = None, # Skip extraction if claims provided
+        external_ledger=None,  # Pre-existing CostLedger to merge events into
+    ) -> dict:
+        """
+        Execute verification via ValidationPipeline.
+        """
+        # Map pipeline_profile to runtime_config for new DAG architecture
+        runtime_config = None
+        if pipeline_profile:
+            runtime_config = {"profile": pipeline_profile}
+        
+        result = await self.pipeline.execute(
+            fact=fact,
+            lang=lang,
+            runtime_config=runtime_config,
+            progress_callback=progress_callback,
+            preloaded_context=preloaded_context,
+            preloaded_sources=preloaded_sources,
+            needs_cleaning=needs_cleaning,
+            source_url=source_url,
+            extract_claims_only=extract_claims_only,
+            preloaded_claims=preloaded_claims,
+            external_ledger=external_ledger,
+        )
+        if "audit" not in result:
+            result["audit"] = {}
+        return result
+

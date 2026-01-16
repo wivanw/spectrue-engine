@@ -6,14 +6,6 @@
 # it under the terms of the GNU Affero General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-#
-# Spectrue Engine is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Affero General Public License for more details.
-#
-# You should have received a copy of the GNU Affero General Public License
-# along with Spectrue Engine. If not, see <https://www.gnu.org/licenses/>.
 
 """
 Spectrue Core Engine
@@ -22,4 +14,9 @@ Spectrue Core Engine
 The open-source AI fact-checking core.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.2.0"
+
+# Versioning for saved checks (SaaS-friendly reproducibility).
+# When changing prompts/strategy, bump these strings.
+PROMPT_VERSION = "fc_agent_v3"
+SEARCH_STRATEGY_VERSION = "waterfall_v2"

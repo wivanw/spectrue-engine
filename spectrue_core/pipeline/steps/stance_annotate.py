@@ -1,0 +1,142 @@
+# Copyright (C) 2025 Ivan Bondarenko
+#
+# This file is part of Spectrue Engine.
+#
+# Spectrue Engine is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2024-2025 Spectrue Contributors
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any
+
+from spectrue_core.pipeline.contracts import GATES_KEY, Gates
+from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.pipeline.errors import PipelineExecutionError
+from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.pipeline.pipeline_evidence import (
+    EvidenceFlowInput,
+    annotate_evidence_stance,
+)
+from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
+from spectrue_core.verification.evidence.evidence_stats import EvidenceStats
+
+logger = logging.getLogger(__name__)
+
+
+def _group_sources_by_claim(sources: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        claim_id = source.get("claim_id")
+        if not claim_id:
+            continue
+        grouped.setdefault(str(claim_id), []).append(source)
+    return grouped
+
+
+@dataclass
+class StanceAnnotateStep:
+    """Optional stance annotation for collected sources.
+
+    Controlled by EVOI gating policy. Reads ctx.extras["gates"].
+    """
+
+    agent: Any  # FactCheckerAgent
+    name: str = "stance_annotate"
+
+    async def run(self, ctx: PipelineContext) -> PipelineContext:
+        try:
+            if ctx.get_extra("gating_rejected") or ctx.get_extra("oracle_hit"):
+                return ctx
+
+            # Check gate policy (EVOI decision from SemanticGatingStep)
+            gates: Gates | None = ctx.get_extra(GATES_KEY)
+            if gates is not None and not gates.is_stance_enabled():
+                Trace.event(
+                    "stance_annotate.skipped_by_gate",
+                    {
+                        "reasons": list(gates.stance.reasons) if gates.stance else [],
+                        "p_need": gates.stance.p_need if gates.stance else 0,
+                    },
+                )
+                return ctx
+
+            if not ctx.claims or not ctx.sources:
+                return ctx
+
+            inp = EvidenceFlowInput(
+                fact=ctx.get_extra("prepared_fact", ""),
+                original_fact=ctx.get_extra("original_fact", ""),
+                lang=ctx.lang,
+                content_lang=ctx.lang,
+                analysis_mode=ctx.mode.api_analysis_mode,
+                progress_callback=ctx.get_extra("progress_callback"),
+            )
+
+            annotated = await annotate_evidence_stance(
+                agent=self.agent,
+                inp=inp,
+                claims=ctx.claims,
+                sources=ctx.sources,
+            )
+
+            if annotated:
+                item_meta = ctx.get_extra("evidence_item_meta") or {}
+                doc_meta = ctx.get_extra("evidence_doc_meta") or {}
+                if item_meta or doc_meta:
+                    enriched: list[dict[str, Any]] = []
+                    for item in annotated:
+                        if not isinstance(item, dict):
+                            continue
+                        merged = dict(item)
+                        claim_id = merged.get("claim_id")
+                        raw_url = merged.get("url") or merged.get("link")
+                        canonical = normalize_url(str(raw_url)) if raw_url else None
+                        if claim_id and canonical:
+                            key = f"{claim_id}::{canonical}"
+                            meta = item_meta.get(key)
+                            if isinstance(meta, dict):
+                                for k, v in meta.items():
+                                    if k not in merged or merged.get(k) in (None, ""):
+                                        merged[k] = v
+                        if canonical and canonical in doc_meta:
+                            meta = doc_meta.get(canonical)
+                            if isinstance(meta, dict):
+                                for k, v in meta.items():
+                                    if k not in merged or merged.get(k) in (None, ""):
+                                        merged[k] = v
+                        enriched.append(merged)
+                    annotated = enriched
+
+                Trace.event(
+                    "stance_annotate.completed",
+                    {"count": len(annotated)},
+                )
+
+                # --- Collect EvidenceStats (M119 iteration 1) ---
+                evidence_stats = EvidenceStats()
+                for ev in annotated:
+                    evidence_stats.observe(ev)
+
+                Trace.event("evidence.stats", evidence_stats.to_dict())
+
+                return (
+                    ctx.with_update(sources=annotated)
+                    .set_extra("stance_annotations", annotated)
+                    .set_extra("evidence_by_claim", _group_sources_by_claim(annotated))
+                    .set_extra("evidence_stats", evidence_stats)
+                )
+
+            return ctx
+
+        except Exception as e:
+            logger.exception("[StanceAnnotateStep] Failed: %s", e)
+            raise PipelineExecutionError(self.name, str(e), cause=e) from e
