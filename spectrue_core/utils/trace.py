@@ -192,10 +192,10 @@ def _sanitize(
             if len(s) > limit:
                 # Safe mode:
                 # - Sensitive keys (prompt/content/text/etc): head-only + sha256 (no tail)
-                # - Non-sensitive keys: keep head+tail + sha256 for debugging
+                # - Non-sensitive keys: keep head+tail + pbkdf2_sha256 for debugging
                 out = {
                     "len": len(s),
-                    "hmac_sha3_256": hmac.new(b"trace-v1", s.encode("utf-8"), hashlib.sha3_256).hexdigest(),
+                    "pbkdf2_sha256": hashlib.pbkdf2_hmac("sha256", s.encode("utf-8"), b"trace-salt", 10000).hex(),
                     "head": s[:limit],
                 }
                 if not is_sensitive_text:
@@ -210,7 +210,7 @@ def _sanitize(
         head_tail_len = min(300, max_str // 2)
         return {
             "len": len(s),
-            "hmac_sha3_256": hmac.new(b"trace-v1", s.encode("utf-8"), hashlib.sha3_256).hexdigest(),
+            "pbkdf2_sha256": hashlib.pbkdf2_hmac("sha256", s.encode("utf-8"), b"trace-salt", 10000).hex(),
             "head": s[:head_tail_len],
             "tail": s[-head_tail_len:] if head_tail_len else "",
         }
