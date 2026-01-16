@@ -173,12 +173,12 @@ class TestWebSearchToolBatchEnrichment:
 
         # Mock cache: a.com and b.com are cached
         def cache_contains(key):
-            return "a.com" in key or "b.com" in key
+            return key in {"page_tavily|https://a.com", "page_tavily|https://b.com"}
         
         def cache_get(key):
-            if "a.com" in key:
+            if key == "page_tavily|https://a.com":
                 return "Cached content A with enough characters."
-            if "b.com" in key:
+            if key == "page_tavily|https://b.com":
                 return "Cached content B with enough characters."
             raise KeyError(key)
 

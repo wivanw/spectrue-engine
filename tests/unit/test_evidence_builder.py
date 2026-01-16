@@ -45,7 +45,7 @@ class TestEvidenceBuilder:
         assert len(results) == 3
         
         # First BBC source is NOT duplicate, second IS
-        bbc_results = [r for r in results if "bbc.com" in r["domain"]]
+        bbc_results = [r for r in results if r["domain"] == "bbc.com"]
         assert len(bbc_results) == 2
         
         # Logic in code: "is_dup = domain in seen_domains"
@@ -54,7 +54,7 @@ class TestEvidenceBuilder:
         assert bbc_results[1]["is_duplicate"] is True
         
         # CNN is unique
-        cnn_result = [r for r in results if "cnn.com" in r["domain"]][0]
+        cnn_result = [r for r in results if r["domain"] == "cnn.com"][0]
         assert cnn_result["is_duplicate"] is False
         
         # Metrics check

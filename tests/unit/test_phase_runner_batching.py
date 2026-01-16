@@ -89,8 +89,7 @@ class TestPhaseRunnerBatchEnrichment:
         call_args = search_mgr.fetch_urls_content_batch.call_args
         urls_passed = call_args[0][0]
         assert len(urls_passed) == 2
-        assert "https://a.com" in urls_passed
-        assert "https://d.com" in urls_passed
+        assert set(urls_passed) == {"https://a.com", "https://d.com"}
 
         # Inline source should also be enriched
         assert inline_sources[0].get("fulltext") is True

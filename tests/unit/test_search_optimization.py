@@ -61,8 +61,7 @@ async def test_search_unified_flow(search_manager):
     # Verify filter applied (Low score removed, Reddit retained)
     assert len(res) == 2
     links = [r["link"] for r in res]
-    assert "https://bbc.com" in links
-    assert "https://reddit.com" in links
+    assert set(links) == {"https://bbc.com", "https://reddit.com"}
     
     # Verify context reconstruction
     assert "T1" in ctx

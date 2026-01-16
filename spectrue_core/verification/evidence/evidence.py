@@ -620,15 +620,15 @@ def build_evidence_pack(
             domain=domain or "",
             title=r.get("title"),
             snippet=r.get("snippet"),
-            channel=channel,  # type: ignore[arg-type]
-            tier=tier,  # type: ignore[arg-type]
+            channel=channel,  # type: ignore[typeddict-item]
+            tier=tier,  # type: ignore[typeddict-item]
             tier_reason=None,
             claim_id=r.get("claim_id") or default_claim_id,
-            stance=stance,  # type: ignore[arg-type]
+            stance=stance,  # type: ignore[typeddict-item]
             quote=quote,
             relevance=float(r.get("relevance_score", 0.0) or 0.0),
             published_at=r.get("published_at"),
-            temporal_flag=temporal_flag,  # type: ignore[arg-type]
+            temporal_flag=temporal_flag,  # type: ignore[typeddict-item]
             fetched=r.get("content_status") == "available",
             raw_text_chars=len(r.get("content_excerpt") or ""),
         ))
@@ -678,7 +678,7 @@ def build_evidence_pack(
         metrics=evidence_metrics,
         constraints=constraints,
         # UI/main-claim hint for the pack: prefer the explicit anchor when available.
-        claim_id=(default_claim_id or (claims[0].get("id") if claims else "c1")),
+        claim_id=(default_claim_id or (claims[0].get("id") if claims else "c1") or "c1"),
         items=evidence_items,
         stats=stats,
         global_cap=global_cap,
