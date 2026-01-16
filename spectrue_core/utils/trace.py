@@ -145,8 +145,6 @@ def _sanitize(
         # Safe Payloads Logic
         safe_mode = _trace_safe_payloads_var.get()
         if safe_mode:
-            # Check if this is a sensitive key
-            is_sensitive = False
             # Check if this is a sensitive (large text) key for truncation purposes
             is_sensitive_text = False
             is_secret_field = False
@@ -154,7 +152,6 @@ def _sanitize(
                 k = key_hint.lower()
                 # Broad match for sensitive text keys (prompts, content, etc.)
                 if any(x in k for x in ("input_text", "response_text", "article", "content", "text", "prompt", "raw_html", "snippet")):
-                    is_sensitive = True
                     is_sensitive_text = True
                 
                 # Check for secret-like fields that should not be hashed
