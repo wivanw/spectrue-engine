@@ -54,8 +54,8 @@ def _redact_text(s: str) -> str:
     if not s:
         return s
 
-    # URL params
     # URL params (stop at &, whitespace, or end of string)
+    # Explicitly redact API-style keys appearing as "key", "api_key", or "access_token".
     s = re.sub(r"([?&]key=)[^&\s]+", r"\1***", s, flags=re.IGNORECASE)
     s = re.sub(r"([?&]api_key=)[^&\s]+", r"\1***", s, flags=re.IGNORECASE)
     s = re.sub(r"([?&]access_token=)[^&\s]+", r"\1***", s, flags=re.IGNORECASE)
@@ -126,9 +126,23 @@ def _is_secret_hint(key_hint: str | None) -> bool:
     if not key_hint:
         return False
     k = key_hint.lower()
-    # Explicitly check for high-entropy secrets. 
-    # We do NOT match generic "key" to avoid false positives on non-secret keys (topic_key, etc).
-    return any(x in k for x in ("password", "secret", "token", "api_key", "apikey", "access_key", "accesskey", "authorization", "bearer"))
+    # Explicitly check for high-entropy secrets and common secret field names.
+    # We now also match generic "key" to ensure API keys like Google CSE's "key" are redacted.
+    return any(
+        x in k
+        for x in (
+            "password",
+            "secret",
+            "token",
+            "api_key",
+            "apikey",
+            "access_key",
+            "accesskey",
+            "authorization",
+            "bearer",
+            "key",
+        )
+    )
 
 
 def _sanitize(
