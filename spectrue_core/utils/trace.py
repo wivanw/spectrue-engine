@@ -15,6 +15,7 @@ import re
 import time
 from dataclasses import dataclass
 import hashlib
+import hmac
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Any
@@ -193,7 +194,7 @@ def _sanitize(
                 # - Non-sensitive keys: keep head+tail + sha256 for debugging
                 out = {
                     "len": len(s),
-                    "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest(),
+                    "hmac_sha256": hmac.new(b"trace-v1", s.encode("utf-8"), hashlib.sha256).hexdigest(),
                     "head": s[:limit],
                 }
                 if not is_sensitive_text:
@@ -208,7 +209,7 @@ def _sanitize(
         head_tail_len = min(300, max_str // 2)
         return {
             "len": len(s),
-            "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest(),
+            "hmac_sha256": hmac.new(b"trace-v1", s.encode("utf-8"), hashlib.sha256).hexdigest(),
             "head": s[:head_tail_len],
             "tail": s[-head_tail_len:] if head_tail_len else "",
         }
