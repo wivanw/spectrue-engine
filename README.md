@@ -472,6 +472,14 @@ Use this checklist to keep the engine “open-source ready” (reproducible, rev
 - Never commit secrets or trace artifacts with sensitive content.
 - Ensure new files follow the repository’s license header pattern and do not introduce incompatible code/licenses.
 
+## 🏛️ Project Principles & Governance
+
+Spectrue is governed by publicly documented principles covering independence, free access, and non-influence guarantees.
+
+- [Independence & Free Access Philosophy](docs/principles/INDEPENDENCE_AND_FREE_ACCESS.md)
+- [Independence & Free Access — Grant Summary](docs/principles/INDEPENDENCE_AND_FREE_ACCESS_SUMMARY.md)
+- [Governance & Non-Influence Guarantees](docs/principles/GOVERNANCE_AND_NON_INFLUENCE.md)
+
 ## 📜 License
 
 This project is licensed under the **GNU Affero General Public License v3 (AGPLv3)**.
