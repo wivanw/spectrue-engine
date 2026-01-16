@@ -176,14 +176,7 @@ def _sanitize(
         safe_mode = _trace_safe_payloads_var.get()
         if safe_mode:
             # Check if this is a sensitive (large text) key for truncation purposes
-                #
-                # Additionally, avoid hashing values that appear to be secrets (passwords, tokens, api keys, etc).
-                if _is_secret_hint(key_hint):
-                    return {
-                        "redacted": True,
-                        "key_hint": key_hint,
-                        "len": len(s),
-                    }
+            is_sensitive_text = False
 
             if key_hint:
                 k = key_hint.lower()
@@ -198,19 +191,7 @@ def _sanitize(
                 # Safe mode:
                 # - Sensitive keys (prompt/content/text/etc): head-only + sha256 (no tail)
                 # - Non-sensitive keys: keep head+tail + sha256 for debugging
-                
                 out = {
-
-        # Avoid hashing values that appear to be secrets (passwords, tokens, api keys, etc).
-        if _is_secret_hint(key_hint):
-            return {
-                "redacted": True,
-                "key_hint": key_hint,
-                "len": len(s),
-                "head": s[:head_tail_len],
-                "tail": s[-head_tail_len:] if head_tail_len else "",
-            }
-
                     "len": len(s),
                     "sha256": hashlib.sha256(s.encode("utf-8")).hexdigest(),
                     "head": s[:limit],
