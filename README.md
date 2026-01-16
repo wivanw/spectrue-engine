@@ -472,13 +472,18 @@ Use this checklist to keep the engine “open-source ready” (reproducible, rev
 - Never commit secrets or trace artifacts with sensitive content.
 - Ensure new files follow the repository’s license header pattern and do not introduce incompatible code/licenses.
 
-## 🏛️ Project Principles & Governance
+## Project Principles
 
-Spectrue is governed by publicly documented principles covering independence, free access, and non-influence guarantees.
+Spectrue is designed as non-authoritative analytical infrastructure.
+The system explicitly surfaces uncertainty, missing context, and conflicting evidence instead of collapsing them into verdicts or confidence scores.
 
+Key documents:
 - [Independence & Free Access Philosophy](docs/principles/INDEPENDENCE_AND_FREE_ACCESS.md)
-- [Independence & Free Access — Grant Summary](docs/principles/INDEPENDENCE_AND_FREE_ACCESS_SUMMARY.md)
 - [Governance & Non-Influence Guarantees](docs/principles/GOVERNANCE_AND_NON_INFLUENCE.md)
+- [What Spectrue Is Not](docs/principles/WHAT_SPECTRUE_IS_NOT.md)
+
+> **Note**: The public website and UI may lag behind the current engine capabilities.
+> Claim-level analysis and full traceability are implemented in the engine and documented here.
 
 ## 📜 License
 
