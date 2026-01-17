@@ -285,6 +285,34 @@ class DailyBonusState:
 
 
 # -----------------------------------------------------------------------------
+# Bonus Ledger
+# -----------------------------------------------------------------------------
+
+@dataclass(frozen=True, slots=True)
+class BonusLedgerEntry:
+    """Entry in the bonus credits ledger."""
+    uid: str
+    event_type: str  # daily_bonus, share_bonus, spend
+    amount_sc: MoneySC
+    date: datetime
+    related_run_id: Optional[str] = None
+    balance_after: Optional[MoneySC] = None  # available_sc after this op
+
+    def to_dict(self) -> dict:
+        d = {
+            "uid": self.uid,
+            "event_type": self.event_type,
+            "amount_sc": self.amount_sc.to_str(),
+            "date": self.date.isoformat(),
+        }
+        if self.related_run_id:
+            d["related_run_id"] = self.related_run_id
+        if self.balance_after:
+            d["balance_after"] = self.balance_after.to_str()
+        return d
+
+
+# -----------------------------------------------------------------------------
 # Legacy Types (backward compatibility)
 # -----------------------------------------------------------------------------
 

@@ -42,6 +42,7 @@ if TYPE_CHECKING:
         DailyBonusState,
         FreePoolV3,
         UserWallet,
+        BonusLedgerEntry,  # Added
     )
 
 
@@ -744,6 +745,19 @@ class FirestoreBillingStore(BillingStore):
                 merge=True,
             )
 
+            # V3: Bonus Ledger (spend)
+            if split.take_available.value > 0:
+                from datetime import datetime, timezone
+                bonus_entry = BonusLedgerEntry(
+                    uid=uid,
+                    event_type="spend",
+                    amount_sc=split.take_available * -1,
+                    date=datetime.now(timezone.utc),
+                    related_run_id=run_id,
+                    balance_after=MoneySCClass(new_available),
+                )
+                self.add_bonus_ledger_entry(bonus_entry, transaction=transaction)
+
             return ChargeResult(
                 ok=True,
                 split=split,
@@ -780,3 +794,22 @@ class FirestoreBillingStore(BillingStore):
             "locked_buckets_v3": [b.to_dict() for b in pool.locked_buckets],
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
+
+    def add_bonus_ledger_entry(
+        self,
+        entry: "BonusLedgerEntry",
+        transaction: Any | None = None,
+        batch: Any | None = None,
+    ) -> None:
+        """Add a bonus ledger entry to Firestore."""
+        # Use root collection "bonus_ledger"
+        ref = self._db.collection("bonus_ledger").document()
+        data = entry.to_dict()
+        data["created_at"] = firestore.SERVER_TIMESTAMP
+
+        if transaction:
+            transaction.set(ref, data)
+        elif batch:
+            batch.set(ref, data)
+        else:
+            ref.set(data)
