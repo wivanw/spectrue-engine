@@ -28,6 +28,10 @@ class MonetizationConfig:
     pool_doc_path: str = "billing/free_subsidy_pool"
     bonus_state_doc_path: str = "billing/daily_bonus_state"
 
+    # Pool bootstrap (when doc doesn't exist yet)
+    initial_pool_available_sc: MoneySC = MoneySC(Decimal("1000"))
+    pool_bootstrap_source: str = "bootstrap_default"
+
     # Pool locking
     pool_lock_days: int = 90
     pool_lock_ratio: Decimal = Decimal("0.50")  # OPERATIONAL_LOCK_RATIO

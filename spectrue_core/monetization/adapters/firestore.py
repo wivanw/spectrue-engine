@@ -8,6 +8,7 @@
 # (at your option) any later version.
 
 from __future__ import annotations
+import logging
 
 from dataclasses import replace
 from datetime import date, datetime
@@ -34,6 +35,8 @@ from spectrue_core.monetization.services.billing import (
 )
 from spectrue_core.monetization.services.free_pool import deduct as pool_deduct
 from spectrue_core.monetization.types import MoneySC, PoolBalance, UserBalance, quantize_sc
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from spectrue_core.monetization.types import (
@@ -548,9 +551,48 @@ class FirestoreBillingStore(BillingStore):
 
         snapshot = self._pool_ref.get()
         if not snapshot.exists:
-            return FreePoolV3(available_balance_sc=MoneySCClass.zero())
+            # Auto-bootstrap pool doc (atomic). This prevents "phantom credits" and
+            # ensures the pool is visible in Firestore emulator immediately.
+            tx = self._db.transaction()
 
-        data = snapshot.to_dict() or {}
+            @firestore.transactional
+            def _bootstrap_pool(transaction: firestore.Transaction) -> dict:  # type: ignore[no-untyped-def]
+                snap = self._pool_ref.get(transaction=transaction)
+                if snap.exists:
+                    return snap.to_dict() or {}
+                bootstrap = {
+                    "available_balance_sc": self._config.initial_pool_available_sc.to_str(),
+                    "locked_buckets_v3": [],
+                    "reserve_sc": self._config.pool_reserve_sc.to_str(),
+                    "source": self._config.pool_bootstrap_source,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+                # Use create() so we never overwrite an existing doc if a race happens.
+                transaction.create(self._pool_ref, bootstrap)
+                # Firestore forbids read-after-write in the same transaction.
+                # Return the bootstrap dict as the source of truth for this call.
+                return {
+                    **bootstrap,
+                    # Normalize server timestamp placeholders for downstream parsing:
+                    # parser already defaults missing timestamps safely.
+                    "created_at": None,
+                    "updated_at": None,
+                }
+
+            try:
+                data = _bootstrap_pool(tx)
+                logger.info(
+                    "Bootstrapped free pool doc at %s with available_balance_sc=%s",
+                    self._config.pool_doc_path,
+                    self._config.initial_pool_available_sc.to_str(),
+                )
+            except Exception as e:
+                # Hard fail would block startup; return zero but log loudly.
+                logger.exception("Failed to bootstrap free pool doc: %s", e)
+                return FreePoolV3(available_balance_sc=MoneySCClass.zero())
+        else:
+            data = snapshot.to_dict() or {}
         available = _to_decimal(data.get("available_balance_sc", "0"))
         raw_buckets = data.get("locked_buckets_v3") or []
         locked_buckets = []
