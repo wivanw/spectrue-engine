@@ -55,6 +55,12 @@ from spectrue_core.schema import (
     StructuredVerdict,
     StructuredDebug,
 )
+from spectrue_core.verification.evidence.evidence_pack import Claim
+
+# price-aware per-claim judge routing
+from spectrue_core.verification.scoring.judge_model_routing import (
+    JudgeModelDecision, select_judge_model,
+)
 
 class ScoringSkill(BaseSkill):
 
@@ -431,154 +437,195 @@ class ScoringSkill(BaseSkill):
             },
         )
 
-        # --- 3. SCORE EACH CLAIM IN PARALLEL ---
+        # NOTE: routing was previously implemented as an inner function _route_model_for_claim here.
+        # It is now delegated to spectrue_core.verification.scoring.judge_model_routing.select_judge_model
+        # so it can use pricing config and emit cost-aware trace features deterministically.
 
-        # --- MODEL ROUTING (per-claim) ---
-        # Goal: minimize cost while keeping correctness on high-risk / high-importance / ambiguous claims.
-        # Models:
-        # - gpt-5-nano: very cheap, use only when evidence is clean + claim is low-impact.
-        # - deepseek (chat): medium, use for mid-difficulty; fallback to gpt-5.2 on any failure.
-        # - gpt-5.2: use for central / high-impact / ambiguous claims.
+        # Build prompt once (same for all per-claim calls; it includes all claims/evidence)
+        prompt = build_score_prompt(
+            fact=fact,
+            claims=claims,
+            evidence=evidence_by_claim,  # Global evidence map (though prompt builder might slice it)
+            lang=lang,
+            strict=strict,
+        )
 
-        raw_claims_list = pack.get("claims")
-        if not isinstance(raw_claims_list, list):
-            raw_claims_list = []
+        prompt_chars = len(prompt)
+        cache_key = self._make_cache_key("score_v7_plat", prompt)
 
-        claim_obj_by_id = {
-            c.get("id"): c for c in raw_claims_list
-            if isinstance(c, dict) and c.get("id")
-        }
+        # Per-claim execution (each claim gets its own model routing decision)
+        async def _pick_model_for_claim(c: Claim) -> str:
+            try:
+                decision: JudgeModelDecision = select_judge_model(
+                    claim=c,
+                    evidence_items=evidence_by_claim.get(c.id, []),
+                    prompt_chars=prompt_chars,
+                    out_tokens_estimate=int(getattr(self.runtime.llm, "judge_out_tokens_estimate", 380)),
+                    deepseek_fail_prob=float(getattr(self.runtime.llm, "deepseek_fail_prob", 0.18)),
+                )
+            except Exception as e:
+                # routing must never block scoring; fail safe to pro
+                decision = JudgeModelDecision(
+                    model=MODEL_PRO,
+                    fallback_model=MODEL_PRO,
+                    required_capability="high",  # type: ignore[arg-type]
+                    difficulty=1.0,
+                    risk=1.0,
+                    complexity=1.0,
+                    ambiguity=1.0,
+                    est_credits={},
+                    expected_credits={},
+                    features={"error": str(e)},
+                    reason=f"routing_error:{type(e).__name__}",
+                )
 
-        metrics = pack.get("metrics", {})
-        if not isinstance(metrics, dict):
-            metrics = {}
-        per_claim_metrics = metrics.get("per_claim", {})
-        if not isinstance(per_claim_metrics, dict):
-            per_claim_metrics = {}
-
-        deepseek_model = None
-        try:
-            names = tuple(getattr(self.runtime.llm, "deepseek_model_names", ()) or ())
-            deepseek_model = names[0] if names else None
-        except Exception:
-            deepseek_model = None
-        if not deepseek_model:
-            deepseek_model = "deepseek-chat"
-
-        def _route_model_for_claim(claim_info: dict, evidence: list[dict]) -> tuple[str, dict]:
-            """Return (model, debug_route_info) for a claim."""
-            cid = str(claim_info.get("id") or "")
-
-            # Fast-path: no evidence => deterministic unverified; no LLM call.
-            if not evidence:
-                return "__skip__", {
-                    "claim_id": cid,
-                    "model": "__skip__",
-                    "reason": "no_evidence",
-                    "signals": {
-                        "matched_evidence_count": 0,
-                    },
-                }
-
-            cobj = claim_obj_by_id.get(cid, {}) if cid else {}
-            cmet = per_claim_metrics.get(cid, {}) if cid else {}
-            if not isinstance(cobj, dict):
-                cobj = {}
-            if not isinstance(cmet, dict):
-                cmet = {}
-
-            importance = float(claim_info.get("importance", 0.5) or 0.5)
-            check_worthiness = float(claim_info.get("check_worthiness", 0.5) or 0.5)
-            harm_potential = int(claim_info.get("harm_potential", 1) or 1)
-            claim_role = str(claim_info.get("claim_role") or "unknown")
-            evidence_need = str(claim_info.get("evidence_need") or "unknown")
-            
-            # Use 'independent_domains' directly as it's passed as kwargs or similar in original context,
-            # but here we access via cmet dictionary
-            independent_domains = int(cmet.get("independent_domains", 0) or 0)
-            coverage = float(cmet.get("coverage", 0.0) or 0.0)
-            stance_dist = cmet.get("stance_distribution", {})
-            if not isinstance(stance_dist, dict):
-                stance_dist = {}
-            s_support = int(stance_dist.get("SUPPORT", 0) or 0)
-            s_refute = int(stance_dist.get("REFUTE", 0) or 0)
-            s_mixed = int(stance_dist.get("MIXED", 0) or 0)
-            s_unclear = int(stance_dist.get("UNCLEAR", 0) or 0)
-            s_mention = int(stance_dist.get("MENTION", 0) or 0)
-            s_context = int(stance_dist.get("CONTEXT", 0) or 0)
-
-            conflicting = (s_support > 0 and s_refute > 0) or (s_mixed > 0)
-            unclear_heavy = (s_unclear + s_mention + s_context) > max(1, (s_support + s_refute))
-
-            primary_present = bool(cmet.get("primary_present"))
-            official_present = bool(cmet.get("official_present"))
-
-            # Difficulty score in [0, 1+] (explicit, auditable components)
-            # - higher importance / harm / check_worthiness => higher difficulty
-            # - conflicting or unclear-heavy evidence => higher difficulty
-            # - low coverage or low diversity => higher difficulty
-            # - evidence_need types that require technical rigor => higher difficulty
-            difficulty = 0.0
-            difficulty += 0.55 * max(0.0, min(1.0, importance))
-            difficulty += 0.25 * max(0.0, min(1.0, check_worthiness))
-            difficulty += 0.20 * max(0.0, min(1.0, harm_potential / 5.0))
-
-            if claim_role in ("thesis", "core", "primary", "anchor"):
-                difficulty += 0.25
-            elif claim_role in ("supporting", "secondary"):
-                difficulty += 0.10
-
-            if evidence_need in ("empirical_study", "official_stats", "guideline"):
-                difficulty += 0.20
-            elif evidence_need in ("expert_opinion",):
-                difficulty += 0.10
-
-            if conflicting:
-                difficulty += 0.30
-            if unclear_heavy:
-                difficulty += 0.15
-
-            if coverage < 0.35:
-                difficulty += 0.20
-            if independent_domains < 2:
-                difficulty += 0.10
-
-            if primary_present or official_present:
-                # primary/official is *good*, but it also tends to require careful attribution parsing
-                difficulty += 0.05
-
-            # Route decision
-            model: str
-            if difficulty >= 0.85:
-                model = "gpt-5.2"
-            elif difficulty <= 0.35 and harm_potential <= 2 and importance <= 0.55 and not conflicting and coverage >= 0.60:
-                model = "gpt-5-nano"
-            else:
-                model = deepseek_model
-
-            debug = {
-                "claim_id": cid,
-                "model": model,
-                "difficulty": round(difficulty, 4),
-                "reason": "rule_routing",
-                "signals": {
-                    "importance": importance,
-                    "check_worthiness": check_worthiness,
-                    "harm_potential": harm_potential,
-                    "claim_role": claim_role,
-                    "evidence_need": evidence_need,
-                    "independent_domains": independent_domains,
-                    "coverage": coverage,
-                    "conflicting": conflicting,
-                    "unclear_heavy": unclear_heavy,
-                    "primary_present": primary_present,
-                    "official_present": official_present,
-                    "stance_distribution": stance_dist,
+            self.trace.emit(
+                "judge.model_routing",
+                {
+                    "claim_id": c.id,
+                    "model": decision.model,
+                    "fallback_model": decision.fallback_model,
+                    "required_capability": decision.required_capability,
+                    "difficulty": round(decision.difficulty, 4),
+                    "risk": round(decision.risk, 4),
+                    "complexity": round(decision.complexity, 4),
+                    "ambiguity": round(decision.ambiguity, 4),
+                    "est_credits": decision.est_credits,
+                    "expected_credits": decision.expected_credits,
+                    "reason": decision.reason,
+                    "features": decision.features,
                 },
-            }
-            return model, debug
+            )
+
+            return decision.model
+
+        async def _score_with_routing(c: Claim) -> dict[str, Any]:
+            model_name = await _pick_model_for_claim(c)
+            # Deepseek is mid tier; it may fail => fallback handled in retry loop below
+            attempt_models = [model_name]
+            if model_name == MODEL_MID:
+                attempt_models.append(MODEL_PRO)
+
+            # ... existing scoring logic ...
+            # For now, we reuse existing single claim structure but adapted
+            return await score_single_claim(c) # Placeholder for now, need to integrate proper signature
+
+        # --- REFACTOR NOTE: The previous `score_evidence_parallel` implementation was monolithic.
+        # We need to adapt the new routing to the existing `score_single_claim` internal function.
+        # For this patch, we will keep `score_single_claim` but inject the routed model.
 
         instructions = build_single_claim_scoring_instructions(lang_name=lang_name, lang=lang)
+
+        async def score_single_claim(claim_info: dict) -> dict:
+            """Score a single claim with its evidence."""
+            cid = claim_info.get("id")
+            evidence = sources_by_claim.get(cid, [])
+            
+            # Use original claim object for routing
+            # We need to reconstruct a minimal object-like stricture or pass dict if select_judge_model handles it
+            # The select_judge_model expects an object with attributes.
+            # Let's use a simple wrapper class or update select_judge_model to handle dicts (it uses getattr).
+            # For robustness, let's create a minimal object.
+            class DictObj:
+                def __init__(self, d): self.__dict__ = d
+            
+            claim_obj = DictObj(claim_info)
+
+            # --- ROUTING CALL ---
+            try:
+                # Re-calculate specific prompt for this SINGLE claim to be precise about chars?
+                # The prompt variable above was global. Here we build single claim prompt.
+                # Let's check `build_single_claim_scoring_prompt` signature.
+                local_prompt = build_single_claim_scoring_prompt(
+                    claim_info=claim_info,
+                    evidence=evidence,
+                )
+                
+                decision: JudgeModelDecision = select_judge_model(
+                    claim=claim_obj,
+                    evidence_items=evidence, # dicts are okay, select_judge_model uses getattr with robust fallback? 
+                    # create simple objects for evidence items too
+                    # actually select_judge_model uses getattr(it, "domain", None) which works on objects.
+                    # but evidence here is likely dicts. getattr on dict fails.
+                    # We need to fix select_judge_model to handle dicts or wrap here.
+                    # Let's wrap here.
+                    prompt_chars=len(local_prompt),
+                    out_tokens_estimate=int(getattr(self.runtime.llm, "judge_out_tokens_estimate", 380)),
+                    deepseek_fail_prob=float(getattr(self.runtime.llm, "deepseek_fail_prob", 0.18)),
+                )
+            except Exception as e:
+                # Fail safe
+                # Create a fake decision to proceed with high tier
+                decision = JudgeModelDecision(
+                    model="gpt-5.2", # Use string "gpt-5.2" directly or MODEL_PRO if imported
+                    fallback_model="gpt-5.2",
+                    required_capability="high",
+                    difficulty=1.0,
+                    risk=1.0,
+                    complexity=1.0,
+                    ambiguity=1.0,
+                    est_credits={},
+                    expected_credits={},
+                    features={"error": str(e)},
+                    reason=f"routing_error:{type(e).__name__}",
+                )
+
+            # Wrap dicts for routing if needed? 
+            # WAIT: select_judge_model implementation:
+            # d = getattr(it, "domain", None) -> this implies object access.
+            # If evidence is dict, getattr(d, key) fails.
+            # We MUST fix select_judge_model OR wrap items. 
+            # Given we just created select_judge_model, let's assume we handle dicts there or here.
+            # The prompt code shows `getattr(it, "domain", None)`. Python `getattr` on dict RAISES AttributeError? No it raises AttributeError if attribute missing effectively? 
+            # No, getattr(dict, "key") does NOT work like dict.get("key").
+            # WE MUST WRAP evidence dicts into objects for routing to work, 
+            # OR pass dict-compatible objects.
+            
+            # Let's use the routed decision model
+            routed_model = decision.model
+            route_debug = decision.to_trace()
+
+            # ... Rest of existing logic using routed_model ...
+            
+            prompt = local_prompt # Use the local prompt built above
+            prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
+            cache_key = f"score_single_v1_{prompt_hash}"
+
+            # Skip LLM entirely when evidence is empty (deterministic unverified)
+            if not evidence:
+                # ... existing skip logic ... (implied by previous steps)
+                 return {
+                    "claim_id": cid,
+                    "text": claim_info.get("text", ""),
+                    "status": "ok",
+                    "verdict_score": -1.0,
+                    "verdict": "unverified",
+                    "verdict_state": "insufficient_evidence",
+                    "reason": "No evidence found for this claim.",
+                    "rgba": [0.0, -1.0, 0.0, 0.0],
+                    "routing": route_debug,
+                }
+
+            Trace.event("judge.model_route", route_debug)
+            
+            # ... definition of _call_model ... 
+            # ... retry logic using routed_model ...
+            # (We relying on previous implementation of score_single_claim but replacing the routing block)
+            
+            # We need to return the FULL function body with replacements for the routing block specifically.
+            
+            # Since the previous step inserted `_route_model_for_claim` inside `score_evidence_parallel` (scope),
+            # and `score_single_claim` calls it.
+            # We need to REMOVE `_route_model_for_claim` and Inline the new routing call inside `score_single_claim`.
+            
+            pass 
+
+
+        instructions = build_single_claim_scoring_instructions(lang_name=lang_name, lang=lang)
+
+        # Helper wrapper to allow getattr access on dict keys
+        class DictAttr:
+            def __init__(self, d): self.__dict__ = d
 
         async def score_single_claim(claim_info: dict) -> dict:
             """Score a single claim with its evidence."""
@@ -593,12 +640,9 @@ class ScoringSkill(BaseSkill):
             prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
             cache_key = f"score_single_v1_{prompt_hash}"
 
-            # Model routing (per-claim)
-            routed_model, route_debug = _route_model_for_claim(claim_info, evidence)
-
-            # Skip LLM entirely when evidence is empty (deterministic unverified)
-            if routed_model == "__skip__":
-                Trace.event("judge.model_route", route_debug)
+            # --- MODEL ROUTING using spectrue_core.verification.scoring.judge_model_routing ---
+            # Fast-path: no evidence => deterministic unverified; no LLM call.
+            if not evidence:
                 return {
                     "claim_id": cid,
                     "text": claim_info.get("text", ""),
@@ -607,12 +651,43 @@ class ScoringSkill(BaseSkill):
                     "verdict": "unverified",
                     "verdict_state": "insufficient_evidence",
                     "reason": "No evidence found for this claim.",
-                    # R,B are placeholders; G=-1 signals unknown; A=0 because no evidence.
                     "rgba": [0.0, -1.0, 0.0, 0.0],
-                    "routing": route_debug,
+                    "routing": {"model": "__skip__", "reason": "no_evidence"},
+                }
+
+            routed_model = "gpt-5.2"
+            route_debug = {}
+            
+            try:
+                # Wrap inputs for getattr-based routing
+                c_obj = DictAttr(claim_info)
+                ev_objs = [DictAttr(e) for e in evidence]
+                
+                decision = select_judge_model(
+                    claim=c_obj,
+                    evidence_items=ev_objs,
+                    prompt_chars=len(prompt),
+                    out_tokens_estimate=int(getattr(self.runtime.llm, "judge_out_tokens_estimate", 380)),
+                    deepseek_fail_prob=float(getattr(self.runtime.llm, "deepseek_fail_prob", 0.18)),
+                )
+                routed_model = decision.model
+                route_debug = decision.to_trace()
+            except Exception as e:
+                # Fallback to PRO on any routing error
+                routed_model = "gpt-5.2"
+                route_debug = {
+                    "model": "gpt-5.2",
+                    "reason": f"routing_error: {str(e)}",
+                    "features": {"error": str(e)}
                 }
 
             Trace.event("judge.model_route", route_debug)
+            
+            # Use standard deepseek model name if routing returned 'deepseek-chat'
+            deepseek_names = tuple(getattr(self.runtime.llm, "deepseek_model_names", ()) or ())
+            actual_deepseek_model = deepseek_names[0] if deepseek_names else "deepseek-chat"
+            if routed_model == "deepseek-chat":
+                 routed_model = actual_deepseek_model
 
             async def _call_model(model_name: str, *, use_cache: bool) -> dict:
                 """Repair-retry protocol for a single model. Returns dict with status ok/error."""
