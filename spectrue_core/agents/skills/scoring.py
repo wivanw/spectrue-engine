@@ -20,11 +20,6 @@ import asyncio
 import json
 from typing import Literal
 
-from spectrue_core.llm.model_registry import ModelID
-from spectrue_core.verification.scoring.judge_model_routing import (
-    select_judge_model,
-)
-
 from spectrue_core.pipeline.mode import AnalysisMode
 
 # Structured output schemas
@@ -62,6 +57,12 @@ from spectrue_core.schema import (
     StructuredDebug,
 )
 
+
+# price-aware per-claim judge routing
+from spectrue_core.verification.scoring.judge_model_routing import (
+    select_judge_model,
+)
+from spectrue_core.llm.model_registry import ModelID
 
 class ScoringSkill(BaseSkill):
 
@@ -438,7 +439,11 @@ class ScoringSkill(BaseSkill):
             },
         )
 
+
+
         instructions = build_single_claim_scoring_instructions(lang_name=lang_name, lang=lang)
+
+
 
         # Helper wrapper to allow getattr access on dict keys
         class DictAttr:
