@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -67,7 +68,7 @@ class FirestoreBillingStore(BillingStore):
 
     def set_user_balance(self, user_id: str, balance_sc: MoneySC) -> UserBalance:
         user_ref = self._users.document(user_id)
-        user_ref.set({self._config.balance_field: float(balance_sc)}, merge=True)
+        user_ref.set({self._config.balance_field: str(balance_sc)}, merge=True)
         return UserBalance(user_id=user_id, balance_sc=balance_sc)
 
     def get_pool_balance(self) -> PoolBalance:
@@ -235,6 +236,22 @@ class FirestoreBillingStore(BillingStore):
                     reserved_pool_sc=Decimal("0"),
                 )
 
+            daily_remaining = user_snapshot.get("subsidy_daily_remaining_sc")
+            monthly_remaining = user_snapshot.get("subsidy_monthly_remaining_sc")
+            update_allowance = daily_remaining is not None or monthly_remaining is not None
+            allowance_updates = {}
+            if update_allowance and reserved_pool > 0:
+                daily_remaining_sc = _to_decimal(daily_remaining)
+                monthly_remaining_sc = _to_decimal(monthly_remaining)
+                allowance_updates = {
+                    "subsidy_daily_remaining_sc": str(
+                        quantize_sc(max(Decimal("0"), daily_remaining_sc - reserved_pool))
+                    ),
+                    "subsidy_monthly_remaining_sc": str(
+                        quantize_sc(max(Decimal("0"), monthly_remaining_sc - reserved_pool))
+                    ),
+                }
+
             entry = LedgerEntry(
                 idempotency_key=key,
                 entry_type=LedgerEntryType.RESERVE,
@@ -250,7 +267,7 @@ class FirestoreBillingStore(BillingStore):
             ledger_ref.set(self._entry_to_dict(entry))
             transaction.set(
                 user_ref,
-                {self._config.balance_field: float(new_user_balance)},
+                {self._config.balance_field: str(new_user_balance), **allowance_updates},
                 merge=True,
             )
             transaction.set(self._pool_ref, self._pool_to_dict(updated_pool), merge=True)
@@ -333,6 +350,22 @@ class FirestoreBillingStore(BillingStore):
                 refund_user = quantize_sc(reserved_user - charge_user)
                 refund_pool = quantize_sc(reserved_pool - charge_pool)
 
+            daily_remaining = user_snapshot.get("subsidy_daily_remaining_sc")
+            monthly_remaining = user_snapshot.get("subsidy_monthly_remaining_sc")
+            update_allowance = daily_remaining is not None or monthly_remaining is not None
+            allowance_updates = {}
+            if update_allowance and (refund_pool > 0 or extra_pool > 0):
+                daily_remaining_sc = _to_decimal(daily_remaining)
+                monthly_remaining_sc = _to_decimal(monthly_remaining)
+                allowance_updates = {
+                    "subsidy_daily_remaining_sc": str(
+                        quantize_sc(max(Decimal("0"), daily_remaining_sc - extra_pool + refund_pool))
+                    ),
+                    "subsidy_monthly_remaining_sc": str(
+                        quantize_sc(max(Decimal("0"), monthly_remaining_sc - extra_pool + refund_pool))
+                    ),
+                }
+
             updated_user_balance = quantize_sc(user_balance.balance_sc - extra_user + refund_user)
             updated_pool = PoolBalance(
                 available_balance_sc=quantize_sc(pool_balance.available_balance_sc - extra_pool + refund_pool),
@@ -361,7 +394,7 @@ class FirestoreBillingStore(BillingStore):
             ledger_ref.set(self._entry_to_dict(updated_entry), merge=True)
             transaction.set(
                 user_ref,
-                {self._config.balance_field: float(updated_user_balance)},
+                {self._config.balance_field: str(updated_user_balance), **allowance_updates},
                 merge=True,
             )
             transaction.set(self._pool_ref, self._pool_to_dict(updated_pool), merge=True)
@@ -413,9 +446,9 @@ class FirestoreBillingStore(BillingStore):
 
     def _pool_to_dict(self, pool: PoolBalance) -> dict[str, Any]:
         return {
-            "available_balance_sc": float(pool.available_balance_sc),
-            "locked_buckets": {k: float(v) for k, v in pool.locked_buckets.items()},
-            "reserve_sc": float(pool.reserve_sc),
+            "available_balance_sc": str(pool.available_balance_sc),
+            "locked_buckets": {k: str(v) for k, v in pool.locked_buckets.items()},
+            "reserve_sc": str(pool.reserve_sc),
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
 

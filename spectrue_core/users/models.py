@@ -24,10 +24,15 @@ class User:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "User":
+        raw_balance = data.get("balance_sc", 0)
+        try:
+            balance = Decimal(str(raw_balance))
+        except Exception:
+            balance = Decimal("0")
         return cls(
             uid=data.get("uid", ""),
             email=data.get("email"),
-            balance_sc=Decimal(str(data.get("balance_sc", 0.0))),
+            balance_sc=balance,
             last_seen_at=data.get("last_seen_at"),
             last_daily_bonus_date=data.get("last_daily_bonus_date"),
             last_share_bonus_date=data.get("last_share_bonus_date"),
@@ -38,10 +43,9 @@ class User:
         return {
             "uid": self.uid,
             "email": self.email,
-            "balance_sc": float(self.balance_sc),
+            "balance_sc": str(self.balance_sc),
             "last_seen_at": self.last_seen_at,
             "last_daily_bonus_date": self.last_daily_bonus_date,
             "last_share_bonus_date": self.last_share_bonus_date,
             "plan_tier": self.plan_tier
         }
-

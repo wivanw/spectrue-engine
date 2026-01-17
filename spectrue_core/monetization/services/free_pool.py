@@ -70,7 +70,7 @@ def release_matured(pool: PoolBalance, *, as_of: datetime) -> tuple[PoolBalance,
 def deduct(pool: PoolBalance, amount_sc: MoneySC) -> tuple[PoolBalance, bool]:
     if amount_sc <= 0:
         return pool, True
-    if pool.available_balance_sc < amount_sc:
+    if pool.spendable_sc < amount_sc:
         return pool, False
     updated = PoolBalance(
         available_balance_sc=quantize_sc(pool.available_balance_sc - amount_sc),
