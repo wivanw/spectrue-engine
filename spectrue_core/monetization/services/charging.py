@@ -26,6 +26,7 @@ from spectrue_core.monetization.types import (
     MoneySC,
     UserWallet,
 )
+from spectrue_core.monetization.ledger import build_charge_idempotency_key_v3
 
 if TYPE_CHECKING:
     from spectrue_core.monetization.config import MonetizationConfig
@@ -96,11 +97,16 @@ class ChargingService:
         total = wallet.available_sc + wallet.balance_sc
         return total >= cost
 
-    def generate_idempotency_key(self, uid: str, run_id: str, cost: MoneySC) -> str:
-        """Generate a stable idempotency key for a charge."""
-        import hashlib
-        data = f"{uid}:{run_id}:{cost.to_str()}:charge-v3"
-        return hashlib.sha256(data.encode()).hexdigest()
+    def generate_idempotency_key(self, uid: str, run_id: str) -> str:
+        """Generate a stable idempotency key for a V3 charge.
+
+        IMPORTANT:
+        - Must be stable for the whole run.
+        - MUST NOT include `cost_sc` (actual cost may vary slightly due to rounding,
+          metering differences, or post-run accounting), otherwise retries could
+          double-charge.
+        """
+        return build_charge_idempotency_key_v3(uid, run_id)
 
     def charge(self, request: ChargeRequest) -> ChargeResult:
         """
@@ -120,9 +126,7 @@ class ChargingService:
         Returns:
             ChargeResult with ok/fail, split details, and new balances
         """
-        idempotency_key = self.generate_idempotency_key(
-            request.uid, request.run_id, request.cost_sc
-        )
+        idempotency_key = self.generate_idempotency_key(request.uid, request.run_id)
 
         # Check if already charged
         existing = self.store.check_idempotency(idempotency_key)
@@ -185,3 +189,4 @@ class ChargingServiceFactory:
     @staticmethod
     def create(store: ChargingStore, cfg: "MonetizationConfig") -> ChargingService:
         return ChargingService(store, cfg)
+
