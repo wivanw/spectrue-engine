@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- M131: Governance & Localization Documentation
+  - Added Governance Principles to README
+  - Refined documentation structure per reviewer guidelines
+
+### Changed
+- Refactor: Replaced HMAC-SHA3-256 with PBKDF2-SHA256 for trace redaction hashing
+
 ## [1.2.0] - 2026-01-08
 
 ### Added
