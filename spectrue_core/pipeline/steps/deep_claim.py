@@ -49,6 +49,7 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.claims.claim_frame_builder import (
     build_claim_frames_from_pipeline,
 )
+from spectrue_core.llm.model_registry import ModelID
 
 
 @dataclass
@@ -281,7 +282,7 @@ class JudgeClaimsStep(Step):
                 repair_system = f"{repair_system}\nReturn only JSON; no markdown or extra text."
 
                 response = await self._llm.call_json(
-                    model=self._llm.model or "gpt-5-nano",
+                    model=self._llm.model or ModelID.NANO,
                     input=repair_prompt,
                     instructions=repair_system,
                     response_schema=CLAIM_JUDGE_SCHEMA,

@@ -23,6 +23,7 @@ import logging
 from typing import Any
 
 from spectrue_core.agents.llm_client import LLMClient, ReasoningEffort
+from spectrue_core.llm.model_registry import ModelID
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class LLMRouter:
         result = await router.call_json(model="qwen/qwen3-14b", ...)
         
         # Routes to openai_client
-        result = await router.call_json(model="gpt-5-nano", ...)
+        result = await router.call_json(model=ModelID.NANO, ...)
     """
 
     def __init__(
@@ -175,7 +176,7 @@ class LLMRouter:
         system_prompt: str | None = None,
         schema: dict[str, Any],
         schema_name: str = "structured_output",
-        model: str = "gpt-5-nano",
+        model: str = ModelID.NANO,
         reasoning_effort: ReasoningEffort = "low",
         timeout: float | None = None,
         max_output_tokens: int | None = None,

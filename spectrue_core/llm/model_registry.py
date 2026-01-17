@@ -1,15 +1,18 @@
-"""
-Registry of supported LLM models for routing and billing.
+from enum import StrEnum
 
-These constants serve as canonical IDs for models used throughout the engine,
-allowing central management of backend model identifiers mapping to pricing.
-"""
+class ModelID(StrEnum):
+    """Canonical model identifiers for internal engine routing."""
+    
+    # Cheap / Fast tier
+    NANO = "gpt-5-nano"
 
-# Cheap / Fast tier
-MODEL_NANO = "gpt-5-nano"
+    # Mid tier (balance of reasoning and cost)
+    MID = "deepseek-chat"
 
-# Mid tier (balance of reasoning and cost)
-MODEL_MID = "deepseek-chat"
+    # High / Pro tier (complex reasoning, high reliability)
+    PRO = "gpt-5.2"
 
-# High / Pro tier (complex reasoning, high reliability)
-MODEL_PRO = "gpt-5.2"
+# Backward compatibility aliases (to avoid breaking existing imports immediately)
+MODEL_NANO = ModelID.NANO
+MODEL_MID = ModelID.MID
+MODEL_PRO = ModelID.PRO

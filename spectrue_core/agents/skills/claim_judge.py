@@ -33,6 +33,7 @@ from spectrue_core.schema.claim_frame import (
 from spectrue_core.utils.trace import Trace
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.verification.scoring.judge_normalize import normalize_verdict_enum
+from spectrue_core.llm.model_registry import ModelID
 
 
 class ClaimJudgeSkill:
@@ -96,7 +97,7 @@ class ClaimJudgeSkill:
                 system_prompt=system_prompt,
                 schema=CLAIM_JUDGE_SCHEMA,
                 schema_name="claim_judge",
-                model="gpt-5.2",
+                model=ModelID.PRO,
                 temperature=0,
             )
 

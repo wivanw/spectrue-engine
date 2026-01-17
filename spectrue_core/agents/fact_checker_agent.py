@@ -24,6 +24,7 @@ from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
 from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
 from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
 from spectrue_core.pipeline.mode import AnalysisMode
+from spectrue_core.llm.model_registry import ModelID
 import logging
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,7 @@ Output JSON: {{ "is_relevant": true/false, "reason": "..." }}
         try:
             from spectrue_core.utils.trace import Trace
             result = await self.llm_client.call_json(
-                model="gpt-5-nano",
+                model=ModelID.NANO,
                 input=prompt,
                 instructions="You are a relevance checking assistant.",
                 reasoning_effort="low",

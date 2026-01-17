@@ -68,6 +68,7 @@ from spectrue_core.verification.search.search_escalation import (
     QueryVariant,
     RetrievalOutcome,
 )
+from spectrue_core.llm.model_registry import ModelID
 
 if TYPE_CHECKING:
     from spectrue_core.verification.search.search_mgr import SearchManager
@@ -905,7 +906,7 @@ class PhaseRunner:
         if not self.can_add_search:
             return True
         # Assume "smart" or equivalent for search type placeholder
-        return bool(self.can_add_search("gpt-5-nano", "smart", self.max_cost))
+        return bool(self.can_add_search(ModelID.NANO, "smart", self.max_cost))
 
     def _get_claims_needing_phase(
         self,

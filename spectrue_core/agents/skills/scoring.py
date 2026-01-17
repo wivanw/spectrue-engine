@@ -18,6 +18,7 @@ from datetime import datetime
 import hashlib
 import asyncio
 import json
+from typing import Literal
 
 from spectrue_core.pipeline.mode import AnalysisMode
 
@@ -61,6 +62,7 @@ from spectrue_core.verification.evidence.evidence_pack import Claim
 from spectrue_core.verification.scoring.judge_model_routing import (
     JudgeModelDecision, select_judge_model,
 )
+from spectrue_core.llm.model_registry import ModelID
 
 class ScoringSkill(BaseSkill):
 
@@ -203,7 +205,7 @@ class ScoringSkill(BaseSkill):
         cache_key = f"score_v7_plat_{prompt_hash}"
 
         try:
-            m = self.config.openai_model or "gpt-5.2"
+            m = self.config.openai_model or ModelID.PRO
 
             result = await self.llm_client.call_json(
                 model=m,
@@ -466,8 +468,8 @@ class ScoringSkill(BaseSkill):
             except Exception as e:
                 # routing must never block scoring; fail safe to pro
                 decision = JudgeModelDecision(
-                    model=MODEL_PRO,
-                    fallback_model=MODEL_PRO,
+                    model=ModelID.PRO,
+                    fallback_model=ModelID.PRO,
                     required_capability="high",  # type: ignore[arg-type]
                     difficulty=1.0,
                     risk=1.0,
@@ -503,8 +505,10 @@ class ScoringSkill(BaseSkill):
             model_name = await _pick_model_for_claim(c)
             # Deepseek is mid tier; it may fail => fallback handled in retry loop below
             attempt_models = [model_name]
-            if model_name == MODEL_MID:
-                attempt_models.append(MODEL_PRO)
+            # Deepseek is mid tier; it may fail => fallback handled in retry loop below
+            attempt_models = [model_name]
+            if model_name == ModelID.MID:
+                attempt_models.append(ModelID.PRO)
 
             # ... existing scoring logic ...
             # For now, we reuse existing single claim structure but adapted
@@ -655,7 +659,7 @@ class ScoringSkill(BaseSkill):
                     "routing": {"model": "__skip__", "reason": "no_evidence"},
                 }
 
-            routed_model = "gpt-5.2"
+            routed_model: str = ModelID.PRO
             route_debug = {}
             
             try:
@@ -674,9 +678,9 @@ class ScoringSkill(BaseSkill):
                 route_debug = decision.to_trace()
             except Exception as e:
                 # Fallback to PRO on any routing error
-                routed_model = "gpt-5.2"
+                routed_model = ModelID.PRO
                 route_debug = {
-                    "model": "gpt-5.2",
+                    "model": ModelID.PRO,
                     "reason": f"routing_error: {str(e)}",
                     "features": {"error": str(e)}
                 }
@@ -685,8 +689,8 @@ class ScoringSkill(BaseSkill):
             
             # Use standard deepseek model name if routing returned 'deepseek-chat'
             deepseek_names = tuple(getattr(self.runtime.llm, "deepseek_model_names", ()) or ())
-            actual_deepseek_model = deepseek_names[0] if deepseek_names else "deepseek-chat"
-            if routed_model == "deepseek-chat":
+            actual_deepseek_model = deepseek_names[0] if deepseek_names else ModelID.MID
+            if routed_model == ModelID.MID:
                  routed_model = actual_deepseek_model
 
             async def _call_model(model_name: str, *, use_cache: bool) -> dict:
@@ -699,10 +703,10 @@ class ScoringSkill(BaseSkill):
                 missing_fields: list[str] = []
 
                 # Timeouts / effort
-                if model_name == "gpt-5-nano":
+                if model_name == ModelID.NANO:
                     timeout_s = float(self.runtime.llm.nano_timeout_sec)
-                    effort = "low"
-                elif model_name == "gpt-5.2":
+                    effort: Literal["low", "medium", "high"] = "low"
+                elif model_name == ModelID.PRO:
                     timeout_s = float(self.runtime.llm.timeout_sec)
                     effort = "low"
                 else:
@@ -866,7 +870,7 @@ Return valid JSON now."""
                 return primary
 
             # 2) DeepSeek is flaky: hard fallback to gpt-5.2 on ANY failure
-            if routed_model == deepseek_model:
+            if routed_model == actual_deepseek_model:
                 Trace.event(
                     "judge.model_fallback",
                     {

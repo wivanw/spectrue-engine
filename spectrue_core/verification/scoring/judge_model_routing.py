@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from spectrue_core.billing import pricing, token_estimator
 from spectrue_core.billing.config_loader import load_pricing_config
-from spectrue_core.llm.model_registry import MODEL_MID, MODEL_NANO, MODEL_PRO
+from spectrue_core.llm.model_registry import ModelID
 
 
 RequiredCapability = Literal["cheap", "mid", "high"]
@@ -153,29 +153,29 @@ def select_judge_model(
 
     allowed: list[str]
     if required_cap == "high":
-        allowed = [MODEL_PRO]
+        allowed = [ModelID.PRO]
     elif required_cap == "cheap":
-        allowed = [MODEL_NANO, MODEL_MID, MODEL_PRO]
+        allowed = [ModelID.NANO, ModelID.MID, ModelID.PRO]
     else:
-        allowed = [MODEL_MID, MODEL_PRO]
+        allowed = [ModelID.MID, ModelID.PRO]
 
     # ---- price-aware selection: choose cheapest expected credits among allowed ----
     est = {
-        MODEL_NANO: _estimate_credits_for_model(model=MODEL_NANO, prompt_chars=prompt_chars, out_tokens=out_tokens_estimate),
-        MODEL_MID: _estimate_credits_for_model(model=MODEL_MID, prompt_chars=prompt_chars, out_tokens=out_tokens_estimate),
-        MODEL_PRO: _estimate_credits_for_model(model=MODEL_PRO, prompt_chars=prompt_chars, out_tokens=out_tokens_estimate),
+        ModelID.NANO: _estimate_credits_for_model(model=ModelID.NANO, prompt_chars=prompt_chars, out_tokens=out_tokens_estimate),
+        ModelID.MID: _estimate_credits_for_model(model=ModelID.MID, prompt_chars=prompt_chars, out_tokens=out_tokens_estimate),
+        ModelID.PRO: _estimate_credits_for_model(model=ModelID.PRO, prompt_chars=prompt_chars, out_tokens=out_tokens_estimate),
     }
 
     # expected credits include Deepseek failure probability *fallback cost*
     expected = dict(est)
-    if MODEL_MID in expected:
-        expected[MODEL_MID] = (1.0 - deepseek_fail_prob) * est[MODEL_MID] + deepseek_fail_prob * est[MODEL_PRO]
+    if ModelID.MID in expected:
+        expected[ModelID.MID] = (1.0 - deepseek_fail_prob) * est[ModelID.MID] + deepseek_fail_prob * est[ModelID.PRO]
 
     chosen = min(allowed, key=lambda m: expected[m])
 
-    if chosen == MODEL_NANO:
+    if chosen == ModelID.NANO:
         reason = "cheap_ok_min_expected_cost"
-    elif chosen == MODEL_MID:
+    elif chosen == ModelID.MID:
         reason = "mid_min_expected_cost_with_fallback"
     else:
         reason = "high_required_or_cheapest_allowed"
@@ -200,7 +200,7 @@ def select_judge_model(
 
     return JudgeModelDecision(
         model=chosen,
-        fallback_model=MODEL_PRO,
+        fallback_model=ModelID.PRO,
         required_capability=required_cap,
         difficulty=difficulty,
         risk=risk,

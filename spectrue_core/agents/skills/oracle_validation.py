@@ -19,6 +19,7 @@ Uses LLM to compute relevance_score (0-1) instead of binary yes/no.
 from spectrue_core.agents.skills.base_skill import BaseSkill
 from spectrue_core.verification.evidence.evidence_pack import OracleStatus
 from spectrue_core.utils.trace import Trace
+from spectrue_core.llm.model_registry import ModelID
 import logging
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ class OracleValidationSkill(BaseSkill):
 
         try:
             result = await self.llm_client.call_json(
-                model="gpt-5-nano",
+                model=ModelID.NANO,
                 input=prompt,
                 instructions=self._get_instructions(),
                 reasoning_effort="low",
@@ -156,7 +157,7 @@ class OracleValidationSkill(BaseSkill):
 
         try:
             result = await self.llm_client.call_json(
-                model="gpt-5-nano",
+                model=ModelID.NANO,
                 input=prompt,
                 instructions=self._get_batch_instructions(),
                 reasoning_effort="low",

@@ -33,6 +33,7 @@ from spectrue_core.billing.meter_context import get_current_llm_meter
 from spectrue_core.utils.trace import Trace
 from spectrue_core.llm.errors import LLMFailureKind
 from spectrue_core.llm.errors import LLMCallError
+from spectrue_core.llm.model_registry import ModelID
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +355,7 @@ class LLMClient:
             "o3",         # o3 models
         )
         # DeepSeek and local models don't support structured outputs
-        unsupported_prefixes = ("deepseek", "llama", "mistral", "qwen")
+        unsupported_prefixes = ("deepseek", "llama", "mistral", "qwen", ModelID.MID)
         
         model_lower = model.lower()
         if any(model_lower.startswith(p) for p in unsupported_prefixes):
@@ -759,7 +760,8 @@ class LLMClient:
         if temperature is not None:
             # Skip temperature for models that don't support it in Responses API
             # Based on empirical testing: gpt-5-nano, gpt-5, gpt-5.2, and O-series models reject temperature
-            skip_temp_models = model.startswith("o") or model.startswith("gpt-5")
+            is_gpt5 = "gpt-5" in model  # Covers gpt-5-nano, gpt-5.2
+            skip_temp_models = model.startswith("o") or is_gpt5
             if skip_temp_models:
                 logger.debug("[LLMClient] Temperature ignored for model %s (not supported)", model)
             else:
