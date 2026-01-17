@@ -20,6 +20,11 @@ import asyncio
 import json
 from typing import Literal
 
+from spectrue_core.llm.model_registry import ModelID
+from spectrue_core.verification.scoring.judge_model_routing import (
+    select_judge_model,
+)
+
 from spectrue_core.pipeline.mode import AnalysisMode
 
 # Structured output schemas
@@ -56,13 +61,7 @@ from spectrue_core.schema import (
     StructuredVerdict,
     StructuredDebug,
 )
-from spectrue_core.verification.evidence.evidence_pack import Claim
 
-# price-aware per-claim judge routing
-from spectrue_core.verification.scoring.judge_model_routing import (
-    JudgeModelDecision, select_judge_model,
-)
-from spectrue_core.llm.model_registry import ModelID
 
 class ScoringSkill(BaseSkill):
 
@@ -438,192 +437,6 @@ class ScoringSkill(BaseSkill):
                 "max_concurrency": max_concurrency,
             },
         )
-
-        # NOTE: routing was previously implemented as an inner function _route_model_for_claim here.
-        # It is now delegated to spectrue_core.verification.scoring.judge_model_routing.select_judge_model
-        # so it can use pricing config and emit cost-aware trace features deterministically.
-
-        # Build prompt once (same for all per-claim calls; it includes all claims/evidence)
-        prompt = build_score_prompt(
-            fact=fact,
-            claims=claims,
-            evidence=evidence_by_claim,  # Global evidence map (though prompt builder might slice it)
-            lang=lang,
-            strict=strict,
-        )
-
-        prompt_chars = len(prompt)
-        cache_key = self._make_cache_key("score_v7_plat", prompt)
-
-        # Per-claim execution (each claim gets its own model routing decision)
-        async def _pick_model_for_claim(c: Claim) -> str:
-            try:
-                decision: JudgeModelDecision = select_judge_model(
-                    claim=c,
-                    evidence_items=evidence_by_claim.get(c.id, []),
-                    prompt_chars=prompt_chars,
-                    out_tokens_estimate=int(getattr(self.runtime.llm, "judge_out_tokens_estimate", 380)),
-                    deepseek_fail_prob=float(getattr(self.runtime.llm, "deepseek_fail_prob", 0.18)),
-                )
-            except Exception as e:
-                # routing must never block scoring; fail safe to pro
-                decision = JudgeModelDecision(
-                    model=ModelID.PRO,
-                    fallback_model=ModelID.PRO,
-                    required_capability="high",  # type: ignore[arg-type]
-                    difficulty=1.0,
-                    risk=1.0,
-                    complexity=1.0,
-                    ambiguity=1.0,
-                    est_credits={},
-                    expected_credits={},
-                    features={"error": str(e)},
-                    reason=f"routing_error:{type(e).__name__}",
-                )
-
-            self.trace.emit(
-                "judge.model_routing",
-                {
-                    "claim_id": c.id,
-                    "model": decision.model,
-                    "fallback_model": decision.fallback_model,
-                    "required_capability": decision.required_capability,
-                    "difficulty": round(decision.difficulty, 4),
-                    "risk": round(decision.risk, 4),
-                    "complexity": round(decision.complexity, 4),
-                    "ambiguity": round(decision.ambiguity, 4),
-                    "est_credits": decision.est_credits,
-                    "expected_credits": decision.expected_credits,
-                    "reason": decision.reason,
-                    "features": decision.features,
-                },
-            )
-
-            return decision.model
-
-        async def _score_with_routing(c: Claim) -> dict[str, Any]:
-            model_name = await _pick_model_for_claim(c)
-            # Deepseek is mid tier; it may fail => fallback handled in retry loop below
-            attempt_models = [model_name]
-            # Deepseek is mid tier; it may fail => fallback handled in retry loop below
-            attempt_models = [model_name]
-            if model_name == ModelID.MID:
-                attempt_models.append(ModelID.PRO)
-
-            # ... existing scoring logic ...
-            # For now, we reuse existing single claim structure but adapted
-            return await score_single_claim(c) # Placeholder for now, need to integrate proper signature
-
-        # --- REFACTOR NOTE: The previous `score_evidence_parallel` implementation was monolithic.
-        # We need to adapt the new routing to the existing `score_single_claim` internal function.
-        # For this patch, we will keep `score_single_claim` but inject the routed model.
-
-        instructions = build_single_claim_scoring_instructions(lang_name=lang_name, lang=lang)
-
-        async def score_single_claim(claim_info: dict) -> dict:
-            """Score a single claim with its evidence."""
-            cid = claim_info.get("id")
-            evidence = sources_by_claim.get(cid, [])
-            
-            # Use original claim object for routing
-            # We need to reconstruct a minimal object-like stricture or pass dict if select_judge_model handles it
-            # The select_judge_model expects an object with attributes.
-            # Let's use a simple wrapper class or update select_judge_model to handle dicts (it uses getattr).
-            # For robustness, let's create a minimal object.
-            class DictObj:
-                def __init__(self, d): self.__dict__ = d
-            
-            claim_obj = DictObj(claim_info)
-
-            # --- ROUTING CALL ---
-            try:
-                # Re-calculate specific prompt for this SINGLE claim to be precise about chars?
-                # The prompt variable above was global. Here we build single claim prompt.
-                # Let's check `build_single_claim_scoring_prompt` signature.
-                local_prompt = build_single_claim_scoring_prompt(
-                    claim_info=claim_info,
-                    evidence=evidence,
-                )
-                
-                decision: JudgeModelDecision = select_judge_model(
-                    claim=claim_obj,
-                    evidence_items=evidence, # dicts are okay, select_judge_model uses getattr with robust fallback? 
-                    # create simple objects for evidence items too
-                    # actually select_judge_model uses getattr(it, "domain", None) which works on objects.
-                    # but evidence here is likely dicts. getattr on dict fails.
-                    # We need to fix select_judge_model to handle dicts or wrap here.
-                    # Let's wrap here.
-                    prompt_chars=len(local_prompt),
-                    out_tokens_estimate=int(getattr(self.runtime.llm, "judge_out_tokens_estimate", 380)),
-                    deepseek_fail_prob=float(getattr(self.runtime.llm, "deepseek_fail_prob", 0.18)),
-                )
-            except Exception as e:
-                # Fail safe
-                # Create a fake decision to proceed with high tier
-                decision = JudgeModelDecision(
-                    model="gpt-5.2", # Use string "gpt-5.2" directly or MODEL_PRO if imported
-                    fallback_model="gpt-5.2",
-                    required_capability="high",
-                    difficulty=1.0,
-                    risk=1.0,
-                    complexity=1.0,
-                    ambiguity=1.0,
-                    est_credits={},
-                    expected_credits={},
-                    features={"error": str(e)},
-                    reason=f"routing_error:{type(e).__name__}",
-                )
-
-            # Wrap dicts for routing if needed? 
-            # WAIT: select_judge_model implementation:
-            # d = getattr(it, "domain", None) -> this implies object access.
-            # If evidence is dict, getattr(d, key) fails.
-            # We MUST fix select_judge_model OR wrap items. 
-            # Given we just created select_judge_model, let's assume we handle dicts there or here.
-            # The prompt code shows `getattr(it, "domain", None)`. Python `getattr` on dict RAISES AttributeError? No it raises AttributeError if attribute missing effectively? 
-            # No, getattr(dict, "key") does NOT work like dict.get("key").
-            # WE MUST WRAP evidence dicts into objects for routing to work, 
-            # OR pass dict-compatible objects.
-            
-            # Let's use the routed decision model
-            routed_model = decision.model
-            route_debug = decision.to_trace()
-
-            # ... Rest of existing logic using routed_model ...
-            
-            prompt = local_prompt # Use the local prompt built above
-            prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
-            cache_key = f"score_single_v1_{prompt_hash}"
-
-            # Skip LLM entirely when evidence is empty (deterministic unverified)
-            if not evidence:
-                # ... existing skip logic ... (implied by previous steps)
-                 return {
-                    "claim_id": cid,
-                    "text": claim_info.get("text", ""),
-                    "status": "ok",
-                    "verdict_score": -1.0,
-                    "verdict": "unverified",
-                    "verdict_state": "insufficient_evidence",
-                    "reason": "No evidence found for this claim.",
-                    "rgba": [0.0, -1.0, 0.0, 0.0],
-                    "routing": route_debug,
-                }
-
-            Trace.event("judge.model_route", route_debug)
-            
-            # ... definition of _call_model ... 
-            # ... retry logic using routed_model ...
-            # (We relying on previous implementation of score_single_claim but replacing the routing block)
-            
-            # We need to return the FULL function body with replacements for the routing block specifically.
-            
-            # Since the previous step inserted `_route_model_for_claim` inside `score_evidence_parallel` (scope),
-            # and `score_single_claim` calls it.
-            # We need to REMOVE `_route_model_for_claim` and Inline the new routing call inside `score_single_claim`.
-            
-            pass 
-
 
         instructions = build_single_claim_scoring_instructions(lang_name=lang_name, lang=lang)
 
