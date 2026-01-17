@@ -76,7 +76,10 @@ class ScoringSkill(BaseSkill):
 
         # Prefer scored sources to avoid context-only hallucinations
         raw_results = pack.get("scored_sources")
-        if not isinstance(raw_results, list):
+        if not isinstance(raw_results, list) or len(raw_results) == 0:
+            # If stance labeling produced no scored sources, still pass all retrieved sources.
+            # Separation between decisive/context is preserved in EvidencePack; here we need
+            # the judge to have access to non-homogeneous evidence rather than a hard empty.
             raw_results = pack.get("search_results")
         if not isinstance(raw_results, list):
             raw_results = []
@@ -238,30 +241,65 @@ class ScoringSkill(BaseSkill):
                         cv["rgba"] = [r, -1.0, b, 0.0] # Explainability 0 implies no evidence
             
             # --- POST-PROCESSING: Aggregate Global Scores ---
-            # Since instructions force LLM to output 0.5 placeholder, we must aggregate manually.
-            # Logic: Average of valid (>=0) claim scores weighted by importance (if available? No, simple avg for now).
-            
-            valid_g = []
-            
-            for cv in claim_verdicts:
-                # Aggregate only G (verified_score) from claims
-                # R, B, A remain as global article-level scores from LLM
-                g = cv.get("verdict_score", -1.0)
-                
-                if g >= 0:
-                    valid_g.append(g)
-            
-            if valid_g:
-                clamped["verified_score"] = sum(valid_g) / len(valid_g)
-            else:
-                # If no claims have valid score (all unverified), global is unverified
+            # Deterministic aggregation MUST account for claims without evidence.
+            # Contract: missing evidence is not "ignored"; it reduces (or blocks) the global score.
+            # Policy:
+            # - If the anchor/main claim is unverified -> global verified_score = -1.0
+            # - Else compute importance-weighted mean where unverified contributes 0.0
+
+            # Build claim importance map
+            importance_by_id = {c["id"]: float(c.get("importance", 0.5) or 0.5) for c in claims_info if c.get("id")}
+
+            # Heuristic anchor: highest importance claim (stable even if anchors missing)
+            anchor_id = None
+            if importance_by_id:
+                anchor_id = max(importance_by_id.items(), key=lambda kv: kv[1])[0]
+
+            # Determine per-claim scores (ensure every claim has an entry)
+            score_by_id = {cv.get("claim_id"): cv.get("verdict_score", -1.0) for cv in claim_verdicts if cv.get("claim_id")}
+            for ci in claims_info:
+                cid = ci.get("id")
+                if not cid:
+                    continue
+                if cid not in score_by_id:
+                    score_by_id[cid] = -1.0
+
+            if anchor_id and score_by_id.get(anchor_id, -1.0) < 0:
                 clamped["verified_score"] = -1.0
+                clamped["verified_score_policy"] = {
+                    "policy": "anchor_unverified_blocks_global",
+                    "anchor_claim_id": anchor_id,
+                }
+            else:
+                num = 0.0
+                den = 0.0
+                for cid, imp in importance_by_id.items():
+                    w = max(0.0, min(1.0, float(imp)))
+                    g = float(score_by_id.get(cid, -1.0))
+                    # Unverified -> contribute 0.0, but still counted in denominator
+                    contrib = g if g >= 0 else 0.0
+                    num += w * contrib
+                    den += w
+                clamped["verified_score"] = (num / den) if den > 0 else -1.0
+                clamped["verified_score_policy"] = {
+                    "policy": "importance_weighted_with_unverified_zero",
+                    "anchor_claim_id": anchor_id,
+                }
+            
+            # For trace/debug only: list of non-negative per-claim G values
+            valid_g = [
+                float(g) for g in score_by_id.values()
+                if isinstance(g, (int, float)) and float(g) >= 0
+            ]
             
             # Debug: trace aggregation decision
             Trace.event(
                 "score_evidence.aggregation",
                 {
                     "claim_count": len(claim_verdicts),
+                    "claims_total": len(claims_info),
+                    "anchor_claim_id": anchor_id,
+                    "aggregation_policy": clamped.get("verified_score_policy"),
                     "valid_g_count": len(valid_g),
                     "valid_g_values": valid_g[:5] if valid_g else [],
                     "computed_verified_score": clamped["verified_score"],

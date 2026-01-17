@@ -371,16 +371,23 @@ def build_evidence_pack(
             if "claim_id" in s:
                 raw_cid = s.get("claim_id")
                 cid_str = (str(raw_cid).strip() if raw_cid is not None else "")
-                if not cid_str or cid_str.lower() in {"global", "__global__"}:
-                    claim_id = None
-                else:
-                    claim_id = cid_str
-            else:
-                claim_id = default_claim_id
+            # if "claim_id" in s:
+            #     raw_cid = s.get("claim_id")
+            #     cid_str = (str(raw_cid).strip() if raw_cid is not None else "")
+            #     if not cid_str or cid_str.lower() in {"global", "__global__"}:
+            #         claim_id = None
+            #     else:
+            #         claim_id = cid_str
+            # else:
+            #     claim_id = default_claim_id
 
             # Build SearchResult
+            # IMPORTANT: preserve per-claim attribution from upstream search pipeline.
+            # Only fall back to default_claim_id when claim_id is missing.
+            src_claim_id = s.get("claim_id") or default_claim_id
+
             search_result = SearchResult(
-                claim_id=claim_id,
+                claim_id=str(src_claim_id),
                 url=url,
                 domain=domain,
                 title=s.get("title", ""),
@@ -568,12 +575,9 @@ def build_evidence_pack(
         else:
             context_sources.append(r)
 
-    if not scored_sources and context_sources:
-        # Fallback: If heuristic/classifier found no support/refute/mixed/neutral sources,
-        # promote ALL context sources to scored_sources.
-        # This gives the LLM a chance to verify using "context" items that might contain answers.
-        # This prevents "Unavailable / -1.0" when we actually found relevant pages.
-        scored_sources.extend(context_sources)
+    # NOTE (Contract): do NOT promote context-only sources into scored_sources.
+    # Context evidence is still valuable for explainability/coverage, but must not silently
+    # become decisive evidence. The judge can still see all sources via `search_results`.
 
     stance_failure = bool(search_results) and not scored_sources
     evidence_metrics["stance_failure"] = stance_failure
