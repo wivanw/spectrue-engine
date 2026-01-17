@@ -105,14 +105,15 @@ def select_judge_model(
             n_quotes += 1
 
         stance = getattr(it, "stance", None) or getattr(it, "stance_label", None)
-        if stance in ("support", "supported", "SUPPORT"):
-            st_support += 1
-        elif stance in ("refute", "refuted", "REFUTE"):
-            st_refute += 1
-        elif stance in ("context", "mention", "neutral"):
-            st_context += 1
-        else:
-            st_unknown += 1
+        match str(stance or "").lower():
+            case "support" | "supported":
+                st_support += 1
+            case "refute" | "refuted":
+                st_refute += 1
+            case "context" | "mention" | "neutral":
+                st_context += 1
+            case _:
+                st_unknown += 1
 
         hint = getattr(it, "source_reliability_hint", None) or getattr(it, "tier", None)
         if hint in ("A", "B", "authoritative", "reputable_news"):
