@@ -10,9 +10,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from firebase_admin import firestore
 
@@ -34,6 +34,15 @@ from spectrue_core.monetization.services.billing import (
 )
 from spectrue_core.monetization.services.free_pool import deduct as pool_deduct
 from spectrue_core.monetization.types import MoneySC, PoolBalance, UserBalance, quantize_sc
+
+if TYPE_CHECKING:
+    from spectrue_core.monetization.types import (
+        ChargeResult,
+        ChargeSplit,
+        DailyBonusState,
+        FreePoolV3,
+        UserWallet,
+    )
 
 
 def _to_decimal(value: Any, default: Decimal = Decimal("0")) -> Decimal:
@@ -475,4 +484,299 @@ class FirestoreBillingStore(BillingStore):
             "event_id": entry.event_id,
             "user_id": entry.user_id,
             "meta": entry.meta,
+        }
+
+    # =========================================================================
+    # V3 Methods: UserWallet, FreePoolV3, DailyBonus, Charging
+    # =========================================================================
+
+    def read_user_wallet(self, uid: str) -> "UserWallet":
+        """Read user wallet with v3 available_sc field."""
+        from spectrue_core.monetization.types import UserWallet, MoneySC as MoneySCClass
+        from datetime import date
+
+        snapshot = self._users.document(uid).get()
+        if not snapshot.exists:
+            return UserWallet(
+                uid=uid,
+                balance_sc=MoneySCClass.zero(),
+                available_sc=MoneySCClass.zero(),
+            )
+        data = snapshot.to_dict() or {}
+        balance = _to_decimal(data.get(self._config.balance_field, "0"))
+        available = _to_decimal(data.get(self._config.available_field, "0"))
+        last_seen_at = data.get("last_seen_at")
+        if last_seen_at and hasattr(last_seen_at, "to_datetime"):
+            last_seen_at = last_seen_at.to_datetime()
+
+        last_daily = data.get("last_daily_bonus_date")
+        if isinstance(last_daily, str):
+            last_daily = date.fromisoformat(last_daily)
+        elif last_daily and hasattr(last_daily, "date"):
+            last_daily = last_daily.date()
+        else:
+            last_daily = None
+
+        last_share = data.get("last_share_bonus_date")
+        if isinstance(last_share, str):
+            last_share = date.fromisoformat(last_share)
+        elif last_share and hasattr(last_share, "date"):
+            last_share = last_share.date()
+        else:
+            last_share = None
+
+        return UserWallet(
+            uid=uid,
+            balance_sc=MoneySCClass(balance),
+            available_sc=MoneySCClass(available),
+            last_seen_at=last_seen_at,
+            last_daily_bonus_date=last_daily,
+            last_share_bonus_date=last_share,
+        )
+
+    def read_pool_v3(self) -> "FreePoolV3":
+        """Read free pool with v3 locked_buckets list."""
+        from spectrue_core.monetization.types import FreePoolV3, LockedBucket, MoneySC as MoneySCClass
+
+        snapshot = self._pool_ref.get()
+        if not snapshot.exists:
+            return FreePoolV3(available_balance_sc=MoneySCClass.zero())
+
+        data = snapshot.to_dict() or {}
+        available = _to_decimal(data.get("available_balance_sc", "0"))
+        raw_buckets = data.get("locked_buckets_v3") or []
+        locked_buckets = []
+        for b in raw_buckets:
+            if isinstance(b, dict):
+                locked_buckets.append(LockedBucket.from_dict(b))
+        updated_at = data.get("updated_at")
+        if updated_at and hasattr(updated_at, "to_datetime"):
+            updated_at = updated_at.to_datetime()
+
+        return FreePoolV3(
+            available_balance_sc=MoneySCClass(available),
+            locked_buckets=locked_buckets,
+            updated_at=updated_at,
+        )
+
+    def read_daily_bonus_state(self) -> "DailyBonusState":
+        """Read daily bonus job state."""
+        from spectrue_core.monetization.types import DailyBonusState, MoneySC as MoneySCClass
+
+        state_ref = self._db.document(self._config.bonus_state_doc_path)
+        snapshot = state_ref.get()
+        if not snapshot.exists:
+            return DailyBonusState(ema_budget_sc=MoneySCClass.zero())
+        data = snapshot.to_dict() or {}
+        return DailyBonusState.from_dict(data)
+
+    def list_active_users(self, today: "date", window_days: int) -> list[str]:
+        """List user IDs that are active (seen within window_days)."""
+        from datetime import timedelta
+        
+        cutoff = datetime.combine(today - timedelta(days=window_days), datetime.min.time())
+        query = self._users.where("last_seen_at", ">=", cutoff)
+        return [doc.id for doc in query.stream()]
+
+    def read_last_daily_b(self) -> "MoneySC":
+        """Read last computed daily bonus per user."""
+
+        state = self.read_daily_bonus_state()
+        return state.last_b_sc
+
+    def apply_daily_bonus_batch(
+        self,
+        user_ids: list[str],
+        bonus_per_user: "MoneySC",
+        today: "date",
+        new_pool: "FreePoolV3",
+        new_state: "DailyBonusState",
+    ) -> int:
+        """Apply daily bonus to a batch of users atomically."""
+
+        if not user_ids:
+            # Still persist pool/state updates
+            self._pool_ref.set(self._pool_v3_to_dict(new_pool), merge=True)
+            state_ref = self._db.document(self._config.bonus_state_doc_path)
+            state_ref.set(new_state.to_dict(), merge=True)
+            return 0
+
+        awarded = 0
+        batch = self._db.batch()
+
+        for uid in user_ids:
+            user_ref = self._users.document(uid)
+            snapshot = user_ref.get()
+            data = snapshot.to_dict() or {} if snapshot.exists else {}
+
+            # Check if already awarded today
+            last_daily = data.get("last_daily_bonus_date")
+            if isinstance(last_daily, str):
+                from datetime import date as date_type
+                last_daily = date_type.fromisoformat(last_daily)
+            elif last_daily and hasattr(last_daily, "date"):
+                last_daily = last_daily.date()
+
+            if last_daily == today:
+                continue  # Already awarded
+
+            current_available = _to_decimal(data.get(self._config.available_field, "0"))
+            new_available = current_available + bonus_per_user.value
+
+            batch.set(
+                user_ref,
+                {
+                    self._config.available_field: str(new_available),
+                    "last_daily_bonus_date": today.isoformat(),
+                },
+                merge=True,
+            )
+            awarded += 1
+
+        # Update pool and state
+        batch.set(self._pool_ref, self._pool_v3_to_dict(new_pool), merge=True)
+        state_ref = self._db.document(self._config.bonus_state_doc_path)
+        batch.set(state_ref, new_state.to_dict(), merge=True)
+
+        batch.commit()
+        return awarded
+
+    def apply_share_bonus(self, uid: str, bonus: "MoneySC", today: "date") -> bool:
+        """Apply share bonus to user's available_sc (1/day limit)."""
+        transaction = self._db.transaction()
+
+        @firestore.transactional
+        def _apply(transaction):  # type: ignore[no-untyped-def]
+            user_ref = self._users.document(uid)
+            snapshot = user_ref.get(transaction=transaction)
+            data = snapshot.to_dict() or {} if snapshot.exists else {}
+
+            last_share = data.get("last_share_bonus_date")
+            if isinstance(last_share, str):
+                from datetime import date as date_type
+                last_share = date_type.fromisoformat(last_share)
+            elif last_share and hasattr(last_share, "date"):
+                last_share = last_share.date()
+
+            if last_share == today:
+                return False  # Already awarded
+
+            current_available = _to_decimal(data.get(self._config.available_field, "0"))
+            new_available = current_available + bonus.value
+
+            transaction.set(
+                user_ref,
+                {
+                    self._config.available_field: str(new_available),
+                    "last_share_bonus_date": today.isoformat(),
+                },
+                merge=True,
+            )
+            return True
+
+        return _apply(transaction)
+
+    def apply_charge(
+        self,
+        uid: str,
+        run_id: str,
+        split: "ChargeSplit",
+        idempotency_key: str,
+    ) -> "ChargeResult":
+        """Apply charge with v3 split (available_sc first, then balance_sc)."""
+        from spectrue_core.monetization.types import ChargeResult, ChargeSplit, MoneySC as MoneySCClass
+
+        transaction = self._db.transaction()
+
+        @firestore.transactional
+        def _charge(transaction):  # type: ignore[no-untyped-def]
+            # Check idempotency
+            ledger_ref = self._ledger.document(idempotency_key)
+            ledger_snap = ledger_ref.get(transaction=transaction)
+            if ledger_snap.exists:
+                # Return cached result
+                entry_data = ledger_snap.to_dict() or {}
+                meta = entry_data.get("meta", {})
+                return ChargeResult(
+                    ok=entry_data.get("status") == LedgerEntryStatus.SETTLED.value,
+                    split=ChargeSplit(
+                        take_available=MoneySCClass.from_str(meta.get("take_available_sc", "0")),
+                        take_balance=MoneySCClass.from_str(meta.get("take_balance_sc", "0")),
+                    ),
+                    new_balance_sc=MoneySCClass.from_str(meta.get("new_balance_sc", "0")),
+                    new_available_sc=MoneySCClass.from_str(meta.get("new_available_sc", "0")),
+                    reason=meta.get("reason"),
+                )
+
+            user_ref = self._users.document(uid)
+            snapshot = user_ref.get(transaction=transaction)
+            data = snapshot.to_dict() or {} if snapshot.exists else {}
+
+            current_balance = _to_decimal(data.get(self._config.balance_field, "0"))
+            current_available = _to_decimal(data.get(self._config.available_field, "0"))
+
+            new_available = quantize_sc(current_available - split.take_available.value)
+            new_balance = quantize_sc(current_balance - split.take_balance.value)
+
+            # Ledger entry
+            entry = LedgerEntry(
+                idempotency_key=idempotency_key,
+                entry_type=LedgerEntryType.DEBIT,
+                amount_sc=split.total.value,
+                status=LedgerEntryStatus.SETTLED,
+                user_id=uid,
+                meta={
+                    "run_id": run_id,
+                    "take_available_sc": split.take_available.to_str(),
+                    "take_balance_sc": split.take_balance.to_str(),
+                    "new_available_sc": str(new_available),
+                    "new_balance_sc": str(new_balance),
+                    "charge_version": "v3",
+                },
+            )
+            transaction.set(ledger_ref, self._entry_to_dict(entry))
+            transaction.set(
+                user_ref,
+                {
+                    self._config.available_field: str(new_available),
+                    self._config.balance_field: str(new_balance),
+                },
+                merge=True,
+            )
+
+            return ChargeResult(
+                ok=True,
+                split=split,
+                new_balance_sc=MoneySCClass(new_balance),
+                new_available_sc=MoneySCClass(new_available),
+            )
+
+        return _charge(transaction)
+
+    def check_idempotency(self, idempotency_key: str) -> "ChargeResult | None":
+        """Check if a charge was already applied."""
+        from spectrue_core.monetization.types import ChargeResult, ChargeSplit, MoneySC as MoneySCClass
+
+        snapshot = self._ledger.document(idempotency_key).get()
+        if not snapshot.exists:
+            return None
+        entry_data = snapshot.to_dict() or {}
+        meta = entry_data.get("meta", {})
+        return ChargeResult(
+            ok=entry_data.get("status") == LedgerEntryStatus.SETTLED.value,
+            split=ChargeSplit(
+                take_available=MoneySCClass.from_str(meta.get("take_available_sc", "0")),
+                take_balance=MoneySCClass.from_str(meta.get("take_balance_sc", "0")),
+            ),
+            new_balance_sc=MoneySCClass.from_str(meta.get("new_balance_sc", "0")),
+            new_available_sc=MoneySCClass.from_str(meta.get("new_available_sc", "0")),
+            reason=meta.get("reason"),
+        )
+
+    def _pool_v3_to_dict(self, pool: "FreePoolV3") -> dict[str, Any]:
+        """Convert FreePoolV3 to Firestore dict."""
+        return {
+            "available_balance_sc": pool.available_balance_sc.to_str(),
+            "locked_buckets_v3": [b.to_dict() for b in pool.locked_buckets],
+            "updated_at": firestore.SERVER_TIMESTAMP,
         }

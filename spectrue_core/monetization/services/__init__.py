@@ -17,8 +17,22 @@ from spectrue_core.monetization.services.billing import (
     ReservationOutcome,
     SettlementOutcome,
 )
+from spectrue_core.monetization.services.daily_bonus import (
+    DailyBonusService,
+    DailyBonusStore,
+)
+from spectrue_core.monetization.services.share_bonus import (
+    ShareBonusService,
+    ShareBonusStore,
+)
+from spectrue_core.monetization.services.charging import (
+    ChargingService,
+    ChargingStore,
+    ChargeRequest,
+)
 
 __all__ = [
+    # Legacy billing
     "BillingStore",
     "BillingError",
     "IdempotencyError",
@@ -27,4 +41,12 @@ __all__ = [
     "LedgerStatusError",
     "ReservationOutcome",
     "SettlementOutcome",
+    # V3 services
+    "DailyBonusService",
+    "DailyBonusStore",
+    "ShareBonusService",
+    "ShareBonusStore",
+    "ChargingService",
+    "ChargingStore",
+    "ChargeRequest",
 ]

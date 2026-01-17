@@ -233,3 +233,76 @@ class BillingFacade:
         )
         self._store.write_ledger_entry(entry)
         return entry
+
+    # =========================================================================
+    # V3 Methods: UserWallet stats, Pool stats, Charging
+    # =========================================================================
+
+    def get_user_stats_v3(self, user_id: str) -> dict:
+        """Get v3 user stats with available_sc and bonus dates."""
+
+        if not hasattr(self._store, "read_user_wallet"):
+            # Fallback to legacy
+            return self.get_user_stats(user_id).to_dict()
+
+        wallet = self._store.read_user_wallet(user_id)
+        return wallet.to_dict()
+
+    def get_pool_stats_v3(self) -> dict:
+        """Get v3 pool stats with locked_total."""
+        if not hasattr(self._store, "read_pool_v3"):
+            # Fallback to legacy
+            return self.get_pool_stats().to_dict()
+
+        pool = self._store.read_pool_v3()
+        return pool.to_dict()
+
+    def charge_v3(
+        self,
+        *,
+        user_id: str,
+        run_id: str,
+        cost_sc: MoneySC,
+    ) -> dict:
+        """
+        Charge using v3 split: available_sc first, then balance_sc.
+        No pool access at runtime.
+
+        Returns ChargeResult as dict.
+        """
+        from spectrue_core.monetization.services.charging import ChargingService, ChargeRequest
+        from spectrue_core.monetization.types import MoneySC as MoneySCClass
+
+        if not hasattr(self._store, "read_user_wallet"):
+            # Fallback: not v3-capable
+            return {
+                "ok": False,
+                "reason": "store_not_v3_capable",
+            }
+
+        charging = ChargingService(self._store, self._config)
+        request = ChargeRequest(
+            uid=user_id,
+            run_id=run_id,
+            cost_sc=MoneySCClass(cost_sc) if not isinstance(cost_sc, MoneySCClass) else cost_sc,
+        )
+        result = charging.charge(request)
+        return result.to_dict()
+
+    def estimate_charge_v3(self, user_id: str, cost_sc: MoneySC) -> dict:
+        """
+        Estimate how a charge would be split (read-only).
+
+        Returns dict with can_afford, take_available, take_balance, etc.
+        """
+        from spectrue_core.monetization.services.charging import ChargingService
+        from spectrue_core.monetization.types import MoneySC as MoneySCClass
+
+        if not hasattr(self._store, "read_user_wallet"):
+            return {"error": "store_not_v3_capable"}
+
+        charging = ChargingService(self._store, self._config)
+        return charging.estimate_split(
+            user_id,
+            MoneySCClass(cost_sc) if not isinstance(cost_sc, MoneySCClass) else cost_sc,
+        )
