@@ -322,12 +322,13 @@ def build_evidence_pack(
                     r["source_type"] = "primary"
                 elif r.get("is_trusted"):
                     r["source_type"] = "independent_media"
-            if not r.get("claim_id") and default_claim_id:
-                r["claim_id"] = default_claim_id
+            if "claim_id" not in r or r.get("claim_id") in ("", None):
+                # Missing claim_id in clustered results -> treat as GLOBAL evidence
+                r["claim_id"] = None
                 Trace.event(
                     "evidence.claim_id.missing",
                     {
-                        "assigned_claim_id": default_claim_id,
+                        "assigned_claim_id": "__global__",
                         "source_url": r.get("url") or r.get("link"),
                     },
                 )
@@ -364,9 +365,22 @@ def build_evidence_pack(
 
             stance = s.get("stance", "unclear")
 
+            # Preserve claim attribution from retrieval pipeline.
+            # - claim_id missing entirely -> backward-compat: assign to default_claim_id
+            # - claim_id is None/empty/global markers -> treat as GLOBAL evidence (claim_id=None)
+            if "claim_id" in s:
+                raw_cid = s.get("claim_id")
+                cid_str = (str(raw_cid).strip() if raw_cid is not None else "")
+                if not cid_str or cid_str.lower() in {"global", "__global__"}:
+                    claim_id = None
+                else:
+                    claim_id = cid_str
+            else:
+                claim_id = default_claim_id
+
             # Build SearchResult
             search_result = SearchResult(
-                claim_id=(s.get("claim_id") or default_claim_id),
+                claim_id=claim_id,
                 url=url,
                 domain=domain,
                 title=s.get("title", ""),

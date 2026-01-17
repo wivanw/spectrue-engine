@@ -188,7 +188,15 @@ class EvidenceCollectStep:
                 sources=sources,
             )
 
-            evidence_by_claim = by_claim_items or _group_sources_by_claim(collection.sources)
+            # Prefer enriched sources from collect_evidence() for per-claim packs.
+            # by_claim_items are raw retrieval payloads (often missing stance/quote/relevance).
+            # We only fall back to by_claim_items when collection.sources is empty.
+            if isinstance(evidence_by_claim_override, dict) and evidence_by_claim_override:
+                evidence_by_claim = evidence_by_claim_override
+            elif collection.sources:
+                evidence_by_claim = _group_sources_by_claim(collection.sources)
+            else:
+                evidence_by_claim = by_claim_items or _group_sources_by_claim(sources)
 
             pack_items = list(collection.pack.get("items", [])) if isinstance(collection.pack, dict) else []
             pack_contract = None
