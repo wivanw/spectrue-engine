@@ -24,6 +24,30 @@ HIGH_TIER_SET = {"A", "A'", "B"}
 LOW_TIER_SET = {"C", "D"}
 TIER_RANK = {"D": 1, "C": 2, "B": 3, "A'": 4, "A": 4}
 
+_MISSING = object()
+
+def _normalize_claim_id(raw: object, *, default_claim_id: str | None) -> str | None:
+    """Normalize claim_id semantics from upstream evidence.
+
+    Semantics:
+      - key missing entirely -> legacy fallback to default_claim_id (may be None)
+      - explicit None -> GLOBAL / unbound evidence (stay None)
+      - empty/whitespace string -> fallback to default_claim_id
+      - markers ("global", "__global__") -> GLOBAL (None)
+    """
+    if raw is _MISSING:
+        return default_claim_id
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        v = raw.strip()
+        if not v:
+            return default_claim_id
+        if v.lower() in {"global", "__global__", "none", "null"}:
+            return None
+        return v
+    return default_claim_id
+
 
 def _normalize_tier(*, tier_raw: str | None, source_type: str | None) -> str:
     if tier_raw:
@@ -54,18 +78,28 @@ def is_strong_tier(tier: str | None) -> bool:
 
 def strongest_tiers_by_claim(
     scored_sources: list[SearchResult],
+    *,
+    default_claim_id: str | None = "c1",
 ) -> dict[str, dict[str, str | int | None]]:
     """
     Determine strongest support/refute tiers per claim from scored sources.
+
+    NOTE:
+        Evidence items with claim_id=None are treated as GLOBAL/unbound and are
+        intentionally excluded from per-claim tier summaries.
     """
     by_claim: dict[str, dict[str, str | int | None]] = {}
 
     for src in scored_sources:
         if not isinstance(src, dict):
             continue
-        claim_id = str(src.get("claim_id") or "").strip()
+
+        cid = _normalize_claim_id(src.get("claim_id", _MISSING), default_claim_id=default_claim_id)
+        if cid is None:
+            continue
+        claim_id = str(cid).strip()
         if not claim_id:
-            claim_id = "c1"
+            continue
 
         stance = (src.get("stance") or "").lower()
         if stance not in ("support", "refute", "contradict"):
@@ -305,6 +339,8 @@ def build_evidence_pack(
         default_claim_id = anchor_claim_id
     elif len(claims) == 1:
         default_claim_id = claims[0].get("id")
+    claim_id_norm_counts: dict[str, int] | None = None
+
     if search_results_clustered is not None:
         search_results = search_results_clustered
         logger.debug("Using clustered evidence: %d items", len(search_results))
@@ -334,6 +370,7 @@ def build_evidence_pack(
                 )
     else:
         seen_domains = set()
+        claim_id_norm_counts = {"explicit": 0, "defaulted": 0, "global": 0}
         for s in (sources or []):
             url = (s.get("link") or s.get("url") or "").strip()
             domain = get_registrable_domain(url)
@@ -365,29 +402,19 @@ def build_evidence_pack(
 
             stance = s.get("stance", "unclear")
 
-            # Preserve claim attribution from retrieval pipeline.
-            # - claim_id missing entirely -> backward-compat: assign to default_claim_id
-            # - claim_id is None/empty/global markers -> treat as GLOBAL evidence (claim_id=None)
-            if "claim_id" in s:
-                raw_cid = s.get("claim_id")
-                cid_str = (str(raw_cid).strip() if raw_cid is not None else "")
-            # if "claim_id" in s:
-            #     raw_cid = s.get("claim_id")
-            #     cid_str = (str(raw_cid).strip() if raw_cid is not None else "")
-            #     if not cid_str or cid_str.lower() in {"global", "__global__"}:
-            #         claim_id = None
-            #     else:
-            #         claim_id = cid_str
-            # else:
-            #     claim_id = default_claim_id
+            raw_cid = s.get("claim_id", _MISSING)
+            src_claim_id = _normalize_claim_id(raw_cid, default_claim_id=default_claim_id)
 
-            # Build SearchResult
-            # IMPORTANT: preserve per-claim attribution from upstream search pipeline.
-            # Only fall back to default_claim_id when claim_id is missing.
-            src_claim_id = s.get("claim_id") or default_claim_id
+            if claim_id_norm_counts is not None: # Ensure it's initialized
+                if raw_cid is _MISSING and default_claim_id is not None:
+                    claim_id_norm_counts["defaulted"] += 1
+                elif src_claim_id is None:
+                    claim_id_norm_counts["global"] += 1
+                else:
+                    claim_id_norm_counts["explicit"] += 1
 
             search_result = SearchResult(
-                claim_id=str(src_claim_id),
+                claim_id=src_claim_id,
                 url=url,
                 domain=domain,
                 title=s.get("title", ""),
@@ -405,6 +432,17 @@ def build_evidence_pack(
                 duplicate_of=None,
             )
             search_results.append(search_result)
+
+    if claim_id_norm_counts is not None:
+        Trace.event(
+            "evidence.claim_id.normalization",
+            {
+                "default_claim_id": default_claim_id,
+                "explicit": claim_id_norm_counts.get("explicit", 0),
+                "defaulted": claim_id_norm_counts.get("defaulted", 0),
+                "global": claim_id_norm_counts.get("global", 0),
+            },
+        )
 
     for r in search_results:
         claim_id = r.get("claim_id")
@@ -641,7 +679,7 @@ def build_evidence_pack(
             channel=channel,  # type: ignore[typeddict-item]
             tier=tier,  # type: ignore[typeddict-item]
             tier_reason=None,
-            claim_id=r.get("claim_id") or default_claim_id,
+            claim_id=_normalize_claim_id(r.get("claim_id", _MISSING), default_claim_id=default_claim_id),
             stance=stance,  # type: ignore[typeddict-item]
             quote=quote,
             relevance=float(r.get("relevance_score", 0.0) or 0.0),
@@ -651,9 +689,10 @@ def build_evidence_pack(
             raw_text_chars=len(r.get("content_excerpt") or ""),
         ))
 
-        claim_id = r.get("claim_id") or default_claim_id or "__global__"
+        cid = _normalize_claim_id(r.get("claim_id", _MISSING), default_claim_id=default_claim_id)
+        stats_key = str(cid) if cid is not None else "__global__"
         claim_stats = per_claim_stats.setdefault(
-            str(claim_id),
+            stats_key,
             {"support": 0, "refute": 0, "context": 0, "with_quote": 0},
         )
         if stance == "SUPPORT":
