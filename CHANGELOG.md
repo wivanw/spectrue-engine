@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - M131: Governance & Localization Documentation
   - Added Governance Principles to README
   - Refined documentation structure per reviewer guidelines
+- M130: Deep v2 Clustered Retrieval
+  - Claim Clustering (MST-split + top-K representatives)
+  - Clustered Retrieval (search per cluster, reducing redundant queries)
+  - Evidence Stats & Confirmation Counts (dedup logic, `confirmation_counts` exposed to judge)
+  - RGBA Clamping Fixes (clamped to [0,1], signed G preservation)
+- M129: Retrieval Pipeline Rewrite
+  - Single Deterministic Retrieval Path (removed experiment modes)
+  - Controlled Extraction and Binding (batch-only extraction, deterministic bindings)
+  - Sufficiency-Driven Escalation (trigger escalation via fixed sufficiency formula)
+- M128: CEGS MVP Evidence Pool
+  - Shared `EvidencePool` and document-level retrieval
+  - `build_doc_query_plan` (structural entities + anchors)
+  - `compute_deficit` and `escalate_claim` (targeted extra searches)
 
 ### Changed
 - Refactor: Replaced HMAC-SHA3-256 with PBKDF2-SHA256 for trace redaction hashing
