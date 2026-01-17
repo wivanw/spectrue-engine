@@ -128,10 +128,7 @@ class ChargingService:
         """
         idempotency_key = self.generate_idempotency_key(request.uid, request.run_id)
 
-        # Check if already charged
-        existing = self.store.check_idempotency(idempotency_key)
-        if existing is not None:
-            return existing
+
 
         # Read current wallet
         wallet = self.store.read_user_wallet(request.uid)
