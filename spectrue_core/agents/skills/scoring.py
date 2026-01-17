@@ -398,11 +398,37 @@ class ScoringSkill(BaseSkill):
             if r.get("is_primary"):
                 content_text = f"⭐ [PRIMARY SOURCE / OFFICIAL]\n{content_text}"
 
+            # Normalize stance to avoid poisoning downstream prompts with unexpected labels.
+            stance_raw = str(stance or "")
+            stance_norm = stance_raw.strip().upper()
+            allowed_stances = {"SUPPORT", "REFUTE", "CONTEXT", "IRRELEVANT", "MENTION", "UNCLEAR", "MIXED"}
+            if stance_norm not in allowed_stances:
+                # Keep original for traceability, but feed the judge a safe default.
+                stance_norm = "CONTEXT"
+
+            # Lightweight, judge-facing evidence item.
+            # IMPORTANT: keep metadata first-class; do not collapse to just an excerpt.
             sources_by_claim[cid].append({
                 "domain": r.get("domain"),
+                "link": r.get("url"),
+                "title": r.get("title"),
+                "source_type": r.get("source_type"),
+                "evidence_tier": r.get("evidence_tier"),
                 "source_reliability_hint": "high" if r.get("is_trusted") else "general",
-                "stance": stance, 
-                "excerpt": content_text
+                "is_primary": bool(r.get("is_primary")),
+                "is_trusted": bool(r.get("is_trusted")),
+                "stance": stance_norm,
+                "stance_raw": stance_raw,
+                "relevance_score": float(r.get("relevance_score", 0.0) or 0.0),
+                "published_at": r.get("published_at"),
+                "timeliness_status": r.get("timeliness_status"),
+                "content_status": r.get("content_status"),
+                "evidence_role": r.get("evidence_role"),
+                "covers": r.get("covers"),
+                "assertion_key": r.get("assertion_key"),
+                "event_signature": r.get("event_signature"),
+                "has_quote": bool(key_snippet),
+                "excerpt": content_text,
             })
 
         # --- 2. PREPARE CLAIMS ---
@@ -431,6 +457,13 @@ class ScoringSkill(BaseSkill):
                 "matched_evidence_count": len(sources_by_claim.get(cid, [])),
             })
 
+        pack_metrics = pack.get("metrics") or {}
+        if not isinstance(pack_metrics, dict):
+            pack_metrics = {}
+        per_claim_metrics = pack_metrics.get("claims") or {}
+        if not isinstance(per_claim_metrics, dict):
+            per_claim_metrics = {}
+
         Trace.event(
             "score_evidence_parallel.start",
             {
@@ -454,9 +487,89 @@ class ScoringSkill(BaseSkill):
             cid = claim_info.get("id")
             evidence = sources_by_claim.get(cid, [])
 
+            # Code-computed judge signals (must survive through the pipeline).
+            # These are *signals* to help the judge reason about sufficiency, diversity, and uncertainty.
+            cmet = per_claim_metrics.get(str(cid), {}) if cid else {}
+            if not isinstance(cmet, dict):
+                cmet = {}
+
+            # Evidence-side summary (computed from the exact items passed to the judge prompt).
+            urls = [s.get("link") for s in (evidence or []) if isinstance(s, dict) and s.get("link")]
+            unique_urls = set(urls)
+            exact_duplicate_count = max(0, len(urls) - len(unique_urls))
+            domains = [s.get("domain") for s in (evidence or []) if isinstance(s, dict) and s.get("domain")]
+            unique_domains = set([d for d in domains if isinstance(d, str)])
+
+            rels = []
+            quotes_found = 0
+            stance_counts = {"SUPPORT": 0, "REFUTE": 0, "CONTEXT": 0, "IRRELEVANT": 0, "MENTION": 0, "UNCLEAR": 0, "MIXED": 0}
+            for s in (evidence or []):
+                if not isinstance(s, dict):
+                    continue
+                try:
+                    rels.append(float(s.get("relevance_score", 0.0) or 0.0))
+                except Exception:
+                    rels.append(0.0)
+                if s.get("has_quote"):
+                    quotes_found += 1
+                st = str(s.get("stance") or "").upper().strip()
+                if st in stance_counts:
+                    stance_counts[st] += 1
+                else:
+                    stance_counts["CONTEXT"] += 1
+
+            avg_relevance = (sum(rels) / len(rels)) if rels else 0.0
+            max_relevance = max(rels) if rels else 0.0
+
+            pack_metrics = pack.get("metrics", {}) if isinstance(pack, dict) else {}
+            if not isinstance(pack_metrics, dict):
+                pack_metrics = {}
+            pack_stats = pack.get("stats", {}) if isinstance(pack, dict) else {}
+            if not isinstance(pack_stats, dict):
+                pack_stats = {}
+            constraints = pack.get("constraints", {}) if isinstance(pack, dict) else {}
+            if not isinstance(constraints, dict):
+                constraints = {}
+
+            judge_context = {
+                "claim_metrics": {
+                    "coverage": cmet.get("coverage"),
+                    "independent_domains": cmet.get("independent_domains"),
+                    "primary_present": cmet.get("primary_present"),
+                    "official_present": cmet.get("official_present"),
+                    "stance_distribution": cmet.get("stance_distribution"),
+                    "freshness_days_median": cmet.get("freshness_days_median"),
+                    "topic_group": cmet.get("topic_group"),
+                    "claim_type": cmet.get("claim_type"),
+                },
+                "evidence_summary": {
+                    "observed_sources": len(evidence or []),
+                    "unique_domains_in_prompt": len(unique_domains),
+                    "exact_duplicate_count_in_prompt": exact_duplicate_count,
+                    "quotes_found_in_prompt": quotes_found,
+                    "avg_relevance_in_prompt": round(float(avg_relevance), 4),
+                    "max_relevance_in_prompt": round(float(max_relevance), 4),
+                    "stance_counts_in_prompt": stance_counts,
+                },
+                "pack_signals": {
+                    "total_sources": pack_metrics.get("total_sources"),
+                    "unique_domains": pack_metrics.get("unique_domains"),
+                    "duplicate_ratio": pack_metrics.get("duplicate_ratio"),
+                    "overall_coverage": pack_metrics.get("overall_coverage"),
+                    "stance_failure": pack_metrics.get("stance_failure"),
+                    "tiers_present": pack_stats.get("tiers_present"),
+                    "outdated_ratio": pack_stats.get("outdated_ratio"),
+                },
+                "constraints": {
+                    "global_cap": constraints.get("global_cap"),
+                    "cap_reasons": constraints.get("cap_reasons"),
+                },
+            }
+
             prompt = build_single_claim_scoring_prompt(
                 claim_info=claim_info,
                 evidence=evidence,
+                judge_context=judge_context,
             )
 
             prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]

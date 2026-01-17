@@ -138,14 +138,22 @@ Be concise.
 """
 
 
-def build_single_claim_scoring_prompt(*, claim_info: dict, evidence: list[dict]) -> str:
-    """Prompt for scoring a SINGLE claim."""
+def build_single_claim_scoring_prompt(*, claim_info: dict, evidence: list[dict], judge_context: dict | None = None) -> str:
+    """Prompt for scoring a SINGLE claim.
+
+    judge_context is a code-computed, auditable summary (coverage, stance distribution,
+    dedup counters, etc.) that the model must treat as *signals*, not as truth.
+    """
+    ctx = judge_context or {}
     return f"""Score this claim based on the evidence.
 
 Claim:
 {json.dumps(claim_info, indent=2, ensure_ascii=False)}
 
-Evidence:
+JudgeSignals (code-computed):
+{json.dumps(ctx, indent=2, ensure_ascii=False)}
+
+Evidence (raw items):
 {json.dumps(evidence, indent=2, ensure_ascii=False)}
 
 Return JSON.
