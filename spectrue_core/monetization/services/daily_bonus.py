@@ -20,7 +20,7 @@ This service handles the daily bonus job that:
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, List, Protocol, Tuple
 
@@ -149,7 +149,7 @@ class DailyBonusService:
         return FreePoolV3(
             available_balance_sc=new_available,
             locked_buckets=new_locked,
-            updated_at=datetime.utcnow(),
+            updated_at=datetime.now(timezone.utc),
         )
 
     def run_daily(self, today: date | None = None) -> dict:
@@ -217,7 +217,7 @@ class DailyBonusService:
         new_pool = FreePoolV3(
             available_balance_sc=new_pool_available.max0(),
             locked_buckets=pool.locked_buckets,
-            updated_at=datetime.utcnow(),
+            updated_at=datetime.now(timezone.utc),
         )
 
         # Apply in batches
