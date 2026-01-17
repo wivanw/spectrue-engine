@@ -1,6 +1,6 @@
-from enum import StrEnum
+from enum import Enum
 
-class ModelID(StrEnum):
+class ModelID(str, Enum):
     """Canonical model identifiers for internal engine routing."""
     
     # Cheap / Fast tier
