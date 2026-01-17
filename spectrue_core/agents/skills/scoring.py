@@ -414,7 +414,13 @@ class ScoringSkill(BaseSkill):
                 "id": cid,
                 "text": safe_text,
                 "importance": float(c.get("importance", 0.5)),
-                "matched_evidence_count": len(sources_by_claim.get(cid, []))
+                "check_worthiness": float(c.get("check_worthiness", 0.5) or 0.5),
+                "harm_potential": int(c.get("harm_potential", 1) or 1),
+                "claim_role": c.get("claim_role") or c.get("role") or "unknown",
+                "evidence_need": c.get("evidence_need") or "unknown",
+                "claim_category": c.get("claim_category") or "FACTUAL",
+                "metadata_confidence": c.get("metadata_confidence") or "unknown",
+                "matched_evidence_count": len(sources_by_claim.get(cid, [])),
             })
 
         Trace.event(
@@ -426,6 +432,152 @@ class ScoringSkill(BaseSkill):
         )
 
         # --- 3. SCORE EACH CLAIM IN PARALLEL ---
+
+        # --- MODEL ROUTING (per-claim) ---
+        # Goal: minimize cost while keeping correctness on high-risk / high-importance / ambiguous claims.
+        # Models:
+        # - gpt-5-nano: very cheap, use only when evidence is clean + claim is low-impact.
+        # - deepseek (chat): medium, use for mid-difficulty; fallback to gpt-5.2 on any failure.
+        # - gpt-5.2: use for central / high-impact / ambiguous claims.
+
+        raw_claims_list = pack.get("claims")
+        if not isinstance(raw_claims_list, list):
+            raw_claims_list = []
+
+        claim_obj_by_id = {
+            c.get("id"): c for c in raw_claims_list
+            if isinstance(c, dict) and c.get("id")
+        }
+
+        metrics = pack.get("metrics", {})
+        if not isinstance(metrics, dict):
+            metrics = {}
+        per_claim_metrics = metrics.get("per_claim", {})
+        if not isinstance(per_claim_metrics, dict):
+            per_claim_metrics = {}
+
+        deepseek_model = None
+        try:
+            names = tuple(getattr(self.runtime.llm, "deepseek_model_names", ()) or ())
+            deepseek_model = names[0] if names else None
+        except Exception:
+            deepseek_model = None
+        if not deepseek_model:
+            deepseek_model = "deepseek-chat"
+
+        def _route_model_for_claim(claim_info: dict, evidence: list[dict]) -> tuple[str, dict]:
+            """Return (model, debug_route_info) for a claim."""
+            cid = str(claim_info.get("id") or "")
+
+            # Fast-path: no evidence => deterministic unverified; no LLM call.
+            if not evidence:
+                return "__skip__", {
+                    "claim_id": cid,
+                    "model": "__skip__",
+                    "reason": "no_evidence",
+                    "signals": {
+                        "matched_evidence_count": 0,
+                    },
+                }
+
+            cobj = claim_obj_by_id.get(cid, {}) if cid else {}
+            cmet = per_claim_metrics.get(cid, {}) if cid else {}
+            if not isinstance(cobj, dict):
+                cobj = {}
+            if not isinstance(cmet, dict):
+                cmet = {}
+
+            importance = float(claim_info.get("importance", 0.5) or 0.5)
+            check_worthiness = float(claim_info.get("check_worthiness", 0.5) or 0.5)
+            harm_potential = int(claim_info.get("harm_potential", 1) or 1)
+            claim_role = str(claim_info.get("claim_role") or "unknown")
+            evidence_need = str(claim_info.get("evidence_need") or "unknown")
+            
+            # Use 'independent_domains' directly as it's passed as kwargs or similar in original context,
+            # but here we access via cmet dictionary
+            independent_domains = int(cmet.get("independent_domains", 0) or 0)
+            coverage = float(cmet.get("coverage", 0.0) or 0.0)
+            stance_dist = cmet.get("stance_distribution", {})
+            if not isinstance(stance_dist, dict):
+                stance_dist = {}
+            s_support = int(stance_dist.get("SUPPORT", 0) or 0)
+            s_refute = int(stance_dist.get("REFUTE", 0) or 0)
+            s_mixed = int(stance_dist.get("MIXED", 0) or 0)
+            s_unclear = int(stance_dist.get("UNCLEAR", 0) or 0)
+            s_mention = int(stance_dist.get("MENTION", 0) or 0)
+            s_context = int(stance_dist.get("CONTEXT", 0) or 0)
+
+            conflicting = (s_support > 0 and s_refute > 0) or (s_mixed > 0)
+            unclear_heavy = (s_unclear + s_mention + s_context) > max(1, (s_support + s_refute))
+
+            primary_present = bool(cmet.get("primary_present"))
+            official_present = bool(cmet.get("official_present"))
+
+            # Difficulty score in [0, 1+] (explicit, auditable components)
+            # - higher importance / harm / check_worthiness => higher difficulty
+            # - conflicting or unclear-heavy evidence => higher difficulty
+            # - low coverage or low diversity => higher difficulty
+            # - evidence_need types that require technical rigor => higher difficulty
+            difficulty = 0.0
+            difficulty += 0.55 * max(0.0, min(1.0, importance))
+            difficulty += 0.25 * max(0.0, min(1.0, check_worthiness))
+            difficulty += 0.20 * max(0.0, min(1.0, harm_potential / 5.0))
+
+            if claim_role in ("thesis", "core", "primary", "anchor"):
+                difficulty += 0.25
+            elif claim_role in ("supporting", "secondary"):
+                difficulty += 0.10
+
+            if evidence_need in ("empirical_study", "official_stats", "guideline"):
+                difficulty += 0.20
+            elif evidence_need in ("expert_opinion",):
+                difficulty += 0.10
+
+            if conflicting:
+                difficulty += 0.30
+            if unclear_heavy:
+                difficulty += 0.15
+
+            if coverage < 0.35:
+                difficulty += 0.20
+            if independent_domains < 2:
+                difficulty += 0.10
+
+            if primary_present or official_present:
+                # primary/official is *good*, but it also tends to require careful attribution parsing
+                difficulty += 0.05
+
+            # Route decision
+            model: str
+            if difficulty >= 0.85:
+                model = "gpt-5.2"
+            elif difficulty <= 0.35 and harm_potential <= 2 and importance <= 0.55 and not conflicting and coverage >= 0.60:
+                model = "gpt-5-nano"
+            else:
+                model = deepseek_model
+
+            debug = {
+                "claim_id": cid,
+                "model": model,
+                "difficulty": round(difficulty, 4),
+                "reason": "rule_routing",
+                "signals": {
+                    "importance": importance,
+                    "check_worthiness": check_worthiness,
+                    "harm_potential": harm_potential,
+                    "claim_role": claim_role,
+                    "evidence_need": evidence_need,
+                    "independent_domains": independent_domains,
+                    "coverage": coverage,
+                    "conflicting": conflicting,
+                    "unclear_heavy": unclear_heavy,
+                    "primary_present": primary_present,
+                    "official_present": official_present,
+                    "stance_distribution": stance_dist,
+                },
+            }
+            return model, debug
+
         instructions = build_single_claim_scoring_instructions(lang_name=lang_name, lang=lang)
 
         async def score_single_claim(claim_info: dict) -> dict:
@@ -441,66 +593,100 @@ class ScoringSkill(BaseSkill):
             prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
             cache_key = f"score_single_v1_{prompt_hash}"
 
-            # --- REPAIR-RETRY PROTOCOL ---
-            # Try up to 2 times: first normal call, then repair if invalid
-            max_attempts = 2
-            last_error: str | None = None
-            missing_fields: list[str] = []
+            # Model routing (per-claim)
+            routed_model, route_debug = _route_model_for_claim(claim_info, evidence)
 
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    m = self.config.openai_model or "gpt-5.2"
+            # Skip LLM entirely when evidence is empty (deterministic unverified)
+            if routed_model == "__skip__":
+                Trace.event("judge.model_route", route_debug)
+                return {
+                    "claim_id": cid,
+                    "text": claim_info.get("text", ""),
+                    "status": "ok",
+                    "verdict_score": -1.0,
+                    "verdict": "unverified",
+                    "verdict_state": "insufficient_evidence",
+                    "reason": "No evidence found for this claim.",
+                    # R,B are placeholders; G=-1 signals unknown; A=0 because no evidence.
+                    "rgba": [0.0, -1.0, 0.0, 0.0],
+                    "routing": route_debug,
+                }
 
-                    result = await self.llm_client.call_json(
-                        model=m,
-                        input=prompt,
-                        instructions=instructions,
-                        response_schema=SINGLE_CLAIM_SCORING_SCHEMA,
-                        reasoning_effort="low",
-                        cache_key=cache_key if attempt == 1 else None,  # No cache for repair
-                        timeout=float(self.runtime.llm.nano_timeout_sec),
-                        trace_kind="score_single_claim",
-                    )
+            Trace.event("judge.model_route", route_debug)
 
-                    # Validate required fields
-                    missing_fields = []
-                    if result.get("verdict_score") is None:
-                        missing_fields.append("verdict_score")
-                    if not result.get("verdict"):
-                        missing_fields.append("verdict")
+            async def _call_model(model_name: str, *, use_cache: bool) -> dict:
+                """Repair-retry protocol for a single model. Returns dict with status ok/error."""
+                # Try up to 2 times: first normal call, then repair if invalid
+                max_attempts = 2
+                last_error: str | None = None
 
-                    rgba = result.get("rgba")
-                    rgba_valid = (
-                        isinstance(rgba, list) 
-                        and len(rgba) >= 4 
-                        and all(isinstance(x, (int, float)) for x in rgba[:4])
-                    )
-                    if not rgba_valid:
-                        missing_fields.append("rgba")
+                local_prompt = prompt
+                missing_fields: list[str] = []
 
-                    # Log schema mismatch details
-                    if missing_fields:
-                        Trace.event(
-                            "score_single_claim.schema_mismatch",
-                            {
-                                "claim_id": cid,
-                                "attempt": attempt,
-                                "missing_fields": missing_fields,
-                                "received_keys": list(result.keys()),
-                                "verdict_score_raw": result.get("verdict_score"),
-                                "verdict_raw": result.get("verdict"),
-                                "rgba_raw": result.get("rgba"),
-                            },
+                # Timeouts / effort
+                if model_name == "gpt-5-nano":
+                    timeout_s = float(self.runtime.llm.nano_timeout_sec)
+                    effort = "low"
+                elif model_name == "gpt-5.2":
+                    timeout_s = float(self.runtime.llm.timeout_sec)
+                    effort = "low"
+                else:
+                    timeout_s = float(getattr(self.runtime.llm, "cluster_timeout_sec", self.runtime.llm.timeout_sec))
+                    effort = "low"
+
+                for attempt in range(1, max_attempts + 1):
+                    try:
+                        result = await self.llm_client.call_json(
+                            model=model_name,
+                            input=local_prompt,
+                            instructions=instructions,
+                            response_schema=SINGLE_CLAIM_SCORING_SCHEMA,
+                            reasoning_effort=effort,
+                            cache_key=cache_key if (use_cache and attempt == 1) else None,
+                            timeout=timeout_s,
+                            trace_kind="score_single_claim",
                         )
 
-                    # If invalid and first attempt, try repair
-                    if missing_fields and attempt < max_attempts:
-                        Trace.event(
-                            "score_single_claim.repair_needed",
-                            {"claim_id": cid, "attempt": attempt, "missing_fields": missing_fields},
+                        # Validate required fields
+                        missing_fields = []
+                        if result.get("verdict_score") is None:
+                            missing_fields.append("verdict_score")
+                        if not result.get("verdict"):
+                            missing_fields.append("verdict")
+
+                        rgba = result.get("rgba")
+                        rgba_valid = (
+                            isinstance(rgba, list) 
+                            and len(rgba) >= 4 
+                            and all(isinstance(x, (int, float)) for x in rgba[:4])
                         )
-                        # Modify prompt for repair
-                        prompt = f"""Your previous response was missing required fields: {missing_fields}.
+                        if not rgba_valid:
+                            missing_fields.append("rgba")
+
+                        # Log schema mismatch details
+                        if missing_fields:
+                            Trace.event(
+                                "score_single_claim.schema_mismatch",
+                                {
+                                    "claim_id": cid,
+                                    "attempt": attempt,
+                                    "model": model_name,
+                                    "missing_fields": missing_fields,
+                                    "received_keys": list(result.keys()),
+                                    "verdict_score_raw": result.get("verdict_score"),
+                                    "verdict_raw": result.get("verdict"),
+                                    "rgba_raw": result.get("rgba"),
+                                },
+                            )
+
+                        # If invalid and first attempt, try repair
+                        if missing_fields and attempt < max_attempts:
+                            Trace.event(
+                                "score_single_claim.repair_needed",
+                                {"claim_id": cid, "attempt": attempt, "model": model_name, "missing_fields": missing_fields},
+                            )
+                            # Modify prompt for repair
+                            local_prompt = f"""Your previous response was missing required fields: {missing_fields}.
 Please return a complete JSON with ALL required fields:
 - claim_id (string)
 - verdict_score (float 0.0-1.0)
@@ -512,91 +698,138 @@ Original claim:
 {json.dumps(claim_info, indent=2, ensure_ascii=False)}
 
 Return valid JSON now."""
-                        continue
+                            continue
 
-                    # If still missing fields after repair, mark as error
-                    if missing_fields:
+                        # If still missing fields after repair, mark as error
+                        if missing_fields:
+                            return {
+                                "claim_id": cid,
+                                "status": "error",
+                                "error_type": "schema_invalid",
+                                "missing_fields": missing_fields,
+                                "verdict_score": None,
+                                "verdict": None,
+                                "rgba": None,
+                                "reason": f"LLM response missing required fields: {missing_fields}",
+                                "model": model_name,
+                            }
+
+                        # SUCCESS: All fields valid
+                        result["claim_id"] = cid
+                        result["text"] = claim_info.get("text", "")
+                        result["status"] = "ok"
+                        result["model"] = model_name
+
+                        # Clamp RGBA values
+                        # Allow -1.0 for G (verified_score) to signal "unknown"
+                        g_val = float(rgba[1])
+                        if g_val < 0:
+                            g_val = -1.0
+                        else:
+                            g_val = max(0.0, min(1.0, g_val))
+
+                        result["rgba"] = [
+                            max(0.0, min(1.0, float(rgba[0]))),
+                            g_val,                               # G (verified)
+                            max(0.0, min(1.0, float(rgba[2]))),
+                            max(0.0, min(1.0, float(rgba[3]))),
+                        ]
+
                         Trace.event(
-                            "score_single_claim.schema_invalid",
-                            {"claim_id": cid, "missing_fields": missing_fields, "attempts": attempt},
+                            "score_single_claim.success",
+                            {
+                                "claim_id": cid,
+                                "model": model_name,
+                                "verdict_score": result.get("verdict_score"),
+                                "rgba": result.get("rgba"),
+                                "attempts": attempt,
+                                "repair_used": attempt > 1,
+                            },
                         )
-                        return {
-                            "claim_id": cid,
-                            "status": "error",
-                            "error_type": "schema_invalid",
-                            "missing_fields": missing_fields,
-                            "verdict_score": None,
-                            "verdict": None,
-                            "rgba": None,
-                            "reason": f"LLM response missing required fields: {missing_fields}",
-                        }
 
-                    # SUCCESS: All fields valid
-                    result["claim_id"] = cid
-                    result["text"] = claim_info.get("text", "")
-                    result["status"] = "ok"
+                        return result
 
-                    # Clamp RGBA values
-                    # Allow -1.0 for G (verified_score) to signal "unknown"
-                    g_val = float(rgba[1])
-                    if g_val < 0:
-                        g_val = -1.0
-                    else:
-                        g_val = max(0.0, min(1.0, g_val))
-
-                    result["rgba"] = [
-                        max(0.0, min(1.0, float(rgba[0]))),
-                        g_val,                               # G (verified)
-                        max(0.0, min(1.0, float(rgba[2]))),
-                        max(0.0, min(1.0, float(rgba[3]))),
-                    ]
-
-                    Trace.event(
-                        "score_single_claim.success",
-                        {
-                            "claim_id": cid,
-                            "verdict_score": result.get("verdict_score"),
-                            "rgba": result.get("rgba"),
-                            "attempts": attempt,
-                            "repair_used": attempt > 1,
-                        },
-                    )
-
-                    return result
-
-                except Exception as e:
-                    last_error = str(e)
-                    Trace.event(
-                        "score_single_claim.llm_error",
-                        {
-                            "claim_id": cid,
-                            "attempt": attempt,
-                            "error": last_error[:500],
-                            "error_type": type(e).__name__,
-                        },
-                    )
-                    if attempt < max_attempts:
+                    except Exception as e:
+                        last_error = str(e)
                         Trace.event(
-                            "score_single_claim.retry",
-                            {"claim_id": cid, "attempt": attempt, "error": last_error[:200]},
+                            "score_single_claim.llm_error",
+                            {
+                                "claim_id": cid,
+                                "attempt": attempt,
+                                "model": model_name,
+                                "error": last_error[:500],
+                                "error_type": type(e).__name__,
+                            },
                         )
-                        continue
+                        if attempt < max_attempts:
+                            Trace.event(
+                                "score_single_claim.retry",
+                                {"claim_id": cid, "attempt": attempt, "model": model_name, "error": last_error[:200]},
+                            )
+                            continue
 
-            # All attempts failed — return error status, NOT fallback 0.5
-            logger.warning("[Scoring] Single claim %s failed after %d attempts: %s", cid, max_attempts, last_error)
-            Trace.event(
-                "score_single_claim.failed",
-                {"claim_id": cid, "error": last_error[:500] if last_error else "unknown", "attempts": max_attempts},
-            )
-            return {
-                "claim_id": cid,
-                "status": "error",
-                "error_type": "llm_failed",
-                "verdict_score": None,
-                "verdict": None,
-                "rgba": None,
-                "reason": f"LLM call failed: {last_error}",
-            }
+                # All attempts failed
+                Trace.event(
+                    "score_single_claim.failed",
+                    {"claim_id": cid, "model": model_name, "error": (last_error or "unknown")[:500], "attempts": max_attempts},
+                )
+                return {
+                    "claim_id": cid,
+                    "status": "error",
+                    "error_type": "llm_failed",
+                    "verdict_score": None,
+                    "verdict": None,
+                    "rgba": None,
+                    "reason": f"LLM call failed: {last_error}",
+                    "model": model_name,
+                }
+
+            # 1) Try routed model
+            primary = await _call_model(routed_model, use_cache=True)
+            if primary.get("status") == "ok":
+                primary["routing"] = route_debug
+                return primary
+
+            # 2) DeepSeek is flaky: hard fallback to gpt-5.2 on ANY failure
+            if routed_model == deepseek_model:
+                Trace.event(
+                    "judge.model_fallback",
+                    {
+                        "claim_id": cid,
+                        "from_model": routed_model,
+                        "to_model": "gpt-5.2",
+                        "reason": primary.get("error_type") or "unknown",
+                    },
+                )
+                fallback = await _call_model("gpt-5.2", use_cache=False)
+                if fallback.get("status") == "ok":
+                    fallback["routing"] = {**route_debug, "fallback_from": routed_model}
+                    return fallback
+                fallback["routing"] = {**route_debug, "fallback_from": routed_model}
+                fallback["fallback_failed"] = True
+                return fallback
+
+            # Optional: nano failure fallback (rare but safer than returning error)
+            if routed_model == "gpt-5-nano":
+                Trace.event(
+                    "judge.model_fallback",
+                    {
+                        "claim_id": cid,
+                        "from_model": routed_model,
+                        "to_model": "gpt-5.2",
+                        "reason": primary.get("error_type") or "unknown",
+                    },
+                )
+                fallback = await _call_model("gpt-5.2", use_cache=False)
+                if fallback.get("status") == "ok":
+                    fallback["routing"] = {**route_debug, "fallback_from": routed_model}
+                    return fallback
+                fallback["routing"] = {**route_debug, "fallback_from": routed_model}
+                fallback["fallback_failed"] = True
+                return fallback
+
+            primary["routing"] = route_debug
+            return primary
 
         # Limit concurrency with semaphore
         semaphore = asyncio.Semaphore(max_concurrency)
