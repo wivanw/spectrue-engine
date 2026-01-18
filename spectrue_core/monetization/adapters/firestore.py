@@ -797,10 +797,35 @@ class FirestoreBillingStore(BillingStore):
                 merge=True,
             )
 
-            # Bonus Ledger (spend)
+            # Bonus Ledger (spend) + Pool Deduction (Lazy Spend)
             if split.take_available.value > 0:
-                # Runtime import: BonusLedgerEntry is needed at runtime (not TYPE_CHECKING),
-                # otherwise this block can crash with NameError.
+                # 1. Check Pool Liquidity (Real Cash Check)
+                pool_snapshot_latest = self._pool_ref.get(transaction=transaction)
+                if not pool_snapshot_latest.exists:
+                     raise InsufficientFundsError("Pool missing during spend.")
+                
+                pool_latest = self._pool_from_snapshot(pool_snapshot_latest)
+                
+                # spendable = available - reserve
+                # Reserve is the safety buffer.
+                spendable_cash = pool_latest.spendable_sc
+                
+                if spendable_cash < split.take_available:
+                     # FAIL Transaction
+                     # "Якщо на момент витрати в free pool не вистачає грошей — операція БЛОКУЄТЬСЯ"
+                     raise InsufficientFundsError(f"Pool exhausted. Available: {pool_latest.available_balance_sc}. Needed: {split.take_available}")
+
+                # 2. Deduct from Pool (Real Spend)
+                new_pool_avail = pool_latest.available_balance_sc - split.take_available
+                updated_pool_final = PoolBalance(
+                    available_balance_sc=new_pool_avail,
+                    locked_buckets=pool_latest.locked_buckets,
+                    reserve_sc=pool_latest.reserve_sc
+                )
+                transaction.set(self._pool_ref, self._serialize_free_pool(updated_pool_final), merge=True)
+
+                # Bonus Ledger (Record the spend event)
+                # Runtime import: BonusLedgerEntry is needed at runtime
                 from spectrue_core.monetization.types import BonusLedgerEntry
                 from datetime import datetime, timezone
                 bonus_entry = BonusLedgerEntry(

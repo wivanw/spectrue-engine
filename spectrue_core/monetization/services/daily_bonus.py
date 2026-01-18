@@ -212,13 +212,14 @@ class DailyBonusService:
         # Calculate total to distribute
         total_to_distribute = MoneySC(b.value * active_count)
 
-        # Step 4 & 5: Award bonuses and deduct from pool
-        new_pool_available = pool.available_balance_sc - total_to_distribute
-        new_pool = FreePool(
-            available_balance_sc=new_pool_available.max0(),
-            locked_buckets=pool.locked_buckets,
-            updated_at=datetime.now(timezone.utc),
-        )
+        # Step 4: Award bonuses (ALLOWANCE ONLY - NO POOL DEDUCTION)
+        # We do NOT deduct from pool.available_balance_sc here.
+        # Deduction happens at spend time.
+        
+        # However, we DO need to persist the unlocked buckets from Step 1 if any.
+        # 'pool' variable already has the unlocked state from self.unlock_matured_buckets().
+        # We just use that.
+        new_pool = pool
 
         # Apply in batches
         awarded_count = 0
@@ -239,5 +240,6 @@ class DailyBonusService:
             "bonus_per_user_sc": b.to_str(),
             "budget_B_sc": B.to_str(),
             "total_distributed_sc": MoneySC(b.value * awarded_count).to_str(),
-            "pool_available_after_sc": new_pool.available_balance_sc.to_str(),
+            "pool_available_sc": new_pool.available_balance_sc.to_str(),
+            "note": "Pool is not deducted until spend.",
         }
