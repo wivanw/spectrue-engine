@@ -738,7 +738,13 @@ class FirestoreBillingStore(BillingStore):
         idempotency_key: str,
     ) -> "ChargeResult":
         """Apply charge with split (available_sc first, then balance_sc)."""
-        from spectrue_core.monetization.types import ChargeResult, ChargeSplit, MoneySC as MoneySCClass
+        from spectrue_core.monetization.types import (
+            ChargeResult, 
+            ChargeSplit, 
+            MoneySC as MoneySCClass,
+            FreePool,
+            LockedBucket
+        )
 
         transaction = self._db.transaction()
 
@@ -772,6 +778,49 @@ class FirestoreBillingStore(BillingStore):
             new_available = quantize_sc(current_available - split.take_available.value)
             new_balance = quantize_sc(current_balance - split.take_balance.value)
 
+            # Lazy Spend Logic: Check Pool Liquidity *BEFORE* any writes
+            updated_pool_final = None
+            if split.take_available.value > 0:
+                # 1. Check Pool Liquidity (Real Cash Check)
+                pool_snapshot_latest = self._pool_ref.get(transaction=transaction)
+                if not pool_snapshot_latest.exists:
+                     raise InsufficientFundsError("Pool missing during spend.")
+                
+                # Custom inline parsing to FreePool (Modern Type) to avoid Legacy PoolBalance issues
+                # and ensure MoneySC wrapping.
+                p_data = pool_snapshot_latest.to_dict() or {}
+                p_avail = MoneySCClass(_to_decimal(p_data.get("available_balance_sc", "0")))
+                p_reserve = MoneySCClass(_to_decimal(p_data.get("reserve_sc"), self._config.pool_reserve_sc.value))
+                
+                # Parse buckets (New schema is list, fallback to empty)
+                raw_buckets = p_data.get("locked_buckets") or []
+                p_buckets = []
+                if isinstance(raw_buckets, list):
+                     for b in raw_buckets:
+                         if isinstance(b, dict):
+                             p_buckets.append(LockedBucket.from_dict(b))
+                
+                pool_latest = FreePool(
+                    available_balance_sc=p_avail,
+                    locked_buckets=p_buckets,
+                    reserve_sc=p_reserve
+                )
+                
+                spendable_cash = pool_latest.spendable_sc
+                
+                if spendable_cash < split.take_available:
+                     raise InsufficientFundsError(f"Pool exhausted. Available: {pool_latest.available_balance_sc}. Needed: {split.take_available}")
+
+                # 2. Prepare Pool Deduction (Real Spend)
+                new_pool_avail = pool_latest.available_balance_sc - split.take_available
+                updated_pool_final = FreePool(
+                    available_balance_sc=new_pool_avail,
+                    locked_buckets=pool_latest.locked_buckets,
+                    reserve_sc=pool_latest.reserve_sc
+                )
+
+            # --- WRITE PHASE START ---
+
             # Ledger entry
             entry = LedgerEntry(
                 idempotency_key=idempotency_key,
@@ -797,35 +846,11 @@ class FirestoreBillingStore(BillingStore):
                 merge=True,
             )
 
-            # Bonus Ledger (spend) + Pool Deduction (Lazy Spend)
-            if split.take_available.value > 0:
-                # 1. Check Pool Liquidity (Real Cash Check)
-                pool_snapshot_latest = self._pool_ref.get(transaction=transaction)
-                if not pool_snapshot_latest.exists:
-                     raise InsufficientFundsError("Pool missing during spend.")
-                
-                pool_latest = self._pool_from_snapshot(pool_snapshot_latest)
-                
-                # spendable = available - reserve
-                # Reserve is the safety buffer.
-                spendable_cash = pool_latest.spendable_sc
-                
-                if spendable_cash < split.take_available:
-                     # FAIL Transaction
-                     # "Якщо на момент витрати в free pool не вистачає грошей — операція БЛОКУЄТЬСЯ"
-                     raise InsufficientFundsError(f"Pool exhausted. Available: {pool_latest.available_balance_sc}. Needed: {split.take_available}")
-
-                # 2. Deduct from Pool (Real Spend)
-                new_pool_avail = pool_latest.available_balance_sc - split.take_available
-                updated_pool_final = PoolBalance(
-                    available_balance_sc=new_pool_avail,
-                    locked_buckets=pool_latest.locked_buckets,
-                    reserve_sc=pool_latest.reserve_sc
-                )
+            # Pool Update & Bonus Ledger (if applicable)
+            if updated_pool_final:
                 transaction.set(self._pool_ref, self._serialize_free_pool(updated_pool_final), merge=True)
 
                 # Bonus Ledger (Record the spend event)
-                # Runtime import: BonusLedgerEntry is needed at runtime
                 from spectrue_core.monetization.types import BonusLedgerEntry
                 from datetime import datetime, timezone
                 bonus_entry = BonusLedgerEntry(
