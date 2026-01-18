@@ -91,28 +91,20 @@ class BillingFacade:
             meta=meta,
         )
 
-    def get_user_stats(self, user_id: str) -> UserBalanceStats:
-        user_balance = self._store.get_user_balance(user_id)
-        if user_balance is None:
-            user_balance = UserBalance(user_id=user_id, balance_sc=Decimal("0"))
-        eligibility = self._policy.get_user_eligibility(user_id)
-        user_balance = UserBalance(
-            user_id=user_balance.user_id,
-            balance_sc=user_balance.balance_sc,
-            legacy_credits=user_balance.legacy_credits,
-            subsidy_allowance=eligibility.to_allowance(),
-        )
-        return user_balance.to_stats()
+    def get_user_stats(self, user_id: str) -> dict:
+        """Get user stats with available_sc and bonus dates."""
+        if not hasattr(self._store, "read_user_wallet"):
+             # Fallback if store not updated, ensuring backward compat for transition only
+             # Realistically should use new methods.
+             # Assuming store has read_user_wallet
+             pass
+        wallet = self._store.read_user_wallet(user_id)
+        return wallet.to_dict()
 
-    def get_pool_stats(self) -> PoolStats:
-        pool_balance = self._store.get_pool_balance()
-        if pool_balance.reserve_sc != self._config.pool_reserve_sc:
-            pool_balance = PoolBalance(
-                available_balance_sc=pool_balance.available_balance_sc,
-                locked_buckets=pool_balance.locked_buckets,
-                reserve_sc=self._config.pool_reserve_sc,
-            )
-        return pool_balance.to_stats()
+    def get_pool_stats(self) -> dict:
+        """Get pool stats with locked_total."""
+        pool = self._store.read_pool()
+        return pool.to_dict()
 
     def credit_user(
         self,
@@ -234,30 +226,7 @@ class BillingFacade:
         self._store.write_ledger_entry(entry)
         return entry
 
-    # =========================================================================
-    # V3 Methods: UserWallet stats, Pool stats, Charging
-    # =========================================================================
-
-    def get_user_stats_v3(self, user_id: str) -> dict:
-        """Get v3 user stats with available_sc and bonus dates."""
-
-        if not hasattr(self._store, "read_user_wallet"):
-            # Fallback to legacy
-            return self.get_user_stats(user_id).to_dict()
-
-        wallet = self._store.read_user_wallet(user_id)
-        return wallet.to_dict()
-
-    def get_pool_stats_v3(self) -> dict:
-        """Get v3 pool stats with locked_total."""
-        if not hasattr(self._store, "read_pool_v3"):
-            # Fallback to legacy
-            return self.get_pool_stats().to_dict()
-
-        pool = self._store.read_pool_v3()
-        return pool.to_dict()
-
-    def charge_v3(
+    def charge(
         self,
         *,
         user_id: str,
@@ -265,20 +234,13 @@ class BillingFacade:
         cost_sc: MoneySC,
     ) -> dict:
         """
-        Charge using v3 split: available_sc first, then balance_sc.
+        Charge using new split: available_sc first, then balance_sc.
         No pool access at runtime.
 
         Returns ChargeResult as dict.
         """
         from spectrue_core.monetization.services.charging import ChargingService, ChargeRequest
         from spectrue_core.monetization.types import MoneySC as MoneySCClass
-
-        if not hasattr(self._store, "read_user_wallet"):
-            # Fallback: not v3-capable
-            return {
-                "ok": False,
-                "reason": "store_not_v3_capable",
-            }
 
         charging = ChargingService(self._store, self._config)
         request = ChargeRequest(
@@ -289,7 +251,7 @@ class BillingFacade:
         result = charging.charge(request)
         return result.to_dict()
 
-    def estimate_charge_v3(self, user_id: str, cost_sc: MoneySC) -> dict:
+    def estimate_charge(self, user_id: str, cost_sc: MoneySC) -> dict:
         """
         Estimate how a charge would be split (read-only).
 
@@ -298,11 +260,10 @@ class BillingFacade:
         from spectrue_core.monetization.services.charging import ChargingService
         from spectrue_core.monetization.types import MoneySC as MoneySCClass
 
-        if not hasattr(self._store, "read_user_wallet"):
-            return {"error": "store_not_v3_capable"}
-
         charging = ChargingService(self._store, self._config)
         return charging.estimate_split(
             user_id,
             MoneySCClass(cost_sc) if not isinstance(cost_sc, MoneySCClass) else cost_sc,
         )
+
+

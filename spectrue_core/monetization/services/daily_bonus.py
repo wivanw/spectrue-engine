@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-"""Daily Bonus Service for Monetization V3.
+"""Daily Bonus Service for Monetization.
 
 This service handles the daily bonus job that:
 1. Unlocks matured pool buckets
@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, List, Protocol, Tuple
 
 from spectrue_core.monetization.types import (
     DailyBonusState,
-    FreePoolV3,
+    FreePool,
     LockedBucket,
     MoneySC,
     UserWallet,
@@ -47,7 +47,7 @@ class DailyBonusStore(Protocol):
         """Read user wallet."""
         ...
 
-    def read_pool_v3(self) -> FreePoolV3:
+    def read_pool(self) -> FreePool:
         """Read the free pool state."""
         ...
 
@@ -60,7 +60,7 @@ class DailyBonusStore(Protocol):
         user_ids: List[str],
         bonus_per_user: MoneySC,
         today: date,
-        new_pool: FreePoolV3,
+        new_pool: FreePool,
         new_state: DailyBonusState,
     ) -> int:
         """
@@ -134,7 +134,7 @@ class DailyBonusService:
 
         return b, B, new_state
 
-    def unlock_matured_buckets(self, pool: FreePoolV3, today: date) -> FreePoolV3:
+    def unlock_matured_buckets(self, pool: FreePool, today: date) -> FreePool:
         """Unlock any buckets that have matured (unlock_at <= today)."""
         new_locked: List[LockedBucket] = []
         unlocked_total = Decimal("0")
@@ -146,7 +146,7 @@ class DailyBonusService:
                 new_locked.append(bucket)
 
         new_available = MoneySC(pool.available_balance_sc.value + unlocked_total)
-        return FreePoolV3(
+        return FreePool(
             available_balance_sc=new_available,
             locked_buckets=new_locked,
             updated_at=datetime.now(timezone.utc),
@@ -169,7 +169,7 @@ class DailyBonusService:
             today = date.today()
 
         # Read current state
-        pool = self.store.read_pool_v3()
+        pool = self.store.read_pool()
         state = self.store.read_daily_bonus_state()
 
         # Check if already run today
@@ -214,7 +214,7 @@ class DailyBonusService:
 
         # Step 4 & 5: Award bonuses and deduct from pool
         new_pool_available = pool.available_balance_sc - total_to_distribute
-        new_pool = FreePoolV3(
+        new_pool = FreePool(
             available_balance_sc=new_pool_available.max0(),
             locked_buckets=pool.locked_buckets,
             updated_at=datetime.now(timezone.utc),

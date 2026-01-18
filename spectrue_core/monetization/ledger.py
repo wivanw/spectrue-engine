@@ -24,8 +24,8 @@ class LedgerEntryType(str, Enum):
     RELEASE = "release"
     DEPOSIT = "deposit"
     ADJUSTMENT = "adjustment"
-    CHARGE_V3 = "charge_v3"  # Added type for V3
-    BONUS = "bonus"          # Added type for V3 bonus ledger
+    CHARGE = "charge"        # Standard charge type
+    BONUS = "bonus"          # Bonus ledger type
 
 
 class LedgerEntryStatus(str, Enum):
@@ -44,12 +44,12 @@ class LedgerEntry:
     status: LedgerEntryStatus
     created_at: datetime = field(default_factory=datetime.utcnow)
     
-    # Optional context (V2/V3 mixed)
+    # Optional context
     event_id: str | None = None
     user_id: str | None = None
-    run_id: str | None = None  # Explicit field for V3
+    run_id: str | None = None
     
-    # V3-specific fields (Optional)
+    # Charge-specific fields (Optional)
     split: Optional[Dict[str, str]] = None      # {"take_available_sc": "...", "take_balance_sc": "..."}
     new_wallet: Optional[Dict[str, str]] = None # {"available_sc": "...", "balance_sc": "..."}
     reason: Optional[str] = None
@@ -101,10 +101,10 @@ def build_idempotency_key(*parts: str) -> str:
     cleaned = [p.strip() for p in parts if p and p.strip()]
     return ":".join(cleaned)
 
-def build_charge_idempotency_key_v3(uid: str, run_id: str) -> str:
+def build_charge_idempotency_key(uid: str, run_id: str) -> str:
     """
-    Build a stable idempotency key for a V3 charge.
-    Format: {uid}:{run_id}:charge_v3:v1
+    Build a stable idempotency key for a charge.
+    Format: {uid}:{run_id}:charge:v1
     """
-    raw = f"{uid}:{run_id}:charge_v3:v1"
+    raw = f"{uid}:{run_id}:charge:v1"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

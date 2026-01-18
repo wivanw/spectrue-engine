@@ -19,7 +19,7 @@ from spectrue_core.monetization.config import MonetizationConfig
 from spectrue_core.monetization.services.daily_bonus import DailyBonusService
 from spectrue_core.monetization.types import (
     DailyBonusState,
-    FreePoolV3,
+    FreePool,
     MoneySC,
     UserWallet,
 )
@@ -30,7 +30,7 @@ class MockDailyBonusStore:
 
     def __init__(self):
         self.users: dict[str, UserWallet] = {}
-        self.pool = FreePoolV3(available_balance_sc=MoneySC(Decimal("1000")))
+        self.pool = FreePool(available_balance_sc=MoneySC(Decimal("1000")))
         self.state = DailyBonusState(ema_budget_sc=MoneySC(Decimal("100")))
         self.awarded_users: List[str] = []
 
@@ -52,7 +52,7 @@ class MockDailyBonusStore:
             available_sc=MoneySC.zero(),
         )
 
-    def read_pool_v3(self) -> FreePoolV3:
+    def read_pool(self) -> FreePool:
         return self.pool
 
     def read_daily_bonus_state(self) -> DailyBonusState:
@@ -63,7 +63,7 @@ class MockDailyBonusStore:
         user_ids: List[str],
         bonus_per_user: MoneySC,
         today: date,
-        new_pool: FreePoolV3,
+        new_pool: FreePool,
         new_state: DailyBonusState,
     ) -> int:
         awarded = 0
@@ -167,7 +167,7 @@ class TestDailyBonusServiceUnlockBuckets:
 
         from spectrue_core.monetization.types import LockedBucket
 
-        pool = FreePoolV3(
+        pool = FreePool(
             available_balance_sc=MoneySC(Decimal("500")),
             locked_buckets=[
                 LockedBucket(MoneySC(Decimal("100")), date(2026, 1, 15)),  # Matured
@@ -193,7 +193,7 @@ class TestDailyBonusServiceRunDaily:
             max_bonus_per_user_sc=Decimal("5.0"),
         )
         store = MockDailyBonusStore()
-        store.pool = FreePoolV3(available_balance_sc=MoneySC(Decimal("1000")))
+        store.pool = FreePool(available_balance_sc=MoneySC(Decimal("1000")))
 
         # Add active users
         today = date(2026, 1, 17)

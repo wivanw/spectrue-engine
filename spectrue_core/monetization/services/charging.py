@@ -7,9 +7,9 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-"""Charging Service for Monetization V3.
+"""Charging Service for Monetization.
 
-This service handles run charging with the v3 split:
+This service handles run charging with the split:
 - First consume from available_sc (bonus credits)
 - Then consume from balance_sc (paid credits)
 - No runtime pool access
@@ -26,7 +26,7 @@ from spectrue_core.monetization.types import (
     MoneySC,
     UserWallet,
 )
-from spectrue_core.monetization.ledger import build_charge_idempotency_key_v3
+from spectrue_core.monetization.ledger import build_charge_idempotency_key
 
 if TYPE_CHECKING:
     from spectrue_core.monetization.config import MonetizationConfig
@@ -68,7 +68,7 @@ class ChargeRequest:
 
 
 class ChargingService:
-    """Service for charging users for runs using v3 split logic."""
+    """Service for charging users for runs using split logic."""
 
     def __init__(self, store: ChargingStore, cfg: "MonetizationConfig"):
         self.store = store
@@ -98,7 +98,7 @@ class ChargingService:
         return total >= cost
 
     def generate_idempotency_key(self, uid: str, run_id: str) -> str:
-        """Generate a stable idempotency key for a V3 charge.
+        """Generate a stable idempotency key for a charge.
 
         IMPORTANT:
         - Must be stable for the whole run.
@@ -106,7 +106,7 @@ class ChargingService:
           metering differences, or post-run accounting), otherwise retries could
           double-charge.
         """
-        return build_charge_idempotency_key_v3(uid, run_id)
+        return build_charge_idempotency_key(uid, run_id)
 
     def charge(self, request: ChargeRequest) -> ChargeResult:
         """

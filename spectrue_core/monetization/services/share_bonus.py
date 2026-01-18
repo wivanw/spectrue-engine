@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-"""Share Bonus Service for Monetization V3.
+"""Share Bonus Service for Monetization.
 
 This service handles the share bonus:
 - User shares content and receives 20% of daily b

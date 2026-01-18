@@ -135,7 +135,7 @@ class EligibilityAllowance:
 
 
 # -----------------------------------------------------------------------------
-# User Wallet (v3: balance_sc + available_sc)
+# User Wallet
 # -----------------------------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +164,7 @@ class UserWallet:
 
 
 # -----------------------------------------------------------------------------
-# Charge Split & Result (v3 charging)
+# Charge Split & Result
 # -----------------------------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
@@ -200,7 +200,7 @@ class ChargeResult:
 
 
 # -----------------------------------------------------------------------------
-# Locked Bucket & Free Pool V3
+# Locked Bucket & Free Pool
 # -----------------------------------------------------------------------------
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +224,7 @@ class LockedBucket:
 
 
 @dataclass(frozen=True, slots=True)
-class FreePoolV3:
+class FreePool:
     """Free subsidy pool with available balance and locked buckets."""
     available_balance_sc: MoneySC
     locked_buckets: List[LockedBucket] = field(default_factory=list)

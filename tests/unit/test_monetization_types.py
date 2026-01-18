@@ -7,9 +7,9 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-"""Unit tests for Monetization V3 types."""
+"""Unit tests for Monetization types."""
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -18,7 +18,7 @@ from spectrue_core.monetization.types import (
     ChargeResult,
     ChargeSplit,
     DailyBonusState,
-    FreePoolV3,
+    FreePool,
     LockedBucket,
     MoneySC,
     UserWallet,
@@ -190,11 +190,11 @@ class TestLockedBucket:
         assert bucket.unlock_at == date(2026, 4, 17)
 
 
-class TestFreePoolV3:
-    """Tests for FreePoolV3 dataclass."""
+class TestFreePool:
+    """Tests for FreePool dataclass."""
 
     def test_locked_total(self):
-        pool = FreePoolV3(
+        pool = FreePool(
             available_balance_sc=MoneySC(Decimal("500")),
             locked_buckets=[
                 LockedBucket(MoneySC(Decimal("100")), date(2026, 4, 17)),
@@ -204,7 +204,7 @@ class TestFreePoolV3:
         assert pool.locked_total().value == Decimal("300")
 
     def test_total(self):
-        pool = FreePoolV3(
+        pool = FreePool(
             available_balance_sc=MoneySC(Decimal("500")),
             locked_buckets=[
                 LockedBucket(MoneySC(Decimal("100")), date(2026, 4, 17)),
@@ -213,7 +213,7 @@ class TestFreePoolV3:
         assert pool.total().value == Decimal("600")
 
     def test_to_dict(self):
-        pool = FreePoolV3(
+        pool = FreePool(
             available_balance_sc=MoneySC(Decimal("500")),
             locked_buckets=[
                 LockedBucket(MoneySC(Decimal("100")), date(2026, 4, 17)),

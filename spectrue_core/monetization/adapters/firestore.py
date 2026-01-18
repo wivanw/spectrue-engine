@@ -43,14 +43,14 @@ if TYPE_CHECKING:
         ChargeResult,
         ChargeSplit,
         DailyBonusState,
-        FreePoolV3,
+        FreePool,
         UserWallet,
         BonusLedgerEntry,  # Added
     )
     from spectrue_core.monetization.ledger import (
         LedgerEntry,
         LedgerEntryStatus as LedgerStatus,
-        LedgerEntryType as LedgerTypeV3,
+        LedgerEntryType,
     )
 
 
@@ -498,11 +498,11 @@ class FirestoreBillingStore(BillingStore):
         }
 
     # =========================================================================
-    # V3 Methods: UserWallet, FreePoolV3, DailyBonus, Charging
+    # Methods: UserWallet, FreePool, DailyBonus, Charging
     # =========================================================================
 
     def read_user_wallet(self, uid: str) -> "UserWallet":
-        """Read user wallet with v3 available_sc field."""
+        """Read user wallet with available_sc field."""
         from spectrue_core.monetization.types import UserWallet, MoneySC as MoneySCClass
         from datetime import date
 
@@ -545,9 +545,9 @@ class FirestoreBillingStore(BillingStore):
             last_share_bonus_date=last_share,
         )
 
-    def read_pool_v3(self) -> "FreePoolV3":
-        """Read free pool with v3 locked_buckets list."""
-        from spectrue_core.monetization.types import FreePoolV3, LockedBucket, MoneySC as MoneySCClass
+    def read_pool(self) -> "FreePool":
+        """Read free pool with locked_buckets list."""
+        from spectrue_core.monetization.types import FreePool, LockedBucket, MoneySC as MoneySCClass
 
         snapshot = self._pool_ref.get()
         if not snapshot.exists:
@@ -562,7 +562,7 @@ class FirestoreBillingStore(BillingStore):
                     return snap.to_dict() or {}
                 bootstrap = {
                     "available_balance_sc": self._config.initial_pool_available_sc.to_str(),
-                    "locked_buckets_v3": [],
+                    "locked_buckets": [],
                     "reserve_sc": self._config.pool_reserve_sc.to_str(),
                     "source": self._config.pool_bootstrap_source,
                     "created_at": firestore.SERVER_TIMESTAMP,
@@ -588,13 +588,13 @@ class FirestoreBillingStore(BillingStore):
                     self._config.initial_pool_available_sc.to_str(),
                 )
             except Exception as e:
-                # Hard fail would block startup; return zero but log loudly.
                 logger.exception("Failed to bootstrap free pool doc: %s", e)
-                return FreePoolV3(available_balance_sc=MoneySCClass.zero())
+                return FreePool(available_balance_sc=MoneySCClass.zero())
         else:
             data = snapshot.to_dict() or {}
         available = _to_decimal(data.get("available_balance_sc", "0"))
-        raw_buckets = data.get("locked_buckets_v3") or []
+        # Support both new clean key and temporary V3 key if migration happened
+        raw_buckets = data.get("locked_buckets") or data.get("locked_buckets_v3") or []
         locked_buckets = []
         for b in raw_buckets:
             if isinstance(b, dict):
@@ -605,7 +605,7 @@ class FirestoreBillingStore(BillingStore):
 
         reserve_sc = _to_decimal(data.get("reserve_sc"), self._config.pool_reserve_sc.value)
 
-        return FreePoolV3(
+        return FreePool(
             available_balance_sc=MoneySCClass(available),
             locked_buckets=locked_buckets,
             reserve_sc=MoneySCClass(reserve_sc),
@@ -642,14 +642,14 @@ class FirestoreBillingStore(BillingStore):
         user_ids: list[str],
         bonus_per_user: "MoneySC",
         today: "date",
-        new_pool: "FreePoolV3",
+        new_pool: "FreePool",
         new_state: "DailyBonusState",
     ) -> int:
         """Apply daily bonus to a batch of users atomically."""
 
         if not user_ids:
             # Still persist pool/state updates
-            self._pool_ref.set(self._pool_v3_to_dict(new_pool), merge=True)
+            self._pool_ref.set(self._serialize_free_pool(new_pool), merge=True)
             state_ref = self._db.document(self._config.bonus_state_doc_path)
             state_ref.set(new_state.to_dict(), merge=True)
             return 0
@@ -687,7 +687,7 @@ class FirestoreBillingStore(BillingStore):
             awarded += 1
 
         # Update pool and state
-        batch.set(self._pool_ref, self._pool_v3_to_dict(new_pool), merge=True)
+        batch.set(self._pool_ref, self._serialize_free_pool(new_pool), merge=True)
         state_ref = self._db.document(self._config.bonus_state_doc_path)
         batch.set(state_ref, new_state.to_dict(), merge=True)
 
@@ -729,7 +729,7 @@ class FirestoreBillingStore(BillingStore):
 
         return _apply(transaction)
 
-    # V3 charge is implemented via apply_charge() below. Keep a single code path.
+    # Charge is implemented via apply_charge() below. Keep a single code path.
     def apply_charge(
         self,
         uid: str,
@@ -737,7 +737,7 @@ class FirestoreBillingStore(BillingStore):
         split: "ChargeSplit",
         idempotency_key: str,
     ) -> "ChargeResult":
-        """Apply charge with v3 split (available_sc first, then balance_sc)."""
+        """Apply charge with split (available_sc first, then balance_sc)."""
         from spectrue_core.monetization.types import ChargeResult, ChargeSplit, MoneySC as MoneySCClass
 
         transaction = self._db.transaction()
@@ -775,7 +775,7 @@ class FirestoreBillingStore(BillingStore):
             # Ledger entry
             entry = LedgerEntry(
                 idempotency_key=idempotency_key,
-                entry_type=LedgerEntryType.DEBIT,
+                entry_type=LedgerEntryType.CHARGE,
                 amount_sc=split.total.value,
                 status=LedgerEntryStatus.SETTLED,
                 user_id=uid,
@@ -785,7 +785,6 @@ class FirestoreBillingStore(BillingStore):
                     "take_balance_sc": split.take_balance.to_str(),
                     "new_available_sc": str(new_available),
                     "new_balance_sc": str(new_balance),
-                    "charge_version": "v3",
                 },
             )
             transaction.set(ledger_ref, self._entry_to_dict(entry))
@@ -798,7 +797,7 @@ class FirestoreBillingStore(BillingStore):
                 merge=True,
             )
 
-            # V3: Bonus Ledger (spend)
+            # Bonus Ledger (spend)
             if split.take_available.value > 0:
                 # Runtime import: BonusLedgerEntry is needed at runtime (not TYPE_CHECKING),
                 # otherwise this block can crash with NameError.
@@ -843,11 +842,11 @@ class FirestoreBillingStore(BillingStore):
             reason=meta.get("reason"),
         )
 
-    def _pool_v3_to_dict(self, pool: "FreePoolV3") -> dict[str, Any]:
-        """Convert FreePoolV3 to Firestore dict."""
+    def _serialize_free_pool(self, pool: "FreePool") -> dict[str, Any]:
+        """Convert FreePool to Firestore dict."""
         return {
             "available_balance_sc": pool.available_balance_sc.to_str(),
-            "locked_buckets_v3": [b.to_dict() for b in pool.locked_buckets],
+            "locked_buckets": [b.to_dict() for b in pool.locked_buckets],
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
 
