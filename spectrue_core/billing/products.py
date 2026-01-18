@@ -30,86 +30,97 @@ OPERATIONAL_LOCK_RATIO = Decimal("0.5") # Default, adjust as needed
 PRODUCTS: Dict[str, ProductConfig] = {
     # Plans
     "plan_base": ProductConfig(
-        stripe_price_id="price_plan_base",
+        stripe_price_id="price_1SqzQ5DPEMozQLe853JR1kHL",
         type=ProductType.PLAN,
         user_grant_sc=Decimal("300"),
         pool_contribution_sc=Decimal("160"),
     ),
     "plan_pro": ProductConfig(
-        stripe_price_id="price_plan_pro",
+        stripe_price_id="price_1SqzPRDPEMozQLe8IRMGfgAt",
         type=ProductType.PLAN,
         user_grant_sc=Decimal("700"),
         pool_contribution_sc=Decimal("240"),
     ),
     "plan_max": ProductConfig(
-        stripe_price_id="price_plan_max",
+        stripe_price_id="price_1SqzQeDPEMozQLe8j8XpP48K",
         type=ProductType.PLAN,
         user_grant_sc=Decimal("2400"),
         pool_contribution_sc=Decimal("480"),
     ),
     "plan_enterprise": ProductConfig(
-        stripe_price_id="price_plan_enterprise",
+        stripe_price_id="price_1SqzRNDPEMozQLe8fo5ZFA2s",
         type=ProductType.PLAN,
         user_grant_sc=Decimal("5100"),
         pool_contribution_sc=Decimal("720"),
     ),
     # Packs
     "pack_5": ProductConfig(
-        stripe_price_id="price_pack_5",
+        stripe_price_id="price_1SqzTcDPEMozQLe8F5OBXocD",
         type=ProductType.PACK,
         user_grant_sc=Decimal("250"),
         pool_contribution_sc=Decimal("200"),
     ),
     "pack_10": ProductConfig(
-        stripe_price_id="price_pack_10",
+        stripe_price_id="price_1SqzU8DPEMozQLe8fhKmyu08",
         type=ProductType.PACK,
         user_grant_sc=Decimal("600"),
         pool_contribution_sc=Decimal("320"),
     ),
     "pack_30": ProductConfig(
-        stripe_price_id="price_pack_30",
+        stripe_price_id="price_1SqzVIDPEMozQLe8xyau37TM",
         type=ProductType.PACK,
         user_grant_sc=Decimal("2100"),
         pool_contribution_sc=Decimal("720"),
     ),
     "pack_60": ProductConfig(
-        stripe_price_id="price_pack_60",
+        stripe_price_id="price_1SqzVwDPEMozQLe8khJpPhY2",
         type=ProductType.PACK,
         user_grant_sc=Decimal("4800"),
         pool_contribution_sc=Decimal("960"),
     ),
     # Donations
     "donation_5": ProductConfig(
-        stripe_price_id="price_donation_5",
+        stripe_price_id="price_1Rxt7EDPEMozQLe8bgu42JxU",
         type=ProductType.DONATION,
         user_grant_sc=Decimal("0"),
         pool_contribution_sc=Decimal("400"),
     ),
     "donation_10": ProductConfig(
-        stripe_price_id="price_donation_10",
+        stripe_price_id="price_1Rxt85DPEMozQLe8bIS0jO7c",
         type=ProductType.DONATION,
         user_grant_sc=Decimal("0"),
         pool_contribution_sc=Decimal("800"),
     ),
     "donation_50": ProductConfig(
-        stripe_price_id="price_donation_50",
+        stripe_price_id="price_1SqzhcDPEMozQLe8wFVJwrxd",
         type=ProductType.DONATION,
         user_grant_sc=Decimal("0"),
         pool_contribution_sc=Decimal("4000"),
     ),
     "donation_100": ProductConfig(
-        stripe_price_id="price_donation_100",
+        stripe_price_id="price_1Sqzi4DPEMozQLe814fpxa1d",
         type=ProductType.DONATION,
         user_grant_sc=Decimal("0"),
         pool_contribution_sc=Decimal("8000"),
     ),
     "donation_1000": ProductConfig(
-        stripe_price_id="price_donation_1000",
+        stripe_price_id="price_1SqziRDPEMozQLe8RffrFLlL",
         type=ProductType.DONATION,
         user_grant_sc=Decimal("0"),
         pool_contribution_sc=Decimal("80000"),
     ),
 }
 
+# Reverse Index for Stripe ID lookup
+STRIPE_ID_TO_KEY: Dict[str, str] = {
+    p.stripe_price_id: k for k, p in PRODUCTS.items()
+}
+
 def get_product_by_key(key: str) -> Optional[ProductConfig]:
     return PRODUCTS.get(key)
+
+def get_product_by_stripe_id(stripe_id: str) -> Optional[ProductConfig]:
+    key = STRIPE_ID_TO_KEY.get(stripe_id)
+    if key:
+        return PRODUCTS.get(key)
+    return None
