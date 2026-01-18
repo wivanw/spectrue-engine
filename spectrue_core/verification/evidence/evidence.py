@@ -38,13 +38,13 @@ def _normalize_claim_id(raw: object, *, default_claim_id: str | None) -> str | N
     if raw is _MISSING:
         return default_claim_id
     if raw is None:
-        return None
+        return default_claim_id
     if isinstance(raw, str):
         v = raw.strip()
         if not v:
             return default_claim_id
         if v.lower() in {"global", "__global__", "none", "null"}:
-            return None
+            return default_claim_id
         return v
     return default_claim_id
 
