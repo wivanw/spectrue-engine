@@ -228,6 +228,7 @@ class FreePoolV3:
     """Free subsidy pool with available balance and locked buckets."""
     available_balance_sc: MoneySC
     locked_buckets: List[LockedBucket] = field(default_factory=list)
+    reserve_sc: MoneySC = field(default_factory=MoneySC.zero)
     updated_at: Optional[datetime] = None
 
     def locked_total(self) -> MoneySC:
@@ -241,10 +242,17 @@ class FreePoolV3:
         """Total pool = available + locked."""
         return self.available_balance_sc + self.locked_total()
 
+    @property
+    def spendable_sc(self) -> MoneySC:
+        """Spendable = available - reserve (floored at 0)."""
+        spendable = self.available_balance_sc - self.reserve_sc
+        return spendable.max0()
+
     def to_dict(self) -> dict:
         return {
             "available_balance_sc": self.available_balance_sc.to_str(),
             "locked_buckets": [b.to_dict() for b in self.locked_buckets],
+            "reserve_sc": self.reserve_sc.to_str(),
             "locked_total_sc": self.locked_total().to_str(),
             "total_sc": self.total().to_str(),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

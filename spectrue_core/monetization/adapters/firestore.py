@@ -603,9 +603,12 @@ class FirestoreBillingStore(BillingStore):
         if updated_at and hasattr(updated_at, "to_datetime"):
             updated_at = updated_at.to_datetime()
 
+        reserve_sc = _to_decimal(data.get("reserve_sc"), self._config.pool_reserve_sc.value)
+
         return FreePoolV3(
             available_balance_sc=MoneySCClass(available),
             locked_buckets=locked_buckets,
+            reserve_sc=MoneySCClass(reserve_sc),
             updated_at=updated_at,
         )
 
