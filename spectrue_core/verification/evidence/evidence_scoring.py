@@ -430,6 +430,7 @@ def apply_explainability_tier_factor(
     pre_a: float,
     best_tier: str | None,
     claim_id: str | None = None,
+    bayesian_p: float | None = None,
 ) -> float | None:
     """
     Apply tier-based explainability factor to A score.
@@ -465,7 +466,17 @@ def apply_explainability_tier_factor(
         )
         return None
 
-    post_a = sigmoid(logit(pre_a) + math.log(factor))
+    # Apply logit-space adjustment
+    # L_post = L_llm + log(tier_factor) + 0.5 * log(bayesian_factor)
+    # The 0.5 weight for Bayesian factor is to keep it conservative 
+    # and avoid over-shadowing the LLM's directness assessment.
+    l_boost = math.log(factor)
+    if bayesian_p is not None and 0.0 < bayesian_p < 1.0:
+        # Boost from Bayesian sufficiency (normalized to baseline 0.5)
+        b_factor = bayesian_p / 0.5
+        l_boost += 0.5 * math.log(b_factor)
+
+    post_a = sigmoid(logit(pre_a) + l_boost)
     if abs(post_a - pre_a) > 1e-9:
         Trace.event(
             "verdict.explainability_tier_factor",
@@ -476,6 +487,8 @@ def apply_explainability_tier_factor(
                 "prior": prior,
                 "baseline": TIER_A_BASELINE,
                 "factor": factor,
+                "bayesian_p": bayesian_p,
+                "l_boost": l_boost,
                 "post_A": post_a,
                 "source": source,
             },

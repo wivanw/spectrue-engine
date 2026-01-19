@@ -557,8 +557,6 @@ class AssembleDeepResultStep(Step):
                     judge_output.rgba.a,
                 ]
 
-                # Deep v2: if A is invalid (<0), use deterministic fallback from evidence stats.
-                # This does NOT override a valid judge A; it only prevents "broken" A.
                 if rgba and len(rgba) == 4 and isinstance(rgba[3], (int, float)) and rgba[3] < 0:
                     stats_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
                     st = stats_by_claim.get(frame.claim_id) if isinstance(stats_by_claim, dict) else None
@@ -569,6 +567,24 @@ class AssembleDeepResultStep(Step):
                         except Exception:
                             a_det_f = 0.0
                         rgba[3] = max(0.0, min(1.0, a_det_f))
+
+                # Apply Bayesian and Tier-based boost for Alpha (Explainability)
+                from spectrue_core.verification.evidence.evidence_scoring import (
+                    apply_explainability_tier_factor,
+                )
+                stats_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
+                st = stats_by_claim.get(frame.claim_id)
+                if isinstance(st, dict) and rgba and len(rgba) == 4:
+                    best_tier = st.get("best_tier")
+                    bayesian_p = st.get("bayesian_p")
+                    adjusted_a = apply_explainability_tier_factor(
+                        rgba[3],
+                        best_tier=best_tier,
+                        claim_id=frame.claim_id,
+                        bayesian_p=bayesian_p,
+                    )
+                    if adjusted_a is not None:
+                        rgba[3] = adjusted_a
 
                 verdict_score = rgba[1] if isinstance(rgba, list) and len(rgba) > 1 else None
                 sources_used_refs = list(judge_output.sources_used or [])

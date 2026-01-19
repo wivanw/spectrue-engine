@@ -132,6 +132,7 @@ class ClusterWebSearchStep:
             url_metadata: dict[str, dict[str, Any]] = {}
             url_variants: dict[str, set[str]] = {}
             cluster_url_map: dict[str, list[str]] = {}
+            cluster_sufficiency: dict[str, float] = {}
 
             total_queries = 0
             for plan in cluster_plans:
@@ -175,6 +176,12 @@ class ClusterWebSearchStep:
                             # Combine or prefer general results if they are better
                             # For simplicity, we just add them to the sources list
                             sources = (sources or []) + general_sources
+
+                    # Final Bayesian sufficiency after fallback
+                    final_sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
+                    current_p = cluster_sufficiency.get(cluster_id, 0.0)
+                    cluster_sufficiency[cluster_id] = max(current_p, final_sufficiency.posterior_p)
+
                     for source in sources or []:
                         if not isinstance(source, dict):
                             continue
@@ -283,6 +290,7 @@ class ClusterWebSearchStep:
                 ctx.set_extra("cluster_evidence_docs", cluster_evidence_docs)
                 .set_extra("evidence_docs", evidence_docs)
                 .set_extra("evidence_doc_meta", evidence_doc_meta)
+                .set_extra("cluster_sufficiency", cluster_sufficiency)
                 .set_extra(
                     "retrieval_search_trace",
                     {

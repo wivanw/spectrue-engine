@@ -226,6 +226,7 @@ class WebSearchStep:
             url_metadata: dict[str, dict[str, Any]] = {}
             state = init_state()
             audited_urls_by_claim: dict[str, set[str]] = {}
+            claim_sufficiency: dict[str, float] = {}
 
             async def _extract_batch(urls: list[str]) -> dict[str, ExtractedContent]:
                 stage = current_stage()
@@ -315,6 +316,20 @@ class WebSearchStep:
                 _refresh_audit_matches()
                 bind_after_extract()
 
+                # Record final Bayesian sufficiency for each claim
+                from spectrue_core.verification.orchestration.sufficiency import check_sufficiency_for_claim
+                for claim_id, claim in claim_id_map.items():
+                    # bind_after_extract ensures state.bindings.audited is up to date
+                    claim_urls = state.bindings.audited.get(claim_id, set())
+                    claim_sources = _build_sources_for_urls(
+                        list(claim_urls),
+                        state.extractor_queue.extracted,
+                        url_metadata,
+                        claim_id=claim_id
+                    )
+                    res = check_sufficiency_for_claim(claim, claim_sources)
+                    claim_sufficiency[claim_id] = res.posterior_p
+
             # Build sources for downstream steps
             extracted_urls = list(state.extractor_queue.extracted.keys())
             global_sources = _build_sources_for_urls(
@@ -395,6 +410,7 @@ class WebSearchStep:
                 )
                 .set_extra("audit_sources", audit_sources)
                 .set_extra("audit_trace_context", audit_trace_context)
+                .set_extra("cluster_sufficiency", claim_sufficiency)  # Reuse key for compatibility
             )
 
         except Exception as e:

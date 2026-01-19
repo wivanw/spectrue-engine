@@ -104,6 +104,9 @@ class SufficiencyResult:
     context_only_count: int = 0
     """Count of sources with only CONTEXT stance."""
 
+    posterior_p: float = 0.5
+    """Bayesian posterior probability [0, 1]."""
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for tracing."""
         return {
@@ -117,6 +120,7 @@ class SufficiencyResult:
             "has_quotes": self.has_quotes,
             "support_refute_count": self.support_refute_count,
             "context_only_count": self.context_only_count,
+            "posterior_p": self.posterior_p,
         }
 
 
@@ -295,6 +299,7 @@ def evidence_sufficiency(
     posterior_p = log_odds_to_prob(total_log_odds)
     
     # 4. Check Against Threshold
+    result.posterior_p = posterior_p
     if posterior_p >= SUFFICIENCY_P_THRESHOLD:
         result.status = SufficiencyStatus.SUFFICIENT
         result.rule_matched = "BayesianConsensus"

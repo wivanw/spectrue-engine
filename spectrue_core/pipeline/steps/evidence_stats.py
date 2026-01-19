@@ -42,12 +42,13 @@ def _collect_slots(src: dict[str, Any]) -> set[str]:
     return slots
 
 
-def _deterministic_A(stats: dict[str, Any]) -> float:
+def _deterministic_A(stats: dict[str, Any], bayesian_p: float = 0.5) -> float:
     """
     Deterministic explainability score in [0,1] based on observable artifacts:
     - direct anchors (quote_span/contradiction_span/quote)
     - number of unique domains (diversity)
     - slot coverage (covers[])
+    - bayesian sufficiency (proof density)
     This is NOT a verdict; it's a traceability score.
     """
     direct = float(stats.get("direct_anchors", 0))
@@ -57,8 +58,10 @@ def _deterministic_A(stats: dict[str, Any]) -> float:
     a1 = 1.0 - math.exp(-0.9 * direct)
     a2 = 1.0 - math.exp(-0.6 * uniq)
     a3 = 1.0 - math.exp(-0.4 * slots)
+    a4 = max(0.0, min(1.0, float(bayesian_p)))
     # Weighted blend (fixed, documented)
-    out = 0.55 * a1 + 0.25 * a2 + 0.20 * a3
+    # Bayesian consensus now accounts for 30% of the deterministic signal
+    out = 0.40 * a1 + 0.15 * a2 + 0.15 * a3 + 0.30 * a4
     return max(0.0, min(1.0, out))
 
 
@@ -107,7 +110,11 @@ class EvidenceStatsStep(Step):
             unique_domains = set()
             direct_anchors = 0
             transferred = 0
+            best_tier: str | None = None
             slots = set()
+
+            def _rank(t):
+                return {"D": 1, "C": 2, "B": 3, "A'": 3, "A": 4}.get(str(t).strip().upper(), 0)
 
             for s in items:
                 url = s.get("url")
@@ -124,6 +131,16 @@ class EvidenceStatsStep(Step):
                 if s.get("provenance") == "transferred":
                     transferred += 1
                 slots |= _collect_slots(s)
+                
+                tier = s.get("tier") or s.get("source_tier")
+                if tier and (best_tier is None or _rank(tier) > _rank(best_tier)):
+                    best_tier = str(tier).strip().upper()
+
+            # Retrieve Bayesian sufficiency from cluster search
+            cluster_map = ctx.get_extra("cluster_map") or {}
+            cluster_sufficiency = ctx.get_extra("cluster_sufficiency") or {}
+            cluster_id = cluster_map.get(cid)
+            bayesian_p = cluster_sufficiency.get(cluster_id, 0.5) if cluster_id else 0.5
 
             stats = {
                 "sources_observed": len(items),
@@ -132,8 +149,10 @@ class EvidenceStatsStep(Step):
                 "direct_anchors": direct_anchors,
                 "covered_slots": len(slots),
                 "transferred": transferred,
+                "bayesian_p": bayesian_p,
+                "best_tier": best_tier,
             }
-            stats["A_deterministic"] = _deterministic_A(stats)
+            stats["A_deterministic"] = _deterministic_A(stats, bayesian_p=bayesian_p)
             stats_by_claim[cid] = stats
 
         Trace.event(
