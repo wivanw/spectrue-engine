@@ -26,14 +26,15 @@ async def test_deep_v2_clustered_retrieval_reduces_search_calls():
     search_mgr = MagicMock()
     call_state = {"count": 0}
 
-    async def _search_phase(query, max_results=5, depth="basic", topic="general"):
+    async def _search_phase(query, max_results=5, depth="basic", topic="general", **kwargs):
         call_state["count"] += 1
         idx = call_state["count"]
         return None, [
             {
-                "url": f"https://example.com/{idx}",
+                "url": f"https://reuters.com/{idx}",
                 "title": f"Result {idx}",
                 "snippet": f"Snippet {idx}",
+                "quote": "Sufficient evidence quote",
                 "score": 0.9,
             }
         ]

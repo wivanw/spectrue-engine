@@ -467,14 +467,18 @@ def should_stop_escalation(
 ) -> tuple[bool, str]:
     """
     Determine if escalation should stop based on Bayesian sufficiency.
-
-    Returns: (should_stop, reason)
     """
+    cfg = config or DEFAULT_ESCALATION_CONFIG
+    
     # Use the unified Bayesian judge
     sufficiency = check_sufficiency_for_claim(claim, sources)
-    
     if sufficiency.status == SufficiencyStatus.SUFFICIENT:
-        return True, f"bayesian_sufficiency: {sufficiency.rule_matched}"
+        return True, f"bayesian_sufficiency:{sufficiency.rule_matched}"
+
+    # Also check technical fallback for legacy/safety (optional but kept as explicit logic)
+    outcome = compute_retrieval_outcome(sources, cfg)
+    if outcome.usable_snippets_count >= cfg.min_usable_snippets and outcome.best_relevance >= cfg.min_relevance_threshold:
+        return True, "snippets_and_relevance"
 
     return False, "insufficient"
 
@@ -580,16 +584,26 @@ def compute_escalation_reason_codes(
     outcome: RetrievalOutcome,
     config: EscalationConfig | None = None,
 ) -> list[str]:
-    """Compute reason codes for why escalation is needed."""
+    """
+    Compute reason codes for why escalation is needed.
+    """
+    cfg = config or DEFAULT_ESCALATION_CONFIG
     sufficiency = check_sufficiency_for_claim(claim, sources)
     
     reasons: list[str] = []
     if outcome.sources_count == 0:
         reasons.append("no_sources")
     
+    # Add legacy diagnostic codes for traceability and tests
+    if outcome.sources_count > 0 and outcome.usable_snippets_count == 0:
+        reasons.append("no_snippets")
+    if outcome.best_relevance < cfg.min_relevance_threshold:
+        reasons.append(f"low_relevance(threshold={cfg.min_relevance_threshold})")
+    if outcome.usable_snippets_count < cfg.min_usable_snippets:
+        reasons.append(f"insufficient_snippets({outcome.usable_snippets_count}<{cfg.min_usable_snippets})")
+
     # Add the descriptive reason from the Bayesian judge
     reasons.append(f"bayesian:{sufficiency.reason}")
-    
     return reasons
 
 
