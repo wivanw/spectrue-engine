@@ -410,6 +410,8 @@ PREDICATE_TYPE_VALUES = [
     "ranking",         # Comparative position (A > B)
     "causal",          # X caused Y
     "existence",       # Entity/document exists with anchors
+    "definition",      # Scientific or logical definition
+    "property",        # Physical or chemical property
     "other",           # Fallback for edge cases
 ]
 
@@ -417,6 +419,7 @@ TIME_ANCHOR_TYPE_VALUES = [
     "explicit_date",   # "January 5, 2025"
     "range",           # "between 2020 and 2023"
     "relative",        # "last week", "yesterday"
+    "timeless",        # Natural laws, math definitions (no time anchor needed)
     "unknown",         # No time reference found
 ]
 

@@ -335,10 +335,12 @@ def build_evidence_pack(
     # That behavior can mis-route global/clustered evidence into "c1" in multi-claim articles,
     # making the real target claim appear to have "no sources" downstream.
     default_claim_id = None
-    if anchor_claim_id:
-        default_claim_id = anchor_claim_id
-    elif len(claims) == 1:
-        default_claim_id = claims[0].get("id")
+    if len(claims) == 1:
+        default_claim_id = claims[0].get("id") or anchor_claim_id
+    elif not anchor_claim_id:
+        # Fallback for empty anchor in legacy calls
+        if claims:
+            default_claim_id = None # Keep global if multiple
     claim_id_norm_counts: dict[str, int] | None = None
 
     if search_results_clustered is not None:

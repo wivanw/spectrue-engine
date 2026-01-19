@@ -77,7 +77,7 @@ POST_EVIDENCE_ALLOWED_FIELDS: set[str] = set()
 # time_anchor makes claims "mathematically unreachable" in non-experiment mode.
 #
 # NOTE: This is not a heuristic. It is a predicate-level schema rule.
-TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence", "measurement"}
+TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence", "measurement", "definition", "property"}
 
 
 # Default system instructions for claim extraction (MANDATORY)

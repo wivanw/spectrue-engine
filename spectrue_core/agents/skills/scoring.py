@@ -132,6 +132,9 @@ class ScoringSkill(BaseSkill):
                 "excerpt": content_text
             })
 
+        global_sources = sources_by_claim.get(None, []) + sources_by_claim.get("unknown", [])
+        global_count = len(global_sources)
+
         Trace.event(
             "score_evidence.inputs",
             {
@@ -139,13 +142,16 @@ class ScoringSkill(BaseSkill):
                     {
                         "claim_id": cid,
                         "sources": len(sources),
+                        "global_pool": global_count,
                         "stances": [
                             s.get("stance") for s in sources[:5]
                         ],
                     }
                     for cid, sources in sources_by_claim.items()
+                    if cid is not None and cid != "unknown"
                 ],
-                "claims_total": len(sources_by_claim),
+                "global_sources": global_count,
+                "claims_total": len(sources_by_claim) - (1 if global_count > 0 else 0),
             },
         )
 
@@ -164,11 +170,16 @@ class ScoringSkill(BaseSkill):
             # SECURITY: Sanitize claims text
             safe_text = sanitize_input(c.get("text", ""))
 
+            # A claim has evidence if it has explicit sources OR if there are global sources
+            # that might be relevant.
+            matched_count = len(sources_by_claim.get(cid, []))
+
             claims_info.append({
                 "id": cid,
                 "text": safe_text,
                 "importance": float(c.get("importance", 0.5)), # Vital for LLM aggregation
-                "matched_evidence_count": len(sources_by_claim.get(cid, []))
+                "matched_evidence_count": matched_count,
+                "global_evidence_count": global_count,
             })
 
         deferred_map = {
@@ -176,8 +187,10 @@ class ScoringSkill(BaseSkill):
             for c in raw_claims
             if isinstance(c, dict)
         }
+        # Only mark as 'no_evidence' if BOTH local and global pools are empty
         no_evidence = [
-            c.get("id") for c in claims_info if c.get("matched_evidence_count", 0) == 0
+            c.get("id") for c in claims_info 
+            if c.get("matched_evidence_count", 0) == 0 and global_count == 0
         ]
         Trace.event(
             "score_evidence.coverage",
@@ -485,7 +498,8 @@ class ScoringSkill(BaseSkill):
         async def score_single_claim(claim_info: dict) -> dict:
             """Score a single claim with its evidence."""
             cid = claim_info.get("id")
-            evidence = sources_by_claim.get(cid, [])
+            # Include both explicit matches AND global (shared) sources
+            evidence = sources_by_claim.get(cid, []) + sources_by_claim.get(None, []) + sources_by_claim.get("unknown", [])
 
             # Code-computed judge signals (must survive through the pipeline).
             # These are *signals* to help the judge reason about sufficiency, diversity, and uncertainty.
