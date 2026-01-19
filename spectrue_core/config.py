@@ -7,6 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
+import os
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -22,14 +23,14 @@ class SpectrueConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, env_prefix="SPECTRUE_")
 
     # LLM Configuration
-    openai_api_key: Optional[str] = Field(None, description="OpenAI API Key for LLM operations")
-    openai_model: str = Field("gpt-4o", description="Model to use for main analysis")
+    openai_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY"), description="OpenAI API Key for LLM operations")
 
     # Search Configuration
-    tavily_api_key: Optional[str] = Field(None, description="Tavily API Key for web search")
-    google_search_api_key: Optional[str] = Field(None, description="Google Custom Search API Key (optional)")
-    google_search_cse_id: Optional[str] = Field(None, description="Google Custom Search Engine ID (optional)")
-    google_fact_check_key: Optional[str] = Field(None, description="Google Fact Check Tools API Key (optional)")
+    # Search Configuration
+    tavily_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("TAVILY_API_KEY"), description="Tavily API Key for web search")
+    google_search_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("GOOGLE_SEARCH_API_KEY"), description="Google Custom Search API Key (optional)")
+    google_search_cse_id: Optional[str] = Field(default_factory=lambda: os.getenv("GOOGLE_SEARCH_CSE_ID"), description="Google Custom Search Engine ID (optional)")
+    google_fact_check_key: Optional[str] = Field(default_factory=lambda: os.getenv("GOOGLE_FACT_CHECK_KEY"), description="Google Fact Check Tools API Key (optional)")
 
     # Verification Settings
     min_confidence_threshold: float = Field(0.7, description="Minimum confidence to verify a claim")

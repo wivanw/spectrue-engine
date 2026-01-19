@@ -201,7 +201,7 @@ class LLMClient:
     Example:
         client = LLMClient(openai_api_key="sk-...")
         result = await client.call(
-            model="gpt-5-nano",
+            model=ModelID.NANO,
             input="Analyze this claim: ...",
             instructions="You are a fact-checking assistant.",
             json_output=True,
@@ -215,7 +215,7 @@ class LLMClient:
         openai_api_key: str | None = None,
         base_url: str | None = None,
         default_timeout: float = 60.0,  # Increased from 30.0 for complex tasks
-        max_retries: int = 3,
+        max_retries: int = 1,
         cache_retention: CacheRetention = "in_memory", # Fix default
         meter: LLMMeter | None = None,
     ):
@@ -709,7 +709,7 @@ class LLMClient:
         Responses-specific parameters (reasoning_effort, cache_key, instructions as separate field).
         
         Args:
-            model: Model to use (e.g., "gpt-5-nano", "qwen3-base-14b")
+            model: Model to use (e.g., ModelID.NANO, "qwen3-base-14b")
             input: The main input/prompt content
             instructions: System instructions (cached if cache_key provided for OpenAI)
             json_output: If True, request JSON output and parse response
@@ -1081,7 +1081,7 @@ class LLMClient:
         system_prompt: str | None = None,
         schema: dict[str, Any],
         schema_name: str = "structured_output",
-        model: str = "gpt-5-nano",
+        model: str = ModelID.NANO,
         reasoning_effort: ReasoningEffort = "low",
         timeout: float | None = None,
         max_output_tokens: int | None = None,

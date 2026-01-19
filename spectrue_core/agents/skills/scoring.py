@@ -205,7 +205,7 @@ class ScoringSkill(BaseSkill):
         cache_key = f"score_v7_plat_{prompt_hash}"
 
         try:
-            m = self.config.openai_model or ModelID.PRO
+            m = ModelID.PRO
 
             result = await self.llm_client.call_json(
                 model=m,
@@ -807,11 +807,11 @@ Return valid JSON now."""
                     {
                         "claim_id": cid,
                         "from_model": routed_model,
-                        "to_model": "gpt-5.2",
+                        "to_model": ModelID.PRO,
                         "reason": primary.get("error_type") or "unknown",
                     },
                 )
-                fallback = await _call_model("gpt-5.2", use_cache=False)
+                fallback = await _call_model(ModelID.PRO, use_cache=False)
                 if fallback.get("status") == "ok":
                     fallback["routing"] = {**route_debug, "fallback_from": routed_model}
                     return fallback
@@ -820,17 +820,17 @@ Return valid JSON now."""
                 return fallback
 
             # Optional: nano failure fallback (rare but safer than returning error)
-            if routed_model == "gpt-5-nano":
+            if routed_model == ModelID.NANO:
                 Trace.event(
                     "judge.model_fallback",
                     {
                         "claim_id": cid,
                         "from_model": routed_model,
-                        "to_model": "gpt-5.2",
+                        "to_model": ModelID.PRO,
                         "reason": primary.get("error_type") or "unknown",
                     },
                 )
-                fallback = await _call_model("gpt-5.2", use_cache=False)
+                fallback = await _call_model(ModelID.PRO, use_cache=False)
                 if fallback.get("status") == "ok":
                     fallback["routing"] = {**route_debug, "fallback_from": routed_model}
                     return fallback
@@ -1008,10 +1008,10 @@ Return valid JSON now."""
         }
         prompt += "\n\n" + no_tag_note_by_lang.get((lang or "").lower(), no_tag_note_by_lang["en"])
 
-        Trace.event("llm.prompt", {"kind": "analysis", "model": self.config.openai_model})
+        Trace.event("llm.prompt", {"kind": "analysis", "model": ModelID.NANO})
         try:
             result = await self.llm_client.call_json(
-                model=self.config.openai_model or "gpt-5-nano",
+                model=ModelID.NANO,
                 input=prompt,
                 instructions="You are Aletheia, an advanced fact-checking AI.",
                 response_schema=ANALYSIS_RESPONSE_SCHEMA,
@@ -1166,7 +1166,7 @@ Return valid JSON now."""
         cache_key = f"score_struct_v1_{prompt_hash}"
 
         try:
-            m = self.config.openai_model or "gpt-5.2"
+            m = ModelID.PRO
 
             result = await self.llm_client.call_json(
                 model=m,

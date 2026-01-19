@@ -1,3 +1,4 @@
+from spectrue_core.llm.model_registry import ModelID
 # Copyright (C) 2025 Ivan Bondarenko
 #
 # This file is part of Spectrue Engine.
@@ -30,12 +31,12 @@ class TestLLMRouterRouting:
         router = LLMRouter(
             openai_client=openai_client,
             chat_client=chat_client,
-            chat_model_names=["deepseek-chat", "deepseek-reasoner"],
+            chat_model_names=[ModelID.MID, "deepseek-reasoner"],
         )
 
         # Test routing decision
         # Test routing decision
-        assert router._get_client("deepseek-chat") is chat_client
+        assert router._get_client(ModelID.MID) is chat_client
         assert router._get_client("deepseek-reasoner") is chat_client
         assert router._get_client("DEEPSEEK-CHAT") is chat_client  # Case-insensitive
 
@@ -49,11 +50,11 @@ class TestLLMRouterRouting:
         router = LLMRouter(
             openai_client=openai_client,
             chat_client=chat_client,
-            chat_model_names=["deepseek-chat"],
+            chat_model_names=[ModelID.MID],
         )
 
-        assert router._get_client("gpt-5-nano") is openai_client
-        assert router._get_client("gpt-5.2") is openai_client
+        assert router._get_client(ModelID.NANO) is openai_client
+        assert router._get_client(ModelID.PRO) is openai_client
         assert router._get_client("some-other-model") is openai_client
 
     def test_router_routes_all_to_openai_when_no_chat_client(self):
@@ -65,12 +66,12 @@ class TestLLMRouterRouting:
         router = LLMRouter(
             openai_client=openai_client,
             chat_client=None,
-            chat_model_names=["deepseek-chat"],
+            chat_model_names=[ModelID.MID],
         )
 
         # Even if model is in chat_model_names, should use openai_client
-        assert router._get_client("deepseek-chat") is openai_client
-        assert router._get_client("gpt-5-nano") is openai_client
+        assert router._get_client(ModelID.MID) is openai_client
+        assert router._get_client(ModelID.NANO) is openai_client
 
     def test_router_routes_all_to_openai_when_empty_chat_models(self):
         """When chat_model_names is empty, all models use openai_client."""
@@ -85,8 +86,8 @@ class TestLLMRouterRouting:
             chat_model_names=[],
         )
 
-        assert router._get_client("deepseek-chat") is openai_client
-        assert router._get_client("gpt-5-nano") is openai_client
+        assert router._get_client(ModelID.MID) is openai_client
+        assert router._get_client(ModelID.NANO) is openai_client
 
 
 class TestLLMRouterCallJSON:
@@ -106,12 +107,12 @@ class TestLLMRouterCallJSON:
         router = LLMRouter(
             openai_client=openai_client,
             chat_client=chat_client,
-            chat_model_names=["deepseek-chat"],
+            chat_model_names=[ModelID.MID],
         )
 
         # Call with chat model
         result_chat = await router.call_json(
-            model="deepseek-chat",
+            model=ModelID.MID,
             input="test prompt",
             instructions="test instructions",
         )
@@ -125,7 +126,7 @@ class TestLLMRouterCallJSON:
 
         # Call with OpenAI model
         result_openai = await router.call_json(
-            model="gpt-5-nano",
+            model=ModelID.NANO,
             input="test prompt",
             instructions="test instructions",
         )
@@ -172,9 +173,9 @@ class TestRuntimeConfigDeepSeek:
 
         assert config.deepseek_base_url == "https://api.deepseek.com"
         assert config.deepseek_api_key == ""
-        assert config.model_claim_extraction == "deepseek-chat"
-        assert config.model_inline_source_verification == "gpt-5-nano"
-        assert config.model_clustering_stance == "gpt-5-nano"
+        assert config.model_claim_extraction == ModelID.MID
+        assert config.model_inline_source_verification == ModelID.NANO
+        assert config.model_clustering_stance == ModelID.NANO
         assert config.enable_inline_source_verification is True
 
     def test_load_from_env_with_local_llm_settings(self):
@@ -221,6 +222,7 @@ class TestRuntimeConfigDeepSeek:
         from spectrue_core.runtime_config import EngineRuntimeConfig
 
         # Clear model-related ENV vars
+        # Clear model-related ENV vars
         env_to_clear = {
             "MODEL_CLAIM_EXTRACTION": "",
             "MODEL_INLINE_SOURCE_VERIFICATION": "",
@@ -228,9 +230,7 @@ class TestRuntimeConfigDeepSeek:
             "DEEPSEEK_MODEL_NAMES": "",
         }
         with patch.dict(os.environ, env_to_clear, clear=False):
-            # Remove the keys entirely
-            for key in env_to_clear:
-                os.environ.pop(key, None)
+            # No need to pop, the empty strings in env_to_clear will be set in environ
             config = EngineRuntimeConfig.load_from_env()
 
         # Empty list = all models go directly to OpenAI
@@ -248,7 +248,7 @@ class TestRuntimeConfigDeepSeek:
         with patch.dict(os.environ, env_vars, clear=False):
             config = EngineRuntimeConfig.load_from_env()
 
-        assert config.llm.deepseek_model_names == ("deepseek-chat", "custom-local-model")
+        assert config.llm.deepseek_model_names == (ModelID.MID, "custom-local-model")
 
 
 class TestInlineSourceVerificationFeatureFlag:
