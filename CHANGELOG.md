@@ -25,9 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Shared `EvidencePool` and document-level retrieval
   - `build_doc_query_plan` (structural entities + anchors)
   - `compute_deficit` and `escalate_claim` (targeted extra searches)
+- M132: Billing Ledger & Types
+  - `MoneySC` frozen dataclass with arithmetic support
+  - `UserWallet`, `ChargeSplit`, `ChargeResult` types
+  - `DailyBonusState` and config fields
+- M133: Cost Estimation Calibration
+  - Updated `scoring` stage estimate (300->1000 tokens) to match GPT-5.2 usage
 
 ### Changed
 - Refactor: Replaced HMAC-SHA3-256 with PBKDF2-SHA256 for trace redaction hashing
+- CostEstimator: Dynamic token scaling based on input length
 
 ## [1.2.0] - 2026-01-08
 
