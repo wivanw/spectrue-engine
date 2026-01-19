@@ -15,7 +15,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from firebase_admin import firestore
+try:
+    from firebase_admin import firestore
+except ImportError:
+    firestore = None  # type: ignore
 
 from spectrue_core.monetization.config import MonetizationConfig
 from spectrue_core.monetization.ledger import (
@@ -73,6 +76,11 @@ def _timestamp_to_datetime(value: Any) -> datetime:
 
 class FirestoreBillingStore(BillingStore):
     def __init__(self, db: firestore.Client, *, config: MonetizationConfig | None = None) -> None:
+        if firestore is None:
+            raise ImportError(
+                "FirestoreBillingStore requires 'firebase-admin' to be installed. "
+                "Run 'pip install firebase-admin' to use this adapter."
+            )
         self._db = db
         self._config = config or MonetizationConfig()
         self._users = self._db.collection(self._config.user_collection)
