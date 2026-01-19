@@ -26,7 +26,7 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.orchestration.sufficiency import sufficiency_threshold
+from spectrue_core.verification.orchestration.sufficiency import SUFFICIENCY_P_THRESHOLD
 from spectrue_core.verification.retrieval.fixed_pipeline import (
     ExtractedContent,
     FixedPipelineContext,
@@ -303,7 +303,7 @@ class WebSearchStep:
                     claim_id = _claim_id_for(claim, idx)
                     metadata = _metadata_dict(claim.get("metadata")) or _metadata_dict(claim)
                     s_value = compute_sufficiency(metadata)
-                    s_min = float(metadata.get("S_min", sufficiency_threshold))
+                    s_min = float(metadata.get("S_min", SUFFICIENCY_P_THRESHOLD))
                     if s_value < s_min:
                         query = _first_query_for_claim(plan, claim_id, claim)
                         if not query:

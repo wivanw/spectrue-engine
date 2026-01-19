@@ -82,6 +82,9 @@ class ClaimRole(str, Enum):
     COUNTERCLAIM = "counterclaim"
     """Counterpoint or opposing claim."""
 
+    DEFINITION = "definition"
+    """Term definition or concept explanation."""
+
 
 class VerificationTarget(str, Enum):
     """

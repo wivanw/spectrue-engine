@@ -1150,7 +1150,11 @@ class PhaseRunner:
                 include_domains: list[str] | None = None
                 if not pass_config.include_domains_relaxed:
                     chan_set = set(phase.channels or []) if phase else set()
-                    if chan_set and chan_set.issubset({EvidenceChannel.AUTHORITATIVE, EvidenceChannel.REPUTABLE_NEWS}):
+                    should_try_trusted = (
+                        EvidenceChannel.AUTHORITATIVE in chan_set 
+                        or EvidenceChannel.REPUTABLE_NEWS in chan_set
+                    )
+                    if should_try_trusted:
                         include_domains = get_trusted_domains_by_lang(phase.locale or "en") if phase else None
                 else:
                     domains_relaxed = True
@@ -1199,8 +1203,8 @@ class PhaseRunner:
                     include_domains_count=len(include_domains) if include_domains else None,
                 )
                 
-                # Check early stop
-                should_stop, stop_reason = should_stop_escalation(outcome, config)
+                # Check early stop using Bayesian judge
+                should_stop, stop_reason = should_stop_escalation(claim, all_sources, config)
                 if should_stop:
                     trace_search_stop(claim_id, pass_config.pass_id, stop_reason, outcome)
                     trace_search_summary(
@@ -1214,7 +1218,7 @@ class PhaseRunner:
             
             # Compute reason codes for next pass (with config for consistent thresholds)
             pass_outcome = compute_retrieval_outcome(pass_sources, config)
-            reason_codes = compute_escalation_reason_codes(pass_outcome, config)
+            reason_codes = compute_escalation_reason_codes(claim, pass_sources, pass_outcome, config)
         
         # Ladder exhausted
         final_outcome = compute_retrieval_outcome(all_sources, config)
@@ -1259,19 +1263,19 @@ class PhaseRunner:
         # Optional include_domains derived from the phase channels.
         include_domains: list[str] | None = None
         chan_set = set(phase.channels or []) if phase else set()
-        if chan_set and chan_set.issubset({EvidenceChannel.AUTHORITATIVE, EvidenceChannel.REPUTABLE_NEWS}):
-            # Restrict to vetted domains for high-quality phases.
-            # NOTE: This is a registry-based restriction; TLD-based authority (e.g. .gov) is
-            # handled by post-filtering below (we cannot express it via include_domains).
-            include_domains = get_trusted_domains_by_lang(phase.locale or "en")
-        else:
-            # Do not restrict for phases that include local_media/social/low_reliability_web.
-            include_domains = None
+        
+        # Priority 1: High-quality sources (Authoritative / Reputable)
+        should_try_trusted = (
+            EvidenceChannel.AUTHORITATIVE in chan_set 
+            or EvidenceChannel.REPUTABLE_NEWS in chan_set
+        )
+        
+        if should_try_trusted:
+            include_domains = get_trusted_domains_by_lang(phase.locale or "en") if phase else None
 
         # Execute search via SearchManager.
         #
         # Prefer the `search_phase()` primitive (respects depth/max_results/domains).
-        # Keep compatibility with older mocks by accepting either tuple or list results.
         if hasattr(self.search_mgr, "search_phase"):
             raw_result = await self.search_mgr.search_phase(
                 query,
@@ -1280,6 +1284,34 @@ class PhaseRunner:
                 max_results=phase.max_results if phase else 3,
                 include_domains=include_domains,
             )
+            
+            # Fallback logic for trusted search
+            if include_domains:
+                _, sources = raw_result if isinstance(raw_result, tuple) else (None, raw_result)
+                
+                # Determine sufficiency using Bayesian judge
+                sufficiency = check_sufficiency_for_claim(claim, sources or [])
+                
+                # If trusted results are not sufficient, try general search
+                if sufficiency.status != SufficiencyStatus.SUFFICIENT:
+                    Trace.event("retrieval.phase_search.fallback", {
+                        "claim_id": claim_id,
+                        "phase_id": phase.phase_id if phase else None,
+                        "reason": "bayesian_insufficient",
+                        "confidence": sufficiency.reason,
+                    })
+                    raw_result = await self.search_mgr.search_phase(
+                        query,
+                        topic=topic,
+                        depth=depth,
+                        max_results=phase.max_results if phase else 3,
+                        exclude_domains=include_domains,
+                    )
+                    # Merge results if needed, but usually we just replace or append
+                    if isinstance(raw_result, tuple):
+                        _, general_sources = raw_result
+                        sources = (sources or []) + general_sources
+                        raw_result = (None, sources)
         else:
             raw_result = await self.search_mgr.search_unified(
                 query=query,
