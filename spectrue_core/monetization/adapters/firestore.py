@@ -596,9 +596,21 @@ class FirestoreBillingStore(BillingStore):
         # Support both new clean key and temporary V3 key if migration happened
         raw_buckets = data.get("locked_buckets") or data.get("locked_buckets_v3") or []
         locked_buckets = []
-        for b in raw_buckets:
-            if isinstance(b, dict):
-                locked_buckets.append(LockedBucket.from_dict(b))
+        
+        if isinstance(raw_buckets, dict):
+             # Handle V2/PoolBalance format (dict[date_str, amount_str])
+             from datetime import date
+             for date_key, amount_val in raw_buckets.items():
+                 try:
+                     unlock_dt = date.fromisoformat(date_key)
+                     amt = MoneySCClass.from_str(str(amount_val))
+                     locked_buckets.append(LockedBucket(amount_sc=amt, unlock_at=unlock_dt))
+                 except Exception as e:
+                     logger.warning(f"Failed to parse locked bucket {date_key}: {e}")
+        elif isinstance(raw_buckets, list):
+            for b in raw_buckets:
+                if isinstance(b, dict):
+                    locked_buckets.append(LockedBucket.from_dict(b))
         updated_at = data.get("updated_at")
         if updated_at and hasattr(updated_at, "to_datetime"):
             updated_at = updated_at.to_datetime()
