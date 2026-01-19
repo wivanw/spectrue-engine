@@ -115,13 +115,20 @@ PRODUCTS: Dict[str, ProductConfig] = {
 
 # Reverse Index for Stripe ID lookup
 STRIPE_ID_TO_KEY: Dict[str, str] = {
-    p.stripe_price_id: k for k, p in PRODUCTS.items()
+    p.stripe_price_id: k
+    for k, p in PRODUCTS.items()
+    if p.stripe_price_id
 }
 
 def get_product_by_key(key: str) -> Optional[ProductConfig]:
-    return PRODUCTS.get(key)
+    cfg = PRODUCTS.get(key)
+    if not cfg or not cfg.stripe_price_id:
+        return None
+    return cfg
 
 def get_product_by_stripe_id(stripe_id: str) -> Optional[ProductConfig]:
+    if not stripe_id:
+        return None
     key = STRIPE_ID_TO_KEY.get(stripe_id)
     if key:
         return PRODUCTS.get(key)
