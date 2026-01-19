@@ -186,18 +186,20 @@ exact_usage_sc = 1.5 SC
 
 ---
 
-### Example B: Search + LLM (Fractional Result)
+### Example B: Realistic Mixed Workload (Standard Run)
 
-**Scenario:** 2 Basic Searches + GPT-5 Nano (1000 input, 500 output tokens)
+**Scenario:** 3 Basic Searches + 1 Advanced Search + Scoring (GPT-5.2) + Extraction (Nano)
 
 | Resource | Calculation | SC |
 |----------|-------------|-----|
-| Search | 2 TC × 0.5 | 1.0 |
-| LLM Input | 1000 × 0.000005 | 0.005 |
-| LLM Output | 500 × 0.00004 | 0.02 |
+| Search (Basic) | 3 TC × 0.5 | 1.50 |
+| Search (Adv) | 2 TC × 0.5 | 1.00 |
+| GPT-5.2 Score | 4.6k tokens (mixed) | 1.54 |
+| GPT-5 Nano | 12k tokens (extract) | 0.06 |
+| GPT-5 Mini | 3k tokens (plan) | 0.08 |
 
 ```
-exact_usage_sc = 1.0 + 0.005 + 0.02 = 1.025 SC
+exact_usage_sc = 1.50 + 1.00 + 1.54 + 0.06 + 0.08 = 4.18 SC
 ```
 
 ---
