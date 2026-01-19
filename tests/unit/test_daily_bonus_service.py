@@ -13,7 +13,6 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List
 
-import pytest
 
 from spectrue_core.monetization.config import MonetizationConfig
 from spectrue_core.monetization.services.daily_bonus import DailyBonusService

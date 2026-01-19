@@ -7,6 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
+import os
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
@@ -26,8 +27,6 @@ class ProductConfig:
 
 # Global Config
 OPERATIONAL_LOCK_RATIO = Decimal("0.5") # Default, adjust as needed
-
-import os
 
 PRODUCTS: Dict[str, ProductConfig] = {
     # Plans

@@ -1,8 +1,7 @@
 import pytest
-import asyncio
 from unittest.mock import MagicMock, AsyncMock
 from spectrue_core.verification.evidence.evidence_pack import (
-    EvidencePack, EvidenceItem, EvidenceMetrics, EvidencePackStats
+    EvidencePack, EvidenceMetrics, EvidencePackStats
 )
 from spectrue_core.agents.llm_client import LLMClient
 

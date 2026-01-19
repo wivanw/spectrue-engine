@@ -1,4 +1,3 @@
-from spectrue_core.llm.model_registry import ModelID
 # Copyright (C) 2025 Ivan Bondarenko
 #
 # This file is part of Spectrue Engine.
@@ -16,6 +15,7 @@ Tests routing logic without making actual network calls.
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from spectrue_core.llm.model_registry import ModelID
 
 
 class TestLLMRouterRouting:

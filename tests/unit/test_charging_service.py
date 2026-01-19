@@ -9,10 +9,8 @@
 
 """Unit tests for ChargingService."""
 
-from datetime import date, datetime
 from decimal import Decimal
 
-import pytest
 
 from spectrue_core.monetization.config import MonetizationConfig
 from spectrue_core.monetization.services.charging import ChargingService, ChargeRequest

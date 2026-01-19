@@ -1,6 +1,5 @@
 import pytest
 from spectrue_core.verification.claims.claim_frame_builder import build_claim_frame
-from spectrue_core.schema.claim_frame import ClaimFrame
 
 @pytest.fixture
 def basic_claim_text():

@@ -127,6 +127,7 @@ class BuildClusterQueriesStep:
                 cluster_plans.append(
                     {
                         "cluster_id": cluster_id,
+                        "claims": claims_for_plan,
                         "representative_claim_ids": [
                             str(c.get("id") or c.get("claim_id"))
                             for c in rep_claims_list

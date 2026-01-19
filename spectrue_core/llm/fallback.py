@@ -1,4 +1,3 @@
-from spectrue_core.llm.model_registry import ModelID
 # Copyright (C) 2025 Ivan Bondarenko
 #
 # This file is part of Spectrue Engine.

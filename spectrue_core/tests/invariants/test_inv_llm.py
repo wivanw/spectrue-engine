@@ -89,7 +89,6 @@ async def test_inv_042_score_is_deterministic(mock_llm_client):
     INV-042: LLM Signals Only.
     Verify that the system propagates exact LLM scores without "fudging" or inventing numbers.
     """
-    from spectrue_core.schema.claim_frame import RGBAScore
     
     # Mock specific return values
     # Note: We can't easily mock the internal parsing if we don't mock the LLM response JSON directly.

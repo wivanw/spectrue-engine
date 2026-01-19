@@ -49,7 +49,6 @@ if TYPE_CHECKING:
     )
     from spectrue_core.monetization.ledger import (
         LedgerEntry,
-        LedgerEntryStatus as LedgerStatus,
         LedgerEntryType,
     )
 

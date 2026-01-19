@@ -209,9 +209,6 @@ class DailyBonusService:
         b, B, new_state = self.compute_b_and_B(pool.available_balance_sc, active_count, state)
         new_state = replace(new_state, last_run_date=today)
 
-        # Calculate total to distribute
-        total_to_distribute = MoneySC(b.value * active_count)
-
         # Step 4: Award bonuses (ALLOWANCE ONLY - NO POOL DEDUCTION)
         # We do NOT deduct from pool.available_balance_sc here.
         # Deduction happens at spend time.

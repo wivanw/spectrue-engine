@@ -154,7 +154,8 @@ class ClusterWebSearchStep:
 
                     # Fallback logic: if trusted results are poor (Bayesian assessment), try general search
                     # For cluster search, we use the first claim of the cluster as a representative for sufficiency
-                    rep_claim = cluster.claims[0] if cluster.claims else {"text": query}
+                    claims_list = plan.get("claims") or []
+                    rep_claim = claims_list[0] if claims_list else {"text": query}
                     sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
                     
                     if sufficiency.status != SufficiencyStatus.SUFFICIENT:

@@ -250,7 +250,8 @@ def evidence_sufficiency(
     
     for src in sources:
         url = src.get("url") or src.get("link") if isinstance(src, dict) else str(src)
-        if not url: continue
+        if not url:
+            continue
         
         domain = _extract_domain(url)
         tier = get_domain_tier(domain)
@@ -285,8 +286,10 @@ def evidence_sufficiency(
         total_log_odds += logv
         
         # Update metrics for diagnostics
-        if tier == EvidenceChannel.AUTHORITATIVE: result.authoritative_count += 1
-        if tier == EvidenceChannel.REPUTABLE_NEWS: result.reputable_count += 1
+        if tier == EvidenceChannel.AUTHORITATIVE:
+            result.authoritative_count += 1
+        if tier == EvidenceChannel.REPUTABLE_NEWS:
+            result.reputable_count += 1
         
     result.independent_domains = len(domain_best_tier)
     posterior_p = log_odds_to_prob(total_log_odds)

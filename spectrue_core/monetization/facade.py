@@ -30,10 +30,7 @@ from spectrue_core.monetization.services.billing import (
 from spectrue_core.monetization.services.free_pool import deposit as pool_deposit, deduct as pool_deduct
 from spectrue_core.monetization.types import (
     MoneySC,
-    PoolBalance,
-    PoolStats,
     UserBalance,
-    UserBalanceStats,
     quantize_sc,
 )
 
