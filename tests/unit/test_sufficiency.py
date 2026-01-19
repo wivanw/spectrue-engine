@@ -18,11 +18,13 @@ Tests the sufficiency rules for early exit from progressive widening.
 from spectrue_core.verification.orchestration.sufficiency import (
     evidence_sufficiency,
     check_sufficiency_for_claim,
+    is_origin_source,
+    SufficiencyStatus,
+)
+from spectrue_core.tools.trusted_sources import (
     is_authoritative,
     is_reputable_news,
-    is_origin_source,
     get_domain_tier,
-    SufficiencyStatus,
 )
 from spectrue_core.schema.claim_metadata import (
     VerificationTarget,
@@ -115,7 +117,7 @@ class TestSufficiencyRule1:
         result = evidence_sufficiency("c1", sources, VerificationTarget.REALITY)
         
         assert result.status == SufficiencyStatus.SUFFICIENT
-        assert result.rule_matched == "Rule1"
+        assert result.rule_matched == "BayesianConsensus"
         assert result.authoritative_count == 1
     
     def test_authoritative_no_quote_insufficient(self):
@@ -150,9 +152,9 @@ class TestSufficiencyRule1:
         
         result = evidence_sufficiency("c1", sources, VerificationTarget.REALITY)
         
-        # T003: With quote present, authoritative source satisfies Rule1
+        # T003: With quote present, authoritative source satisfies BayesianConsensus
         assert result.status == SufficiencyStatus.SUFFICIENT
-        assert result.rule_matched == "Rule1"
+        assert result.rule_matched == "BayesianConsensus"
 
 
 class TestSufficiencyRule2:
@@ -177,7 +179,7 @@ class TestSufficiencyRule2:
         result = evidence_sufficiency("c1", sources, VerificationTarget.REALITY)
         
         assert result.status == SufficiencyStatus.SUFFICIENT
-        assert result.rule_matched == "Rule2"
+        assert result.rule_matched == "BayesianConsensus"
         assert result.independent_domains >= 2
     
     def test_two_reputable_same_domain_insufficient(self):
@@ -239,7 +241,7 @@ class TestSufficiencyRule3:
         )
         
         assert result.status == SufficiencyStatus.SUFFICIENT
-        assert result.rule_matched == "Rule3"
+        assert result.rule_matched == "BayesianConsensus"
     
     def test_existence_with_official_source_sufficient(self):
         """Existence claim with official source is sufficient."""
@@ -309,9 +311,8 @@ class TestSufficiencyNotSufficient:
         result = evidence_sufficiency("c1", sources, VerificationTarget.REALITY)
         
         # T003: With quotes present, sources satisfy sufficiency rules
-        # Note: reuters.com is Tier A (global news agency), so Rule1 may match first
         assert result.status == SufficiencyStatus.SUFFICIENT
-        assert result.rule_matched in ("Rule1", "Rule2")  # Either rule is acceptable
+        assert result.rule_matched == "BayesianConsensus"
     
     def test_empty_sources_insufficient(self):
         """No sources is insufficient."""
