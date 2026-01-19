@@ -143,6 +143,12 @@ class ClaimVerdict(SchemaModel):
     key_evidence: list[str] = Field(default_factory=list)
     """Most important evidence URLs."""
 
+    prior_score: float = Field(default=-1.0)
+    """LLM's internal knowledge score. -1.0 = unknown/skipped."""
+
+    prior_reason: str = ""
+    """LLM's internal knowledge rationale."""
+
 
 class StructuredDebug(SchemaModel):
     """

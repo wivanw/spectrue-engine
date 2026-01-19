@@ -104,6 +104,16 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
                         "maxItems": 4,
                         "description": "Per-claim [R=danger, G=veracity, B=style, A=explainability]",
                     },
+                    "prior_score": {
+                        "type": "number",
+                        "minimum": -1,
+                        "maximum": 1,
+                        "description": "LLM's internal knowledge score for this claim (0-1). 1.0 = known fact, 0.0 = known false, 0.5 = neutral. Use -1 if unknown.",
+                    },
+                    "prior_reason": {
+                        "type": "string",
+                        "description": "Short explanation for the prior_score based ONLY on internal knowledge.",
+                    },
                 },
             },
         },
@@ -155,6 +165,16 @@ SINGLE_CLAIM_SCORING_SCHEMA: dict[str, Any] = {
             "minItems": 4,
             "maxItems": 4,
             "description": "[R=danger, G=veracity, B=style, A=explainability]",
+        },
+        "prior_score": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1,
+            "description": "LLM's internal knowledge score for this claim (0-1). 1.0 = known fact, 0.0 = known false, 0.5 = neutral. Use -1 if unknown.",
+        },
+        "prior_reason": {
+            "type": "string",
+            "description": "Short explanation for the prior_score based ONLY on internal knowledge.",
         },
     },
 }
@@ -798,6 +818,16 @@ CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
         "explanation": {
             "type": "string",
             "description": "Human-readable explanation of the verdict",
+        },
+        "prior_score": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1,
+            "description": "LLM's internal knowledge score for this claim (0-1). 1.0 = known fact, 0.0 = known false, 0.5 = neutral. Use -1 if unknown.",
+        },
+        "prior_reason": {
+            "type": "string",
+            "description": "Short explanation for the prior_score based ONLY on internal knowledge.",
         },
         "sources_used": {
             "type": "array",
