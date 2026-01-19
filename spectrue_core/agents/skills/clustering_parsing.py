@@ -36,7 +36,7 @@ UNREADABLE_MARKERS = [
 ]
 
 
-def get_source_text_for_llm(source: dict, *, max_len: int = 350) -> tuple[str, bool, list[str]]:
+def get_source_text_for_llm(source: dict, *, max_len: int = 2500) -> tuple[str, bool, list[str]]:
     """
     Return canonical text for LLM and metadata about source fields.
 
@@ -179,7 +179,7 @@ def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]
             status_hint = "[CONTENT UNAVAILABLE - JUDGE BY SNIPPET/TITLE]"
 
         # Use canonical text extraction with quote priority
-        source_text, has_quote, fields_present = get_source_text_for_llm(r, max_len=350)
+        source_text, has_quote, fields_present = get_source_text_for_llm(r, max_len=2500)
 
         # Check for unreadable content markers
         is_unreadable = False
@@ -201,7 +201,7 @@ def build_sources_lite(search_results: list[dict]) -> tuple[list[dict], set[int]
         if quote_value:
             fields_present.append("quote_value")
 
-        max_quote_len = 350
+        max_quote_len = 500
         results_lite.append(
             {
                 "index": i,
@@ -232,7 +232,7 @@ def _context_fallback_result(r: dict) -> SearchResult:
         domain=r.get("domain"),
         title=r.get("title", ""),
         snippet=r.get("snippet", ""),
-        content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:1500],
+        content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:25000],
         published_at=r.get("published_date"),
         source_type=r.get("source_type", "unknown"),  # type: ignore
         stance="context",  # type: ignore
@@ -325,7 +325,7 @@ def postprocess_evidence_matrix(
                         domain=r.get("domain"),
                         title=r.get("title", ""),
                         snippet=r.get("snippet", ""),
-                        content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:1500],
+                        content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:25000],
                         published_at=r.get("published_date"),
                         source_type=r.get("source_type", "unknown"),  # type: ignore
                         stance="neutral",  # type: ignore
@@ -457,7 +457,7 @@ def postprocess_evidence_matrix(
                 domain=r.get("domain"),
                 title=r.get("title", ""),
                 snippet=r.get("snippet", ""),
-                content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:1500],
+                content_excerpt=(r.get("content") or r.get("extracted_content") or "")[:25000],
                 published_at=r.get("published_date"),
                 source_type=r.get("source_type", "unknown"),  # type: ignore
                 stance=stance.lower(),  # type: ignore

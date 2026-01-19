@@ -1,3 +1,4 @@
+from spectrue_core.llm.model_registry import ModelID
 # Copyright (C) 2025 Ivan Bondarenko
 #
 # This file is part of Spectrue Engine.
@@ -15,14 +16,14 @@ See: https://openrouter.ai/models for available models.
 """
 
 # DeepSeek constant
-MODEL_DEEPSEEK_CHAT = "deepseek-chat"
+MODEL_DEEPSEEK_CHAT = ModelID.MID
 MODEL_DEEPSEEK_REASONER = "deepseek-reasoner"
 
 # Default models for pipeline steps (Override via ENV)
 # Switched to DeepSeek-V3 (deepseek-chat) for cost/performance balance
-DEFAULT_MODEL_CLAIM_EXTRACTION = "deepseek-chat"
-DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION = "gpt-5-nano"
-DEFAULT_MODEL_CLUSTERING_STANCE = "gpt-5-nano"
+DEFAULT_MODEL_CLAIM_EXTRACTION = ModelID.MID
+DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION = ModelID.NANO
+DEFAULT_MODEL_CLUSTERING_STANCE = ModelID.NANO
 
 # OpenAI models (used for other skills)
-DEFAULT_MODEL_OPENAI_NANO = "gpt-5-nano"
+DEFAULT_MODEL_OPENAI_NANO = ModelID.NANO

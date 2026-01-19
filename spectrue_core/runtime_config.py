@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from spectrue_core.llm.model_registry import ModelID
+
 import os
 import re
 from dataclasses import dataclass, field
@@ -142,7 +144,7 @@ class EngineLLMConfig:
     model_clustering_stance: str = DEFAULT_MODEL_CLUSTERING_STANCE
 
     # Fallback models
-    model_claim_extraction_fallback: str = "gpt-5.2"
+    model_claim_extraction_fallback: str = ModelID.PRO
 
     # Feature flags for optional pipeline steps
     enable_inline_source_verification: bool = True
@@ -581,13 +583,14 @@ class EngineRuntimeConfig:
         # DeepSeek configuration
         deepseek_base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip()
         deepseek_api_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
-        deepseek_model_names_env = (os.getenv("DEEPSEEK_MODEL_NAMES") or "").strip()
-        if deepseek_model_names_env:
-            deepseek_model_names = tuple(
-                name.strip() for name in deepseek_model_names_env.split(",") if name.strip()
-            )
-        else:
+
+        deepseek_models_env = os.getenv("DEEPSEEK_MODEL_NAMES")
+        if deepseek_models_env is None:
+            deepseek_model_names = (ModelID.MID, "deepseek-reasoner")
+        elif not deepseek_models_env.strip():
             deepseek_model_names = ()
+        else:
+            deepseek_model_names = tuple(x.strip() for x in deepseek_models_env.split(",") if x.strip())
 
         llm = EngineLLMConfig(
             timeout_sec=float(llm_timeout),
@@ -599,7 +602,7 @@ class EngineRuntimeConfig:
             model_claim_extraction=model_claim_extraction,
             model_inline_source_verification=model_inline_source_verification,
             model_clustering_stance=model_clustering_stance,
-            model_claim_extraction_fallback=os.getenv("MODEL_CLAIM_EXTRACTION_FALLBACK", "gpt-5.2"),
+            model_claim_extraction_fallback=os.getenv("MODEL_CLAIM_EXTRACTION_FALLBACK", ModelID.PRO),
             enable_inline_source_verification=enable_inline_source_verification,
         )
 

@@ -114,9 +114,6 @@ class SpectrueEngine:
             if analysis_mode == AnalysisMode.DEEP:
                 analysis_mode = AnalysisMode.DEEP_V2
                 Trace.event("engine.mode_remapped", {"from": "deep", "to": "deep_v2"})
-            
-            # Use canonical model from config (no override allowed)
-            model = self.config.openai_model
 
             # Detect content language
             detected_lang, detected_prob = detect_content_language(text, fallback=lang)
@@ -131,7 +128,6 @@ class SpectrueEngine:
                 {
                     "analysis_mode": str(analysis_mode),
                     "text_len": len(text),
-                    "model": model,
                 },
             )
 

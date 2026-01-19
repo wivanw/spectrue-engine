@@ -7,23 +7,18 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline.mode import AnalysisMode
+
 from spectrue_core.verification.evidence.evidence_pack import Claim, EvidencePack, ArticleIntent
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.agents.llm_client import LLMClient
-from spectrue_core.agents.llm_router import LLMRouter
-from spectrue_core.agents.skills.claims import ClaimExtractionSkill
-from spectrue_core.agents.skills.clustering import ClusteringSkill
-from spectrue_core.agents.skills.scoring import ScoringSkill
-from spectrue_core.agents.skills.query import QuerySkill
-from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
-from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
-from spectrue_core.agents.skills.relevance import RelevanceSkill
-from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
-# Per-claim judging skills (deep analysis mode)
-from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
-from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
-from spectrue_core.pipeline.mode import AnalysisMode
+
+
 from spectrue_core.llm.model_registry import ModelID
 import logging
 
@@ -33,7 +28,20 @@ class FactCheckerAgent:
     """
     Main agent Facade using composed Skills.
     """
-    def __init__(self, config: SpectrueConfig = None):
+    def __init__(self, config: SpectrueConfig | None = None):
+        # Lazy import to avoid circular dependency with pipeline
+        from spectrue_core.agents.llm_router import LLMRouter
+        from spectrue_core.agents.skills.claims import ClaimExtractionSkill
+        from spectrue_core.agents.skills.clustering import ClusteringSkill
+        from spectrue_core.agents.skills.scoring import ScoringSkill
+        from spectrue_core.agents.skills.query import QuerySkill
+        from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
+        from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
+        from spectrue_core.agents.skills.relevance import RelevanceSkill
+        from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
+        from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
+        from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
+        
         self.config = config
         self.runtime = (config.runtime if config else None) or EngineRuntimeConfig.load_from_env()
         api_key = config.openai_api_key if config else None
@@ -130,11 +138,11 @@ class FactCheckerAgent:
     def detect_evidence_gaps(self, pack: EvidencePack) -> list[str]:
         return self.scoring_skill.detect_evidence_gaps(pack)
 
-    async def analyze(self, fact: str, context: str, lang: str, analysis_mode: str | AnalysisMode = AnalysisMode.GENERAL) -> dict:
+    async def analyze(self, fact: str, context: str, lang: str, analysis_mode: str | "AnalysisMode" = "general") -> dict:
         # Delegate to scoring skill for final analysis (it has the logic)
         return await self.scoring_skill.analyze(fact, context, lang, analysis_mode=analysis_mode)
 
-    async def generate_search_queries(self, fact: str, context: str = "", lang: str = "en", content_lang: str = None) -> list[str]:
+    async def generate_search_queries(self, fact: str, context: str = "", lang: str = "en", content_lang: str | None = None) -> list[str]:
         return await self.query_skill.generate_search_queries(
             fact, context, lang, content_lang
         )

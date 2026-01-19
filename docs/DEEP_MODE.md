@@ -93,9 +93,9 @@ In Deep Mode, the final step is a **Per-Claim Judge** (LLM).
 **Output**: `DeepClaimResult` (RGBA, Verdict, Explanation).
 
 **The Invariant**:
-- The Judge output is **final** for that claim.
+- The Judge output is **final** for that claim's semantic verdict.
 - The Engine **does not** post-process or average these scores.
-- The Engine **does** validate the format (Schema Repair).
+- The Engine **does** validate the format and ensures it adheres to the minimal `ClaimResult` contract (INV-030).
 
 If the Judge outputs:
 ```json

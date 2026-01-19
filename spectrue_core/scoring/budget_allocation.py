@@ -352,7 +352,8 @@ class BudgetState:
         
         # Hard stop at max
         if self.extracts_used >= params.max_extracts:
-            return False, "max_extracts_reached"
+            Trace.event("budget.extract_stop", {"reason": "cap:max_extracts", "extracts_used": self.extracts_used, "cap": params.max_extracts})
+            return False, f"cap:max_extracts used={self.extracts_used} cap={params.max_extracts}"
         
         # Always do minimum
         if self.extracts_used < params.min_extracts:

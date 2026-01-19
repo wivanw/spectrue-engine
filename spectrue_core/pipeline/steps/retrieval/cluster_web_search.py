@@ -23,8 +23,10 @@ from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
+from spectrue_core.tools.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.url_utils import get_registrable_domain
+from spectrue_core.verification.orchestration.sufficiency import check_sufficiency_for_claim, SufficiencyStatus
 from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url, source_id_for_url
 from spectrue_core.verification.search.search_policy import (
     default_search_policy,
@@ -140,12 +142,38 @@ class ClusterWebSearchStep:
                     if not query:
                         continue
                     total_queries += 1
+                    # Stage 1: Trusted (Tier 1) search
+                    trusted_domains = get_trusted_domains_by_lang(ctx.lang or "en")
                     _, sources = await self.search_mgr.search_phase(
                         query,
                         max_results=max_results,
                         depth=search_depth,
                         topic="general",
+                        include_domains=trusted_domains,
                     )
+
+                    # Fallback logic: if trusted results are poor (Bayesian assessment), try general search
+                    # For cluster search, we use the first claim of the cluster as a representative for sufficiency
+                    rep_claim = cluster.claims[0] if cluster.claims else {"text": query}
+                    sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
+                    
+                    if sufficiency.status != SufficiencyStatus.SUFFICIENT:
+                        Trace.event("retrieval.cluster_search.fallback", {
+                            "query": query,
+                            "reason": "bayesian_insufficient",
+                            "confidence": sufficiency.reason,
+                        })
+                        _, general_sources = await self.search_mgr.search_phase(
+                            query,
+                            max_results=max_results,
+                            depth=search_depth,
+                            topic="general",
+                            exclude_domains=trusted_domains,
+                        )
+                        if general_sources:
+                            # Combine or prefer general results if they are better
+                            # For simplicity, we just add them to the sources list
+                            sources = (sources or []) + general_sources
                     for source in sources or []:
                         if not isinstance(source, dict):
                             continue

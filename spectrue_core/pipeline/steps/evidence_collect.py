@@ -224,17 +224,21 @@ class EvidenceCollectStep:
                 if cid:
                     claim_ids.append(str(cid))
             # Count claims that have ANY evidence (support, refute, OR context)
-            # This should match what score_evidence.coverage sees
             claims_with_any_items = set()
+            has_global_items = False
             for item in pack_items:
                 if isinstance(item, dict):
                     item_claim_id = item.get("claim_id")
                     if item_claim_id:
                         claims_with_any_items.add(str(item_claim_id))
+                    else:
+                        has_global_items = True
             
-            # If pack_items exist but have unassigned claim_ids, fallback to claim count
-            if not claims_with_any_items and pack_items and claim_ids:
-                # All items are "global" (no claim_id) - count all claims as having evidence
+            # If there are global items, they apply to ALL claims in standard mode
+            if has_global_items and self.include_global_pack:
+                claims_with_any_items = set(claim_ids)
+            # Fallback for when everything is global but skip_global is on (unlikely but safe)
+            elif not claims_with_any_items and pack_items and claim_ids:
                 claims_with_any_items = set(claim_ids)
             
             evidence_index = EvidenceIndex(

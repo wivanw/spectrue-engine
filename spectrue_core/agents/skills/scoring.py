@@ -21,6 +21,7 @@ import json
 from typing import Literal
 
 from spectrue_core.pipeline.mode import AnalysisMode
+from spectrue_core.scoring.belief import prob_to_log_odds, log_odds_to_prob
 
 # Structured output schemas
 from spectrue_core.agents.llm_schemas import (
@@ -132,6 +133,9 @@ class ScoringSkill(BaseSkill):
                 "excerpt": content_text
             })
 
+        global_sources = sources_by_claim.get(None, []) + sources_by_claim.get("unknown", [])
+        global_count = len(global_sources)
+
         Trace.event(
             "score_evidence.inputs",
             {
@@ -139,13 +143,16 @@ class ScoringSkill(BaseSkill):
                     {
                         "claim_id": cid,
                         "sources": len(sources),
+                        "global_pool": global_count,
                         "stances": [
                             s.get("stance") for s in sources[:5]
                         ],
                     }
                     for cid, sources in sources_by_claim.items()
+                    if cid is not None and cid != "unknown"
                 ],
-                "claims_total": len(sources_by_claim),
+                "global_sources": global_count,
+                "claims_total": len(sources_by_claim) - (1 if global_count > 0 else 0),
             },
         )
 
@@ -164,11 +171,16 @@ class ScoringSkill(BaseSkill):
             # SECURITY: Sanitize claims text
             safe_text = sanitize_input(c.get("text", ""))
 
+            # A claim has evidence if it has explicit sources OR if there are global sources
+            # that might be relevant.
+            matched_count = len(sources_by_claim.get(cid, []))
+
             claims_info.append({
                 "id": cid,
                 "text": safe_text,
                 "importance": float(c.get("importance", 0.5)), # Vital for LLM aggregation
-                "matched_evidence_count": len(sources_by_claim.get(cid, []))
+                "matched_evidence_count": matched_count,
+                "global_evidence_count": global_count,
             })
 
         deferred_map = {
@@ -176,8 +188,10 @@ class ScoringSkill(BaseSkill):
             for c in raw_claims
             if isinstance(c, dict)
         }
+        # Only mark as 'no_evidence' if BOTH local and global pools are empty
         no_evidence = [
-            c.get("id") for c in claims_info if c.get("matched_evidence_count", 0) == 0
+            c.get("id") for c in claims_info 
+            if c.get("matched_evidence_count", 0) == 0 and global_count == 0
         ]
         Trace.event(
             "score_evidence.coverage",
@@ -205,7 +219,7 @@ class ScoringSkill(BaseSkill):
         cache_key = f"score_v7_plat_{prompt_hash}"
 
         try:
-            m = self.config.openai_model or ModelID.PRO
+            m = ModelID.PRO
 
             result = await self.llm_client.call_json(
                 model=m,
@@ -264,7 +278,39 @@ class ScoringSkill(BaseSkill):
                 anchor_id = max(importance_by_id.items(), key=lambda kv: kv[1])[0]
 
             # Determine per-claim scores (ensure every claim has an entry)
-            score_by_id = {cv.get("claim_id"): cv.get("verdict_score", -1.0) for cv in claim_verdicts if cv.get("claim_id")}
+            # Signal score mapping: evidence veracity + prior internal knowledge
+            score_by_id = {}
+            prior_by_id = {}
+            for cv in claim_verdicts:
+                cid = cv.get("claim_id")
+                if not cid:
+                    continue
+                g = float(cv.get("verdict_score", -1.0))
+                p = float(cv.get("prior_score", -1.0))
+                pr = str(cv.get("prior_reason", ""))
+                
+                prior_by_id[cid] = (p, pr)
+                
+                # Bayesian Hybrid Signal Calculation:
+                # 1. Evidence is primary. If G < 0 (unverified), result is unverified (-1.0).
+                # 2. Prior is a probabilistic "nudge" using additive log-odds.
+                # 3. If Prior is unknown (-1.0) or reason contains NEI, it's ignored.
+                if g < 0:
+                    score_by_id[cid] = -1.0
+                else:
+                    # Ignore prior if unknown or NEI
+                    if p < 0 or "NEI" in pr.upper():
+                        score_by_id[cid] = g
+                    else:
+                        # Bayesian Update in Log-Odds space:
+                        # L_posterior = L_evidence + W_prior * L_prior
+                        # This follows 'Weighing of Evidence' principles (Good, 1950).
+                        PRIOR_W = 0.2
+                        l_evidence = prob_to_log_odds(g)
+                        l_prior = prob_to_log_odds(p)
+                        l_final = l_evidence + (PRIOR_W * l_prior)
+                        score_by_id[cid] = log_odds_to_prob(l_final)
+
             for ci in claims_info:
                 cid = ci.get("id")
                 if not cid:
@@ -290,8 +336,9 @@ class ScoringSkill(BaseSkill):
                     den += w
                 clamped["verified_score"] = (num / den) if den > 0 else -1.0
                 clamped["verified_score_policy"] = {
-                    "policy": "importance_weighted_with_unverified_zero",
+                    "policy": "importance_weighted_hybrid_signal",
                     "anchor_claim_id": anchor_id,
+                    "prior_included": True,
                 }
             
             # For trace/debug only: list of non-negative per-claim G values
@@ -300,22 +347,30 @@ class ScoringSkill(BaseSkill):
                 if isinstance(g, (int, float)) and float(g) >= 0
             ]
             
+            # Update per-claim rgba[1] to reflect hybrid signal if informative
+            for cv in claim_verdicts:
+                cid = cv.get("claim_id")
+                if cid in score_by_id and cv.get("rgba"):
+                    # Only update if evidence was found.
+                    if score_by_id[cid] >= 0:
+                        cv["rgba"][1] = score_by_id[cid]
+            
             # Debug: trace aggregation decision
             Trace.event(
                 "score_evidence.aggregation",
                 {
                     "claim_count": len(claim_verdicts),
-                    "claims_total": len(claims_info),
+                    "claims_total": len(importance_by_id),
                     "anchor_claim_id": anchor_id,
                     "aggregation_policy": clamped.get("verified_score_policy"),
                     "valid_g_count": len(valid_g),
-                    "valid_g_values": valid_g[:5] if valid_g else [],
+                    "valid_g_values": valid_g,
                     "computed_verified_score": clamped["verified_score"],
-                    "claims_without_evidence": list(claims_without_evidence)[:5],
+                    "claims_without_evidence": list(claims_without_evidence),
                     "preserved_global_r": clamped.get("danger_score"),
                     "preserved_global_b": clamped.get("style_score"),
                     "preserved_global_a": clamped.get("explainability_score"),
-                },
+                }
             )
             # NOTE: Do NOT aggregate R, B, A from claim-level RGBA
             # Those remain as global article-level scores from LLM
@@ -485,7 +540,8 @@ class ScoringSkill(BaseSkill):
         async def score_single_claim(claim_info: dict) -> dict:
             """Score a single claim with its evidence."""
             cid = claim_info.get("id")
-            evidence = sources_by_claim.get(cid, [])
+            # Include both explicit matches AND global (shared) sources
+            evidence = sources_by_claim.get(cid, []) + sources_by_claim.get(None, []) + sources_by_claim.get("unknown", [])
 
             # Code-computed judge signals (must survive through the pipeline).
             # These are *signals* to help the judge reason about sufficiency, diversity, and uncertainty.
@@ -587,6 +643,8 @@ class ScoringSkill(BaseSkill):
                     "verdict_state": "insufficient_evidence",
                     "reason": "No evidence found for this claim.",
                     "rgba": [0.0, -1.0, 0.0, 0.0],
+                    "prior_score": -1.0,
+                    "prior_reason": "NEI",
                     "routing": {"model": "__skip__", "reason": "no_evidence"},
                 }
 
@@ -720,6 +778,8 @@ Return valid JSON now."""
                                 "verdict_score": None,
                                 "verdict": None,
                                 "rgba": None,
+                                "prior_score": -1.0,
+                                "prior_reason": "NEI (schema error)",
                                 "reason": f"LLM response missing required fields: {missing_fields}",
                                 "model": model_name,
                             }
@@ -744,6 +804,26 @@ Return valid JSON now."""
                             max(0.0, min(1.0, float(rgba[2]))),
                             max(0.0, min(1.0, float(rgba[3]))),
                         ]
+
+                        # --- Prior knowledge extraction & Bayesian Fusion ---
+                        p_val = float(result.get("prior_score", -1.0))
+                        p_reason = str(result.get("prior_reason", ""))
+                        
+                        # Apply hybrid signal to parallel verdict score
+                        if p_val >= 0 and "NEI" not in p_reason.upper():
+                            # If G is valid (not unknown), perform Bayesian update.
+                            if g_val >= 0:
+                                PRIOR_W = 0.2
+                                l_evidence = prob_to_log_odds(g_val)
+                                l_prior = prob_to_log_odds(p_val)
+                                l_final = l_evidence + (PRIOR_W * l_prior)
+                                
+                                result["verdict_score"] = log_odds_to_prob(l_final)
+                                result["rgba"][1] = result["verdict_score"]
+                                result["hybrid_signal"] = True
+                        
+                        result["prior_score"] = p_val
+                        result["prior_reason"] = p_reason
 
                         Trace.event(
                             "score_single_claim.success",
@@ -807,11 +887,11 @@ Return valid JSON now."""
                     {
                         "claim_id": cid,
                         "from_model": routed_model,
-                        "to_model": "gpt-5.2",
+                        "to_model": ModelID.PRO,
                         "reason": primary.get("error_type") or "unknown",
                     },
                 )
-                fallback = await _call_model("gpt-5.2", use_cache=False)
+                fallback = await _call_model(ModelID.PRO, use_cache=False)
                 if fallback.get("status") == "ok":
                     fallback["routing"] = {**route_debug, "fallback_from": routed_model}
                     return fallback
@@ -820,17 +900,17 @@ Return valid JSON now."""
                 return fallback
 
             # Optional: nano failure fallback (rare but safer than returning error)
-            if routed_model == "gpt-5-nano":
+            if routed_model == ModelID.NANO:
                 Trace.event(
                     "judge.model_fallback",
                     {
                         "claim_id": cid,
                         "from_model": routed_model,
-                        "to_model": "gpt-5.2",
+                        "to_model": ModelID.PRO,
                         "reason": primary.get("error_type") or "unknown",
                     },
                 )
-                fallback = await _call_model("gpt-5.2", use_cache=False)
+                fallback = await _call_model(ModelID.PRO, use_cache=False)
                 if fallback.get("status") == "ok":
                     fallback["routing"] = {**route_debug, "fallback_from": routed_model}
                     return fallback
@@ -1008,10 +1088,10 @@ Return valid JSON now."""
         }
         prompt += "\n\n" + no_tag_note_by_lang.get((lang or "").lower(), no_tag_note_by_lang["en"])
 
-        Trace.event("llm.prompt", {"kind": "analysis", "model": self.config.openai_model})
+        Trace.event("llm.prompt", {"kind": "analysis", "model": ModelID.NANO})
         try:
             result = await self.llm_client.call_json(
-                model=self.config.openai_model or "gpt-5-nano",
+                model=ModelID.NANO,
                 input=prompt,
                 instructions="You are Aletheia, an advanced fact-checking AI.",
                 response_schema=ANALYSIS_RESPONSE_SCHEMA,
@@ -1166,7 +1246,7 @@ Return valid JSON now."""
         cache_key = f"score_struct_v1_{prompt_hash}"
 
         try:
-            m = self.config.openai_model or "gpt-5.2"
+            m = ModelID.PRO
 
             result = await self.llm_client.call_json(
                 model=m,

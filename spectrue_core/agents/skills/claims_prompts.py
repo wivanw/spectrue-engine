@@ -567,9 +567,9 @@ You are extracting **externally verifiable factual propositions** from text.
 ## VERIFIABILITY CONTRACT (CRITICAL)
 
 A claim is verifiable if and only if it has:
-1. **Subject entities**: At least one named entity (person, organization, place, product)
-2. **Time anchor**: When it happened/was stated (date, year, relative time)
-3. **Falsifiability**: The claim can be proven TRUE or FALSE using external evidence
+1. **Subject entities**: At least one named or scientific entity (person, organization, place, product, chemical, biological entity, or specific natural object like "Crystals", "DNA", "Solar Wind")
+2. **Time anchor**: When it happened/was stated OR evidence of being a "timeless truth" (natural law, physical property, mathematical definition)
+3. **Falsifiability**: The claim can be proven TRUE or FALSE using external evidence (scientific journals, official stats, textbooks, reputable news)
 
 ## REQUIRED FIELDS FOR EACH CLAIM
 
@@ -579,8 +579,8 @@ For every claim you extract, provide:
 2. **normalized_text**: Self-sufficient English summary for search
 3. **subject_entities**: List of canonical entity names (1-5 items, REQUIRED)
    - Example: ["Elon Musk", "Tesla", "SEC"]
-4. **predicate_type**: One of: "event", "measurement", "policy", "quote", "ranking", "causal", "existence", "other"
-5. **time_anchor**: Object with {{"type": "explicit_date"|"range"|"relative"|"unknown", "value": "<extracted or unknown>"}}
+4. **predicate_type**: One of: "event", "measurement", "policy", "quote", "ranking", "causal", "existence", "definition", "property", "other"
+5. **time_anchor**: Object with {{"type": "explicit_date"|"range"|"relative"|"timeless"|"unknown", "value": "<extracted or unknown>"}}
 6. **location_anchor**: Geographic context or "unknown"
 7. **falsifiability**: Object with:
    - is_falsifiable: boolean (MUST be true for claims you emit)
@@ -596,7 +596,8 @@ For every claim you extract, provide:
 ❌ **Opinions without facts**: "This is an encouraging sign", "The policy is terrible"
 ❌ **Meta-statements**: "There is insufficient evidence", "This does not prove anything"
 ❌ **Rhetorical summaries**: "In conclusion, X is important"
-❌ **Unanchored generalizations**: "People tend to..." (no entity, no time)
+❌ **Unanchored generalizations**: "People tend to...", "Life is complex" (vague social generalizations without specific entity or metric)
+   - *Note*: Scientific definitions like "Water boils at 100C" are NOT generalizations; they are verifiable properties.
 ❌ **Predictions/forecasts**: "X will happen", "Expected to increase"
 ❌ **Subjective evaluations**: "X is the best", "Y is undervalued" (without metric)
 

@@ -1,5 +1,8 @@
 # Copyright (C) 2025 Ivan Bondarenko
 #
+from spectrue_core.schema.claim_metadata import EvidenceChannel
+
+
 # This file is part of Spectrue Engine.
 #
 # Spectrue Engine is free software: you can redistribute it and/or modify
@@ -176,6 +179,9 @@ TRUSTED_SOURCES: dict[str, list[str]] = {
         "abajournal.com",
         "thecrimereport.org",
     ],
+    "reference_and_encyclopedic": [
+        "wikipedia.org",
+    ],
 }
 
 # Helper to flatten all domains for broad searches (deduped, order-preserving).
@@ -219,6 +225,7 @@ def get_trusted_domains_by_lang(lang: str) -> list[str]:
         + TRUSTED_SOURCES["fact_checking_ifcn"]
         + TRUSTED_SOURCES["science_and_health"]
         + TRUSTED_SOURCES["technology"]
+        + TRUSTED_SOURCES["reference_and_encyclopedic"]
         # + TRUSTED_SOURCES["international_public_bodies"]  # removed for news queries
     )
 
@@ -405,3 +412,141 @@ def is_social_platform(domain: str) -> bool:
             return True
 
     return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier Detection Logic (Moved from sufficiency.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def is_authoritative(domain: str) -> bool:
+    """
+    Check if domain is authoritative (Tier A).
+    """
+    if not domain:
+        return False
+
+    d = domain.lower().strip()
+
+    # Check TLDs
+    for tld in TIER_A_TLDS:
+        if d.endswith(tld):
+            return True
+
+    # Check sub-TLDs
+    for suffix in TIER_A_SUFFIXES:
+        if d.endswith(suffix):
+            return True
+
+    # Check explicit lists
+    if d in TRUSTED_SOURCES.get("international_public_bodies", []):
+        return True
+    if d in TRUSTED_SOURCES.get("science_and_health", []):
+        return True
+    if d in TRUSTED_SOURCES.get("astronomy_tier_a", []):
+        return True
+    if d in TRUSTED_SOURCES.get("global_news_agencies", []):
+        return True
+    if d in TRUSTED_SOURCES.get("fact_checking_ifcn", []):
+        return True
+
+    return False
+
+
+def is_reputable_news(domain: str) -> bool:
+    """
+    Check if domain is reputable news (Tier B).
+    """
+    if not domain:
+        return False
+
+    d = domain.lower().strip()
+
+    # Check against all trusted domains
+    if d in ALL_TRUSTED_DOMAINS:
+        return True
+
+    # Check specific categories
+    tier_b_categories = [
+        "general_news_western",
+        "ukraine_imi_whitelist",
+        "general_news_ukraine_broad",
+        "europe_tier1",
+        "asia_pacific",
+        "technology",
+        "astronomy_tier_b",
+        "russia_independent_exiled",
+    ]
+
+    for category in tier_b_categories:
+        if d in TRUSTED_SOURCES.get(category, []):
+            return True
+
+    return False
+
+
+def is_local_media(domain: str) -> bool:
+    """
+    Check if domain is local/regional media (Tier C).
+    """
+    if not domain:
+        return False
+
+    d = domain.lower().strip()
+
+    # Not social and not authoritative/reputable
+    if is_social_platform(d):
+        return False
+    if is_authoritative(d) or is_reputable_news(d):
+        return False
+
+    # Assume local media if it has news-like TLD patterns
+    news_patterns = [".news", ".media", ".tv", ".radio", ".times", ".post", ".herald"]
+    for pattern in news_patterns:
+        if pattern in d:
+            return True
+
+    return False
+
+
+def get_domain_tier(domain: str) -> EvidenceChannel:
+    """
+    Determine the evidence channel for a domain.
+    """
+    if not domain:
+        return EvidenceChannel.LOW_RELIABILITY
+
+    if is_authoritative(domain):
+        return EvidenceChannel.AUTHORITATIVE
+
+    if is_reputable_news(domain):
+        return EvidenceChannel.REPUTABLE_NEWS
+
+    if is_social_platform(domain):
+        return EvidenceChannel.SOCIAL
+
+    if is_local_media(domain):
+        return EvidenceChannel.LOCAL_MEDIA
+
+    return EvidenceChannel.LOW_RELIABILITY
+
+
+def get_tier_code(domain: str) -> str:
+    """
+    Get string tier code (A, B, C, D) for a domain.
+    
+    Used for RGBA explainability adjustment.
+    """
+    channel = get_domain_tier(domain)
+    match channel:
+        case EvidenceChannel.AUTHORITATIVE:
+            return "A"
+        case EvidenceChannel.REPUTABLE_NEWS:
+            return "B"
+        case EvidenceChannel.LOCAL_MEDIA:
+            return "C"
+        case EvidenceChannel.SOCIAL:
+            return "D"
+        case EvidenceChannel.LOW_RELIABILITY:
+            return "D"
+        case _:
+            return "D"

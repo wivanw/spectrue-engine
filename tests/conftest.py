@@ -1,3 +1,4 @@
+from spectrue_core.llm.model_registry import ModelID
 # Copyright (C) 2025 Ivan Bondarenko
 #
 # This file is part of Spectrue Engine.
@@ -46,7 +47,7 @@ def mock_llm_client():
     client.call = AsyncMock(return_value={
         "content": "Mocked LLM content",
         "parsed": None,
-        "model": "gpt-5-nano",
+        "model": ModelID.NANO,
         "cache_status": "NONE",
         "usage": {"total_tokens": 100}
     })

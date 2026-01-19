@@ -130,6 +130,36 @@ sign = -1 if CONTRADICTS else +1
 
 ---
 
+### Hybrid Signal Fusion [A]
+
+**Status:** Formally Grounded (Bayesian Belief Updating)
+
+Fuses internal LLM knowledge (`prior_score`) with external evidence results (`verdict_score`) using weighted additive log-odds.
+
+**Formula:**
+```python
+# L = logit(p)
+L_final = L_evidence + W_prior * L_prior
+G_final = sigmoid(L_final)
+```
+
+**Parameters:**
+- `W_prior = 0.2` (Prior Knowledge weight factor)
+- `L_evidence = logit(verdict_score)`
+- `L_prior = logit(prior_score)`
+
+**Sentinels:**
+- `prior_score = -1.0`: Unknown. Update is SKIPPED ($W_{prior} = 0.0$).
+- `prior_score = 0.5`: Neutral. Informative signal (contribution to $L_{final}$ is $0$).
+
+**Code location:** `spectrue_core/agents/skills/scoring.py`
+
+> **Reference:** Good, I.J. (1950). *Probability and the Weighing of Evidence*.
+> This implements a conservative Bayesian update where internal model knowledge 
+> acts as a "nudge" to the evidence-based signal.
+
+---
+
 ### RGBA Belief Dimensions [B]
 
 **Status:** Engineering Decision

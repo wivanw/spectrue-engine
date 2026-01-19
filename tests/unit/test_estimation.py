@@ -1,3 +1,4 @@
+from spectrue_core.llm.model_registry import ModelID
 # Copyright (C) 2025 Ivan Bondarenko
 #
 # This file is part of Spectrue Engine.
@@ -22,7 +23,7 @@ def _policy() -> CreditPricingPolicy:
         llm_safety_multiplier=1.2,
         rounding="ceil",
         llm_prices={
-            "gpt-5-nano": ModelPrice(
+            ModelID.NANO: ModelPrice(
                 usd_per_input_token=0.00000005,
                 usd_per_output_token=0.0000004,
                 usd_per_reasoning_token=None,
@@ -39,7 +40,7 @@ def _policy() -> CreditPricingPolicy:
 def _estimator() -> CostEstimator:
     return CostEstimator(
         _policy(),
-        standard_model="gpt-5-nano",
+        standard_model=ModelID.NANO,
         pro_model="gpt-5",
     )
 

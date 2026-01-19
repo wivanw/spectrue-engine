@@ -38,13 +38,13 @@ def _normalize_claim_id(raw: object, *, default_claim_id: str | None) -> str | N
     if raw is _MISSING:
         return default_claim_id
     if raw is None:
-        return None
+        return default_claim_id
     if isinstance(raw, str):
         v = raw.strip()
         if not v:
             return default_claim_id
         if v.lower() in {"global", "__global__", "none", "null"}:
-            return None
+            return default_claim_id
         return v
     return default_claim_id
 
@@ -335,10 +335,12 @@ def build_evidence_pack(
     # That behavior can mis-route global/clustered evidence into "c1" in multi-claim articles,
     # making the real target claim appear to have "no sources" downstream.
     default_claim_id = None
-    if anchor_claim_id:
-        default_claim_id = anchor_claim_id
-    elif len(claims) == 1:
-        default_claim_id = claims[0].get("id")
+    if len(claims) == 1:
+        default_claim_id = claims[0].get("id") or anchor_claim_id
+    elif not anchor_claim_id:
+        # Fallback for empty anchor in legacy calls
+        if claims:
+            default_claim_id = None # Keep global if multiple
     claim_id_norm_counts: dict[str, int] | None = None
 
     if search_results_clustered is not None:
@@ -419,7 +421,7 @@ def build_evidence_pack(
                 domain=domain,
                 title=s.get("title", ""),
                 snippet=s.get("snippet", ""),
-                content_excerpt=(s.get("content") or s.get("extracted_content") or "")[:1500],
+                content_excerpt=(s.get("content") or s.get("extracted_content") or "")[:25000],
                 published_at=s.get("published_date"),
                 source_type=source_type,  # type: ignore
                 stance=stance,  # type: ignore

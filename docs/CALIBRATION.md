@@ -4,8 +4,9 @@ This document describes how to fit the alpha/beta parameters used by the
 claim posterior model:
 
     l_post = l_prior + alpha * l_llm + beta * l_evidence
+    l_final = l_post + W_prior * l_internal_prior
 
-The script performs MAP estimation with Gaussian priors on alpha and beta.
+The script performs MAP estimation with Gaussian priors on alpha, beta, and W_prior.
 
 ## Dataset format
 

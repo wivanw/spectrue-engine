@@ -33,14 +33,20 @@ DEFAULT_STAGE_ESTIMATES: dict[str, StageTokenEstimate] = {
     "extract": StageTokenEstimate(input_tokens=400, output_tokens=200),  # URL extraction (if applicable)
     "clean": StageTokenEstimate(input_tokens=600, output_tokens=300),    # Article cleaning (if applicable)
     "claims": StageTokenEstimate(
-        input_tokens=2500, output_tokens=800, per_claim_input=50, per_claim_output=30
-    ),  # Claim extraction: ~2300 input, ~1700 output observed
+        input_tokens=500, output_tokens=400, per_claim_input=50, per_claim_output=30
+    ),  # Claim extraction: reduced based on actual traces (was 2500/800)
     "clustering": StageTokenEstimate(
-        input_tokens=400, output_tokens=150, per_claim_input=50, per_claim_output=25
-    ),  # Stance clustering: lighter than originally estimated
+        input_tokens=200, output_tokens=50, per_claim_input=50, per_claim_output=25
+    ),  # Stance clustering: minimal for simple checks
     "scoring": StageTokenEstimate(
-        input_tokens=500, output_tokens=250, per_claim_input=50, per_claim_output=25
-    ),  # Score evidence: ~300 input, ~500 output observed (per claim)
+        input_tokens=1000, output_tokens=200, per_claim_input=1000, per_claim_output=150
+    ),  # Score evidence: heavy context reading (trace showed ~3k tokens for 2 claims)
+    "claim_retrieval_plan": StageTokenEstimate(
+        input_tokens=400, output_tokens=400, per_claim_input=50, per_claim_output=50
+    ),  # Planning retrival strategies per claim
+    "edge_typing": StageTokenEstimate(
+        input_tokens=500, output_tokens=200, per_claim_input=50, per_claim_output=20
+    ),  # Claim graph edge classification
 }
 
 
@@ -70,12 +76,25 @@ class CostEstimator:
             raise ValueError(f"Missing pricing for model: {model}")
         return price
 
-    def _estimate_llm_stage(self, *, model: str, stage: str, claim_count: int) -> int:
+    def _estimate_llm_stage(self, *, model: str, stage: str, claim_count: int, input_length: int) -> int:
         estimate = self._stage_estimates.get(stage)
         if not estimate:
             return 0
-        input_tokens = estimate.input_tokens + estimate.per_claim_input * max(0, claim_count)
+        
+        # Dynamic base input tokens based on input length (approx 1 token per 3-4 chars)
+        # We assume instructions take ~500-1000 tokens overhead.
+        # Stages reading the full text: extract, clean, claims.
+        # Stages reading snippets: clustering, scoring.
+        
+        base_input = estimate.input_tokens
+        if stage in ("extract", "clean", "claims"):
+             # Heuristic: base represents instructions overhead, add text length
+             text_tokens = int(input_length / 3.5)
+             base_input = estimate.input_tokens + text_tokens
+        
+        input_tokens = base_input + estimate.per_claim_input * max(0, claim_count)
         output_tokens = estimate.output_tokens + estimate.per_claim_output * max(0, claim_count)
+        
         price = self._get_model_price(model)
         return self._llm_calc.credits_cost(
             price=price,
@@ -85,17 +104,17 @@ class CostEstimator:
         )
 
     def estimate_min(
-        self, *, claim_count: int, search_count: int, input_type: str = "text"
+        self, *, claim_count: int, search_count: int, input_type: str = "text", input_length: int = 1000
     ) -> int:
         return self.estimate_range(
-            claim_count=claim_count, search_count=search_count, input_type=input_type
+            claim_count=claim_count, search_count=search_count, input_type=input_type, input_length=input_length
         )["min"]
 
     def estimate_max(
-        self, *, claim_count: int, search_count: int, input_type: str = "text"
+        self, *, claim_count: int, search_count: int, input_type: str = "text", input_length: int = 1000
     ) -> int:
         return self.estimate_range(
-            claim_count=claim_count, search_count=search_count, input_type=input_type
+            claim_count=claim_count, search_count=search_count, input_type=input_type, input_length=input_length
         )["max"]
 
     def estimate_range(
@@ -104,6 +123,7 @@ class CostEstimator:
         claim_count: int,
         search_count: int,
         input_type: str = "text",
+        input_length: int = 1000,
     ) -> dict:
         min_by_stage: dict[str, int] = {}
         max_by_stage: dict[str, int] = {}
@@ -121,11 +141,13 @@ class CostEstimator:
                 model=self._standard_model,
                 stage=stage,
                 claim_count=claim_count,
+                input_length=input_length,
             )
             max_by_stage[stage] = self._estimate_llm_stage(
                 model=self._pro_model,
                 stage=stage,
                 claim_count=claim_count,
+                input_length=input_length,
             )
 
         search_usd_min = self._tavily_calc.usd_cost(search_count * self._standard_search_credits)
