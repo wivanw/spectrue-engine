@@ -421,7 +421,7 @@ def build_evidence_pack(
                 domain=domain,
                 title=s.get("title", ""),
                 snippet=s.get("snippet", ""),
-                content_excerpt=(s.get("content") or s.get("extracted_content") or "")[:1500],
+                content_excerpt=(s.get("content") or s.get("extracted_content") or "")[:25000],
                 published_at=s.get("published_date"),
                 source_type=source_type,  # type: ignore
                 stance=stance,  # type: ignore
