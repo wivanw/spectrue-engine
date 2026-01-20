@@ -577,7 +577,7 @@ For every claim you extract, provide:
 
 1. **claim_text**: Exact substring from the article (original language)
 2. **normalized_text**: Self-sufficient English summary for search
-3. **subject_entities**: List of canonical entity names (1-5 items, REQUIRED)
+3. **subject_entities**: List of canonical entity names (1-10 items, REQUIRED)
    - Example: ["Elon Musk", "Tesla", "SEC"]
 4. **predicate_type**: One of: "event", "measurement", "policy", "quote", "ranking", "causal", "existence", "definition", "property", "other"
 5. **time_anchor**: Object with {{"type": "explicit_date"|"range"|"relative"|"timeless"|"unknown", "value": "<extracted or unknown>"}}
@@ -586,7 +586,7 @@ For every claim you extract, provide:
    - is_falsifiable: boolean (MUST be true for claims you emit)
    - falsifiable_by: one of "public_records", "scientific_publication", "official_statement", "reputable_news", "dataset", "other"
 8. **expected_evidence**: Object with {{"evidence_kind": "primary_source"|"secondary_source"|"both", "likely_sources": [...]}}
-9. **retrieval_seed_terms**: Array of 3-10 KEYWORDS (not sentences!) derived from entities + key noun phrases
+9. **retrieval_seed_terms**: Array of 3-15 KEYWORDS (not sentences!) derived from entities + key noun phrases
    - GOOD: ["Tesla", "SEC", "fraud", "settlement", "2024"]
    - BAD: ["Tesla was sued by the SEC for fraud in 2024"]
 10. **importance**: Float 0.0-1.0 for prioritization
@@ -679,7 +679,7 @@ ARTICLE CONTEXT:
 {article_context_sm}
 
 **CRITICAL: search_queries FORMAT REQUIREMENTS:**
-- MUST be a non-empty array with 1-5 keyword queries
+- MUST be a non-empty array with 1-10 keyword queries
 - Each query: 2-8 words, MAX 80 characters
 - Format: keyword phrases ONLY (NOT full sentences)
 - NO trailing periods or punctuation
