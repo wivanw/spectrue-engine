@@ -24,7 +24,6 @@ from spectrue_core.verification.evidence.evidence_scoring import (
     tier_rank,
     compute_article_g_from_anchor,
     select_anchor_for_article_g,
-    TIER_A_PRIOR_MEAN,
     TIER_A_BASELINE,
 )
 
@@ -170,36 +169,13 @@ class TestClaimText:
 class TestExplainabilityFactorForTier:
     """Tests for explainability_factor_for_tier function."""
 
-    def test_tier_a_highest(self):
-        """Tier A should have highest factor."""
-        factor_a, _, _ = explainability_factor_for_tier("A")
-        factor_b, _, _ = explainability_factor_for_tier("B")
-        factor_c, _, _ = explainability_factor_for_tier("C")
-        assert factor_a > factor_b > factor_c
-
-    def test_tier_a_prime(self):
-        """Tier A' should be between A and B."""
-        factor_a, _, _ = explainability_factor_for_tier("A")
-        factor_a_prime, _, _ = explainability_factor_for_tier("A'")
-        factor_b, _, _ = explainability_factor_for_tier("B")
-        assert factor_a > factor_a_prime > factor_b
-
-    def test_unknown_tier(self):
-        """Unknown tier should return default factor."""
-        factor, source, _ = explainability_factor_for_tier("UNKNOWN")
-        assert source == "best_tier"
-        assert factor < 1.0  # Unknown is below baseline
-
-    def test_none_tier(self):
-        """None tier should return unknown_default."""
-        factor, source, _ = explainability_factor_for_tier(None)
-        assert source == "unknown_default"
-
-    def test_case_insensitive(self):
-        """Tier lookup should be case-insensitive."""
-        f1, _, _ = explainability_factor_for_tier("A")
-        f2, _, _ = explainability_factor_for_tier("a")
-        assert f1 == f2
+    def test_all_tiers_neutral(self):
+        """All tiers should now return neutral factor 1.0 (M119)."""
+        for tier in ["A", "A'", "B", "C", "D", "UNKNOWN", None]:
+            factor, source, prior = explainability_factor_for_tier(tier)
+            assert factor == 1.0
+            assert source == "neutral (m119)"
+            assert prior == 0.90
 
 
 class TestTierRank:
@@ -357,19 +333,7 @@ class TestSelectAnchorForArticleG:
 class TestConstants:
     """Tests for module constants."""
 
-    def test_tier_prior_ordering(self):
-        """TIER_A_PRIOR_MEAN should have correct ordering."""
-        assert TIER_A_PRIOR_MEAN["A"] > TIER_A_PRIOR_MEAN["B"]
-        assert TIER_A_PRIOR_MEAN["B"] > TIER_A_PRIOR_MEAN["C"]
-        assert TIER_A_PRIOR_MEAN["C"] > TIER_A_PRIOR_MEAN["D"]
-        assert TIER_A_PRIOR_MEAN["D"] > TIER_A_PRIOR_MEAN["UNKNOWN"]
-
-    def test_baseline_is_tier_b(self):
-        """TIER_A_BASELINE should equal Tier B prior."""
-        assert TIER_A_BASELINE == TIER_A_PRIOR_MEAN["B"]
-
-    def test_all_priors_valid_probability(self):
-        """All tier priors should be valid probabilities."""
-        for tier, prior in TIER_A_PRIOR_MEAN.items():
-            assert 0.0 <= prior <= 1.0, f"Invalid prior for tier {tier}"
+    def test_baseline_value(self):
+        """TIER_A_BASELINE should be 0.90."""
+        assert TIER_A_BASELINE == 0.90
 
