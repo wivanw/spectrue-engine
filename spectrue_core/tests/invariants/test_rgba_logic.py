@@ -1,5 +1,4 @@
 import math
-import pytest
 from spectrue_core.verification.evidence.evidence_alpha import weight_func, compute_A_det, sigmoid
 
 def test_weight_func_basic():

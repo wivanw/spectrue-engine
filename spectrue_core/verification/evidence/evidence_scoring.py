@@ -24,8 +24,6 @@ import logging
 import math
 from typing import TYPE_CHECKING, Any
 
-from spectrue_core.utils.trace import Trace
-
 if TYPE_CHECKING:
     pass
 

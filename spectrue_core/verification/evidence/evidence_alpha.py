@@ -16,7 +16,7 @@ Implements deterministic A_det via log-odds accumulation of source reliability.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from spectrue_core.verification.evidence.evidence_pack import EvidenceItem
