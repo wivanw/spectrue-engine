@@ -29,6 +29,7 @@ class CostSummaryStep:
     """Attach metering summary to the final result payload."""
 
     name: str = "cost_summary"
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

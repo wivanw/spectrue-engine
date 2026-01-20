@@ -9,6 +9,7 @@
 
 from .base_skill import BaseSkill, logger
 from spectrue_core.verification.evidence.evidence_pack import Claim
+from spectrue_core.llm.model_registry import ModelID
 
 class RelevanceSkill(BaseSkill):
     """
@@ -70,7 +71,7 @@ Return JSON:
 
         try:
             result = await self.llm_client.call_json(
-                model="gpt-5-nano",
+                model=ModelID.NANO,
                 input=prompt,
                 instructions="You are a semantic router. Be generous with TOPIC matches for context, strict with EXACT matches.",
                 reasoning_effort="low",

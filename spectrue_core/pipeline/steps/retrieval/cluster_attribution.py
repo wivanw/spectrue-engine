@@ -32,6 +32,7 @@ class ClusterAttributionStep:
 
     config: Any
     name: str = "cluster_attribution"
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

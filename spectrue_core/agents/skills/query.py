@@ -15,6 +15,7 @@ from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from spectrue_core.agents.llm_schemas import QUERY_GENERATION_SCHEMA
 from spectrue_core.agents.llm_client import is_schema_failure
+from spectrue_core.llm.model_registry import ModelID
 
 FOLLOWUP_QUERY_TYPES = {
     "clarify_entity",
@@ -185,7 +186,7 @@ CONTEXT:
 
         try:
             result = await self.llm_client.call_json(
-                model="gpt-5-nano",
+                model=ModelID.NANO,
                 input=prompt,
                 instructions=instructions,
                 response_schema=QUERY_GENERATION_SCHEMA,

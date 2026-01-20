@@ -119,7 +119,7 @@ def _build_evidence_item(
     attribution: str,
 ) -> dict[str, Any]:
     cleaned = str(doc.get("cleaned_text") or "")
-    content_excerpt = cleaned[:1500] if cleaned else ""
+    content_excerpt = cleaned[:25000] if cleaned else ""
 
     return {
         "claim_id": claim_id,

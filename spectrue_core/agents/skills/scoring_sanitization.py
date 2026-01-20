@@ -11,8 +11,8 @@ import re
 
 from spectrue_core.utils.security import sanitize_input
 
-MAX_SNIPPET_LEN = 600
-MAX_QUOTE_LEN = 300
+MAX_SNIPPET_LEN = 20000
+MAX_QUOTE_LEN = 1000
 
 
 def sanitize_snippet(text: str, *, limit: int = MAX_SNIPPET_LEN) -> str:

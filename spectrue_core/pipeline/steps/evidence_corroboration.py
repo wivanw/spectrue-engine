@@ -34,10 +34,9 @@ class EvidenceCorroborationStep(Step):
     - corroboration confirmations: unique similar clusters with SUPPORT/REFUTE (any anchor)
     - exact duplicate count (informational)
     """
+    weight: float = 1.0
 
-    @property
-    def name(self) -> str:
-        return "evidence_corroboration"
+    name: str = "evidence_corroboration"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         if ctx.mode.api_analysis_mode != AnalysisMode.DEEP_V2:

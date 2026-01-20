@@ -49,6 +49,7 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.verification.claims.claim_frame_builder import (
     build_claim_frames_from_pipeline,
 )
+from spectrue_core.llm.model_registry import ModelID
 
 
 @dataclass
@@ -117,10 +118,9 @@ class BuildClaimFramesStep(Step):
     Converts pipeline state (claims, evidence, execution state) into
     per-claim ClaimFrame bundles.
     """
+    weight: float = 1.0
 
-    @property
-    def name(self) -> str:
-        return "build_claim_frames"
+    name: str = "build_claim_frames"
 
     def __init__(self, config: Any | None = None):
         self._config = config
@@ -177,13 +177,12 @@ class SummarizeEvidenceStep(Step):
     
     Uses EvidenceSummarizerSkill to categorize evidence by stance.
     """
+    weight: float = 5.0
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
 
-    @property
-    def name(self) -> str:
-        return "summarize_evidence"
+    name: str = "summarize_evidence"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("summarize_evidence")
@@ -232,13 +231,12 @@ class JudgeClaimsStep(Step):
     Uses ClaimJudgeSkill to generate RGBA scores and verdicts.
     Output is returned unchanged to the frontend.
     """
+    weight: float = 20.0
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
 
-    @property
-    def name(self) -> str:
-        return "judge_claims"
+    name: str = "judge_claims"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("judge_claims")
@@ -281,7 +279,7 @@ class JudgeClaimsStep(Step):
                 repair_system = f"{repair_system}\nReturn only JSON; no markdown or extra text."
 
                 response = await self._llm.call_json(
-                    model=self._llm.model or "gpt-5-nano",
+                    model=self._llm.model or ModelID.NANO,
                     input=repair_prompt,
                     instructions=repair_system,
                     response_schema=CLAIM_JUDGE_SCHEMA,
@@ -411,9 +409,9 @@ class MarkJudgeUnavailableStep(Step):
     def __init__(self, reason: str = "judge_unavailable"):
         self._reason = reason
 
-    @property
-    def name(self) -> str:
-        return "judge_unavailable"
+    weight: float = 1.0
+
+    name: str = "judge_unavailable"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("judge_unavailable")
@@ -451,10 +449,9 @@ class AssembleDeepResultStep(Step):
 
     Produces per-claim outputs with no global scoring.
     """
+    weight: float = 1.0
 
-    @property
-    def name(self) -> str:
-        return "assemble_deep_result"
+    name: str = "assemble_deep_result"
 
     def __init__(self, config: Any | None = None):
         self._config = config
@@ -556,8 +553,6 @@ class AssembleDeepResultStep(Step):
                     judge_output.rgba.a,
                 ]
 
-                # Deep v2: if A is invalid (<0), use deterministic fallback from evidence stats.
-                # This does NOT override a valid judge A; it only prevents "broken" A.
                 if rgba and len(rgba) == 4 and isinstance(rgba[3], (int, float)) and rgba[3] < 0:
                     stats_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
                     st = stats_by_claim.get(frame.claim_id) if isinstance(stats_by_claim, dict) else None
@@ -568,6 +563,8 @@ class AssembleDeepResultStep(Step):
                         except Exception:
                             a_det_f = 0.0
                         rgba[3] = max(0.0, min(1.0, a_det_f))
+
+                # M133: Alpha capping removed — LLM A-score passes through unchanged
 
                 verdict_score = rgba[1] if isinstance(rgba, list) and len(rgba) > 1 else None
                 sources_used_refs = list(judge_output.sources_used or [])

@@ -114,6 +114,7 @@ class EvidenceCollectStep:
     search_mgr: Any  # SearchManager
     include_global_pack: bool = True
     name: str = "evidence_collect"
+    weight: float = 15.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
@@ -188,7 +189,15 @@ class EvidenceCollectStep:
                 sources=sources,
             )
 
-            evidence_by_claim = by_claim_items or _group_sources_by_claim(collection.sources)
+            # Prefer enriched sources from collect_evidence() for per-claim packs.
+            # by_claim_items are raw retrieval payloads (often missing stance/quote/relevance).
+            # We only fall back to by_claim_items when collection.sources is empty.
+            if isinstance(evidence_by_claim_override, dict) and evidence_by_claim_override:
+                evidence_by_claim = evidence_by_claim_override
+            elif collection.sources:
+                evidence_by_claim = _group_sources_by_claim(collection.sources)
+            else:
+                evidence_by_claim = by_claim_items or _group_sources_by_claim(sources)
 
             pack_items = list(collection.pack.get("items", [])) if isinstance(collection.pack, dict) else []
             pack_contract = None
@@ -216,17 +225,21 @@ class EvidenceCollectStep:
                 if cid:
                     claim_ids.append(str(cid))
             # Count claims that have ANY evidence (support, refute, OR context)
-            # This should match what score_evidence.coverage sees
             claims_with_any_items = set()
+            has_global_items = False
             for item in pack_items:
                 if isinstance(item, dict):
                     item_claim_id = item.get("claim_id")
                     if item_claim_id:
                         claims_with_any_items.add(str(item_claim_id))
+                    else:
+                        has_global_items = True
             
-            # If pack_items exist but have unassigned claim_ids, fallback to claim count
-            if not claims_with_any_items and pack_items and claim_ids:
-                # All items are "global" (no claim_id) - count all claims as having evidence
+            # If there are global items, they apply to ALL claims in standard mode
+            if has_global_items and self.include_global_pack:
+                claims_with_any_items = set(claim_ids)
+            # Fallback for when everything is global but skip_global is on (unlikely but safe)
+            elif not claims_with_any_items and pack_items and claim_ids:
                 claims_with_any_items = set(claim_ids)
             
             evidence_index = EvidenceIndex(

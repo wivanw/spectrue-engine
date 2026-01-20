@@ -41,7 +41,7 @@ async def test_phase_runner_dependency_ordering():
         query = args[0] if args else kwargs.get("query", "")
         execution_log.append(query)
         await asyncio.sleep(0)
-        return "", [{"url": "https://example.com"}]
+        return "", [{"url": "https://reuters.com", "quote": "Reliable evidence quote", "source_tier": "A"}]
 
     search_mgr.search_phase = AsyncMock(side_effect=mock_search)
 

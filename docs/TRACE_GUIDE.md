@@ -4,18 +4,17 @@ Spectrue Engine emits a structured JSONL trace for every run.
 
 ## Key events to look at
 
-- `claims.extracted` / `claims.normalized`: how many claims were produced and their metadata.
+- `claim_extraction.claims_extracted` / `claim_extraction.metadata_distribution`: how many claims were produced and their metadata.
 - `claims.skeleton.*`: coverage skeleton extraction events (parsing, coverage warnings, conversion stats).
-- `claims.dropped`: rejected non-verifiable claims with reason codes.
+- `claim.dropped`: rejected non-verifiable claims with reason codes.
 - `target_selection.completed`: which claims were chosen for retrieval (targets) vs deferred.
 - `urls_registered`: URLs collected per stage (stage, count).
 - `extract_batch_started`: extraction batch started (batch_size, pending_before, batch_urls_count, pending_after, stage).
 - `extract_batch_finished`: extraction batch completed (success_count, pending_before, batch_urls_count, pending_after, stage).
 - `bind_completed`: claim/url binding finished (stage).
 - `evidence.items.summary`: stance distribution (SUPPORT/REFUTE/CONTEXT) per claim.
-- `score_evidence.response`: LLM scoring output per claim.
+- `claim_audit.complete` / `evidence_audit.complete`: RGBA audit step completion (deep/audit pipeline).
 - `verdict.*`: deterministic post-processing and final per-claim verdict.
-- `verdict.explainability_tier_factor`: A adjustment from tier prior factor.
 
 ## How to diagnose cost spikes
 

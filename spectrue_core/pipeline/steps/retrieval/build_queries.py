@@ -116,6 +116,7 @@ class BuildQueriesStep:
     """Build a structured query plan without executing search."""
 
     name: str = "build_queries"
+    weight: float = 3.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         claims = ctx.claims or []

@@ -246,6 +246,12 @@ def clamp_score_evidence_result(result: dict, *, scoring_mode: ScoringMode | str
                     else:
                         # Standard mode: fallback will be used later
                         pass
+
+                # --- (5) Clamp prior_score ---
+                if "prior_score" in cv:
+                    cv["prior_score"] = safe_score(cv["prior_score"], default=-1.0)
+                else:
+                    cv["prior_score"] = -1.0
     else:
         result["claim_verdicts"] = []
 
@@ -353,6 +359,8 @@ def parse_structured_verdict(raw: dict, *, lang: str = "en") -> StructuredVerdic
                     confidence=confidence_label,
                     reasons_short=reasons_short,
                     reasons_expert=reasons_expert,
+                    prior_score=safe_score(rc.get("prior_score"), default=-1.0),
+                    prior_reason=rc.get("prior_reason", ""),
                 )
             )
             # Enforce unverified score for insufficient evidence

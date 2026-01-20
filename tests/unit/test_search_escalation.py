@@ -16,7 +16,6 @@ Unit tests for M126 search escalation module.
 
 from spectrue_core.verification.search.search_escalation import (
     EscalationConfig,
-    RetrievalOutcome,
     build_query_variants,
     select_topic_from_claim,
     compute_retrieval_outcome,
@@ -342,43 +341,44 @@ class TestShouldStopEscalation:
     """Tests for should_stop_escalation()."""
 
     def test_stop_on_snippets_and_relevance(self):
-        """usable_snippets >= 2 AND relevance >= 0.2 → stop."""
-        outcome = RetrievalOutcome(
-            sources_count=5,
-            best_relevance=0.3,
-            usable_snippets_count=2,
-        )
+        """usable_snippets >= 2 AND relevance >= 0.2 → stop (technical fallback)."""
+        claim = {"id": "c1", "text": "Test"}
+        # 2 sources with good relevance and snippets
+        sources = [
+            {"url": "https://a.com", "score": 0.3, "snippet": "x" * 60},
+            {"url": "https://b.com", "score": 0.3, "snippet": "y" * 60},
+        ]
         config = EscalationConfig(min_usable_snippets=2, min_relevance_threshold=0.2)
-        should_stop, reason = should_stop_escalation(outcome, config)
+        should_stop, reason = should_stop_escalation(claim, sources, config)
         
         assert should_stop is True
         assert reason == "snippets_and_relevance"
 
     def test_continue_low_relevance(self):
         """Snippets ok but relevance low → continue."""
-        outcome = RetrievalOutcome(
-            sources_count=5,
-            best_relevance=0.1,  # Below threshold
-            usable_snippets_count=3,
-        )
+        claim = {"id": "c1", "text": "Test"}
+        sources = [
+            {"url": "https://a.com", "score": 0.1, "snippet": "x" * 60},
+            {"url": "https://b.com", "score": 0.1, "snippet": "y" * 60},
+        ]
         config = EscalationConfig(min_relevance_threshold=0.2)
-        should_stop, reason = should_stop_escalation(outcome, config)
+        should_stop, reason = should_stop_escalation(claim, sources, config)
         
         assert should_stop is False
-        assert reason == "continue"
+        assert reason == "insufficient"
 
     def test_continue_insufficient_snippets(self):
         """Relevance ok but snippets low → continue."""
-        outcome = RetrievalOutcome(
-            sources_count=5,
-            best_relevance=0.5,
-            usable_snippets_count=1,  # Below threshold
-        )
+        claim = {"id": "c1", "text": "Test"}
+        sources = [
+            {"url": "https://a.com", "score": 0.5, "snippet": "short"},
+            {"url": "https://b.com", "score": 0.5, "snippet": "short"},
+        ]
         config = EscalationConfig(min_usable_snippets=2)
-        should_stop, reason = should_stop_escalation(outcome, config)
+        should_stop, reason = should_stop_escalation(claim, sources, config)
         
         assert should_stop is False
-        assert reason == "continue"
+        assert reason == "insufficient"
 
 
 class TestEscalationLadder:
@@ -423,35 +423,29 @@ class TestComputeEscalationReasonCodes:
 
     def test_no_sources(self):
         """No sources → 'no_sources' reason."""
-        outcome = RetrievalOutcome(
-            sources_count=0,
-            best_relevance=0.0,
-            usable_snippets_count=0,
-        )
-        reasons = compute_escalation_reason_codes(outcome)
+        claim = {"id": "c1", "text": "Test"}
+        sources = []
+        outcome = compute_retrieval_outcome(sources)
+        reasons = compute_escalation_reason_codes(claim, sources, outcome)
         
         assert "no_sources" in reasons
 
     def test_no_snippets(self):
         """Sources but no usable snippets → 'no_snippets' reason."""
-        outcome = RetrievalOutcome(
-            sources_count=3,
-            best_relevance=0.5,
-            usable_snippets_count=0,
-        )
-        reasons = compute_escalation_reason_codes(outcome)
+        claim = {"id": "c1", "text": "Test"}
+        sources = [{"url": "https://a.com", "score": 0.5, "snippet": ""}]
+        outcome = compute_retrieval_outcome(sources)
+        reasons = compute_escalation_reason_codes(claim, sources, outcome)
         
         assert "no_snippets" in reasons
 
     def test_low_relevance_uses_config_threshold(self):
         """Relevance below config threshold → low_relevance with threshold in reason."""
-        outcome = RetrievalOutcome(
-            sources_count=3,
-            best_relevance=0.1,
-            usable_snippets_count=2,
-        )
+        claim = {"id": "c1", "text": "Test"}
+        sources = [{"url": "https://a.com", "score": 0.1, "snippet": "x" * 60}]
         config = EscalationConfig(min_relevance_threshold=0.3)
-        reasons = compute_escalation_reason_codes(outcome, config)
+        outcome = compute_retrieval_outcome(sources, config)
+        reasons = compute_escalation_reason_codes(claim, sources, outcome, config)
         
         # Should include threshold in reason for diagnostics
         assert any("low_relevance" in r for r in reasons)
@@ -459,13 +453,11 @@ class TestComputeEscalationReasonCodes:
 
     def test_insufficient_snippets_uses_config_threshold(self):
         """Snippets below config threshold → reason includes threshold."""
-        outcome = RetrievalOutcome(
-            sources_count=3,
-            best_relevance=0.5,
-            usable_snippets_count=1,
-        )
+        claim = {"id": "c1", "text": "Test"}
+        sources = [{"url": "https://a.com", "score": 0.5, "snippet": "x" * 60}]
         config = EscalationConfig(min_usable_snippets=3)
-        reasons = compute_escalation_reason_codes(outcome, config)
+        outcome = compute_retrieval_outcome(sources, config)
+        reasons = compute_escalation_reason_codes(claim, sources, outcome, config)
         
         assert any("insufficient_snippets" in r for r in reasons)
         assert any("1<3" in r for r in reasons)  # Current < threshold

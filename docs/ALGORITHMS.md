@@ -130,6 +130,36 @@ sign = -1 if CONTRADICTS else +1
 
 ---
 
+### Hybrid Signal Fusion [A]
+
+**Status:** Formally Grounded (Bayesian Belief Updating)
+
+Fuses internal LLM knowledge (`prior_score`) with external evidence results (`verdict_score`) using weighted additive log-odds.
+
+**Formula:**
+```python
+# L = logit(p)
+L_final = L_evidence + W_prior * L_prior
+G_final = sigmoid(L_final)
+```
+
+**Parameters:**
+- `W_prior = 0.2` (Prior Knowledge weight factor)
+- `L_evidence = logit(verdict_score)`
+- `L_prior = logit(prior_score)`
+
+**Sentinels:**
+- `prior_score = -1.0`: Unknown. Update is SKIPPED ($W_{prior} = 0.0$).
+- `prior_score = 0.5`: Neutral. Informative signal (contribution to $L_{final}$ is $0$).
+
+**Code location:** `spectrue_core/agents/skills/scoring.py`
+
+> **Reference:** Good, I.J. (1950). *Probability and the Weighing of Evidence*.
+> This implements a conservative Bayesian update where internal model knowledge 
+> acts as a "nudge" to the evidence-based signal.
+
+---
+
 ### RGBA Belief Dimensions [B]
 
 **Status:** Engineering Decision
@@ -454,16 +484,10 @@ They do **not** cap `verdict_score` or `verified_score`.
 We treat tier as a calibrated *prior reliability signal* for how interpretable/defensible the explanation is, given the
 class of sources involved.
 
-Deterministic rule (per-claim):
-
-- `baseline = TierPrior["B"]`
-- `prior = TierPrior[best_tier or "UNKNOWN"]`
-- `factor = prior / baseline`
-- `A_post = clamp(A_pre * factor, 0..1)`
-
-Trace event:
-
-- `verdict.explainability_tier_factor` logs `pre_A`, `prior`, `baseline`, `factor`, `post_A`, `best_tier`, `claim_id`, and `source`.
+Deterministic adjustment is applied in the explainability pipeline (see
+`spectrue_core/verification/evidence/evidence_scoring.py`). The exact formula
+may evolve with calibration; treat tier-based explainability as a deterministic
+post-processing step rather than a verdict driver.
 
 ## Verification Target Selection (Bayesian EVOI Model)
 

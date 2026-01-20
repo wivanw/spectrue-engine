@@ -33,6 +33,7 @@ from spectrue_core.billing.meter_context import get_current_llm_meter
 from spectrue_core.utils.trace import Trace
 from spectrue_core.llm.errors import LLMFailureKind
 from spectrue_core.llm.errors import LLMCallError
+from spectrue_core.llm.model_registry import ModelID
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +201,7 @@ class LLMClient:
     Example:
         client = LLMClient(openai_api_key="sk-...")
         result = await client.call(
-            model="gpt-5-nano",
+            model=ModelID.NANO,
             input="Analyze this claim: ...",
             instructions="You are a fact-checking assistant.",
             json_output=True,
@@ -213,8 +214,8 @@ class LLMClient:
         *,
         openai_api_key: str | None = None,
         base_url: str | None = None,
-        default_timeout: float = 60.0,  # Increased from 30.0 for complex tasks
-        max_retries: int = 3,
+        default_timeout: float = 120.0,  # Increased to prevent timeouts on slow models
+        max_retries: int = 1,
         cache_retention: CacheRetention = "in_memory", # Fix default
         meter: LLMMeter | None = None,
     ):
@@ -354,7 +355,7 @@ class LLMClient:
             "o3",         # o3 models
         )
         # DeepSeek and local models don't support structured outputs
-        unsupported_prefixes = ("deepseek", "llama", "mistral", "qwen")
+        unsupported_prefixes = ("deepseek", "llama", "mistral", "qwen", ModelID.MID)
         
         model_lower = model.lower()
         if any(model_lower.startswith(p) for p in unsupported_prefixes):
@@ -708,7 +709,7 @@ class LLMClient:
         Responses-specific parameters (reasoning_effort, cache_key, instructions as separate field).
         
         Args:
-            model: Model to use (e.g., "gpt-5-nano", "qwen3-base-14b")
+            model: Model to use (e.g., ModelID.NANO, "qwen3-base-14b")
             input: The main input/prompt content
             instructions: System instructions (cached if cache_key provided for OpenAI)
             json_output: If True, request JSON output and parse response
@@ -759,7 +760,8 @@ class LLMClient:
         if temperature is not None:
             # Skip temperature for models that don't support it in Responses API
             # Based on empirical testing: gpt-5-nano, gpt-5, gpt-5.2, and O-series models reject temperature
-            skip_temp_models = model.startswith("o") or model.startswith("gpt-5")
+            is_gpt5 = "gpt-5" in model  # Covers gpt-5-nano, gpt-5.2
+            skip_temp_models = model.startswith("o") or is_gpt5
             if skip_temp_models:
                 logger.debug("[LLMClient] Temperature ignored for model %s (not supported)", model)
             else:
@@ -1079,7 +1081,7 @@ class LLMClient:
         system_prompt: str | None = None,
         schema: dict[str, Any],
         schema_name: str = "structured_output",
-        model: str = "gpt-5-nano",
+        model: str = ModelID.NANO,
         reasoning_effort: ReasoningEffort = "low",
         timeout: float | None = None,
         max_output_tokens: int | None = None,

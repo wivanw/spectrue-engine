@@ -32,6 +32,7 @@ class OracleFlowStep:
 
     search_mgr: Any # SearchManager
     name: str = "oracle_flow"
+    weight: float = 4.0
 
     @staticmethod
     def _create_evidence_source(oracle_result: dict) -> dict:

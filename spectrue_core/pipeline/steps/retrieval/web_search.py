@@ -26,7 +26,7 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.orchestration.sufficiency import sufficiency_threshold
+from spectrue_core.verification.orchestration.sufficiency import SUFFICIENCY_P_THRESHOLD
 from spectrue_core.verification.retrieval.fixed_pipeline import (
     ExtractedContent,
     FixedPipelineContext,
@@ -205,6 +205,7 @@ class WebSearchStep:
     search_mgr: Any
     agent: Any
     name: str = "web_search"
+    weight: float = 15.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
@@ -226,6 +227,7 @@ class WebSearchStep:
             url_metadata: dict[str, dict[str, Any]] = {}
             state = init_state()
             audited_urls_by_claim: dict[str, set[str]] = {}
+            claim_sufficiency: dict[str, float] = {}
 
             async def _extract_batch(urls: list[str]) -> dict[str, ExtractedContent]:
                 stage = current_stage()
@@ -303,7 +305,7 @@ class WebSearchStep:
                     claim_id = _claim_id_for(claim, idx)
                     metadata = _metadata_dict(claim.get("metadata")) or _metadata_dict(claim)
                     s_value = compute_sufficiency(metadata)
-                    s_min = float(metadata.get("S_min", sufficiency_threshold))
+                    s_min = float(metadata.get("S_min", SUFFICIENCY_P_THRESHOLD))
                     if s_value < s_min:
                         query = _first_query_for_claim(plan, claim_id, claim)
                         if not query:
@@ -314,6 +316,20 @@ class WebSearchStep:
                 _apply_metadata(state.extractor_queue.extracted, url_metadata)
                 _refresh_audit_matches()
                 bind_after_extract()
+
+                # Record final Bayesian sufficiency for each claim
+                from spectrue_core.verification.orchestration.sufficiency import check_sufficiency_for_claim
+                for claim_id, claim in claim_id_map.items():
+                    # bind_after_extract ensures state.bindings.audited is up to date
+                    claim_urls = state.bindings.audited.get(claim_id, set())
+                    claim_sources = _build_sources_for_urls(
+                        list(claim_urls),
+                        state.extractor_queue.extracted,
+                        url_metadata,
+                        claim_id=claim_id
+                    )
+                    res = check_sufficiency_for_claim(claim, claim_sources)
+                    claim_sufficiency[claim_id] = res.posterior_p
 
             # Build sources for downstream steps
             extracted_urls = list(state.extractor_queue.extracted.keys())
@@ -395,6 +411,7 @@ class WebSearchStep:
                 )
                 .set_extra("audit_sources", audit_sources)
                 .set_extra("audit_trace_context", audit_trace_context)
+                .set_extra("cluster_sufficiency", claim_sufficiency)  # Reuse key for compatibility
             )
 
         except Exception as e:

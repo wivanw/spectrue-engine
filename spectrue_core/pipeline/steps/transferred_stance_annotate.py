@@ -78,10 +78,9 @@ class TransferredStanceAnnotateStep(Step):
 
     agent: Any
     config: Any
+    weight: float = 2.0
 
-    @property
-    def name(self) -> str:
-        return "transferred_stance_annotate"
+    name: str = "transferred_stance_annotate"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         if ctx.mode.api_analysis_mode != AnalysisMode.DEEP_V2:

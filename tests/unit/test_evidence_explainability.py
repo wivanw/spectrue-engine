@@ -8,16 +8,16 @@
 # (at your option) any later version.
 
 """
-Unit tests for evidence_explainability module (M119).
+Unit tests for evidence_explainability module (M119, M133).
 
-Tests tier ranking, explainability adjustments, and best tier selection.
+Tests tier ranking and best tier selection.
+M133: compute_explainability_tier_adjustment removed.
 """
 
 
 
 from spectrue_core.verification.evidence.evidence_explainability import (
     get_tier_rank,
-    compute_explainability_tier_adjustment,
     find_best_tier_for_claim,
 )
 
@@ -60,52 +60,7 @@ class TestGetTierRank:
         assert ranks == sorted(ranks, reverse=True)
 
 
-class TestComputeExplainabilityTierAdjustment:
-    """Tests for tier-based explainability adjustment."""
-
-    def test_invalid_score_returns_none(self):
-        assert compute_explainability_tier_adjustment(-0.1, "A", "c1") is None
-        assert compute_explainability_tier_adjustment("invalid", "A", "c1") is None
-
-    def test_boundary_score_returns_none(self):
-        # 0.0 and 1.0 are out of (0, 1) open interval for logit
-        assert compute_explainability_tier_adjustment(0.0, "A", "c1") is None
-        assert compute_explainability_tier_adjustment(1.0, "A", "c1") is None
-
-    def test_tier_a_increases_score(self):
-        # Tier A has factor > 1, so adjustment should increase score
-        result = compute_explainability_tier_adjustment(0.7, "A", "c1")
-        assert result is not None
-        assert result > 0.7
-
-    def test_unknown_tier_decreases_score(self):
-        # Unknown tier has factor < 1, so adjustment should decrease score
-        result = compute_explainability_tier_adjustment(0.7, None, "c1")
-        assert result is not None
-        assert result < 0.7
-
-    def test_tier_b_minimal_change(self):
-        # Tier B is baseline, so factor ~= 1
-        result = compute_explainability_tier_adjustment(0.7, "B", "c1")
-        # Result should be None (change < 1e-9) or very close to original
-        if result is not None:
-            assert abs(result - 0.7) < 0.01
-
-    def test_result_in_valid_range(self):
-        # Result should always be in (0, 1)
-        result = compute_explainability_tier_adjustment(0.1, "A", "c1")
-        if result:
-            assert 0 < result < 1
-        
-        result = compute_explainability_tier_adjustment(0.9, "D", "c1")
-        if result:
-            assert 0 < result < 1
-
-    def test_tier_d_moderate_decrease(self):
-        # Tier D has low factor, should moderately decrease
-        result = compute_explainability_tier_adjustment(0.8, "D", "c1")
-        if result:
-            assert result < 0.8
+# M133: TestComputeExplainabilityTierAdjustment removed — function deleted
 
 
 class TestFindBestTierForClaim:

@@ -93,12 +93,12 @@ async def execute_pipeline(
         claims=claims,
         lang=lang,
         trace=trace,
+        progress_callback=progress_callback,
     )
 
     # Set extras for steps that need them
     ctx = ctx.set_extra("max_cost", max_cost)
     ctx = ctx.set_extra("inline_sources", inline_sources or [])
-    ctx = ctx.set_extra("progress_callback", progress_callback)
 
     # Build pipeline for this mode
     factory = PipelineFactory(search_mgr=search_mgr, agent=agent)
@@ -156,14 +156,15 @@ def _context_to_result(ctx: PipelineContext) -> dict[str, Any]:
     result = {
         "sources": ctx.sources,
         "evidence": ctx.evidence,
-        "verified_score": verdict.get("verified_score", 0.5),
-        "danger_score": verdict.get("danger_score", 0.0),
-        "context_score": verdict.get("context_score", 0.5),
-        "style_score": verdict.get("style_score", 0.5),
-        "confidence_score": verdict.get("confidence_score", 0.0),
-        "explainability_score": verdict.get("explainability_score", 0.5),
+        "verified_score": verdict.get("verified_score"),
+        "danger_score": verdict.get("danger_score"),
+        "context_score": verdict.get("context_score"),
+        "style_score": verdict.get("style_score"),
+        "confidence_score": verdict.get("confidence_score"),
+        "explainability_score": verdict.get("explainability_score"),
         "rationale": verdict.get("rationale", ""),
         "claim_verdicts": verdict.get("claim_verdicts", []),
+        "status": verdict.get("status", "ok"),
     }
     _attach_execution_metadata(result, ctx)
     return result

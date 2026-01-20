@@ -212,7 +212,7 @@ def _extract_evidence_features(
     for pack in evidence_index.by_claim_id.values():
         for item in pack.items:
             total_items += 1
-            if item.stance:
+            if (item.stance or "").upper() in {"SUPPORT", "REFUTE"}:
                 n_with_stance += 1
             if (item.tier or "").upper() in {"A", "A'", "B"}:
                 n_high_tier += 1
@@ -223,7 +223,7 @@ def _extract_evidence_features(
     if evidence_index.global_pack:
         for item in evidence_index.global_pack.items:
             total_items += 1
-            if item.stance:
+            if (item.stance or "").upper() in {"SUPPORT", "REFUTE"}:
                 n_with_stance += 1
             if (item.tier or "").upper() in {"A", "A'", "B"}:
                 n_high_tier += 1
@@ -417,6 +417,7 @@ class EvidenceGatingStep:
     """
     
     name: str = "evidence_gating"
+    weight: float = 1.0
     
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

@@ -18,17 +18,19 @@ Extracted from pipeline_evidence.py as part of core logic modularization.
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any
 
-from spectrue_core.verification.evidence.evidence_scoring import (
-    logit,
-    sigmoid,
-    TIER_A_BASELINE,
-)
-from spectrue_core.utils.trace import Trace
-
 logger = logging.getLogger(__name__)
+
+
+def norm_claim_id(x: Any) -> str | None:
+    """Normalize claim ID for consistent lookup."""
+    if x is None:
+        return None
+    s = str(x).strip().lower()
+    if s in ("", "none", "null", "undefined"):
+        return None
+    return s
 
 
 def get_tier_rank(tier: str | None) -> int:
@@ -48,67 +50,12 @@ def get_tier_rank(tier: str | None) -> int:
     )
 
 
-def compute_explainability_tier_adjustment(
-    explainability_score: float,
-    best_tier: str | None,
-    claim_id: str,
-) -> float | None:
-    """
-    Apply tier-based adjustment to explainability score.
-    
-    Uses logit-space adjustment to preserve probabilistic properties.
-    
-    Args:
-        explainability_score: Raw explainability from LLM (0-1)
-        best_tier: Best evidence tier for this claim
-        claim_id: Claim identifier for tracing
-        
-    Returns:
-        Adjusted explainability score, or None if no adjustment needed
-    """
-    from spectrue_core.verification.evidence.evidence_scoring import explainability_factor_for_tier
-    
-    if not isinstance(explainability_score, (int, float)) or explainability_score < 0:
-        return None
-    
-    pre_a = float(explainability_score)
-    
-    # Contract: pre_A must be strictly in (0, 1) for logit
-    if not (0.0 < pre_a < 1.0) or not math.isfinite(pre_a):
-        Trace.event(
-            "verdict.explainability_missing",
-            {"claim_id": claim_id, "best_tier": best_tier, "pre_A": pre_a},
-        )
-        return None
-    
-    factor, source, prior = explainability_factor_for_tier(best_tier)
-    
-    if factor <= 0 or not math.isfinite(factor):
-        Trace.event(
-            "verdict.explainability_bad_factor",
-            {
-                "claim_id": claim_id,
-                "best_tier": best_tier,
-                "pre_A": pre_a,
-                "prior": prior,
-                "baseline": TIER_A_BASELINE,
-                "factor": factor,
-                "source": source,
-            },
-        )
-        return None
-    
-    # Apply logit-space adjustment
-    post_a = sigmoid(logit(pre_a) + math.log(factor))
-    
-    # Only return if adjustment is significant
-    if abs(post_a - pre_a) < 1e-9:
-        return None
-    
-    # NOTE: Trace event moved to caller (evidence_verdict_processing.py)
-    # Only log when the adjustment is actually applied (source != "llm")
-    
-    return post_a
+# compute_alpha_cap removed in M133 — LLM A-score passes through unchanged
+# Rationale: caps were forcing A ≤ 0.4 even with good evidence; now trust LLM judgment
+
+
+
+# compute_explainability_tier_adjustment removed in M133 — was already deprecated (M119)
 
 
 def find_best_tier_for_claim(

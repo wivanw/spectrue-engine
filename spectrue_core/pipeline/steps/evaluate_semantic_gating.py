@@ -42,6 +42,7 @@ class EvaluateSemanticGatingStep:
 
     agent: Any
     name: str = "semantic_gating"
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Evaluate semantic rejection policy."""

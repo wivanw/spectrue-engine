@@ -82,6 +82,12 @@ class ClaimRole(str, Enum):
     COUNTERCLAIM = "counterclaim"
     """Counterpoint or opposing claim."""
 
+    DEFINITION = "definition"
+    """Term definition or concept explanation."""
+
+    FORECAST = "forecast"
+    """Prediction or forecast about future events. Limited verifiability."""
+
 
 class VerificationTarget(str, Enum):
     """
@@ -352,6 +358,8 @@ class ClaimMetadata:
             ClaimRole.EXAMPLE: 0.5,
             ClaimRole.HEDGE: 0.2,
             ClaimRole.COUNTERCLAIM: 0.7,
+            ClaimRole.DEFINITION: 0.3,
+            ClaimRole.FORECAST: 0.3,  # Limited verifiability
         }
         # If verification_target is NONE, weight is 0 regardless of role
         if self.verification_target == VerificationTarget.NONE:

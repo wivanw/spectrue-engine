@@ -182,6 +182,7 @@ class AssembleStandardResultStep(Step):
     """Assemble standard-mode payload by mapping prior step outputs."""
 
     name: str = "assemble_standard_result"
+    weight: float = 5.0
 
     def __init__(self, config: Any | None = None):
         self._config = config
@@ -346,3 +347,4 @@ class ResultAssemblyStep(AssembleStandardResultStep):
     """Backward-compatible alias for standard result assembly."""
 
     name: str = "result_assembly"
+    weight: float = 5.0

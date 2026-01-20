@@ -28,6 +28,7 @@ from spectrue_core.graph.types import (
 )
 from .base_skill import BaseSkill
 from spectrue_core.agents.llm_schemas import EDGE_TYPING_SCHEMA
+from spectrue_core.llm.model_registry import ModelID
 
 if TYPE_CHECKING:
     pass
@@ -109,7 +110,7 @@ class EdgeTypingSkill(BaseSkill):
         for attempt in range(max_retries + 1):
             try:
                 result = await self.llm_client.call_json(
-                    model="gpt-5-nano",
+                    model=ModelID.NANO,
                     input=prompt,
                     instructions=instructions,
                     response_schema=EDGE_TYPING_SCHEMA,

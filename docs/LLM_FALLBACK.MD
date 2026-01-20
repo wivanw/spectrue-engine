@@ -1,6 +1,6 @@
 # LLM Provider Fallback Strategy
 
-Spectrue Engine implements a robust provider fallback mechanism to ensure claim extraction and verification continuity even when the primary LLM provider (DeepSeek) experiences execution failures.
+Spectrue Engine implements a provider fallback mechanism for **claim extraction** when the primary LLM provider (DeepSeek) experiences execution failures.
 
 ## Overview
 
@@ -29,7 +29,7 @@ Failures are classified into the following types (`spectrue_core.llm.failures.LL
 4. **Switch:** If eligible, the system switches to the Fallback Provider (`llm.fallback.used`).
 5. **Attempt Fallback:** The operation is retried with the Fallback Provider.
 6. **Final Result:**
-   - If successful: Returns result (`is_fallback=True`).
+   - If successful: Returns the fallback result (trace marks `is_fallback=True`).
    - If failure: A `llm.fallback.failed` event is emitted.
 
 ## Configuration
@@ -37,7 +37,7 @@ Failures are classified into the following types (`spectrue_core.llm.failures.LL
 Fallback models are configured in `EngineRuntimeConfig`:
 
 ```python
-model_claim_extraction_fallback: str = "gpt-5.2"
+model_claim_extraction_fallback: str = ModelID.PRO  # "gpt-5.2"
 ```
 
 Override via ENV: `MODEL_CLAIM_EXTRACTION_FALLBACK="gpt-4o"`

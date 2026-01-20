@@ -53,7 +53,12 @@ def canonicalize_source(src: Any) -> Source | None:
 
     url = str(out.get("url") or "")
     if url and "domain" not in out:
-        out["domain"] = extract_domain(url)
+        domain = extract_domain(url)
+        out["domain"] = domain
+        
+        # Populate tier based on domain (T16)
+        from spectrue_core.tools.trusted_sources import get_tier_code
+        out["tier"] = get_tier_code(domain)
 
     return out
 

@@ -35,9 +35,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from spectrue_core.pipeline.mode import ScoringMode
 
-from spectrue_core.verification.evidence.evidence_explainability import (
-    compute_explainability_tier_adjustment,
-)
+# M133: compute_explainability_tier_adjustment removed
 from spectrue_core.verification.evidence.evidence_scoring import norm_id as _norm_id
 
 logger = logging.getLogger(__name__)
@@ -93,10 +91,7 @@ def process_single_claim_verdict(
     }
     cv["reasons_short"] = cv.get("reasons_short", []) or []
 
-    # Explainability tier adjustment using extracted function
-    explainability_update = compute_explainability_tier_adjustment(
-        explainability, best_tier, claim_id
-    )
+    explainability_update = None
 
     veracity_entry = {
         "claim_id": claim_id,
@@ -124,8 +119,7 @@ def process_single_claim_verdict(
     # Conflict detection using extracted function
     has_conflict = detect_evidence_conflict(n_support, n_refute)
 
-    # Store local explainability update for use in RGBA assignment
-    cv["local_explainability"] = explainability_update
+    # M119: local_explainability is deprecated; handled in assign_claim_rgba
 
     return {
         "claim_id": claim_id,
@@ -259,5 +253,6 @@ def enrich_all_claim_verdicts(
             global_b=global_b,
             global_a=global_a,
             judge_mode=scoring_mode,
+            pack=pack,
         )
 

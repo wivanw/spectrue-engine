@@ -95,3 +95,8 @@ def load_pricing_policy(config_path: str | Path | None = None) -> CreditPricingP
         llm_prices=llm_prices,
         rounding=rounding,
     )
+
+# Backward-compatible alias (older routing modules expect this name)
+def load_pricing_config():
+    """Alias for :func:`load_pricing_policy` (kept for compatibility)."""
+    return load_pricing_policy()

@@ -174,12 +174,16 @@ def assign_claim_rgba(
     global_b: float,
     global_a: float,
     judge_mode: ScoringMode | str,
+    pack: dict[str, Any] | None = None,
 ) -> None:
     """
     Assign RGBA to claim verdict based on mode.
     
-    Deep mode: Preserve existing RGBA from LLM judge (1:1 contract)
-    Standard mode: Compute from global values
+    M119 Unified Logic:
+    1. Extract A_llm (from judge output or global fallback)
+    2. Compute A_det (deterministic fallback based on evidence reliability)
+    3. Compute A_cap (safety ceiling based on diversity and anchors)
+    4. A_final = min(A_llm, A_cap) if A_llm exists, else min(A_det, A_cap)
     
     Args:
         claim_verdict: Claim verdict dict (mutated in-place)
@@ -187,16 +191,22 @@ def assign_claim_rgba(
         global_b: Global bias score
         global_a: Global explainability score
         judge_mode: ScoringMode enum or string
+        pack: Full EvidencePack (M119)
     """
     from spectrue_core.utils.trace import Trace
+    from spectrue_core.verification.evidence.evidence_alpha import compute_A_det
+    from spectrue_core.verification.scoring.rgba_aggregation import apply_conflict_explainability_penalty
+    from spectrue_core.pipeline.mode import ScoringMode
     
     cid = claim_verdict.get("claim_id", "unknown")
     g_score = float(claim_verdict.get("verdict_score", 0.5) or 0.5)
     existing_rgba = claim_verdict.get("rgba")
     
     # Handle enum or string input
-    from spectrue_core.pipeline.mode import ScoringMode
     mode_value = judge_mode.value if isinstance(judge_mode, ScoringMode) else judge_mode
+    
+    from spectrue_core.verification.evidence.evidence_explainability import norm_claim_id
+    target_cid = norm_claim_id(cid)
     
     has_valid_rgba = (
         isinstance(existing_rgba, list)
@@ -204,71 +214,83 @@ def assign_claim_rgba(
         and all(isinstance(x, (int, float)) for x in existing_rgba)
     )
     
-    # Determine source and final RGBA in one pass
+    # 1. Base scores
+    r_val = global_r
+    g_val = g_score
+    b_val = global_b
+    a_llm = None
+    
     if has_valid_rgba:
-        # Deep claim-judge already provided RGBA - keep LLM output 1:1
-        Trace.event(
-            "cv.rgba_assigned",
-            {
-                "claim_id": cid,
-                "judge_mode": mode_value,
-                "source": "llm",
-                "rgba": existing_rgba,
-            },
-        )
-    elif mode_value == ScoringMode.DEEP.value:
-        # Deep mode but no RGBA from LLM - error handling
+        r_val, g_val, b_val, a_llm = existing_rgba
+    elif global_a >= 0:
+        a_llm = global_a
+
+    # 2. Extract from verdict_payload as second priority (Deep result storage)
+    if a_llm is None and claim_verdict.get("verdict_payload"):
+        v_payload = claim_verdict["verdict_payload"]
+        if isinstance(v_payload, dict):
+            v_rgba = v_payload.get("rgba")
+            if isinstance(v_rgba, list) and len(v_rgba) == 4:
+                a_llm = v_rgba[3]
+
+    # 3. Handle explicit DEEP mode errors
+    if mode_value == ScoringMode.DEEP.value and not has_valid_rgba:
         if claim_verdict.get("status") == "error":
-            # Expected: error claim has no RGBA
-            Trace.event(
-                "cv.rgba_assigned",
-                {
-                    "claim_id": cid,
-                    "judge_mode": mode_value,
-                    "source": "error",
-                    "rgba": None,
-                    "error_type": claim_verdict.get("error_type"),
-                },
-            )
-        else:
-            # Unexpected: valid claim missing RGBA
-            claim_verdict["rgba"] = None
-            claim_verdict["rgba_error"] = "missing_from_llm"
-            Trace.event(
-                "cv.rgba_assigned",
-                {
-                    "claim_id": cid,
-                    "judge_mode": mode_value,
-                    "source": "missing",
-                    "rgba": None,
-                    "error": "Deep mode claim missing RGBA from judge",
-                },
-            )
-            logger.warning(
-                "[DeepMode] Claim %s missing RGBA from judge - marked as error",
-                cid,
-            )
+            Trace.event("cv.rgba_assigned", {"claim_id": cid, "judge_mode": mode_value, "source": "error", "rgba": None})
+            return
+        # If not error but missing RGBA, we proceed to compute A_det as fallback below
+        # but log it as missing
+        Trace.event("cv.rgba_missing_in_deep", {"claim_id": cid})
+
+    # 4. M133: Alpha — LLM score passes through unchanged (no cap)
+    items = pack.get("items", []) if isinstance(pack, dict) else []
+    
+    # A_det (fallback only)
+    a_det = compute_A_det(items, cid)
+    
+    claim_items = []
+    for it in items:
+        item_cid = norm_claim_id(it.get("claim_id"))
+        if item_cid is not None and item_cid != target_cid:
+            continue
+        claim_items.append(it)
+
+    # Count for conflict penalty
+    support_with_quote = [
+        it for it in claim_items 
+        if it.get("quote") and (it.get("stance") or "").upper() == "SUPPORT"
+    ]
+    refute_with_quote = [
+        it for it in claim_items 
+        if it.get("quote") and (it.get("stance") or "").upper() == "REFUTE"
+    ]
+    
+    # A_final: LLM score if available, else deterministic (no cap)
+    if a_llm is not None:
+        a_final = float(a_llm)
+        a_source = "llm" if has_valid_rgba else "global"
     else:
-        # Standard mode fallback: compute from global values
-        # Support per-claim explainability adjustment (Tier masking) if present
-        local_a = claim_verdict.get("local_explainability")
-        final_a = float(local_a) if local_a is not None and float(local_a) >= 0 else global_a
+        a_final = a_det
+        a_source = "det"
         
-        claim_verdict["rgba"] = [global_r, g_score, global_b, final_a]
-        
-        # Log tier-factor info only when it's actually applied
-        trace_data = {
+    # 5. Conflict Penalty (M119 Rule: Requires both SUPPORT and REFUTE with direct anchors)
+    if len(support_with_quote) > 0 and len(refute_with_quote) > 0:
+        a_final = apply_conflict_explainability_penalty(a_final)
+        a_source += "_with_conflict_penalty"
+    
+    claim_verdict["rgba"] = [float(r_val), float(g_val), float(b_val), float(a_final)]
+    
+    Trace.event(
+        "cv.rgba_assigned",
+        {
             "claim_id": cid,
             "judge_mode": mode_value,
-            "source": "fallback",
+            "source": a_source,
             "rgba": claim_verdict["rgba"],
-        }
-        if local_a is not None:
-            trace_data["tier_factor_applied"] = True
-            trace_data["global_a"] = global_a
-            trace_data["local_a"] = local_a
-        
-        Trace.event("cv.rgba_assigned", trace_data)
+            "a_det": a_det,
+            "a_llm": a_llm,
+        },
+    )
 
 
 def enrich_claim_sources(

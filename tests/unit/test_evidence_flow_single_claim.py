@@ -1,3 +1,4 @@
+from spectrue_core.llm.model_registry import ModelID
 # Copyright (C) 2025 Ivan Bondarenko
 #
 # This file is part of Spectrue Engine.
@@ -17,7 +18,7 @@ class _DummyAgent:
     async def cluster_evidence(self, claims, sources, stance_pass_mode="single"):
         return None
 
-    async def score_evidence(self, pack, *, model="gpt-5.2", lang="en"):
+    async def score_evidence(self, pack, *, model=ModelID.PRO, lang="en"):
         # If single-claim enforcement works, this should only ever see one claim in normal.
         assert isinstance(pack, dict)
         claims = pack.get("claims")
@@ -76,7 +77,7 @@ async def test_normal_profile_allows_multiple_claims():
     ]
 
     # Mock agent expects multiple claims now
-    async def mock_score_evidence(pack, *, model="gpt-5.2", lang="en"):
+    async def mock_score_evidence(pack, *, model=ModelID.PRO, lang="en"):
         claims = pack.get("claims")
         assert len(claims) == 2
         return {

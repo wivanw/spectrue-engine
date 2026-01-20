@@ -33,15 +33,8 @@ from enum import Enum
 from typing import Any, TYPE_CHECKING
 from urllib.parse import urlparse
 
-from spectrue_core.schema.claim_metadata import VerificationTarget, EvidenceChannel, UsePolicy
-from spectrue_core.verification.search.source_utils import has_evidence_chunk
-from spectrue_core.tools.trusted_sources import (
-    TRUSTED_SOURCES,
-    TIER_A_TLDS,
-    TIER_A_SUFFIXES,
-    ALL_TRUSTED_DOMAINS,
-    is_social_platform,
-)
+from spectrue_core.schema.claim_metadata import VerificationTarget, EvidenceChannel
+from spectrue_core.tools.trusted_sources import get_domain_tier, is_authoritative
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -111,6 +104,9 @@ class SufficiencyResult:
     context_only_count: int = 0
     """Count of sources with only CONTEXT stance."""
 
+    posterior_p: float = 0.5
+    """Bayesian posterior probability [0, 1]."""
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for tracing."""
         return {
@@ -124,6 +120,7 @@ class SufficiencyResult:
             "has_quotes": self.has_quotes,
             "support_refute_count": self.support_refute_count,
             "context_only_count": self.context_only_count,
+            "posterior_p": self.posterior_p,
         }
 
 
@@ -140,14 +137,20 @@ class SufficiencyDecisionResult:
 
 
 # Bayesian Parameters (Scientific Scoring)
-base_prior: float = 0.5       # Neutral starting point
-sufficiency_threshold: float = 0.95
+BASE_PRIOR_P: float = 0.5       # Neutral starting point (0.0 log-odds)
+SUFFICIENCY_P_THRESHOLD: float = 0.95
+sufficiency_threshold = SUFFICIENCY_P_THRESHOLD  # Alias for backward compatibility
 
-# Bayes Factors (Log-Odds contributions)
-logbf_authoritative: float = 3.0  # Strong evidence (one source can prove)
-logbf_reliable: float = 0.8       # Good evidence (needs corroboration)
-logbf_unreliable: float = 0.1     # Weak evidence
-logbf_irrelevant: float = 0.0
+# Tier-to-Support-Probability Mapping (Veracity Support Signals)
+# These represent the probability that a "hit" in this tier is factually correct.
+# Used as Bayes Factors for search sufficiency.
+TIER_SUPPORT_PROBABILITIES = {
+    EvidenceChannel.AUTHORITATIVE: 0.96,    # Tier A
+    EvidenceChannel.REPUTABLE_NEWS: 0.90,   # Tier B (Wikipedia now here)
+    EvidenceChannel.LOCAL_MEDIA: 0.75,      # Tier C
+    EvidenceChannel.SOCIAL: 0.55,           # Tier D (Weak signal)
+    EvidenceChannel.LOW_RELIABILITY: 0.52, # Very weak
+}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -166,147 +169,6 @@ def _extract_domain(url: str) -> str:
         return ""
 
 
-def is_authoritative(domain: str) -> bool:
-    """
-    T16: Check if domain is authoritative (Tier A).
-    
-    Tier A includes:
-    - .gov, .edu, .mil, .int TLDs
-    - Official sub-TLDs (.gov.uk, .europa.eu, etc.)
-    - International public bodies (who.int, cdc.gov, nasa.gov)
-    - Science and health institutions
-    
-    Args:
-        domain: Domain string (without protocol)
-        
-    Returns:
-        True if authoritative (Tier A)
-    """
-    if not domain:
-        return False
-
-    d = domain.lower().strip()
-
-    # Check TLDs
-    for tld in TIER_A_TLDS:
-        if d.endswith(tld):
-            return True
-
-    # Check sub-TLDs
-    for suffix in TIER_A_SUFFIXES:
-        if d.endswith(suffix):
-            return True
-
-    # Check explicit lists
-    if d in TRUSTED_SOURCES.get("international_public_bodies", []):
-        return True
-    if d in TRUSTED_SOURCES.get("science_and_health", []):
-        return True
-    if d in TRUSTED_SOURCES.get("astronomy_tier_a", []):
-        return True
-    if d in TRUSTED_SOURCES.get("global_news_agencies", []):
-        return True
-    if d in TRUSTED_SOURCES.get("fact_checking_ifcn", []):
-        return True
-
-    return False
-
-
-def is_reputable_news(domain: str) -> bool:
-    """
-    T16: Check if domain is reputable news (Tier B).
-    
-    Tier B includes:
-    - Major news outlets
-    - Regional quality media
-    - Trusted editorial sources
-    
-    Args:
-        domain: Domain string
-        
-    Returns:
-        True if reputable news (Tier B)
-    """
-    if not domain:
-        return False
-
-    d = domain.lower().strip()
-
-    # Check against all trusted domains
-    if d in ALL_TRUSTED_DOMAINS:
-        return True
-
-    # Check specific categories
-    tier_b_categories = [
-        "general_news_western",
-        "ukraine_imi_whitelist",
-        "general_news_ukraine_broad",
-        "europe_tier1",
-        "asia_pacific",
-        "technology",
-        "astronomy_tier_b",
-        "russia_independent_exiled",
-    ]
-
-    for category in tier_b_categories:
-        if d in TRUSTED_SOURCES.get(category, []):
-            return True
-
-    return False
-
-
-def is_local_media(domain: str) -> bool:
-    """
-    Check if domain is local/regional media (Tier C).
-    
-    Not in Tier A or B but has legitimate news structure.
-    """
-    if not domain:
-        return False
-
-    d = domain.lower().strip()
-
-    # Not social and not authoritative/reputable
-    if is_social_platform(d):
-        return False
-    if is_authoritative(d) or is_reputable_news(d):
-        return False
-
-    # Assume local media if it has news-like TLD patterns
-    news_patterns = [".news", ".media", ".tv", ".radio", ".times", ".post", ".herald"]
-    for pattern in news_patterns:
-        if pattern in d:
-            return True
-
-    return False
-
-
-def get_domain_tier(domain: str) -> EvidenceChannel:
-    """
-    Determine the evidence channel for a domain.
-    
-    Args:
-        domain: Domain string
-        
-    Returns:
-        EvidenceChannel enum value
-    """
-    if not domain:
-        return EvidenceChannel.LOW_RELIABILITY
-
-    if is_authoritative(domain):
-        return EvidenceChannel.AUTHORITATIVE
-
-    if is_reputable_news(domain):
-        return EvidenceChannel.REPUTABLE_NEWS
-
-    if is_social_platform(domain):
-        return EvidenceChannel.SOCIAL
-
-    if is_local_media(domain):
-        return EvidenceChannel.LOCAL_MEDIA
-
-    return EvidenceChannel.LOW_RELIABILITY
 
 
 def is_origin_source(source: Any, claim_text: str) -> bool:
@@ -366,29 +228,15 @@ def evidence_sufficiency(
     use_policy_by_channel: dict[str, Any] | None = None,
 ) -> SufficiencyResult:
     """
-    T14/T15: Check if evidence is sufficient for a claim.
+    Bayesian Sufficiency Judge.
     
-    Sufficient if ANY rule is satisfied:
-    - Rule 1: 1 authoritative source with quote (SUPPORT/REFUTE)
-    - Rule 2: 2 independent reputable sources with quotes (different domains)
-    - Rule 3: For attribution/existence - 1 origin source
-    
-    Not sufficient if:
-    - Only social/low_reliability_web sources (lead-only)
-    - Only CONTEXT stance (no SUPPORT/REFUTE)
-    
-    Args:
-        claim_id: The claim being checked
-        sources: List of source dicts with url, stance, etc.
-        verification_target: What we're trying to verify
-        claim_text: Claim text for origin matching
-        
-    Returns:
-        SufficiencyResult with status and metrics
+    Accumulates evidence signals in log-odds space based on source tiers.
+    Replaces heuristic Rules with a unified probabilistic threshold.
     """
+    from spectrue_core.scoring.belief import prob_to_log_odds, log_odds_to_prob
+
     result = SufficiencyResult(claim_id=claim_id)
 
-    # Skip check for non-verifiable claims
     if verification_target == VerificationTarget.NONE:
         result.status = SufficiencyStatus.SKIP
         result.reason = "verification_target=none, no search needed"
@@ -399,139 +247,66 @@ def evidence_sufficiency(
         result.reason = "No sources available"
         return result
 
-    # Analyze sources
-    authoritative_sources: list[dict] = []
-    reputable_sources: list[dict] = []
-    origin_sources: list[dict] = []
-    support_refute_domains: set[str] = set()
-    has_quotes = False
-    context_only = True
-
-    # Normalize use_policy_by_channel values to UsePolicy.
-    policy_map: dict[str, UsePolicy] = {}
-    if isinstance(use_policy_by_channel, dict):
-        for k, v in use_policy_by_channel.items():
-            try:
-                if isinstance(v, UsePolicy):
-                    policy_map[str(k)] = v
-                else:
-                    policy_map[str(k)] = UsePolicy(str(v))
-            except Exception:
-                continue
-
-    lead_only_count = 0
-
-    for source in sources:
-        if isinstance(source, str):
-            url = source
-            has_quote = False
-            has_text_content = False
-        else:
-            url = source.get("url", "") or source.get("link", "")
-            # Strict quote contract - only actual quote field counts as "having quote"
-            # for sufficiency rules that require "sources with quotes".
-            has_quote = bool(source.get("quote"))
-            # T003: has_text_content is used for evidence candidacy (can potentially be scored)
-            has_text_content = bool(source.get("quote") or source.get("snippet") or source.get("content"))
-
+    # 1. Collect unique domains to avoid over-inflating from one site
+    # 2. Assign best tier for each domain
+    domain_best_tier: dict[str, EvidenceChannel] = {}
+    domain_has_quote: dict[str, bool] = {}
+    
+    for src in sources:
+        url = src.get("url") or src.get("link") if isinstance(src, dict) else str(src)
         if not url:
             continue
-
+        
         domain = _extract_domain(url)
-
-        # Track quotes (strict: only real quote field)
-        if has_quote:
-            has_quotes = True
-
-        # Track candidate evidence (T003: replaces support_refute_count during retrieval)
-        # Sources with any text content are candidates for support/refutation.
-        if has_text_content:
-            context_only = False
-            result.support_refute_count += 1
-            if domain:
-                support_refute_domains.add(domain)
-        else:
-            result.context_only_count += 1
-
-        # Categorize by tier
         tier = get_domain_tier(domain)
+        
+        # Track best tier per domain
+        if domain not in domain_best_tier:
+            domain_best_tier[domain] = tier
+        else:
+            # If we found it on a higher tier (unlikely for same domain but safe)
+            current_rank = {"A": 4, "B": 3, "C": 2, "D": 1}.get(tier.value[0], 0) if hasattr(tier, "value") else 0
+            best_rank = {"A": 4, "B": 3, "C": 2, "D": 1}.get(domain_best_tier[domain].value[0], 0)
+            if current_rank > best_rank:
+                domain_best_tier[domain] = tier
+        
+        # Track if domain provided a quote
+        if isinstance(src, dict) and src.get("quote"):
+            domain_has_quote[domain] = True
+            result.has_quotes = True
 
-        # Enforce lead_only policy for social/low-reliability: these are leads, not evidence.
-        if tier in (EvidenceChannel.SOCIAL, EvidenceChannel.LOW_RELIABILITY):
-            policy = policy_map.get(tier.value, UsePolicy.LEAD_ONLY)
-            if policy == UsePolicy.LEAD_ONLY:
-                lead_only_count += 1
-                # Do not count toward sufficiency rules; keep tracking for diagnostics.
-                continue
-
+    # 3. Accumulate Log-Odds
+    # Formula: L_post = L_prior + sum( logit(P_tier_i) )
+    total_log_odds = prob_to_log_odds(BASE_PRIOR_P)
+    
+    for domain, tier in domain_best_tier.items():
+        p_support = TIER_SUPPORT_PROBABILITIES.get(tier, 0.5)
+        
+        # Penalize if no quote (weakens the signal)
+        if not domain_has_quote.get(domain):
+            p_support = 0.5 + (p_support - 0.5) * 0.3  # Reduce weight significantly if snippet only
+            
+        logv = prob_to_log_odds(p_support)
+        total_log_odds += logv
+        
+        # Update metrics for diagnostics
         if tier == EvidenceChannel.AUTHORITATIVE:
             result.authoritative_count += 1
-            if has_quote:
-                authoritative_sources.append(source)
-
-        elif tier in (EvidenceChannel.REPUTABLE_NEWS, EvidenceChannel.LOCAL_MEDIA):
+        if tier == EvidenceChannel.REPUTABLE_NEWS:
             result.reputable_count += 1
-            if has_quote:
-                reputable_sources.append(source)
-
-        # Check for origin source (attribution/existence claims).
-        # Origin requires a real evidence chunk (quote/snippet/content), not just a bare link.
-        if verification_target in (VerificationTarget.ATTRIBUTION, VerificationTarget.EXISTENCE):
-            if has_evidence_chunk(source) and is_origin_source(source, claim_text):
-                origin_sources.append(source)
-
-    result.independent_domains = len(support_refute_domains)
-    result.has_quotes = has_quotes
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Apply Sufficiency Rules
-    # ─────────────────────────────────────────────────────────────────────────
-
-    # Rule 3: For attribution/existence, 1 origin source is enough
-    if verification_target in (VerificationTarget.ATTRIBUTION, VerificationTarget.EXISTENCE):
-        if len(origin_sources) >= 1:
-            result.status = SufficiencyStatus.SUFFICIENT
-            result.rule_matched = "Rule3"
-            result.reason = f"Found {len(origin_sources)} origin source(s) for {verification_target.value} claim"
-            return result
-
-    # Rule 1: 1 authoritative source with quote
-    if len(authoritative_sources) >= 1:
+        
+    result.independent_domains = len(domain_best_tier)
+    posterior_p = log_odds_to_prob(total_log_odds)
+    
+    # 4. Check Against Threshold
+    result.posterior_p = posterior_p
+    if posterior_p >= SUFFICIENCY_P_THRESHOLD:
         result.status = SufficiencyStatus.SUFFICIENT
-        result.rule_matched = "Rule1"
-        result.reason = f"Found {len(authoritative_sources)} authoritative source(s) with quotes"
-        return result
-
-    # Rule 2: 2 independent strong sources with quotes (authoritative or reputable)
-    strong_domains: set[str] = set()
-    for source in authoritative_sources + reputable_sources:
-        url = source.get("url", "") or source.get("link", "")
-        domain = _extract_domain(url)
-        if domain:
-            strong_domains.add(domain)
-
-    if len(strong_domains) >= 2:
-        result.status = SufficiencyStatus.SUFFICIENT
-        result.rule_matched = "Rule2"
-        result.reason = f"Found {len(strong_domains)} independent strong sources with quotes"
-        return result
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Not Sufficient - Determine Reason
-    # ─────────────────────────────────────────────────────────────────────────
-
-    result.status = SufficiencyStatus.INSUFFICIENT
-
-    if lead_only_count > 0 and (lead_only_count == len(sources)):
-        result.reason = "All sources are lead-only (social/low_reliability_web); no usable evidence chunks"
-    elif context_only:
-        result.reason = "All sources lack usable evidence chunks (quotes/content)"
-    elif result.authoritative_count == 0 and result.reputable_count < 2:
-        result.reason = f"Need authoritative or 2+ reputable sources. Have: {result.authoritative_count} auth, {result.reputable_count} reputable"
-    elif not has_quotes:
-        result.reason = "Sources lack quotes/content"
+        result.rule_matched = "BayesianConsensus"
+        result.reason = f"Combined confidence {posterior_p:.1%} >= {SUFFICIENCY_P_THRESHOLD:.1%} (domains: {len(domain_best_tier)})"
     else:
-        result.reason = f"Insufficient quality: {result.independent_domains} independent domains"
+        result.status = SufficiencyStatus.INSUFFICIENT
+        result.reason = f"Confidence {posterior_p:.1%} < {SUFFICIENCY_P_THRESHOLD:.1%}"
 
     return result
 

@@ -32,7 +32,12 @@ Return `rgba`: [R, G, B, A] where:
 - R = danger (0=harmless, 1=dangerous misinformation)
 - G = verdict_score (same as verdict_score, use -1.0 if unknown)
 - B = style (0=biased, 1=neutral)
-- A = explainability (0=no evidence, 1=strong direct quotes)"""
+- A = explainability (0=no evidence, 1=strong direct quotes)
+
+# INTERNAL KNOWLEDGE (PRIOR)
+You MUST also provide your own evaluation based ONLY on your internal training data:
+- **prior_score** (0.0-1.0): 1.0 = known true, 0.0 = known false, 0.5 = neutral. Use **-1.0** if you have zero information about this claim in your training data.
+- **prior_reason**: Short explanation (in {lang_name}) of your internal evaluation. Use "NEI" if score is -1.0."""
 
 VERDICT_VALUES = ["verified", "refuted", "ambiguous", "unverified", "partially_verified"]
 
@@ -42,12 +47,20 @@ def _language_contract(lang_name: str, lang: str) -> str:
     return f"""# LANGUAGE CONTRACT
 - Respond ONLY in **{lang_name}** ({lang}).
 - Do NOT switch languages.
-- Write `reason` and `rationale` ENTIRELY in **{lang_name}**."""
+- Write `reason`, `rationale`, and `prior_reason` ENTIRELY in **{lang_name}**."""
 
 
 def _claim_verdict_example() -> str:
-    """Shared JSON example for claim verdict with RGBA."""
-    return """{{"claim_id": "c1", "verdict_score": 0.9, "verdict": "verified", "reason": "...", "rgba": [0.1, 0.9, 0.85, 0.8]}}"""
+    """Shared JSON example for claim verdict with RGBA and Prior."""
+    return """{
+      "claim_id": "c1",
+      "verdict_score": 0.9,
+      "verdict": "verified",
+      "reason": "...",
+      "rgba": [0.1, 0.9, 0.85, 0.8],
+      "prior_score": 0.95,
+      "prior_reason": "Це загальновідомий науковий факт..."
+    }"""
 
 
 # ==============================================================================
@@ -56,13 +69,15 @@ def _claim_verdict_example() -> str:
 
 def build_score_evidence_instructions(*, lang_name: str, lang: str) -> str:
     return f"""You are the Spectrue Verdict Engine.
-Your task is to classify the reliability of claims based *strictly* on the provided Evidence.
+Your task is to classify the reliability of claims based *strictly* on the provided Evidence, while also providing your internal knowledge as a separate signal.
 
 # INPUT DATA
 - **Claims**: Note the `importance` (0.0-1.0). High importance = Core Thesis.
 - **Evidence**: Look for "📌 QUOTE" segments. `stance` is a hint; always verify against the quote/excerpt.
 - **Metadata**: `source_reliability_hint` is context, not a hard rule.
 - **Consistency Rule**: If a claim has `matched_evidence_count > 0`, you MUST NOT say "no sources/evidence". Say the evidence is indirect, insufficient, or lacks direct confirmation.
+
+{RGBA_EXPLANATION}
 
 {_language_contract(lang_name, lang)}
 - Do NOT mention other claims, other claim IDs, or "c1/c2" comparisons in user-facing text.
@@ -130,7 +145,9 @@ Return JSON:
   "verdict_score": -1.0,
   "verdict": "unverified",
   "reason": "Explanation in {lang_name}...",
-  "rgba": [0.1, -1.0, 0.85, 0.0]
+  "rgba": [0.1, -1.0, 0.85, 0.0],
+  "prior_score": -1.0,
+  "prior_reason": "NEI"
 }}
 
 {_language_contract(lang_name, lang)}
@@ -138,14 +155,22 @@ Be concise.
 """
 
 
-def build_single_claim_scoring_prompt(*, claim_info: dict, evidence: list[dict]) -> str:
-    """Prompt for scoring a SINGLE claim."""
+def build_single_claim_scoring_prompt(*, claim_info: dict, evidence: list[dict], judge_context: dict | None = None) -> str:
+    """Prompt for scoring a SINGLE claim.
+
+    judge_context is a code-computed, auditable summary (coverage, stance distribution,
+    dedup counters, etc.) that the model must treat as *signals*, not as truth.
+    """
+    ctx = judge_context or {}
     return f"""Score this claim based on the evidence.
 
 Claim:
 {json.dumps(claim_info, indent=2, ensure_ascii=False)}
 
-Evidence:
+JudgeSignals (code-computed):
+{json.dumps(ctx, indent=2, ensure_ascii=False)}
+
+Evidence (raw items):
 {json.dumps(evidence, indent=2, ensure_ascii=False)}
 
 Return JSON.
@@ -203,6 +228,8 @@ If evidence has `content_status: "unavailable"`:
 - Assertion stays AMBIGUOUS, NOT refuted
 - This is NOT evidence against the claim
 
+{RGBA_EXPLANATION}
+
 # OUTPUT FORMAT
 ```json
 {{
@@ -212,24 +239,11 @@ If evidence has `content_status: "unavailable"`:
       "verdict_score": 0.85,
       "status": "verified",
       "assertion_verdicts": [
-        {{
-          "assertion_key": "event.location.city",
-          "dimension": "FACT",
-          "score": 0.9,
-          "status": "verified",
-          "evidence_count": 2,
-          "rationale": "Multiple sources confirm Miami"
-        }},
-        {{
-          "assertion_key": "event.time_reference",
-          "dimension": "CONTEXT",
-          "score": 0.8,
-          "status": "verified",
-          "evidence_count": 1,
-          "rationale": "Time zone context verified"
-        }}
+        ...
       ],
-      "reason": "Location and timing confirmed by official sources."
+      "reason": "...",
+      "prior_score": 0.9,
+      "prior_reason": "..."
     }}
   ],
   "verified_score": 0.5,

@@ -7,6 +7,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from spectrue_core.agents.skills.claims import ClaimExtractionSkill
+from spectrue_core.llm.model_registry import ModelID
 
 
 @pytest.mark.asyncio
@@ -18,8 +19,8 @@ async def test_claim_extraction_uses_fallback_on_failure():
     # Setup dependencies
     mock_config = MagicMock()
     # Mock runtime config for fallback model
-    mock_config.runtime.llm.model_claim_extraction = "deepseek-chat"
-    mock_config.runtime.llm.model_claim_extraction_fallback = "gpt-5.2"
+    mock_config.runtime.llm.model_claim_extraction = ModelID.MID
+    mock_config.runtime.llm.model_claim_extraction_fallback = ModelID.PRO
     
     mock_client = AsyncMock()
     
@@ -45,9 +46,9 @@ async def test_claim_extraction_uses_fallback_on_failure():
         # We need to distinguish calls by model arg
         async def side_effect(*args, **kwargs):
             model = kwargs.get("model")
-            if model == "deepseek-chat":
+            if model == ModelID.MID:
                 raise Exception("Connection reset by peer")
-            elif model == "gpt-5.2":
+            elif model == ModelID.PRO:
                 return {
                     "claims": [
                         {
@@ -82,5 +83,5 @@ async def test_claim_extraction_uses_fallback_on_failure():
             calls = mock_client.call_json.call_args_list
             models_called = [c.kwargs.get("model") for c in calls]
             
-            assert "deepseek-chat" in models_called
-            assert "gpt-5.2" in models_called
+            assert ModelID.MID in models_called
+            assert ModelID.PRO in models_called

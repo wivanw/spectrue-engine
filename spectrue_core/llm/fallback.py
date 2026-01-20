@@ -43,7 +43,7 @@ async def call_with_fallback(
         fallback_call: Async callable for the fallback provider
         task_name: Name of the task for tracing (e.g., "claims.extraction")
         primary_provider_name: Name of primary provider (e.g., "deepseek")
-        fallback_provider_name: Name of fallback provider (e.g., "gpt-5.2")
+        fallback_provider_name: Name of fallback provider (e.g., ModelID.PRO)
         
     Returns:
         Result dict from the successful provider

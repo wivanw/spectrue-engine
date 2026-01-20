@@ -1,0 +1,36 @@
+@@ -53,6 +53,12 @@
+     product_config = get_product_by_key(payload.price_id_key)
+     if not product_config:
+         raise HTTPException(status_code=400, detail="Invalid price_id_key")
++    if not product_config.stripe_price_id:
++        logger.error("Stripe price id is not configured for product key=%s", payload.price_id_key)
++        raise HTTPException(status_code=500, detail="Payment configuration error")
++
++    if not product_config.stripe_price_id:
++        raise HTTPException(status_code=500, detail="Stripe price ID is not configured on the server")
+ 
+     # 2. Get/Create Stripe Customer
+     user_ref = db.collection("users").document(user.uid)
+@@ -81,10 +87,6 @@
+     
+     # Use configured frontend URL (strict security)
+     frontend_url = settings.FRONTEND_URL.rstrip("/")
+-
+-    if user.email and user.email.endswith("@spectrue.net"): # Internal debugging
+-         pass 
+-
+     success_url = f"{frontend_url}/payment_success.html?session_id={{CHECKOUT_SESSION_ID}}"
+     cancel_url = f"{frontend_url}/pricing.html"
+ 
+@@ -120,10 +122,7 @@
+              session_params["payment_method_collection"] = "if_required"
+              
+              # If user already has a subscription, checking out a new one might flag errors unless logic handles replacement.
+-             # MVP: Assume basic flow or Stripe handles multiple subs correctly (it creates a new one).
+-             #Ideally we should check for active sub. 
+-             pass
+-
++        # MVP: allow Stripe to create a new subscription (Portal handles upgrades).
+         session = stripe.checkout.Session.create(**session_params)
+         return {"url": session.url}
+ 

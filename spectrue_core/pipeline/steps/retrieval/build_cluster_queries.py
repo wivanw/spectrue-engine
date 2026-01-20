@@ -61,6 +61,7 @@ class BuildClusterQueriesStep:
     """Build clustered retrieval query plans for deep_v2."""
 
     name: str = "build_cluster_queries"
+    weight: float = 3.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
@@ -127,6 +128,7 @@ class BuildClusterQueriesStep:
                 cluster_plans.append(
                     {
                         "cluster_id": cluster_id,
+                        "claims": claims_for_plan,
                         "representative_claim_ids": [
                             str(c.get("id") or c.get("claim_id"))
                             for c in rep_claims_list

@@ -20,6 +20,7 @@ from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
 import asyncio
 from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
+from spectrue_core.llm.model_registry import ModelID
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +201,7 @@ class ArticleCleanerSkill:
 
         try:
             result = await self.llm_client.call(
-                model="gpt-5-nano",
+                model=ModelID.NANO,
                 input=prompt,
                 instructions=instr,
                 json_output=False,
@@ -265,7 +266,7 @@ class ArticleCleanerSkill:
 
                 try:
                     result = await self.llm_client.call(
-                        model="gpt-5-nano",
+                        model=ModelID.NANO,
                         input=prompt,
                         instructions=instr,
                         json_output=False,

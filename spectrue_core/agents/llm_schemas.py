@@ -104,6 +104,16 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
                         "maxItems": 4,
                         "description": "Per-claim [R=danger, G=veracity, B=style, A=explainability]",
                     },
+                    "prior_score": {
+                        "type": "number",
+                        "minimum": -1,
+                        "maximum": 1,
+                        "description": "LLM's internal knowledge score for this claim (0-1). 1.0 = known fact, 0.0 = known false, 0.5 = neutral. Use -1 if unknown.",
+                    },
+                    "prior_reason": {
+                        "type": "string",
+                        "description": "Short explanation for the prior_score based ONLY on internal knowledge.",
+                    },
                 },
             },
         },
@@ -155,6 +165,16 @@ SINGLE_CLAIM_SCORING_SCHEMA: dict[str, Any] = {
             "minItems": 4,
             "maxItems": 4,
             "description": "[R=danger, G=veracity, B=style, A=explainability]",
+        },
+        "prior_score": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1,
+            "description": "LLM's internal knowledge score for this claim (0-1). 1.0 = known fact, 0.0 = known false, 0.5 = neutral. Use -1 if unknown.",
+        },
+        "prior_reason": {
+            "type": "string",
+            "description": "Short explanation for the prior_score based ONLY on internal knowledge.",
         },
     },
 }
@@ -247,8 +267,8 @@ QUERY_GENERATION_SCHEMA: dict[str, Any] = {
     "properties": {
         "queries": {
             "type": "array",
-            "minItems": 2,
-            "maxItems": 2,
+            "minItems": 1,
+            "maxItems": 5,
             "items": {"type": "string", "minLength": 4, "maxLength": 220},
         },
         "topics": {
@@ -410,6 +430,8 @@ PREDICATE_TYPE_VALUES = [
     "ranking",         # Comparative position (A > B)
     "causal",          # X caused Y
     "existence",       # Entity/document exists with anchors
+    "definition",      # Scientific or logical definition
+    "property",        # Physical or chemical property
     "other",           # Fallback for edge cases
 ]
 
@@ -417,6 +439,7 @@ TIME_ANCHOR_TYPE_VALUES = [
     "explicit_date",   # "January 5, 2025"
     "range",           # "between 2020 and 2023"
     "relative",        # "last week", "yesterday"
+    "timeless",        # Natural laws, math definitions (no time anchor needed)
     "unknown",         # No time reference found
 ]
 
@@ -481,7 +504,7 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string", "minLength": 1},
                         "minItems": 1,
-                        "maxItems": 5,
+                        "maxItems": 12,
                         "description": "Canonical entity names (person, org, place) - required for search",
                     },
                     # Predicate classification
@@ -549,7 +572,7 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string", "minLength": 2, "maxLength": 40},
                         "minItems": 3,
-                        "maxItems": 10,
+                        "maxItems": 15,
                         "description": "Keywords for search, derived from entities + key noun phrases",
                     },
                     # Importance score (kept but not sole gate)
@@ -642,7 +665,7 @@ CLAIM_RETRIEVAL_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string", "maxLength": 80},
             "minItems": 1,
-            "maxItems": 5,
+            "maxItems": 10,
         },
         "evidence_req": {
             "type": "object",
@@ -795,6 +818,16 @@ CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
         "explanation": {
             "type": "string",
             "description": "Human-readable explanation of the verdict",
+        },
+        "prior_score": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1,
+            "description": "LLM's internal knowledge score for this claim (0-1). 1.0 = known fact, 0.0 = known false, 0.5 = neutral. Use -1 if unknown.",
+        },
+        "prior_reason": {
+            "type": "string",
+            "description": "Short explanation for the prior_score based ONLY on internal knowledge.",
         },
         "sources_used": {
             "type": "array",

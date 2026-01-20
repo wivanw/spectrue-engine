@@ -45,10 +45,10 @@ logger = logging.getLogger(__name__)
 class ClaimScore:
     """Score for a single claim with weighting metadata."""
     claim_id: str
-    verified_score: float  # 0-1
-    danger_score: float    # 0-1
-    style_score: float     # 0-1
-    explainability_score: float  # 0-1
+    verified_score: float | None  # 0-1
+    danger_score: float | None    # 0-1
+    style_score: float | None     # 0-1
+    explainability_score: float | None  # 0-1
 
     # Weighting factors
     role_weight: float = 1.0  # From ClaimMetadata.role_weight
@@ -69,10 +69,10 @@ class ClaimScore:
 @dataclass
 class AggregatedRGBA:
     """Aggregated RGBA scores from all claims."""
-    verified: float = 0.5
-    danger: float = 0.5
-    style: float = 0.5
-    explainability: float = 0.5
+    verified: float | None = None
+    danger: float | None = None
+    style: float | None = None
+    explainability: float | None = None
 
     # Metadata
     total_claims: int = 0
@@ -83,10 +83,10 @@ class AggregatedRGBA:
     def to_dict(self) -> dict[str, Any]:
         """Serialize for API response."""
         return {
-            "verified": round(self.verified, 3),
-            "danger": round(self.danger, 3),
-            "style": round(self.style, 3),
-            "explainability": round(self.explainability, 3),
+            "verified": round(self.verified, 3) if self.verified is not None else None,
+            "danger": round(self.danger, 3) if self.danger is not None else None,
+            "style": round(self.style, 3) if self.style is not None else None,
+            "explainability": round(self.explainability, 3) if self.explainability is not None else None,
             "meta": {
                 "total_claims": self.total_claims,
                 "included_claims": self.included_claims,
@@ -126,10 +126,13 @@ def aggregate_weighted(claim_scores: list[ClaimScore]) -> AggregatedRGBA:
 
     # Accumulators
     weighted_verified = 0.0
+    weight_v = 0.0
     weighted_danger = 0.0
+    weight_r = 0.0
     weighted_style = 0.0
+    weight_b = 0.0
     weighted_explainability = 0.0
-    total_weight = 0.0
+    weight_a = 0.0
 
     for cs in claim_scores:
         weight = cs.total_weight
@@ -139,30 +142,41 @@ def aggregate_weighted(claim_scores: list[ClaimScore]) -> AggregatedRGBA:
             continue
 
         result.included_claims += 1
-        total_weight += weight
 
-        weighted_verified += cs.verified_score * weight
-        weighted_danger += cs.danger_score * weight
-        weighted_style += cs.style_score * weight
-        weighted_explainability += cs.explainability_score * weight
+        if cs.verified_score is not None:
+            weighted_verified += cs.verified_score * weight
+            weight_v += weight
+        if cs.danger_score is not None:
+            weighted_danger += cs.danger_score * weight
+            weight_r += weight
+        if cs.style_score is not None:
+            weighted_style += cs.style_score * weight
+            weight_b += weight
+        if cs.explainability_score is not None:
+            weighted_explainability += cs.explainability_score * weight
+            weight_a += weight
 
-    result.total_weight = total_weight
+    result.total_weight = weight_v
 
     # Calculate weighted averages
-    if total_weight > 0:
-        result.verified = weighted_verified / total_weight
-        result.danger = weighted_danger / total_weight
-        result.style = weighted_style / total_weight
-        result.explainability = weighted_explainability / total_weight
-    else:
-        # No verifiable claims - return neutral scores
-        result.verified = 0.5
-        result.danger = 0.5
-        result.style = 0.5
-        result.explainability = 0.5
+    if weight_v > 0:
+        result.verified = weighted_verified / weight_v
+    if weight_r > 0:
+        result.danger = weighted_danger / weight_r
+    if weight_b > 0:
+        result.style = weighted_style / weight_b
+    if weight_a > 0:
+        result.explainability = weighted_explainability / weight_a
+    
+    if weight_v <= 0 and weight_r <= 0 and weight_b <= 0 and weight_a <= 0:
+        # No verifiable claims - return None values (INV-040)
+        result.verified = None
+        result.danger = None
+        result.style = None
+        result.explainability = None
         logger.warning(
             "[Orchestration] No verifiable claims (all weights=0). "
-            "Returning neutral RGBA scores."
+            "Returning None for RGBA scores."
         )
 
     return result
@@ -171,10 +185,10 @@ def aggregate_weighted(claim_scores: list[ClaimScore]) -> AggregatedRGBA:
 def claim_to_score(
     claim: dict,
     *,
-    verified_score: float,
-    danger_score: float,
-    style_score: float = 0.5,
-    explainability_score: float = 0.5,
+    verified_score: float | None,
+    danger_score: float | None,
+    style_score: float | None = None,
+    explainability_score: float | None = None,
     evidence_quality: float = 1.0,
 ) -> ClaimScore:
     """

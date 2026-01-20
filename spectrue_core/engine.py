@@ -22,6 +22,7 @@ from spectrue_core.billing.cost_ledger import CostLedger
 from spectrue_core.billing.metering import TavilyMeter
 from spectrue_core.billing.config_loader import load_pricing_policy
 from spectrue_core.pipeline.mode import AnalysisMode
+from spectrue_core.pipeline.progress import ProgressEstimator
 
 
 # Make language detection deterministic
@@ -93,7 +94,7 @@ class SpectrueEngine:
             text: Text to analyze
             lang: UI language ISO code
             analysis_mode: AnalysisMode enum or string ("general", "deep", "deep_v2")
-            progress_callback: Async callable(stage: str)
+            progress_callback: Async callable(ProgressEvent)
 
         Returns:
             Dict with analysis result
@@ -114,9 +115,6 @@ class SpectrueEngine:
             if analysis_mode == AnalysisMode.DEEP:
                 analysis_mode = AnalysisMode.DEEP_V2
                 Trace.event("engine.mode_remapped", {"from": "deep", "to": "deep_v2"})
-            
-            # Use canonical model from config (no override allowed)
-            model = self.config.openai_model
 
             # Detect content language
             detected_lang, detected_prob = detect_content_language(text, fallback=lang)
@@ -131,7 +129,6 @@ class SpectrueEngine:
                 {
                     "analysis_mode": str(analysis_mode),
                     "text_len": len(text),
-                    "model": model,
                 },
             )
 
@@ -146,10 +143,27 @@ class SpectrueEngine:
             prior_meter = getattr(web_tool._tavily, "_meter", None)
             web_tool._tavily._meter = tavily_meter
 
+            # Setup Progress Estimator
+            progress_estimator = None
+            dag_progress_callback = None
+
+            if progress_callback:
+                progress_estimator = ProgressEstimator(progress_callback)
+                
+                async def _on_dag_event(event_type: str, step_name: str | None = None, *args):
+                    if event_type == "init" and args:
+                        progress_estimator.set_planned_nodes(args[0])
+                    elif event_type == "step_start" and step_name:
+                        await progress_estimator.on_step_start(step_name)
+                    elif event_type == "step_end" and step_name:
+                        await progress_estimator.on_step_end(step_name)
+                
+                dag_progress_callback = _on_dag_event
+
 
             if analysis_mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
-                if progress_callback:
-                    await progress_callback("extracting_claims")
+                if progress_estimator:
+                    await progress_estimator.on_step_start("extract_claims")
 
                 # Deep analysis: if input is a URL, first extract the article content
                 working_text = text
@@ -178,7 +192,7 @@ class SpectrueEngine:
                 initial_result = await self.verifier.verify_fact(
                     fact=working_text,
                     lang=lang,
-                    progress_callback=progress_callback,
+                    progress_callback=dag_progress_callback,
                     _content_lang=content_lang,
                     _max_cost=max_credits,
                     extract_claims_only=True,  # Just extract claims, don't verify
@@ -209,8 +223,8 @@ class SpectrueEngine:
                     or 0.0
                 )
 
-                if progress_callback:
-                    await progress_callback("verifying_claims")
+                if progress_estimator:
+                    await progress_estimator.on_step_start("verifying_claims")
 
                 # Step 2: Single pipeline run with all claims (avoids N+1 pipeline runs)
                 # This replaces the per-claim loop that caused N+1 pipeline runs
@@ -218,7 +232,7 @@ class SpectrueEngine:
                 verification_result = await self.verifier.verify_fact(
                     fact=working_text,  # Full article text for context
                     lang=lang,
-                    progress_callback=progress_callback,
+                    progress_callback=dag_progress_callback,
                     _content_lang=content_lang,
                     _max_cost=max_credits - int(extraction_cost)
                     if max_credits is not None
@@ -270,7 +284,7 @@ class SpectrueEngine:
             result = await self.verifier.verify_fact(
                 fact=text,
                 lang=lang,
-                progress_callback=progress_callback,
+                progress_callback=dag_progress_callback,
                 _content_lang=content_lang,
                 _max_cost=max_credits,
                 pipeline_profile="general",  # Use general profile

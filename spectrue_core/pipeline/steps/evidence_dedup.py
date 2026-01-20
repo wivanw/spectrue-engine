@@ -32,10 +32,9 @@ class EvidenceDedupStep(Step):
     - content_hash: sha256(normalized payload)
     - similar_cluster_id: simhash bucket id
     """
+    weight: float = 1.0
 
-    @property
-    def name(self) -> str:
-        return "evidence_dedup"
+    name: str = "evidence_dedup"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         if ctx.mode.api_analysis_mode != AnalysisMode.DEEP_V2:

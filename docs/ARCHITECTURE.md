@@ -66,9 +66,9 @@ Every `EvidenceItem` carries structured signals:
 - `checks`: List of passing/failing sanity checks (date match, entity match).
 
 ### Insufficient Evidence
-If no decisive evidence is found after the **Evidence Acquisition Ladder (EAL)** is exhausted, the claim status is `INSUFFICIENT_EVIDENCE`.
-- **We do not fallback to 0.5 (Unknown)**. We report `null` score validation.
-- **We distinguishes** "No results found" vs "Results found but irrelevant" vs "Results relevant but inconclusive".
+If no decisive evidence is found after the **Evidence Acquisition Ladder (EAL)** is exhausted, the RGBA audit status may be `INSUFFICIENT_EVIDENCE`.
+- **RGBA audit statuses** use `null` values when evidence is insufficient or off-topic.
+- **We distinguish** "No results found" vs "Results found but irrelevant" vs "Results relevant but inconclusive".
 
 ---
 
@@ -139,9 +139,7 @@ We never embed an entire article as a single vector. It dilutes specific claims.
 
 ### Credit Accounting
 Spectrue uses a unified `SpectrueCredit` (SC) currency.
-- **Scoring**: $0.01
-- **Search**: $0.05
-- **Deep Judge**: $0.10
+Rates are configured in `spectrue_core/billing/default_pricing.json` and can be overridden at runtime.
 
 ### EVOI (Expected Value of Information)
 We use a lightweight EVOI model to decide on **Search Escalation**:
@@ -155,7 +153,7 @@ We use a lightweight EVOI model to decide on **Search Escalation**:
 ### Invariants (Do Not Break)
 1.  **I0: Single Source of Truth**. Algorithms must be consistent across modes.
 2.  **I7: LLM is Auditor (Standard)**. Do not let LLM just guess the score.
-3.  **I8: Typed Statuses**. Never use `0.5` for "Unknown".
+3.  **I8: Typed Statuses**. Use explicit statuses (RGBA audit) rather than implicit "unknown" numeric fallbacks.
 
 ### Anti-Patterns
 - **Heuristic Caps**: "If > 5 sources, score = 1.0". (Wrong, what if they are all blogs?)

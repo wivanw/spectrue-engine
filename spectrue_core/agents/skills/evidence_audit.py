@@ -24,6 +24,7 @@ from spectrue_core.agents.skills.audit_prompts import (
 from spectrue_core.schema.claim_frame import ClaimFrame, EvidenceItemFrame
 from spectrue_core.schema.rgba_audit import EvidenceAudit
 from spectrue_core.utils.trace import Trace
+from spectrue_core.llm.model_registry import ModelID
 
 
 class EvidenceAuditSkill:
@@ -48,7 +49,7 @@ class EvidenceAuditSkill:
                 system_prompt=prompt,
                 schema=EVIDENCE_AUDIT_SCHEMA,
                 schema_name="evidence_audit",
-                model="gpt-5-nano",
+                model=ModelID.NANO,
                 temperature=0,
             )
             return EvidenceAudit(**response)

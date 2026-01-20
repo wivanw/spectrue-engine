@@ -22,6 +22,7 @@ from spectrue_core.agents.skills.audit_prompts import (
 from spectrue_core.schema.claim_frame import ClaimFrame
 from spectrue_core.schema.rgba_audit import ClaimAudit
 from spectrue_core.utils.trace import Trace
+from spectrue_core.llm.model_registry import ModelID
 
 
 class ClaimAuditSkill:
@@ -42,7 +43,7 @@ class ClaimAuditSkill:
                 system_prompt=system_prompt,
                 schema=CLAIM_AUDIT_SCHEMA,
                 schema_name="claim_audit",
-                model="gpt-5-nano",
+                model=ModelID.NANO,
                 temperature=0,
             )
             audit = ClaimAudit(**response)

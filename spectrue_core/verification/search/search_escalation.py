@@ -38,6 +38,7 @@ from typing import Any
 
 from spectrue_core.verification.types import SearchDepth
 from spectrue_core.utils.trace import Trace
+from spectrue_core.verification.orchestration.sufficiency import check_sufficiency_for_claim, SufficiencyStatus
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -460,28 +461,26 @@ def compute_retrieval_outcome(
 
 
 def should_stop_escalation(
-    outcome: RetrievalOutcome,
+    claim: dict[str, Any],
+    sources: list[dict[str, Any]],
     config: EscalationConfig | None = None,
 ) -> tuple[bool, str]:
     """
-    Determine if escalation should stop based on RETRIEVAL-ONLY outcome.
-
-    Returns: (should_stop, reason)
-
-    Stop if:
-    - usable_snippets_count >= min_usable_snippets AND best_relevance >= min_relevance_threshold
-    
-    This is a quality-based stop: we have enough relevant content to proceed to matching.
+    Determine if escalation should stop based on Bayesian sufficiency.
     """
     cfg = config or DEFAULT_ESCALATION_CONFIG
+    
+    # Use the unified Bayesian judge
+    sufficiency = check_sufficiency_for_claim(claim, sources)
+    if sufficiency.status == SufficiencyStatus.SUFFICIENT:
+        return True, f"bayesian_sufficiency:{sufficiency.rule_matched}"
 
-    if (
-        outcome.usable_snippets_count >= cfg.min_usable_snippets
-        and outcome.best_relevance >= cfg.min_relevance_threshold
-    ):
+    # Also check technical fallback for legacy/safety (optional but kept as explicit logic)
+    outcome = compute_retrieval_outcome(sources, cfg)
+    if outcome.usable_snippets_count >= cfg.min_usable_snippets and outcome.best_relevance >= cfg.min_relevance_threshold:
         return True, "snippets_and_relevance"
 
-    return False, "continue"
+    return False, "insufficient"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -580,26 +579,32 @@ def get_escalation_ladder() -> list[EscalationPass]:
 
 
 def compute_escalation_reason_codes(
+    claim: dict[str, Any],
+    sources: list[dict[str, Any]],
     outcome: RetrievalOutcome,
     config: EscalationConfig | None = None,
 ) -> list[str]:
-    """Compute reason codes for why escalation is needed.
-    
-    Uses config thresholds for consistency with stop conditions.
+    """
+    Compute reason codes for why escalation is needed.
     """
     cfg = config or DEFAULT_ESCALATION_CONFIG
+    sufficiency = check_sufficiency_for_claim(claim, sources)
+    
     reasons: list[str] = []
-
     if outcome.sources_count == 0:
         reasons.append("no_sources")
-    if outcome.usable_snippets_count == 0:
+    
+    # Add legacy diagnostic codes for traceability and tests
+    if outcome.sources_count > 0 and outcome.usable_snippets_count == 0:
         reasons.append("no_snippets")
-    elif outcome.usable_snippets_count < cfg.min_usable_snippets:
-        reasons.append(f"insufficient_snippets:{outcome.usable_snippets_count}<{cfg.min_usable_snippets}")
     if outcome.best_relevance < cfg.min_relevance_threshold:
-        reasons.append(f"low_relevance:{outcome.best_relevance:.2f}<{cfg.min_relevance_threshold}")
+        reasons.append(f"low_relevance(threshold={cfg.min_relevance_threshold})")
+    if outcome.usable_snippets_count < cfg.min_usable_snippets:
+        reasons.append(f"insufficient_snippets({outcome.usable_snippets_count}<{cfg.min_usable_snippets})")
 
-    return reasons if reasons else ["insufficient_quality"]
+    # Add the descriptive reason from the Bayesian judge
+    reasons.append(f"bayesian:{sufficiency.reason}")
+    return reasons
 
 
 # ─────────────────────────────────────────────────────────────────────────────

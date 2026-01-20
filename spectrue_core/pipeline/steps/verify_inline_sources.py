@@ -43,6 +43,7 @@ class VerifyInlineSourcesStep:
     search_mgr: Any  # SearchManager
     config: Any  # SpectrueConfig
     name: str = "verify_inline_sources"
+    weight: float = 3.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Verify inline sources."""

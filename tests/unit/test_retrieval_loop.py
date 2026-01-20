@@ -25,7 +25,7 @@ from spectrue_core.schema.claim_metadata import (
     RetrievalPolicy,
     EvidenceChannel,
 )
-from spectrue_core.verification.orchestration.execution_plan import ExecutionPlan, phase_a
+from spectrue_core.verification.orchestration.execution_plan import ExecutionPlan, Phase
 from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
 from spectrue_core.verification.search.search_policy import SearchDepth, SearchPolicyProfile, SearchProfileName
 
@@ -35,7 +35,7 @@ async def test_hop_limit_enforced_main_profile():
     search_mgr = MagicMock()
     search_mgr.search_phase = AsyncMock(
         return_value=("", [
-            {"url": "https://example.com/a", "stance": "context", "snippet": "Example context evidence."},
+            {"url": "https://reuters.com/a", "stance": "support", "snippet": "Example evidence.", "quote": "Reliable quote", "source_tier": "A"},
         ])
     )
     # Mock apply_evidence_acquisition_ladder to avoid TypeError on await
@@ -70,7 +70,7 @@ async def test_hop_limit_enforced_main_profile():
     }
 
     plan = ExecutionPlan()
-    plan.add_claim("c1", [phase_a("en")])
+    plan.add_claim("c1", [Phase(phase_id="A", locale="en", channels=[EvidenceChannel.LOCAL_MEDIA])])
 
     await runner.run_all_claims([claim], plan)
 
@@ -94,7 +94,7 @@ async def test_stop_when_followup_query_fails():
         max_hops=2,
         search_depth=SearchDepth.ADVANCED.value,
         max_results=5,
-        channels_allowed=[EvidenceChannel.REPUTABLE_NEWS],
+        channels_allowed=[EvidenceChannel.LOCAL_MEDIA],
     )
 
     search_mgr.estimate_hop_cost = MagicMock(return_value=0.0)
@@ -104,7 +104,7 @@ async def test_stop_when_followup_query_fails():
         verification_target=VerificationTarget.REALITY,
         claim_role=ClaimRole.CORE,
         search_locale_plan=SearchLocalePlan(primary="en", fallback=[]),
-        retrieval_policy=RetrievalPolicy(channels_allowed=[EvidenceChannel.REPUTABLE_NEWS]),
+        retrieval_policy=RetrievalPolicy(channels_allowed=[EvidenceChannel.LOCAL_MEDIA]),
         metadata_confidence=MetadataConfidence.HIGH,
     )
 
@@ -117,7 +117,7 @@ async def test_stop_when_followup_query_fails():
     }
 
     plan = ExecutionPlan()
-    plan.add_claim("c1", [phase_a("en")])
+    plan.add_claim("c1", [Phase(phase_id="A", locale="en", channels=[EvidenceChannel.LOCAL_MEDIA])])
 
     await runner.run_all_claims([claim], plan)
 

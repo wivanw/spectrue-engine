@@ -142,8 +142,9 @@ class ValidationPipeline:
             ctx = PipelineContext(
                 mode=mode,
                 lang=lang,
+                progress_callback=progress_callback,
             )
-            
+
             # Populate Context
             # Setup extras
             ctx = (ctx
@@ -155,11 +156,11 @@ class ValidationPipeline:
                 .set_extra("needs_cleaning", needs_cleaning)
                 .set_extra("claim_count_hint", claim_count)
                 .set_extra("search_count_hint", search_count)
-                .set_extra("progress_callback", progress_callback)
                 .set_extra("runtime_config", runtime_config)
                 .set_extra("preloaded_claims", preloaded_claims)
                 .set_extra("extract_claims_only", extract_claims_only)
                 .set_extra("external_ledger", external_ledger)
+                .set_extra("progress_callback", progress_callback)
             )
 
             # Build DAG (with extraction logic if needed)
@@ -220,4 +221,3 @@ class ValidationPipeline:
             if prior_tavily_meter:
                 if getattr(self.search_mgr, "web_tool", None) and getattr(self.search_mgr.web_tool, "_tavily", None):
                     self.search_mgr.web_tool._tavily._meter = prior_tavily_meter
-

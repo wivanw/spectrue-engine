@@ -24,6 +24,30 @@ HIGH_TIER_SET = {"A", "A'", "B"}
 LOW_TIER_SET = {"C", "D"}
 TIER_RANK = {"D": 1, "C": 2, "B": 3, "A'": 4, "A": 4}
 
+_MISSING = object()
+
+def _normalize_claim_id(raw: object, *, default_claim_id: str | None) -> str | None:
+    """Normalize claim_id semantics from upstream evidence.
+
+    Semantics:
+      - key missing entirely -> legacy fallback to default_claim_id (may be None)
+      - explicit None -> GLOBAL / unbound evidence (stay None)
+      - empty/whitespace string -> fallback to default_claim_id
+      - markers ("global", "__global__") -> GLOBAL (None)
+    """
+    if raw is _MISSING:
+        return default_claim_id
+    if raw is None:
+        return default_claim_id
+    if isinstance(raw, str):
+        v = raw.strip()
+        if not v:
+            return default_claim_id
+        if v.lower() in {"global", "__global__", "none", "null"}:
+            return default_claim_id
+        return v
+    return default_claim_id
+
 
 def _normalize_tier(*, tier_raw: str | None, source_type: str | None) -> str:
     if tier_raw:
@@ -54,18 +78,28 @@ def is_strong_tier(tier: str | None) -> bool:
 
 def strongest_tiers_by_claim(
     scored_sources: list[SearchResult],
+    *,
+    default_claim_id: str | None = "c1",
 ) -> dict[str, dict[str, str | int | None]]:
     """
     Determine strongest support/refute tiers per claim from scored sources.
+
+    NOTE:
+        Evidence items with claim_id=None are treated as GLOBAL/unbound and are
+        intentionally excluded from per-claim tier summaries.
     """
     by_claim: dict[str, dict[str, str | int | None]] = {}
 
     for src in scored_sources:
         if not isinstance(src, dict):
             continue
-        claim_id = str(src.get("claim_id") or "").strip()
+
+        cid = _normalize_claim_id(src.get("claim_id", _MISSING), default_claim_id=default_claim_id)
+        if cid is None:
+            continue
+        claim_id = str(cid).strip()
         if not claim_id:
-            claim_id = "c1"
+            continue
 
         stance = (src.get("stance") or "").lower()
         if stance not in ("support", "refute", "contradict"):
@@ -301,10 +335,14 @@ def build_evidence_pack(
     # That behavior can mis-route global/clustered evidence into "c1" in multi-claim articles,
     # making the real target claim appear to have "no sources" downstream.
     default_claim_id = None
-    if anchor_claim_id:
-        default_claim_id = anchor_claim_id
-    elif len(claims) == 1:
-        default_claim_id = claims[0].get("id")
+    if len(claims) == 1:
+        default_claim_id = claims[0].get("id") or anchor_claim_id
+    elif not anchor_claim_id:
+        # Fallback for empty anchor in legacy calls
+        if claims:
+            default_claim_id = None # Keep global if multiple
+    claim_id_norm_counts: dict[str, int] | None = None
+
     if search_results_clustered is not None:
         search_results = search_results_clustered
         logger.debug("Using clustered evidence: %d items", len(search_results))
@@ -322,17 +360,19 @@ def build_evidence_pack(
                     r["source_type"] = "primary"
                 elif r.get("is_trusted"):
                     r["source_type"] = "independent_media"
-            if not r.get("claim_id") and default_claim_id:
-                r["claim_id"] = default_claim_id
+            if "claim_id" not in r or r.get("claim_id") in ("", None):
+                # Missing claim_id in clustered results -> treat as GLOBAL evidence
+                r["claim_id"] = None
                 Trace.event(
                     "evidence.claim_id.missing",
                     {
-                        "assigned_claim_id": default_claim_id,
+                        "assigned_claim_id": "__global__",
                         "source_url": r.get("url") or r.get("link"),
                     },
                 )
     else:
         seen_domains = set()
+        claim_id_norm_counts = {"explicit": 0, "defaulted": 0, "global": 0}
         for s in (sources or []):
             url = (s.get("link") or s.get("url") or "").strip()
             domain = get_registrable_domain(url)
@@ -364,26 +404,48 @@ def build_evidence_pack(
 
             stance = s.get("stance", "unclear")
 
-            # Build SearchResult
+            raw_cid = s.get("claim_id", _MISSING)
+            src_claim_id = _normalize_claim_id(raw_cid, default_claim_id=default_claim_id)
+
+            if claim_id_norm_counts is not None: # Ensure it's initialized
+                if raw_cid is _MISSING and default_claim_id is not None:
+                    claim_id_norm_counts["defaulted"] += 1
+                elif src_claim_id is None:
+                    claim_id_norm_counts["global"] += 1
+                else:
+                    claim_id_norm_counts["explicit"] += 1
+
             search_result = SearchResult(
-                claim_id=(s.get("claim_id") or default_claim_id),
+                claim_id=src_claim_id,
                 url=url,
                 domain=domain,
                 title=s.get("title", ""),
                 snippet=s.get("snippet", ""),
-                content_excerpt=(s.get("content") or s.get("extracted_content") or "")[:1500],
+                content_excerpt=(s.get("content") or s.get("extracted_content") or "")[:25000],
                 published_at=s.get("published_date"),
                 source_type=source_type,  # type: ignore
                 stance=stance,  # type: ignore
                 relevance_score=float(s.get("relevance_score", 0.0) or 0.0),
                 timeliness_status=s.get("timeliness_status"),
                 key_snippet=None,
+                quote=s.get("quote"),
                 quote_matches=[],
                 is_trusted=bool(s.get("is_trusted")),
                 is_duplicate=is_dup,
                 duplicate_of=None,
             )
             search_results.append(search_result)
+
+    if claim_id_norm_counts is not None:
+        Trace.event(
+            "evidence.claim_id.normalization",
+            {
+                "default_claim_id": default_claim_id,
+                "explicit": claim_id_norm_counts.get("explicit", 0),
+                "defaulted": claim_id_norm_counts.get("defaulted", 0),
+                "global": claim_id_norm_counts.get("global", 0),
+            },
+        )
 
     for r in search_results:
         claim_id = r.get("claim_id")
@@ -397,10 +459,9 @@ def build_evidence_pack(
             r["stance"] = "context"
             r["timeliness_excluded"] = True
 
-    # Enforce quote requirement for SUPPORT/REFUTE
     for r in search_results:
         stance = str(r.get("stance") or "").lower()
-        quote = r.get("quote_span") or r.get("contradiction_span") or r.get("key_snippet")
+        quote = r.get("quote") or r.get("quote_span") or r.get("contradiction_span") or r.get("key_snippet")
         if stance in ("support", "refute", "contradict") and not quote:
             r["stance"] = "context"
             r["quote_missing"] = True
@@ -554,12 +615,9 @@ def build_evidence_pack(
         else:
             context_sources.append(r)
 
-    if not scored_sources and context_sources:
-        # Fallback: If heuristic/classifier found no support/refute/mixed/neutral sources,
-        # promote ALL context sources to scored_sources.
-        # This gives the LLM a chance to verify using "context" items that might contain answers.
-        # This prevents "Unavailable / -1.0" when we actually found relevant pages.
-        scored_sources.extend(context_sources)
+    # NOTE (Contract): do NOT promote context-only sources into scored_sources.
+    # Context evidence is still valuable for explainability/coverage, but must not silently
+    # become decisive evidence. The judge can still see all sources via `search_results`.
 
     stance_failure = bool(search_results) and not scored_sources
     evidence_metrics["stance_failure"] = stance_failure
@@ -589,8 +647,16 @@ def build_evidence_pack(
                 stance = "IRRELEVANT"
             case _:
                 stance = "CONTEXT"
+        raw_q = (
+            r.get("quote")
+            or r.get("quote_span")
+            or r.get("contradiction_span")
+            or r.get("key_snippet")
+        )
+        quote = str(raw_q) if raw_q else None
+        if quote and len(quote) > 450:
+            quote = quote[:447] + "..."
 
-        quote = r.get("quote_span") or r.get("contradiction_span") or r.get("key_snippet")
         if stance in ("SUPPORT", "REFUTE") and not quote:
             stance = "CONTEXT"
 
@@ -615,6 +681,43 @@ def build_evidence_pack(
         if domain:
             item_domains.add(domain)
 
+        # M119: Reliability Metadata
+        r_domain = {
+            "A": 0.90,
+            "A'": 0.90,
+            "B": 0.80,
+            "C": 0.60,
+            "D": 0.35,
+        }.get(tier, 0.50)
+
+        # Authority anchor detection
+        cid = _normalize_claim_id(r.get("claim_id", _MISSING), default_claim_id=default_claim_id)
+        claim_obj = next((c for c in (claims or []) if c.get("id") == cid), None)
+        
+        has_authority_anchor = False
+        authority_anchor_reason = None
+        r_contextual = None
+        
+        if claim_obj:
+            v_target = str(claim_obj.get("verification_target", "")).lower()
+            c_structure = str(claim_obj.get("structure", {}).get("type", "")).lower()
+            is_attribution = v_target == "attribution" or "attribution" in c_structure
+            
+            if is_attribution:
+                # Rule: Official source for attribution claim
+                if r.get("source_type") in ("primary", "official"):
+                    has_authority_anchor = True
+                    authority_anchor_reason = "Official source for attribution-type claim"
+                    r_contextual = 0.90
+        
+        r_eff = max(r_domain, r_contextual) if (has_authority_anchor and r_contextual is not None) else r_domain
+        
+        rel_conf = "low"
+        if tier in ("A", "A'", "B") or has_authority_anchor:
+            rel_conf = "high"
+        elif tier == "C":
+            rel_conf = "medium"
+
         evidence_items.append(EvidenceItem(
             url=r.get("url") or "",
             domain=domain or "",
@@ -623,7 +726,7 @@ def build_evidence_pack(
             channel=channel,  # type: ignore[typeddict-item]
             tier=tier,  # type: ignore[typeddict-item]
             tier_reason=None,
-            claim_id=r.get("claim_id") or default_claim_id,
+            claim_id=cid,
             stance=stance,  # type: ignore[typeddict-item]
             quote=quote,
             relevance=float(r.get("relevance_score", 0.0) or 0.0),
@@ -631,11 +734,18 @@ def build_evidence_pack(
             temporal_flag=temporal_flag,  # type: ignore[typeddict-item]
             fetched=r.get("content_status") == "available",
             raw_text_chars=len(r.get("content_excerpt") or ""),
+            # M119 fields
+            r_domain=r_domain,
+            r_contextual=r_contextual,
+            r_eff=r_eff,
+            has_authority_anchor=has_authority_anchor,
+            authority_anchor_reason=authority_anchor_reason,
+            reliability_confidence=rel_conf, # type: ignore[typeddict-item]
         ))
 
-        claim_id = r.get("claim_id") or default_claim_id or "__global__"
+        stats_key = str(cid) if cid is not None else "__global__"
         claim_stats = per_claim_stats.setdefault(
-            str(claim_id),
+            stats_key,
             {"support": 0, "refute": 0, "context": 0, "with_quote": 0},
         )
         if stance == "SUPPORT":

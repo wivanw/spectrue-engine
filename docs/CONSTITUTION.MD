@@ -15,7 +15,7 @@ flowchart TD
   C --> D{Coverage Contract OK? - all anchors covered or skipped}
   D -- no --> E[LLM Gap-Fill ONE - add-only skeleton items]
   E --> F{Coverage OK after gap-fill?}
-  F -- no --> X[TERMINAL: CLAIM_EXTRACTION_INCOMPLETE - STOP before search]
+  F -- no --> X[TERMINAL: gapfill.incomplete logged - callers should stop before search]
   F -- yes --> G[Skeleton -> Claims - strict verifiability validator + context_entities inheritance]
   D -- yes --> G
 
@@ -46,7 +46,7 @@ flowchart TD
 
 **Required behavior:**
 - If instructions are empty, inject a default system instruction.
-- Emit trace `claim_extraction.guard.missing_instructions`.
+- Emit trace `claim_extraction.guard.instructions_injected`.
 
 ---
 
@@ -63,7 +63,7 @@ flowchart TD
 **Invariant:** Coverage gap-fill is performed **at most once** (add-only).
 After one attempt:
 - If coverage is complete → continue
-- If coverage is still incomplete → terminal stop with `CLAIM_EXTRACTION_INCOMPLETE` **before any search**.
+- If coverage is still incomplete → emit `claims.coverage.gapfill.incomplete` and treat as incomplete (callers should stop before search).
 
 ---
 
@@ -122,10 +122,12 @@ See `docs/DEEP_MODE.md` for full deep mode contract.
 ---
 
 ## I8. Typed Statuses, No "Unknown as 0.5"
-**Invariant:** RGBA metrics must never represent "unknown" as a numeric midpoint.
+**Invariant:** RGBA audit metrics must never represent "unknown" as a numeric midpoint.
 If a metric is not confidently scoreable, return:
 - `status != OK`
 - `value = null`
+
+Note: claim-level verdict scores may still use `0.5` to represent ambiguity in standard outputs.
 
 Allowed statuses include:
 - `INSUFFICIENT_EVIDENCE`

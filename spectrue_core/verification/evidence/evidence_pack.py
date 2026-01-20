@@ -69,7 +69,7 @@ Claim types for multi-claim extraction:
 
 ClaimRoleType = Literal[
     "core", "support", "context", "meta", "attribution", "aggregated", "subclaim",
-    "thesis", "background", "example", "hedge", "counterclaim",
+    "thesis", "background", "example", "hedge", "counterclaim", "definition", "forecast",
     "peripheral",
 ]
 """Role of a claim in document structure."""
@@ -406,6 +406,7 @@ class SearchResult(TypedDict, total=False):
     published_at: str | None
     source_type: SourceType
     stance: Stance                  # Position relative to claim
+    quote: str | None               # Verified quote for the stance
     relevance_score: float          # 0-1, how relevant to claim
     timeliness_status: str | None   # in_window | outdated | unknown_date
     key_snippet: str | None         # Most relevant quote from content
@@ -461,6 +462,12 @@ class EvidenceItem(TypedDict, total=False):
     temporal_flag: Literal["in_window", "outdated", "unknown"]
     fetched: bool | None
     raw_text_chars: int | None
+    r_domain: float | None
+    r_contextual: float | None
+    r_eff: float | None
+    has_authority_anchor: bool
+    authority_anchor_reason: str | None
+    reliability_confidence: Literal["low", "medium", "high"] | None
 
 
 class EvidencePackStats(TypedDict, total=False):

@@ -56,7 +56,7 @@ This guarantees **high recall** without numeric caps or lexical heuristics.
 
 ## Guarantees
 
-- ✅ **No top-K or max-claim limits**
+- ✅ **No fixed cap during extraction** (runtime pipelines may apply safety guards)
 - ✅ **No word-based importance heuristics**
 - ✅ **Every detected anchor is accounted for**
 - ✅ **Instructions always present** (hard guard)
@@ -88,7 +88,7 @@ context = anchors_to_prompt_context(anchors)
 | `claim_extraction.guard.instructions_injected` | Instructions injected into LLM call |
 | `claims.coverage.anchors` | Extracted anchors with counts by type |
 | `claims.coverage.gaps` | Missing anchor IDs after skeleton extraction |
-| `claims.coverage.gapfill` | Gap-fill repair attempt results |
+| `claims.coverage.gapfill.incomplete` | Gap-fill attempt left missing anchors |
 | `claims.context.anchored` | Context entities inherited from document pool |
 | `search.query.variants` | Query variants with context entities count |
 | `search.query.empty_blocked` | Empty query blocked (no queryable terms) |
@@ -130,7 +130,7 @@ anchor_terms = normalize(subject_entities + context_entities + retrieval_seed_te
 
 ## Evidence Mismatch Status
 
-New `RGBAStatus.EVIDENCE_MISMATCH = -6`:
+`RGBAStatus.EVIDENCE_MISMATCH = -6` is defined for off-topic evidence:
 
 | Condition | Status |
 |-----------|--------|
@@ -138,9 +138,9 @@ New `RGBAStatus.EVIDENCE_MISMATCH = -6`:
 | Sources found but off-topic | `EVIDENCE_MISMATCH` |
 | Sources on-topic, conflicting | `CONFLICTING_EVIDENCE` |
 
-The sanity gate ensures off-topic evidence never reaches the judge/audit phase.
+The sanity gate flags off-topic passes and triggers escalation. Status assignment depends on the pipeline stage that consumes these signals.
 
 ## Related
 
-- [VERIFICATION_METRICS.md](./VERIFICATION_METRICS.md) - RGBA scoring contract
+- [OUTPUT_CONTRACT.md](./OUTPUT_CONTRACT.md) - Output semantics and status codes
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - System components

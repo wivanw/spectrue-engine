@@ -39,7 +39,6 @@ The **SC** is the engine's universal unit of accounting. It provides a normalize
 LLM operations are measured in tokens. The engine tracks:
 
 - **Input tokens** — prompt and context
-- **Cached input tokens** — previously processed content (reduced cost)
 - **Output tokens** — generated response
 
 Token consumption is converted to SC using model-specific rates.
@@ -60,15 +59,8 @@ The engine measures and aggregates the following resource consumption:
 
 ### LLM Token Consumption
 
-Reference rates (SC per token):
-
-| Model | Input | Cached Input | Output |
-|-------|-------|--------------|--------|
-| GPT-5 Nano | 0.000005 | 0.0000005 | 0.00004 |
-| GPT-5 Mini | 0.000025 | 0.0000025 | 0.0002 |
-| GPT-5.2 | 0.000175 | 0.0000175 | 0.0014 |
-
-> The engine converts external resource usage into a unified SC space for consistent measurement and reporting.
+Token rates are configured in `spectrue_core/billing/default_pricing.json` (model prices, safety multipliers, and SC conversion).
+Consumers should treat that file as the source of truth for per-token SC rates.
 
 ---
 
@@ -115,11 +107,11 @@ The engine produces an **exact fractional result**. Systems that require discret
 | Value | Description |
 |-------|-------------|
 | `exact_usage_sc` | Precise `Decimal` value (e.g., `3.27`) |
-| `finalized_usage` | Discrete value after rounding (e.g., `4`) |
+| `finalized_usage` | Discrete value after rounding (caller-defined) |
 
 ### Caller-Applied Finalization
 
-The engine **does not mandate** a specific rounding rule. It exports both exact and finalized values, allowing the caller to choose:
+The engine **does not mandate** a specific rounding rule. It exports exact values and allows the caller to choose how to finalize:
 
 ```python
 # Engine provides
@@ -186,18 +178,20 @@ exact_usage_sc = 1.5 SC
 
 ---
 
-### Example B: Search + LLM (Fractional Result)
+### Example B: Realistic Mixed Workload (Standard Run)
 
-**Scenario:** 2 Basic Searches + GPT-5 Nano (1000 input, 500 output tokens)
+**Scenario:** 3 Basic Searches + 1 Advanced Search + Scoring (GPT-5.2) + Extraction (Nano)
 
 | Resource | Calculation | SC |
 |----------|-------------|-----|
-| Search | 2 TC × 0.5 | 1.0 |
-| LLM Input | 1000 × 0.000005 | 0.005 |
-| LLM Output | 500 × 0.00004 | 0.02 |
+| Search (Basic) | 3 TC × 0.5 | 1.50 |
+| Search (Adv) | 2 TC × 0.5 | 1.00 |
+| GPT-5.2 Score | 4.6k tokens (mixed) | 1.54 |
+| GPT-5 Nano | 12k tokens (extract) | 0.06 |
+| GPT-5 Mini | 3k tokens (plan) | 0.08 |
 
 ```
-exact_usage_sc = 1.0 + 0.005 + 0.02 = 1.025 SC
+exact_usage_sc = 1.50 + 1.00 + 1.54 + 0.06 + 0.08 = 4.18 SC
 ```
 
 ---

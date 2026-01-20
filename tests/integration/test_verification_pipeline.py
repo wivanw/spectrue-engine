@@ -1,3 +1,4 @@
+from spectrue_core.llm.model_registry import ModelID
 # Copyright (C) 2025 Ivan Bondarenko
 #
 # This file is part of Spectrue Engine.
@@ -21,7 +22,7 @@ def mock_config():
     config.google_fact_check_key = "test_key"
     config.google_search_api_key = "test_key" # Added string key
     config.google_search_cse_id = "test_id"
-    config.openai_model = "gpt-5.2"
+    config.openai_model = ModelID.PRO
     
     # Mock runtime config structure
     config.runtime.llm.timeout_sec = 60.0

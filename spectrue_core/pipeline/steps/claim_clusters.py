@@ -22,10 +22,9 @@ from spectrue_core.utils.trace import Trace
 @dataclass
 class ClaimClustersStep(Step):
     config: Any
+    weight: float = 1.0
 
-    @property
-    def name(self) -> str:
-        return "claim_clusters"
+    name: str = "claim_clusters"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         claims = ctx.claims or []

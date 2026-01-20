@@ -54,6 +54,7 @@ class FetchChunksStep:
 
     search_mgr: Any
     name: str = "fetch_chunks"
+    weight: float = 5.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

@@ -1138,9 +1138,9 @@ def test_rgba_aggregation_excludes_context_claims():
         "Score appears to be simple average (not weighted)"
 
 
-def test_rgba_aggregation_all_context_returns_neutral():
+def test_rgba_aggregation_all_context_returns_none():
     """
-    T32: If all claims are context (weight=0), return neutral scores.
+    T32: If all claims are context (weight=0), return None scores (not 0.5).
     """
     from spectrue_core.verification.scoring.rgba_aggregation import (
         aggregate_weighted, ClaimScore
@@ -1176,9 +1176,9 @@ def test_rgba_aggregation_all_context_returns_neutral():
     assert result.included_claims == 0
     assert result.excluded_claims == 2
     
-    # Assert: Neutral scores returned
-    assert result.verified == 0.5
-    assert result.danger == 0.5
+    # Assert: None scores returned (not 0.5)
+    assert result.verified is None
+    assert result.danger is None
 
 
 def test_rgba_aggregation_weights_by_check_worthiness():

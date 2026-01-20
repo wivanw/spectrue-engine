@@ -17,6 +17,7 @@ Burn Logic:
 This protects purchased credits from unfair burn.
 """
 from datetime import datetime, timedelta
+from decimal import Decimal
 from firebase_admin import firestore
 
 
@@ -38,9 +39,9 @@ def burn_inactive_users(db, days_threshold: int = 365) -> int:
     cutoff = now - timedelta(days=days_threshold)
     users_ref = db.collection("users")
 
-    # Query: last_seen_at < cutoff AND balance_sc > 0
+    # Query: last_seen_at < cutoff (balance_sc stored as string, filter in code)
     # We filter active plans in code (Firestore doesn't support OR well)
-    query = users_ref.where("last_seen_at", "<", cutoff).where("balance_sc", ">", 0)
+    query = users_ref.where("last_seen_at", "<", cutoff)
 
     batch = db.batch()
     count = 0
@@ -66,13 +67,15 @@ def burn_inactive_users(db, days_threshold: int = 365) -> int:
                 continue  # Not enough time passed since plan expiry
 
         # --- BURN: Free user or plan expired + threshold passed ---
-        balance = data.get("balance_sc", 0)
+        balance = Decimal(str(data.get("balance_sc", data.get("credits", 0)) or 0))
+        if balance <= 0:
+            continue
 
         # Burn
         batch.update(doc.reference, {
-            "balance_sc": 0,
+            "balance_sc": "0",
             "burn_reason": "inactivity_365d",
-            "burned_amount": balance,
+            "burned_amount": str(balance),
             "burned_at": firestore.SERVER_TIMESTAMP
         })
 
