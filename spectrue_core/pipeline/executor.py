@@ -93,12 +93,12 @@ async def execute_pipeline(
         claims=claims,
         lang=lang,
         trace=trace,
+        progress_callback=progress_callback,
     )
 
     # Set extras for steps that need them
     ctx = ctx.set_extra("max_cost", max_cost)
     ctx = ctx.set_extra("inline_sources", inline_sources or [])
-    ctx = ctx.set_extra("progress_callback", progress_callback)
 
     # Build pipeline for this mode
     factory = PipelineFactory(search_mgr=search_mgr, agent=agent)

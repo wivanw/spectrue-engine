@@ -319,6 +319,7 @@ class DAGPipeline:
             async def run_node(node: StepNode) -> tuple[str, PipelineContext | Exception]:
                 async with semaphore:
                     try:
+                        logger.debug(f"DAG.run: starting node '{node.name}' (layer={layer_idx}) progress_cb_present={bool(current_ctx.progress_callback)}")
                         step_state = dag_state.ensure_step(
                             node.name,
                             depends_on=node.depends_on,
@@ -328,7 +329,16 @@ class DAGPipeline:
                         step_state.mark_running(timestamp=time.time())
                         if trace:
                             Trace.event("dag_step_start", {"step": node.name})
+                        
+                        if current_ctx.progress_callback:
+                            await current_ctx.progress_callback("step_start", node.name)
+
                         result = await node.step.run(current_ctx)
+                        logger.debug(f"DAG.run: finished node '{node.name}' (layer={layer_idx}) result_type={type(result).__name__ if result is not None else 'None'}")
+                        
+                        if current_ctx.progress_callback:
+                            await current_ctx.progress_callback("step_end", node.name)
+
                         step_state.mark_succeeded(timestamp=time.time())
                         if trace:
                             Trace.event("dag_step_end", {"step": node.name})
@@ -400,6 +410,7 @@ class DAGPipeline:
                 evidence=merged_evidence,
                 verdict=merged_verdict,
                 extras=merged_extras,
+                progress_callback=getattr(current_ctx, "progress_callback", None),
             )
             layer_state.mark_completed(timestamp=time.time())
 

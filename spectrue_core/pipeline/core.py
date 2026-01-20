@@ -80,6 +80,7 @@ class PipelineContext:
     evidence: dict[str, Any] | None = None
     verdict: dict[str, Any] | None = None
     extras: dict[str, Any] = field(default_factory=dict)
+    progress_callback: Any | None = None  # Callable[[str, ...], Awaitable[None]]
 
     def with_update(self, **kwargs: Any) -> PipelineContext:
         """
@@ -99,6 +100,7 @@ class PipelineContext:
             "evidence": self.evidence,
             "verdict": self.verdict,
             "extras": self.extras,
+            "progress_callback": self.progress_callback,
         }
         current.update(kwargs)
         return PipelineContext(**current)

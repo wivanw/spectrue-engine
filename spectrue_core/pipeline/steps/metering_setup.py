@@ -124,7 +124,7 @@ class MeteringSetupStep:
                 pass
             
             # Wrap progress callback to include costs
-            raw_cb = ctx.get_extra("progress_callback")
+            raw_cb = ctx.progress_callback
             if raw_cb:
                 # Use helper (imported)
                 wrapped_cb = await create_progress_callback(raw_cb, progress_emitter)
@@ -136,14 +136,15 @@ class MeteringSetupStep:
                 {"run_id": current_trace_id()},
             )
 
+            # NOTE: We must update the progress_callback attribute so DAG uses the wrapped one
             return (
                 ctx.set_extra("ledger", ledger)
                 .set_extra("tavily_meter", tavily_meter)
                 .set_extra("llm_meter", llm_meter)
                 .set_extra("progress_emitter", progress_emitter)
                 .set_extra("pricing_policy", policy)
-                .set_extra("progress_callback", wrapped_cb)
                 .set_extra("metering_initialized", True)
+                .with_update(progress_callback=wrapped_cb)
             )
 
         except Exception as e:
