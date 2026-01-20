@@ -337,8 +337,8 @@ class TestAssignClaimRgba:
         # Should have computed RGBA
         assert "rgba" in claim_verdict
 
-    def test_deep_mode_missing_rgba_marked_error(self, mock_trace):
-        """Deep mode claim without RGBA should be marked as error."""
+    def test_deep_mode_missing_rgba_gets_fallback(self, mock_trace):
+        """Deep mode claim without RGBA should get fallback A_det computed."""
         claim_verdict = {
             "claim_id": "c1",
             "verdict_score": 0.8,
@@ -351,8 +351,10 @@ class TestAssignClaimRgba:
             global_a=0.8,
             judge_mode=ScoringMode.DEEP,
         )
-        # Should mark as error
-        assert claim_verdict.get("rgba_error") == "missing_from_llm"
+        # Should now compute fallback RGBA (A_det based on evidence)
+        assert "rgba" in claim_verdict
+        assert isinstance(claim_verdict["rgba"], list)
+        assert len(claim_verdict["rgba"]) == 4
 
     def test_deep_mode_error_claim_no_rgba_expected(self, mock_trace):
         """Deep mode error claim should not require RGBA."""
