@@ -18,8 +18,12 @@ mock_firestore = MagicMock()
 sys.modules["firebase_admin"] = MagicMock()
 sys.modules["firebase_admin.firestore"] = mock_firestore
 
-from spectrue_core.monetization.adapters.firestore import FirestoreBillingStore  # noqa: E402
-from spectrue_core.monetization.config import MonetizationConfig  # noqa: E402
+import spectrue_core.monetization.adapters.firestore as firestore_adapter
+# Force mock in case it was already imported and set to None
+firestore_adapter.firestore = mock_firestore
+
+from spectrue_core.monetization.adapters.firestore import FirestoreBillingStore
+from spectrue_core.monetization.config import MonetizationConfig
 
 class TestFirestoreLegacyFallback:
     def test_read_user_wallet_legacy_fallback(self):
