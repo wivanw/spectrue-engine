@@ -16,13 +16,13 @@ async def test_progress_estimator_monotonicity():
         "metering_setup",
         "extract_claims",
         "build_queries",
-        "search_execution",
-        "process_search_results",
-        "clustering",
-        "select_evidence",
+        "web_search",
+        "fetch_chunks",
+        "cluster_evidence",
+        "evidence_collect",
         "summarize_evidence",
         "judge_claims",
-        "assemble_result"
+        "assemble_deep_result"
     ]
     
     last_percent = 0

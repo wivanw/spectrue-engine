@@ -126,9 +126,9 @@ class ProgressEstimator:
         self.completed_weight += weight
         
         # Calculate new percentage
-        # Use rounding so small weights can still become visible
-        percent = int(round((self.completed_weight / self.total_weight) * 100))
-        percent = min(98, percent)
+        # Use 95% scale to match on_step_start and reserve room for final "Done" state
+        percent = int((self.completed_weight / self.total_weight) * 95)
+        # Ensure a minimum visible progress unless it's essentially 0
         # Ensure a minimum visible progress unless it's essentially 0
         percent = max(5, percent)
         
