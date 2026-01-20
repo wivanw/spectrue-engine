@@ -280,6 +280,11 @@ class DAGPipeline:
         dag_state.ordered_steps = [node.name for layer in layers for node in layer]
 
         current_ctx = ctx.set_extra(DAG_EXECUTION_STATE_KEY, dag_state)
+        
+        if current_ctx.progress_callback:
+            # Tell estimator about all nodes to calculate total weights
+            await current_ctx.progress_callback("init", None, self.nodes)
+
         completed_results: dict[str, PipelineContext] = {}
 
         for layer_idx, layer in enumerate(layers):

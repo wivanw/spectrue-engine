@@ -250,10 +250,10 @@ class EvidenceSpilloverStep(Step):
     """
 
     config: Any
+    name: str = "evidence_spillover"
+    weight: float = 2.0
 
-    @property
-    def name(self) -> str:
-        return "evidence_spillover"
+
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         sources = ctx.sources or []

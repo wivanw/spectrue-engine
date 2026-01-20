@@ -45,6 +45,7 @@ class TargetSelectionStep:
 
     process_all_claims: bool = False  # Normal mode: False, Deep mode: True
     name: str = "target_selection"
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Select verification targets."""

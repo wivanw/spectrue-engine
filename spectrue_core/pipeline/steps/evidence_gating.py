@@ -417,6 +417,7 @@ class EvidenceGatingStep:
     """
     
     name: str = "evidence_gating"
+    weight: float = 1.0
     
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

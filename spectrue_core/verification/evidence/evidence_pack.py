@@ -69,7 +69,7 @@ Claim types for multi-claim extraction:
 
 ClaimRoleType = Literal[
     "core", "support", "context", "meta", "attribution", "aggregated", "subclaim",
-    "thesis", "background", "example", "hedge", "counterclaim",
+    "thesis", "background", "example", "hedge", "counterclaim", "definition", "forecast",
     "peripheral",
 ]
 """Role of a claim in document structure."""

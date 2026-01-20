@@ -53,6 +53,7 @@ class AssembleRetrievalItemsStep:
     """Assemble retrieval items from ranked results and optional chunks."""
 
     name: str = "assemble_retrieval_items"
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

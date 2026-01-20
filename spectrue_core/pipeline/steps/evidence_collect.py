@@ -114,6 +114,7 @@ class EvidenceCollectStep:
     search_mgr: Any  # SearchManager
     include_global_pack: bool = True
     name: str = "evidence_collect"
+    weight: float = 15.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

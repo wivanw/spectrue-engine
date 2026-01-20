@@ -54,6 +54,7 @@ class RerankStep:
     """Blend provider and similarity scores without filtering."""
 
     name: str = "rerank_results"
+    weight: float = 2.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

@@ -130,17 +130,12 @@ class Step(Protocol):
     - Receives context, does work, returns updated context
     - Should be stateless (all state in context)
     - May be sync or async
-
-    Example:
-        class SearchStep:
-            name = "search"
-
-            async def run(self, ctx: PipelineContext) -> PipelineContext:
-                sources = await self.search_mgr.search(ctx.claims)
-                return ctx.with_update(sources=sources)
+    - May provide weight for progress estimation (default: 1)
+    - May provide status_key for localization (default: status.processing)
     """
 
     name: str
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Execute this step and return updated context."""

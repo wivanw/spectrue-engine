@@ -71,9 +71,8 @@ class EvidenceStatsStep(Step):
     Build per-claim EvidenceStats from already selected sources.
     This decouples explainability (A) from BudgetState and fetch/extract counts.
     """
-    @property
-    def name(self) -> str:
-        return "evidence_stats"
+    weight: float = 1.0
+    name: str = "evidence_stats"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         if ctx.mode.api_analysis_mode != AnalysisMode.DEEP_V2:

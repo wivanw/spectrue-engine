@@ -118,10 +118,9 @@ class BuildClaimFramesStep(Step):
     Converts pipeline state (claims, evidence, execution state) into
     per-claim ClaimFrame bundles.
     """
+    weight: float = 1.0
 
-    @property
-    def name(self) -> str:
-        return "build_claim_frames"
+    name: str = "build_claim_frames"
 
     def __init__(self, config: Any | None = None):
         self._config = config
@@ -178,13 +177,12 @@ class SummarizeEvidenceStep(Step):
     
     Uses EvidenceSummarizerSkill to categorize evidence by stance.
     """
+    weight: float = 5.0
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
 
-    @property
-    def name(self) -> str:
-        return "summarize_evidence"
+    name: str = "summarize_evidence"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("summarize_evidence")
@@ -233,13 +231,12 @@ class JudgeClaimsStep(Step):
     Uses ClaimJudgeSkill to generate RGBA scores and verdicts.
     Output is returned unchanged to the frontend.
     """
+    weight: float = 20.0
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
 
-    @property
-    def name(self) -> str:
-        return "judge_claims"
+    name: str = "judge_claims"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("judge_claims")
@@ -412,9 +409,9 @@ class MarkJudgeUnavailableStep(Step):
     def __init__(self, reason: str = "judge_unavailable"):
         self._reason = reason
 
-    @property
-    def name(self) -> str:
-        return "judge_unavailable"
+    weight: float = 1.0
+
+    name: str = "judge_unavailable"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         Trace.phase_start("judge_unavailable")
@@ -452,10 +449,9 @@ class AssembleDeepResultStep(Step):
 
     Produces per-claim outputs with no global scoring.
     """
+    weight: float = 1.0
 
-    @property
-    def name(self) -> str:
-        return "assemble_deep_result"
+    name: str = "assemble_deep_result"
 
     def __init__(self, config: Any | None = None):
         self._config = config

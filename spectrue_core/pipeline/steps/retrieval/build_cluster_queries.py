@@ -61,6 +61,7 @@ class BuildClusterQueriesStep:
     """Build clustered retrieval query plans for deep_v2."""
 
     name: str = "build_cluster_queries"
+    weight: float = 3.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

@@ -113,6 +113,7 @@ class ClusterWebSearchStep:
     config: Any
     search_mgr: Any
     name: str = "cluster_web_search"
+    weight: float = 15.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

@@ -596,11 +596,6 @@ class FirestoreBillingStore(BillingStore):
 
             try:
                 data = _bootstrap_pool(tx)
-                logger.info(
-                    "Bootstrapped free pool doc at %s with available_balance_sc=%s",
-                    self._config.pool_doc_path,
-                    self._config.initial_pool_available_sc.to_str(),
-                )
             except Exception as e:
                 logger.exception("Failed to bootstrap free pool doc: %s", e)
                 return FreePool(available_balance_sc=MoneySCClass.zero())

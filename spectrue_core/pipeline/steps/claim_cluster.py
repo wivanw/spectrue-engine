@@ -30,6 +30,7 @@ class ClaimClusterStep(Step):
     """
 
     name: str = "claim_cluster"
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         graph_result = ctx.get_extra("graph_result")

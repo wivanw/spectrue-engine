@@ -36,6 +36,7 @@ class JudgeStandardStep:
     agent: Any  # FactCheckerAgent
     search_mgr: Any  # SearchManager
     name: str = "judge_standard"
+    weight: float = 7.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

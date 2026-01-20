@@ -46,6 +46,7 @@ class MeteringSetupStep:
     agent: Any | None = None  # FactCheckerAgent
     search_mgr: Any | None = None  # SearchManager
     name: str = METERING_SETUP_STEP_NAME
+    weight: float = 2.0
 
     @classmethod
     def ensure_present(cls, nodes: list[Any]) -> None:

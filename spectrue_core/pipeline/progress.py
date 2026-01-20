@@ -16,7 +16,7 @@ Calculates weighted progress for DAG execution and emits rich events.
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, Awaitable, Dict, Optional
+from typing import Callable, Awaitable, Dict, Optional, Any
 import logging
 
 
@@ -32,52 +32,8 @@ class ProgressEvent:
     meta: Dict[str, str] = field(default_factory=dict)  # Dynamic values for the message (e.g. {processed: 10, total: 20})
 
 
-# Step weights define how much "progress" each step represents out of 100%
-# Total should ideally sum to 100, but logic will clamp/normalize if needed.
-STEP_WEIGHTS = {
-    # Setup & Extraction (15%)
-    "metering_setup": 1,
-    "extract_claims": 14,
-
-    # Search & Retrieval (40%)
-    "build_queries": 5,
-    "web_search": 25,  # Matches WebSearchStep.name
-    "verify_inline_sources": 5,
-    "fetch_chunks": 5,
-
-    # Evidence Processing (20%)
-    "evidence_collect": 10,  # Matches EvidenceCollectStep
-    "cluster_evidence": 10,  # Matches ClusterEvidenceStep
-
-    # Reasoning & Scoring (20%)
-    "summarize_evidence": 5,
-    "judge_claims": 15,
-    "judge_standard": 15,  # Mutually exclusive with judge_claims
-
-    # Finalization (5%)
-    "assemble_standard_result": 5,
-    "assemble_deep_result": 5,
-}
-
-# Mapping step names to user-facing status keys
-STATUS_KEYS = {
-    "metering_setup": "status.initializing",
-    "extract_claims": "loader.extracting_claims",
-    "claim_graph": "loader.building_claim_graph",
-    "oracle_flow": "loader.checking_oracle",
-    "build_queries": "loader.generating_queries",
-    "web_search": "loader.searching_phase_a",  # Generic initial search
-    "verify_inline_sources": "loader.verifying_sources",
-    "fetch_chunks": "loader.processing_sources",
-    "cluster_evidence": "loader.clustering_evidence",
-    "evidence_collect": "loader.analyzing_evidence",
-    "stance_annotate": "loader.stance_annotation",
-    "summarize_evidence": "loader.compressing_context",
-    "judge_claims": "loader.verifying_claim",  # Deep mode specific
-    "judge_standard": "loader.ai_analysis",
-    "assemble_standard_result": "loader.finalizing",
-    "assemble_deep_result": "loader.finalizing",
-}
+# Progress emitter uses attributes from Step objects (weight, status_key).
+# Refer to spectrue_core.pipeline.core.Step protocol for defaults.
 
 
 logger = logging.getLogger(__name__)
@@ -90,8 +46,28 @@ class ProgressEstimator:
     def __init__(self, callback: Callable[[ProgressEvent], Awaitable[None]]):
         self.callback = callback
         self.completed_weight = 0.0
-        self.total_weight = sum(STEP_WEIGHTS.values())
+        self.total_weight = 0.0
         self.executed_steps: set[str] = set()
+        self.last_status_key: Optional[str] = None
+        self.step_objects: dict[str, Any] = {} # Map name -> Step object
+
+    def set_planned_nodes(self, nodes: list[Any]):
+        """Sets the list of nodes (StepNode) that are expected to run."""
+        self.step_objects = {n.name: n.step for n in nodes}
+        
+        total = 0.0
+        for name, step in self.step_objects.items():
+            # Try to get weight from step object, default to 1.0
+            weight = getattr(step, "weight", 1.0)
+            total += weight
+            
+        self.total_weight = total
+        logger.info(f"ProgressEstimator: planned steps={len(nodes)}, total_weight={self.total_weight}")
+
+    def set_planned_steps(self, step_names: list[str]):
+        """Legacy compatibility method. Discouraged in DAG mode."""
+        self.total_weight = float(len(step_names))
+        logger.warning(f"ProgressEstimator(legacy): planned steps={len(step_names)}, total_weight={self.total_weight}")
 
     async def on_step_start(self, step_name: str):
         """Called when a step starts."""
@@ -99,11 +75,22 @@ class ProgressEstimator:
             logger.debug(f"ProgressEstimator.on_step_start: step={step_name}, completed_weight={self.completed_weight}")
         except Exception:
             pass
-        # We don't advance percentage on start, but we update status text
-        current_percent = int((self.completed_weight / self.total_weight) * 95)
+        # Use 100% scale for progress, clamp to 95% until finalized
+        divisor = max(1.0, self.total_weight)
+        current_percent = int((self.completed_weight / divisor) * 95)
         
-        status_key = STATUS_KEYS.get(step_name, "status.processing")
+        # Automatically generate status key from step name
+        status_key = f"loader.{step_name}"
         
+        if self.step_objects.get(step_name) is None:
+            logger.warning(f"[Progress] Unknown step_name '{step_name}' - no step object")
+        
+        # Avoid redundant events if status and percent haven't changed much
+        if status_key == self.last_status_key:
+             return
+        
+        self.last_status_key = status_key
+
         event = ProgressEvent(
             percent=max(5, current_percent), # Minimum 5% to show activity
             status_key=status_key,
@@ -122,14 +109,16 @@ class ProgressEstimator:
             return
         
         self.executed_steps.add(step_name)
-        weight = STEP_WEIGHTS.get(step_name, 0)
+        
+        # Get weight from step object with fallback
+        step_obj = self.step_objects.get(step_name)
+        weight = getattr(step_obj, "weight", 1.0 if step_obj else 0.0)
         self.completed_weight += weight
         
         # Calculate new percentage
-        # Use 95% scale to match on_step_start and reserve room for final "Done" state
-        percent = int((self.completed_weight / self.total_weight) * 95)
-        # Ensure a minimum visible progress unless it's essentially 0
-        # Ensure a minimum visible progress unless it's essentially 0
+        divisor = max(1.0, self.total_weight)
+        percent = int((self.completed_weight / divisor) * 95)
+        # Ensure a minimum visible progress
         percent = max(5, percent)
         
         try:
@@ -137,8 +126,10 @@ class ProgressEstimator:
         except Exception:
             pass
         
-        # Emit an explicit progress event on step end so frontend updates percentage
-        status_key = STATUS_KEYS.get(step_name, "status.processing")
+        # Automatically generate status key from step name
+        status_key = f"loader.{step_name}"
+        self.last_status_key = status_key
+
         event = ProgressEvent(
             percent=percent,
             status_key=status_key,

@@ -51,6 +51,7 @@ class StanceAnnotateStep:
 
     agent: Any  # FactCheckerAgent
     name: str = "stance_annotate"
+    weight: float = 2.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

@@ -29,6 +29,7 @@ class ExtractionResultAssemblyStep:
     Returns specific payload with extracted claims and prepared text.
     """
     name = "extraction_result_assembly"
+    weight: float = 1.0
     
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Assemble result for extraction-only mode."""

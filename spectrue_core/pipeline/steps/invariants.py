@@ -54,6 +54,7 @@ class AssertSingleClaimStep:
     """
 
     name: str = "assert_single_claim"
+    weight: float = 0.5
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         claim_count = len(ctx.claims)
@@ -86,6 +87,7 @@ class AssertMaxClaimsStep:
 
     max_claims: int
     name: str = "assert_max_claims"
+    weight: float = 0.5
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         claim_count = len(ctx.claims)
@@ -118,6 +120,7 @@ class AssertSingleLanguageStep:
     """
 
     name: str = "assert_single_language"
+    weight: float = 0.5
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         # Collect languages from claims
@@ -160,6 +163,7 @@ class AssertNonEmptyClaimsStep:
     """
 
     name: str = "assert_non_empty_claims"
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         if not ctx.claims:
@@ -187,6 +191,7 @@ class AssertMeteringEnabledStep:
     """
 
     name: str = "assert_metering_enabled"
+    weight: float = 0.5
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         if ctx.mode.require_metering and ctx.trace is None:
@@ -258,6 +263,7 @@ class AssertContractPresenceStep:
         JUDGMENTS_KEY,
     )
     name: str = "assert_contracts"
+    weight: float = 0.5
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         contract_map: dict[str, type] = {
@@ -318,6 +324,7 @@ class AssertStandardResultKeysStep:
 
     required: tuple[str, ...] = ("text", "details", "anchor_claim", "rgba", "sources")
     name: str = "assert_standard_result_keys"
+    weight: float = 0.5
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         final_result = ctx.get_extra("final_result")
@@ -412,6 +419,7 @@ class AssertCostNonZeroStep:
     """
 
     name: str = "assert_cost_non_zero"
+    weight: float = 0.5
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         from spectrue_core.utils.trace import Trace
@@ -465,6 +473,7 @@ class AssertRetrievalTraceStep:
         "retrieval_search_trace",
     )
     name: str = "assert_retrieval_trace"
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         # Oracle short-circuit: when oracle produces a jackpot verdict, the pipeline
@@ -497,6 +506,7 @@ class AssertDeepJudgingStep:
     """Assert deep judging fan-out/fan-in invariants."""
 
     name: str = "assert_deep_judging"
+    weight: float = 0.5
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         deep_ctx = ctx.get_extra("deep_claim_ctx")

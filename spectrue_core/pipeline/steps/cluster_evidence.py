@@ -50,6 +50,7 @@ class ClusterEvidenceStep:
 
     agent: Any  # FactCheckerAgent
     name: str = "cluster_evidence"
+    weight: float = 4.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

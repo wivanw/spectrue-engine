@@ -29,6 +29,7 @@ class AggregateRGBAAuditStep:
     """Aggregate claim and evidence audits into RGBAResult."""
 
     name: str = "aggregate_rgba_audit"
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

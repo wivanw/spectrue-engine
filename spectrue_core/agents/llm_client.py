@@ -214,7 +214,7 @@ class LLMClient:
         *,
         openai_api_key: str | None = None,
         base_url: str | None = None,
-        default_timeout: float = 60.0,  # Increased from 30.0 for complex tasks
+        default_timeout: float = 120.0,  # Increased to prevent timeouts on slow models
         max_retries: int = 1,
         cache_retention: CacheRetention = "in_memory", # Fix default
         meter: LLMMeter | None = None,

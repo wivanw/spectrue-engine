@@ -504,7 +504,7 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string", "minLength": 1},
                         "minItems": 1,
-                        "maxItems": 10,
+                        "maxItems": 12,
                         "description": "Canonical entity names (person, org, place) - required for search",
                     },
                     # Predicate classification
