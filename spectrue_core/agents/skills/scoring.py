@@ -375,14 +375,11 @@ class ScoringSkill(BaseSkill):
             # NOTE: Do NOT aggregate R, B, A from claim-level RGBA
             # Those remain as global article-level scores from LLM
 
-            metrics = pack.get("metrics", {})
-            if isinstance(metrics, dict) and metrics.get("stance_failure") is True:
-                current = clamped.get("explainability_score", -1.0)
-                clamped["explainability_score"] = 0.2 if current < 0 else min(current, 0.4)
-                clamped["stance_fallback"] = "context"
+            # Legacy stance_failure cap REMOVED (M119).
+            # Previously capped explainability to 0.4 if stance annotation failed.
+            # LLM now provides proper per-claim A-scores; no need to penalize globally.
 
             return clamped
-
         except Exception as e:
             logger.exception("[Scoring] Failed: %s", e)
             Trace.event("llm.error", {"kind": "score_evidence", "error": str(e)})

@@ -159,6 +159,7 @@ def _build_rgba(verdict: dict, ctx: PipelineContext) -> list[float]:
         r = max(0.0, min(1.0, r))
         b = max(0.0, min(1.0, b))
         a = max(0.0, min(1.0, a))
+        Trace.event("result_assembly.rgba_from_list", {"source": "verdict_or_ctx", "rgba": [r, g, b, a]})
         return [r, g, b, a]
 
     danger = _coerce_score(verdict.get("danger_score"), -1.0)
@@ -174,6 +175,13 @@ def _build_rgba(verdict: dict, ctx: PipelineContext) -> list[float]:
     # A (explainability) is defined on [0, 1]. Never emit negative A.
     explainability_score = _coerce_unit_score(explainability, 0.0)
 
+    Trace.event("result_assembly.rgba_from_fields", {
+        "danger": danger,
+        "verified": verified,
+        "honesty": honesty,
+        "explainability_raw": explainability,
+        "explainability_score": explainability_score,
+    })
     return [danger, verified, honesty, explainability_score]
 
 
