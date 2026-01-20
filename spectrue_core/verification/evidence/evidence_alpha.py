@@ -69,15 +69,15 @@ def compute_A_det(items: list[EvidenceItem], claim_id: str | None) -> float:
         if target_cid and item_cid not in (None, target_cid):
             continue
             
-        # 2. SUPPORT stance filter
-        if item.get("stance") != "SUPPORT":
+        # 2. Anchor filter: MUST have quote and NOT be IRRELEVANT
+        stance = (item.get("stance") or "").upper()
+        if stance == "IRRELEVANT":
             continue
             
-        # 3. Direct anchor filter (quote must exist)
         if not item.get("quote"):
             continue
             
-        # 4. Reliability filter
+        # 3. Reliability filter
         r_eff = item.get("r_eff")
         if r_eff is None:
             continue

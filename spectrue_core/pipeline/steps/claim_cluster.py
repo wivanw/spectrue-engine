@@ -78,6 +78,11 @@ class ClaimClusterStep(Step):
                 "topic_tags": list(topic_tags),
             })
 
+        cluster_map = {}
+        for c in clusters:
+            for cid in c["claim_ids"]:
+                cluster_map[cid] = c["cluster_id"]
+
         Trace.event("claim_cluster.completed", {
             "cluster_count": len(clusters),
             "avg_cluster_size": (
@@ -86,4 +91,7 @@ class ClaimClusterStep(Step):
             ),
         })
 
-        return ctx.set_extra("claim_clusters", clusters)
+        return (
+            ctx.set_extra("claim_clusters", clusters)
+            .set_extra("cluster_map", cluster_map)
+        )

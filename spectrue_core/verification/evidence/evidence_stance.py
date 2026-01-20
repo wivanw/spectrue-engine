@@ -247,14 +247,47 @@ def assign_claim_rgba(
     a_det = compute_A_det(items, cid)
     
     # A_cap
-    claim_items = [it for it in items if str(it.get("claim_id")).strip().lower() in (None, str(cid).strip().lower())]
-    support_with_quote = [it for it in claim_items if it.get("stance") == "SUPPORT" and it.get("quote")]
-    refute_with_quote = [it for it in claim_items if it.get("stance") == "REFUTE" and it.get("quote")]
-    independent_domains = {it.get("domain") for it in claim_items if it.get("domain") and it.get("stance") in ("SUPPORT", "REFUTE")}
+    def _norm_cid(x: Any) -> str | None:
+        if x is None:
+            return None
+        s = str(x).strip().lower()
+        if s in ("", "none", "null"):
+            return None
+        return s
+
+    target_cid = _norm_cid(cid)
     
+    claim_items = []
+    for it in items:
+        item_cid = _norm_cid(it.get("claim_id"))
+        if item_cid is None or item_cid == target_cid:
+            claim_items.append(it)
+
+    # Direct anchors are ANY evidence items with quote (and not IRRELEVANT)
+    direct_anchors = [
+        it for it in claim_items 
+        if it.get("quote") and (it.get("stance") or "").upper() != "IRRELEVANT"
+    ]
+    
+    # Independent domains similarly (must have quote to prevent leakage from low-quality hits)
+    independent_domains = {
+        it.get("domain") for it in claim_items 
+        if it.get("domain") and it.get("quote") and (it.get("stance") or "").upper() != "IRRELEVANT"
+    }
+    
+    # Also need counts for conflict penalty below
+    support_with_quote = [
+        it for it in claim_items 
+        if it.get("quote") and (it.get("stance") or "").upper() == "SUPPORT"
+    ]
+    refute_with_quote = [
+        it for it in claim_items 
+        if it.get("quote") and (it.get("stance") or "").upper() == "REFUTE"
+    ]
+
     a_cap = compute_alpha_cap(
         independent_source_count=len(independent_domains),
-        direct_anchor_count=len(support_with_quote) + len(refute_with_quote)
+        direct_anchor_count=len(direct_anchors)
     )
     
     # A_final
@@ -283,7 +316,7 @@ def assign_claim_rgba(
             "a_llm": a_llm,
             "a_cap": a_cap,
             "independent_domains": len(independent_domains),
-            "direct_anchors": len(support_with_quote) + len(refute_with_quote),
+            "direct_anchors": len(direct_anchors),
         },
     )
 

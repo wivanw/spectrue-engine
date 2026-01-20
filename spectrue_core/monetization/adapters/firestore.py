@@ -521,7 +521,14 @@ class FirestoreBillingStore(BillingStore):
                 available_sc=MoneySCClass.zero(),
             )
         data = snapshot.to_dict() or {}
-        balance = _to_decimal(data.get(self._config.balance_field, "0"))
+        raw_balance = data.get(self._config.balance_field)
+        raw_legacy = data.get(self._config.legacy_balance_field)
+        
+        if raw_balance is None and raw_legacy is not None:
+            balance = _to_decimal(raw_legacy)
+        else:
+            balance = _to_decimal(raw_balance)
+            
         available = _to_decimal(data.get(self._config.available_field, "0"))
         last_seen_at = data.get("last_seen_at")
         if last_seen_at and hasattr(last_seen_at, "to_datetime"):

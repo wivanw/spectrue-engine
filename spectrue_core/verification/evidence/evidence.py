@@ -428,6 +428,7 @@ def build_evidence_pack(
                 relevance_score=float(s.get("relevance_score", 0.0) or 0.0),
                 timeliness_status=s.get("timeliness_status"),
                 key_snippet=None,
+                quote=s.get("quote"),
                 quote_matches=[],
                 is_trusted=bool(s.get("is_trusted")),
                 is_duplicate=is_dup,
@@ -458,10 +459,9 @@ def build_evidence_pack(
             r["stance"] = "context"
             r["timeliness_excluded"] = True
 
-    # Enforce quote requirement for SUPPORT/REFUTE
     for r in search_results:
         stance = str(r.get("stance") or "").lower()
-        quote = r.get("quote_span") or r.get("contradiction_span") or r.get("key_snippet")
+        quote = r.get("quote") or r.get("quote_span") or r.get("contradiction_span") or r.get("key_snippet")
         if stance in ("support", "refute", "contradict") and not quote:
             r["stance"] = "context"
             r["quote_missing"] = True
@@ -647,8 +647,16 @@ def build_evidence_pack(
                 stance = "IRRELEVANT"
             case _:
                 stance = "CONTEXT"
+        raw_q = (
+            r.get("quote")
+            or r.get("quote_span")
+            or r.get("contradiction_span")
+            or r.get("key_snippet")
+        )
+        quote = str(raw_q) if raw_q else None
+        if quote and len(quote) > 450:
+            quote = quote[:447] + "..."
 
-        quote = r.get("quote_span") or r.get("contradiction_span") or r.get("key_snippet")
         if stance in ("SUPPORT", "REFUTE") and not quote:
             stance = "CONTEXT"
 

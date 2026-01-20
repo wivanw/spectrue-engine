@@ -142,6 +142,7 @@ class PipelineFactory:
             CostSummaryStep,
             AssertStandardResultKeysStep,
             AssertRetrievalTraceStep,
+            EvidenceSpilloverStep,
         )
 
         # All steps now always included (no feature flags)
@@ -255,11 +256,16 @@ class PipelineFactory:
                 optional=True,
             ),
 
-            # EVOI gating decision (after evidence collection, before expensive steps)
-            # Reads EvidenceIndex to compute p_need for stance/cluster
+            # Spillover routing inside claim clusters
+            StepNode(
+                step=EvidenceSpilloverStep(config=config),
+                depends_on=["enrich_claims_post_evidence"],
+            ),
+
+            # EVOI gating decision (after spillover!)
             StepNode(
                 step=EvidenceGatingStep(),
-                depends_on=["enrich_claims_post_evidence"],
+                depends_on=["evidence_spillover"],
             ),
 
             # Stance annotation (controlled by EVOI gate)

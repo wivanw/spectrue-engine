@@ -406,6 +406,7 @@ class SearchResult(TypedDict, total=False):
     published_at: str | None
     source_type: SourceType
     stance: Stance                  # Position relative to claim
+    quote: str | None               # Verified quote for the stance
     relevance_score: float          # 0-1, how relevant to claim
     timeliness_status: str | None   # in_window | outdated | unknown_date
     key_snippet: str | None         # Most relevant quote from content

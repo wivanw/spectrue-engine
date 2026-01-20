@@ -56,3 +56,30 @@ def test_sigmoid_robustness():
     assert sigmoid(1000) == 1.0
     assert sigmoid(-1000) == 0.0
     assert math.isclose(sigmoid(0), 0.5)
+
+def test_A_det_works_without_support_label():
+    """M119 Fix: A_det should work with quoted items even if stance is missing or CONTEXT."""
+    items = [
+        {"claim_id": "c1", "stance": "CONTEXT", "quote": "Direct evidence", "r_eff": 0.90}
+    ]
+    a_val = compute_A_det(items, "c1")
+    # sigmoid(w(0.9)) = sigmoid(ln(9)) = sigmoid(2.19) ~= 0.9
+    assert a_val > 0.8
+
+def test_A_det_ignores_irrelevant():
+    """M119 Fix: IRRELEVANT items should not contribute to A_det even if they have quotes."""
+    items = [
+        {"claim_id": "c1", "stance": "IRRELEVANT", "quote": "Some quote", "r_eff": 0.95}
+    ]
+    a_val = compute_A_det(items, "c1")
+    assert a_val == 0.5 # sigmoid(0)
+
+def test_A_det_increases_with_multiple_anchors():
+    """M119: More anchors should increase A_det."""
+    items_1 = [{"claim_id": "c1", "stance": "SUPPORT", "quote": "q1", "r_eff": 0.8}]
+    items_2 = items_1 + [{"claim_id": "c1", "stance": "REFUTE", "quote": "q2", "r_eff": 0.8}]
+    
+    a1 = compute_A_det(items_1, "c1")
+    a2 = compute_A_det(items_2, "c1")
+    
+    assert a2 > a1
