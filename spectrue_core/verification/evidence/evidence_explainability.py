@@ -48,67 +48,37 @@ def get_tier_rank(tier: str | None) -> int:
     )
 
 
+def compute_alpha_cap(
+    *,
+    independent_source_count: int,
+    direct_anchor_count: int,
+) -> float:
+    """
+    Compute Alpha cap based on source diversity and anchors.
+    
+    cap_independence = 1 - exp(-0.8 * independent_source_count)
+    cap_anchors = 1 - exp(-1.0 * direct_anchor_count)
+    A_cap = min(1.0, max(cap_anchors, 0.2) * max(cap_independence, 0.4))
+    """
+    cap_indep = 1.0 - math.exp(-0.8 * float(independent_source_count))
+    cap_anchors = 1.0 - math.exp(-1.0 * float(direct_anchor_count))
+    
+    a_cap = min(1.0, max(cap_anchors, 0.2) * max(cap_indep, 0.4))
+    return float(a_cap)
+
+
 def compute_explainability_tier_adjustment(
     explainability_score: float,
     best_tier: str | None,
     claim_id: str,
 ) -> float | None:
     """
-    Apply tier-based adjustment to explainability score.
+    DEPRECATED (M119): Logic moved to assign_claim_rgba and compute_alpha_cap.
     
-    Uses logit-space adjustment to preserve probabilistic properties.
-    
-    Args:
-        explainability_score: Raw explainability from LLM (0-1)
-        best_tier: Best evidence tier for this claim
-        claim_id: Claim identifier for tracing
-        
-    Returns:
-        Adjusted explainability score, or None if no adjustment needed
+    This function used to apply tier-based multiplicative adjustments. 
+    Now it returns None to signal no change from this module.
     """
-    from spectrue_core.verification.evidence.evidence_scoring import explainability_factor_for_tier
-    
-    if not isinstance(explainability_score, (int, float)) or explainability_score < 0:
-        return None
-    
-    pre_a = float(explainability_score)
-    
-    # Contract: pre_A must be strictly in (0, 1) for logit
-    if not (0.0 < pre_a < 1.0) or not math.isfinite(pre_a):
-        Trace.event(
-            "verdict.explainability_missing",
-            {"claim_id": claim_id, "best_tier": best_tier, "pre_A": pre_a},
-        )
-        return None
-    
-    factor, source, prior = explainability_factor_for_tier(best_tier)
-    
-    if factor <= 0 or not math.isfinite(factor):
-        Trace.event(
-            "verdict.explainability_bad_factor",
-            {
-                "claim_id": claim_id,
-                "best_tier": best_tier,
-                "pre_A": pre_a,
-                "prior": prior,
-                "baseline": TIER_A_BASELINE,
-                "factor": factor,
-                "source": source,
-            },
-        )
-        return None
-    
-    # Apply logit-space adjustment
-    post_a = sigmoid(logit(pre_a) + math.log(factor))
-    
-    # Only return if adjustment is significant
-    if abs(post_a - pre_a) < 1e-9:
-        return None
-    
-    # NOTE: Trace event moved to caller (evidence_verdict_processing.py)
-    # Only log when the adjustment is actually applied (source != "llm")
-    
-    return post_a
+    return None
 
 
 def find_best_tier_for_claim(

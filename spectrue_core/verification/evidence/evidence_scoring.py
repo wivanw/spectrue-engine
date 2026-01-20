@@ -69,34 +69,15 @@ def claim_text(cv: dict) -> str:
 
 # Tier is a first-class prior on A (Explainability) ONLY.
 # It must not bias veracity (G) or verdicts.
-TIER_A_PRIOR_MEAN = {
-    "A": 0.96,
-    "A'": 0.93,
-    "B": 0.90,
-    "C": 0.85,
-    "D": 0.80,
-    "UNKNOWN": 0.38,
-}
-TIER_A_BASELINE = TIER_A_PRIOR_MEAN["B"]
+# TIER_A_PRIOR_MEAN = { ... } DEPRECATED (M119)
+TIER_A_BASELINE = 0.90
 
 
 def explainability_factor_for_tier(tier: str | None) -> tuple[float, str, float]:
     """
-    Compute explainability adjustment factor based on evidence tier.
-
-    Args:
-        tier: Evidence tier (A, A', B, C, D) or None
-
-    Returns:
-        Tuple of (factor, source_label, prior)
+    DEPRECATED (M119): Return neutral factor 1.0.
     """
-    if not tier:
-        prior = TIER_A_PRIOR_MEAN["UNKNOWN"]
-        return prior / TIER_A_BASELINE, "unknown_default", prior
-    prior = TIER_A_PRIOR_MEAN.get(
-        str(tier).strip().upper(), TIER_A_PRIOR_MEAN["UNKNOWN"]
-    )
-    return prior / TIER_A_BASELINE, "best_tier", prior
+    return 1.0, "neutral (m119)", 0.90
 
 
 def tier_rank(tier: str | None) -> int:
@@ -424,75 +405,3 @@ def derive_verdict_state(
         return "conflicted"
     else:
         return "insufficient_evidence"
-
-
-def apply_explainability_tier_factor(
-    pre_a: float,
-    best_tier: str | None,
-    claim_id: str | None = None,
-    bayesian_p: float | None = None,
-) -> float | None:
-    """
-    Apply tier-based explainability factor to A score.
-
-    Args:
-        pre_a: Pre-factor A score (0-1)
-        best_tier: Best evidence tier
-        claim_id: Claim ID for tracing
-
-    Returns:
-        Updated A score, or None if no update needed
-    """
-    if not (isinstance(pre_a, (int, float)) and 0.0 < pre_a < 1.0):
-        Trace.event(
-            "verdict.explainability_missing",
-            {"claim_id": claim_id, "best_tier": best_tier, "pre_A": pre_a},
-        )
-        return None
-
-    factor, source, prior = explainability_factor_for_tier(best_tier)
-    if factor <= 0 or not math.isfinite(factor):
-        Trace.event(
-            "verdict.explainability_bad_factor",
-            {
-                "claim_id": claim_id,
-                "best_tier": best_tier,
-                "pre_A": pre_a,
-                "prior": prior,
-                "baseline": TIER_A_BASELINE,
-                "factor": factor,
-                "source": source,
-            },
-        )
-        return None
-
-    # Apply logit-space adjustment
-    # L_post = L_llm + log(tier_factor) + 0.5 * log(bayesian_factor)
-    # The 0.5 weight for Bayesian factor is to keep it conservative 
-    # and avoid over-shadowing the LLM's directness assessment.
-    l_boost = math.log(factor)
-    if bayesian_p is not None and 0.0 < bayesian_p < 1.0:
-        # Boost from Bayesian sufficiency (normalized to baseline 0.5)
-        b_factor = bayesian_p / 0.5
-        l_boost += 0.5 * math.log(b_factor)
-
-    post_a = sigmoid(logit(pre_a) + l_boost)
-    if abs(post_a - pre_a) > 1e-9:
-        Trace.event(
-            "verdict.explainability_tier_factor",
-            {
-                "claim_id": claim_id,
-                "best_tier": best_tier,
-                "pre_A": pre_a,
-                "prior": prior,
-                "baseline": TIER_A_BASELINE,
-                "factor": factor,
-                "bayesian_p": bayesian_p,
-                "l_boost": l_boost,
-                "post_A": post_a,
-                "source": source,
-            },
-        )
-        return post_a
-
-    return None

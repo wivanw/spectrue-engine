@@ -156,14 +156,15 @@ def _context_to_result(ctx: PipelineContext) -> dict[str, Any]:
     result = {
         "sources": ctx.sources,
         "evidence": ctx.evidence,
-        "verified_score": verdict.get("verified_score", 0.5),
-        "danger_score": verdict.get("danger_score", 0.0),
-        "context_score": verdict.get("context_score", 0.5),
-        "style_score": verdict.get("style_score", 0.5),
-        "confidence_score": verdict.get("confidence_score", 0.0),
-        "explainability_score": verdict.get("explainability_score", 0.5),
+        "verified_score": verdict.get("verified_score"),
+        "danger_score": verdict.get("danger_score"),
+        "context_score": verdict.get("context_score"),
+        "style_score": verdict.get("style_score"),
+        "confidence_score": verdict.get("confidence_score"),
+        "explainability_score": verdict.get("explainability_score"),
         "rationale": verdict.get("rationale", ""),
         "claim_verdicts": verdict.get("claim_verdicts", []),
+        "status": verdict.get("status", "ok"),
     }
     _attach_execution_metadata(result, ctx)
     return result

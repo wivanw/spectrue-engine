@@ -475,12 +475,10 @@ async def score_evidence_collection(
         global_b = float(result.get("style_score", -1.0))
         if global_b < 0:
             global_b = float(result.get("context_score", -1.0))
-        if global_b < 0:
-            global_b = 1.0  # Default B=1.0 if missing
+        # M119: Default 1.0 removed. Falling back to -1.0 if missing.
 
         global_a = float(result.get("explainability_score", -1.0))
-        if global_a < 0:
-            global_a = 1.0  # Default A=1.0 if missing
+        # M119: Default 1.0 removed. Falling back to -1.0 if missing.
 
         # Enrich all claim verdicts with sources and RGBA
         enrich_all_claim_verdicts(

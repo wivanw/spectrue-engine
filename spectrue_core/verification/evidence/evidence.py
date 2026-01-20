@@ -673,6 +673,43 @@ def build_evidence_pack(
         if domain:
             item_domains.add(domain)
 
+        # M119: Reliability Metadata
+        r_domain = {
+            "A": 0.90,
+            "A'": 0.90,
+            "B": 0.80,
+            "C": 0.60,
+            "D": 0.35,
+        }.get(tier, 0.50)
+
+        # Authority anchor detection
+        cid = _normalize_claim_id(r.get("claim_id", _MISSING), default_claim_id=default_claim_id)
+        claim_obj = next((c for c in (claims or []) if c.get("id") == cid), None)
+        
+        has_authority_anchor = False
+        authority_anchor_reason = None
+        r_contextual = None
+        
+        if claim_obj:
+            v_target = str(claim_obj.get("verification_target", "")).lower()
+            c_structure = str(claim_obj.get("structure", {}).get("type", "")).lower()
+            is_attribution = v_target == "attribution" or "attribution" in c_structure
+            
+            if is_attribution:
+                # Rule: Official source for attribution claim
+                if r.get("source_type") in ("primary", "official"):
+                    has_authority_anchor = True
+                    authority_anchor_reason = "Official source for attribution-type claim"
+                    r_contextual = 0.90
+        
+        r_eff = max(r_domain, r_contextual) if (has_authority_anchor and r_contextual is not None) else r_domain
+        
+        rel_conf = "low"
+        if tier in ("A", "A'", "B") or has_authority_anchor:
+            rel_conf = "high"
+        elif tier == "C":
+            rel_conf = "medium"
+
         evidence_items.append(EvidenceItem(
             url=r.get("url") or "",
             domain=domain or "",
@@ -681,7 +718,7 @@ def build_evidence_pack(
             channel=channel,  # type: ignore[typeddict-item]
             tier=tier,  # type: ignore[typeddict-item]
             tier_reason=None,
-            claim_id=_normalize_claim_id(r.get("claim_id", _MISSING), default_claim_id=default_claim_id),
+            claim_id=cid,
             stance=stance,  # type: ignore[typeddict-item]
             quote=quote,
             relevance=float(r.get("relevance_score", 0.0) or 0.0),
@@ -689,9 +726,15 @@ def build_evidence_pack(
             temporal_flag=temporal_flag,  # type: ignore[typeddict-item]
             fetched=r.get("content_status") == "available",
             raw_text_chars=len(r.get("content_excerpt") or ""),
+            # M119 fields
+            r_domain=r_domain,
+            r_contextual=r_contextual,
+            r_eff=r_eff,
+            has_authority_anchor=has_authority_anchor,
+            authority_anchor_reason=authority_anchor_reason,
+            reliability_confidence=rel_conf, # type: ignore[typeddict-item]
         ))
 
-        cid = _normalize_claim_id(r.get("claim_id", _MISSING), default_claim_id=default_claim_id)
         stats_key = str(cid) if cid is not None else "__global__"
         claim_stats = per_claim_stats.setdefault(
             stats_key,

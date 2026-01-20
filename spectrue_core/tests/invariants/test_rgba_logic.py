@@ -1,0 +1,58 @@
+import math
+import pytest
+from spectrue_core.verification.evidence.evidence_alpha import weight_func, compute_A_det, sigmoid
+from spectrue_core.verification.evidence.evidence_explainability import compute_alpha_cap
+
+def test_weight_func_basic():
+    # r <= 0.5 should have 0 weight
+    assert weight_func(0.5) == 0.0
+    assert weight_func(0.3) == 0.0
+    
+    # r > 0.5 should have positive weight
+    w_06 = weight_func(0.6)
+    assert w_06 > 0
+    assert math.isclose(w_06, math.log(0.6/0.4))
+
+def test_alpha_not_decreased_by_weak_support():
+    """M119: Adding a low-tier SUPPORT quote should not reduce A_det."""
+    items_initial = [
+        {"claim_id": "c1", "stance": "SUPPORT", "quote": "Strong evidence", "r_eff": 0.90}
+    ]
+    a_initial = compute_A_det(items_initial, "c1")
+    
+    items_with_weak = items_initial + [
+        {"claim_id": "c1", "stance": "SUPPORT", "quote": "Weak evidence", "r_eff": 0.51}
+    ]
+    a_with_weak = compute_A_det(items_with_weak, "c1")
+    
+    # A_det should increase (or stay same), never decrease
+    assert a_with_weak >= a_initial
+
+def test_alpha_ignores_r_leq_0_5():
+    """M119: SUPPORT quotes with r_eff <= 0.5 should not increase A_det."""
+    items_baseline = [
+        {"claim_id": "c1", "stance": "SUPPORT", "quote": "Base evidence", "r_eff": 0.70}
+    ]
+    a_baseline = compute_A_det(items_baseline, "c1")
+    
+    items_with_useless = items_baseline + [
+        {"claim_id": "c1", "stance": "SUPPORT", "quote": "Useless evidence", "r_eff": 0.50}
+    ]
+    a_with_useless = compute_A_det(items_with_useless, "c1")
+    
+    assert math.isclose(a_baseline, a_with_useless)
+
+def test_alpha_cap_logic():
+    """M119: Test Alpha capping rules."""
+    # 0 sources/anchors -> low cap
+    cap_0 = compute_alpha_cap(independent_source_count=0, direct_anchor_count=0)
+    assert cap_0 == 0.2 * 0.4 # max(cap_anchors, 0.2) * max(cap_indep, 0.4) where both are 0
+    
+    # Sufficient sources/anchors should allow high Alpha
+    cap_high = compute_alpha_cap(independent_source_count=10, direct_anchor_count=10)
+    assert cap_high > 0.9
+
+def test_sigmoid_robustness():
+    assert sigmoid(1000) == 1.0
+    assert sigmoid(-1000) == 0.0
+    assert math.isclose(sigmoid(0), 0.5)

@@ -461,6 +461,12 @@ class EvidenceItem(TypedDict, total=False):
     temporal_flag: Literal["in_window", "outdated", "unknown"]
     fetched: bool | None
     raw_text_chars: int | None
+    r_domain: float | None
+    r_contextual: float | None
+    r_eff: float | None
+    has_authority_anchor: bool
+    authority_anchor_reason: str | None
+    reliability_confidence: Literal["low", "medium", "high"] | None
 
 
 class EvidencePackStats(TypedDict, total=False):
