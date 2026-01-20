@@ -18,17 +18,19 @@ Extracted from pipeline_evidence.py as part of core logic modularization.
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any
 
-from spectrue_core.verification.evidence.evidence_scoring import (
-    logit,
-    sigmoid,
-    TIER_A_BASELINE,
-)
-from spectrue_core.utils.trace import Trace
-
 logger = logging.getLogger(__name__)
+
+
+def norm_claim_id(x: Any) -> str | None:
+    """Normalize claim ID for consistent lookup."""
+    if x is None:
+        return None
+    s = str(x).strip().lower()
+    if s in ("", "none", "null", "undefined"):
+        return None
+    return s
 
 
 def get_tier_rank(tier: str | None) -> int:
@@ -48,37 +50,12 @@ def get_tier_rank(tier: str | None) -> int:
     )
 
 
-def compute_alpha_cap(
-    *,
-    independent_source_count: int,
-    direct_anchor_count: int,
-) -> float:
-    """
-    Compute Alpha cap based on source diversity and anchors.
-    
-    cap_independence = 1 - exp(-0.8 * independent_source_count)
-    cap_anchors = 1 - exp(-1.0 * direct_anchor_count)
-    A_cap = min(1.0, max(cap_anchors, 0.2) * max(cap_independence, 0.4))
-    """
-    cap_indep = 1.0 - math.exp(-0.8 * float(independent_source_count))
-    cap_anchors = 1.0 - math.exp(-1.0 * float(direct_anchor_count))
-    
-    a_cap = min(1.0, max(cap_anchors, 0.2) * max(cap_indep, 0.4))
-    return float(a_cap)
+# compute_alpha_cap removed in M133 — LLM A-score passes through unchanged
+# Rationale: caps were forcing A ≤ 0.4 even with good evidence; now trust LLM judgment
 
 
-def compute_explainability_tier_adjustment(
-    explainability_score: float,
-    best_tier: str | None,
-    claim_id: str,
-) -> float | None:
-    """
-    DEPRECATED (M119): Logic moved to assign_claim_rgba and compute_alpha_cap.
-    
-    This function used to apply tier-based multiplicative adjustments. 
-    Now it returns None to signal no change from this module.
-    """
-    return None
+
+# compute_explainability_tier_adjustment removed in M133 — was already deprecated (M119)
 
 
 def find_best_tier_for_claim(

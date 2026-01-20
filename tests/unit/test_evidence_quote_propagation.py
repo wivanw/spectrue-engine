@@ -3,10 +3,10 @@ from spectrue_core.verification.evidence.evidence import build_evidence_pack
 from spectrue_core.verification.evidence.evidence_stance import assign_claim_rgba
 from spectrue_core.pipeline.mode import ScoringMode
 
-def test_quote_propagation_to_alpha_cap():
+def test_quote_propagation_to_rgba():
     """
     Test that a quote in the raw source successfully propagates to EvidenceItem
-     and results in a non-collapsed Alpha cap.
+    and LLM A-score passes through unchanged (M133: cap removed).
     """
     fact = "Кристали мають впорядковану структуру."
     claims = [
@@ -54,12 +54,11 @@ def test_quote_propagation_to_alpha_cap():
         pack=pack
     )
     
-    # Verify final Alpha is not 0.08
+    # M133: Alpha cap removed — LLM A-score passes through unchanged
     final_a = verdict["rgba"][3]
-    # For 1 source: cap_independence ~= 0.55, cap_anchors ~= 0.63 -> cap ~= 0.35
-    assert final_a > 0.3
-    assert final_a < 0.4
-    assert final_a != pytest.approx(0.08, abs=0.01)
+    # LLM said 0.9, so final should be 0.9 (no cap)
+    assert final_a == pytest.approx(0.9, abs=0.01)
 
 if __name__ == "__main__":
     pytest.main([__file__])
+

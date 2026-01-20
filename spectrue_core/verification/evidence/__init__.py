@@ -14,7 +14,6 @@ from .evidence_scoring import (
 )
 from .evidence_explainability import (
     find_best_tier_for_claim,
-    compute_explainability_tier_adjustment,
     get_tier_rank,
 )
 from .evidence_stance import (
@@ -45,7 +44,6 @@ __all__ = [
     "is_prob",
     "norm_id",
     "find_best_tier_for_claim",
-    "compute_explainability_tier_adjustment",
     "get_tier_rank",
     "enrich_claim_sources",
     "assign_claim_rgba",

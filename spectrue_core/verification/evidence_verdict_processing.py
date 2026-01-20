@@ -35,9 +35,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from spectrue_core.pipeline.mode import ScoringMode
 
-from spectrue_core.verification.evidence.evidence_explainability import (
-    compute_explainability_tier_adjustment,
-)
+# M133: compute_explainability_tier_adjustment removed
 from spectrue_core.verification.evidence.evidence_scoring import norm_id as _norm_id
 
 logger = logging.getLogger(__name__)

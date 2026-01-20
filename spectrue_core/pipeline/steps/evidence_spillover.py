@@ -125,10 +125,16 @@ def _covers_ok_for_claim(src: dict[str, Any], claim: dict[str, Any]) -> bool:
         return True
 
     akey = str(src.get("assertion_key") or "")
-    derived = slots_from_assertion_key(akey)
-    covers = merge_covers(src.get("covers"), derived)
+    covers = src.get("covers")
+    
+    # Relaxed: if evidence has no structured metadata, don't reject by slots
+    if not akey and not covers:
+        return True
 
-    return bool(covers & required)
+    derived = slots_from_assertion_key(akey)
+    merged = merge_covers(covers, derived)
+
+    return bool(merged & required)
 
 
 def _event_ok_for_claim(src: dict[str, Any], claim: dict[str, Any]) -> bool:
@@ -139,6 +145,11 @@ def _event_ok_for_claim(src: dict[str, Any], claim: dict[str, Any]) -> bool:
     """
     c_sig = claim_event_signature(claim)
     e_sig = evidence_event_signature(src)
+    
+    # Relaxed: if either has no signature, assume compatible for spillover
+    if not c_sig or not e_sig:
+        return True
+
     return signature_compatible(c_sig, e_sig)
 
 
@@ -319,8 +330,10 @@ class EvidenceSpilloverStep(Step):
                         rejections["not_candidate"] += 1
                         continue
                     if not _compatible_for_claim(src, fact_keys, context_keys):
-                        rejections["compat_assertion"] += 1
-                        continue
+                        # Relaxed check: if target claim has no defined assertions, don't reject by key
+                        if fact_keys or context_keys:
+                            rejections["compat_assertion"] += 1
+                            continue
                     # Compatibility v3: required slots for claim's verification_target
                     if not _covers_ok_for_claim(src, target_claim):
                         rejections["required_slots"] += 1
@@ -384,7 +397,10 @@ class EvidenceSpilloverStep(Step):
             )
 
         if not transferred_items:
-            Trace.event("evidence_spillover.completed", {"transferred": 0, "touched_claims": 0, "top_k": top_k})
+            Trace.event(
+                "evidence_spillover.completed",
+                {"transferred": 0, "touched_claims": 0, "top_k": top_k, "rejections": rejections},
+            )
             return ctx
 
         combined_sources = list(sources) + transferred_items

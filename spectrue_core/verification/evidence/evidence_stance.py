@@ -195,7 +195,6 @@ def assign_claim_rgba(
     """
     from spectrue_core.utils.trace import Trace
     from spectrue_core.verification.evidence.evidence_alpha import compute_A_det
-    from spectrue_core.verification.evidence.evidence_explainability import compute_alpha_cap
     from spectrue_core.verification.scoring.rgba_aggregation import apply_conflict_explainability_penalty
     from spectrue_core.pipeline.mode import ScoringMode
     
@@ -205,6 +204,9 @@ def assign_claim_rgba(
     
     # Handle enum or string input
     mode_value = judge_mode.value if isinstance(judge_mode, ScoringMode) else judge_mode
+    
+    from spectrue_core.verification.evidence.evidence_explainability import norm_claim_id
+    target_cid = norm_claim_id(cid)
     
     has_valid_rgba = (
         isinstance(existing_rgba, list)
@@ -240,42 +242,20 @@ def assign_claim_rgba(
         # but log it as missing
         Trace.event("cv.rgba_missing_in_deep", {"claim_id": cid})
 
-    # 4. M119: Compute Alpha via Capped Fallback
+    # 4. M133: Alpha — LLM score passes through unchanged (no cap)
     items = pack.get("items", []) if isinstance(pack, dict) else []
     
-    # A_det
+    # A_det (fallback only)
     a_det = compute_A_det(items, cid)
-    
-    # A_cap
-    def _norm_cid(x: Any) -> str | None:
-        if x is None:
-            return None
-        s = str(x).strip().lower()
-        if s in ("", "none", "null"):
-            return None
-        return s
-
-    target_cid = _norm_cid(cid)
     
     claim_items = []
     for it in items:
-        item_cid = _norm_cid(it.get("claim_id"))
-        if item_cid is None or item_cid == target_cid:
-            claim_items.append(it)
+        item_cid = norm_claim_id(it.get("claim_id"))
+        if item_cid is not None and item_cid != target_cid:
+            continue
+        claim_items.append(it)
 
-    # Direct anchors are ANY evidence items with quote (and not IRRELEVANT)
-    direct_anchors = [
-        it for it in claim_items 
-        if it.get("quote") and (it.get("stance") or "").upper() != "IRRELEVANT"
-    ]
-    
-    # Independent domains similarly (must have quote to prevent leakage from low-quality hits)
-    independent_domains = {
-        it.get("domain") for it in claim_items 
-        if it.get("domain") and it.get("quote") and (it.get("stance") or "").upper() != "IRRELEVANT"
-    }
-    
-    # Also need counts for conflict penalty below
+    # Count for conflict penalty
     support_with_quote = [
         it for it in claim_items 
         if it.get("quote") and (it.get("stance") or "").upper() == "SUPPORT"
@@ -284,19 +264,14 @@ def assign_claim_rgba(
         it for it in claim_items 
         if it.get("quote") and (it.get("stance") or "").upper() == "REFUTE"
     ]
-
-    a_cap = compute_alpha_cap(
-        independent_source_count=len(independent_domains),
-        direct_anchor_count=len(direct_anchors)
-    )
     
-    # A_final
+    # A_final: LLM score if available, else deterministic (no cap)
     if a_llm is not None:
-        a_final = min(float(a_llm), a_cap)
-        a_source = "llm_capped" if has_valid_rgba else "global_capped"
+        a_final = float(a_llm)
+        a_source = "llm" if has_valid_rgba else "global"
     else:
-        a_final = min(a_det, a_cap)
-        a_source = "det_capped"
+        a_final = a_det
+        a_source = "det"
         
     # 5. Conflict Penalty (M119 Rule: Requires both SUPPORT and REFUTE with direct anchors)
     if len(support_with_quote) > 0 and len(refute_with_quote) > 0:
@@ -314,9 +289,6 @@ def assign_claim_rgba(
             "rgba": claim_verdict["rgba"],
             "a_det": a_det,
             "a_llm": a_llm,
-            "a_cap": a_cap,
-            "independent_domains": len(independent_domains),
-            "direct_anchors": len(direct_anchors),
         },
     )
 

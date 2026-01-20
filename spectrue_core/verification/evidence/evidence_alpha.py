@@ -60,12 +60,13 @@ def compute_A_det(items: list[EvidenceItem], claim_id: str | None) -> float:
     - item.quote exists (direct anchor)
     - item.r_eff is not None
     """
+    from spectrue_core.verification.evidence.evidence_explainability import norm_claim_id
+    target_cid = norm_claim_id(claim_id)
     sum_contrib = 0.0
-    target_cid = str(claim_id).strip().lower() if claim_id else None
     
     for item in items:
         # 1. Claim ID filter
-        item_cid = str(item.get("claim_id")).strip().lower() if item.get("claim_id") else None
+        item_cid = norm_claim_id(item.get("claim_id"))
         if target_cid and item_cid not in (None, target_cid):
             continue
             
