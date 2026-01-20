@@ -484,16 +484,10 @@ They do **not** cap `verdict_score` or `verified_score`.
 We treat tier as a calibrated *prior reliability signal* for how interpretable/defensible the explanation is, given the
 class of sources involved.
 
-Deterministic rule (per-claim):
-
-- `baseline = TierPrior["B"]`
-- `prior = TierPrior[best_tier or "UNKNOWN"]`
-- `factor = prior / baseline`
-- `A_post = clamp(A_pre * factor, 0..1)`
-
-Trace event:
-
-- `verdict.explainability_tier_factor` logs `pre_A`, `prior`, `baseline`, `factor`, `post_A`, `best_tier`, `claim_id`, and `source`.
+Deterministic adjustment is applied in the explainability pipeline (see
+`spectrue_core/verification/evidence/evidence_scoring.py`). The exact formula
+may evolve with calibration; treat tier-based explainability as a deterministic
+post-processing step rather than a verdict driver.
 
 ## Verification Target Selection (Bayesian EVOI Model)
 

@@ -39,7 +39,6 @@ The **SC** is the engine's universal unit of accounting. It provides a normalize
 LLM operations are measured in tokens. The engine tracks:
 
 - **Input tokens** — prompt and context
-- **Cached input tokens** — previously processed content (reduced cost)
 - **Output tokens** — generated response
 
 Token consumption is converted to SC using model-specific rates.
@@ -60,15 +59,8 @@ The engine measures and aggregates the following resource consumption:
 
 ### LLM Token Consumption
 
-Reference rates (SC per token):
-
-| Model | Input | Cached Input | Output |
-|-------|-------|--------------|--------|
-| GPT-5 Nano | 0.000005 | 0.0000005 | 0.00004 |
-| GPT-5 Mini | 0.000025 | 0.0000025 | 0.0002 |
-| GPT-5.2 | 0.000175 | 0.0000175 | 0.0014 |
-
-> The engine converts external resource usage into a unified SC space for consistent measurement and reporting.
+Token rates are configured in `spectrue_core/billing/default_pricing.json` (model prices, safety multipliers, and SC conversion).
+Consumers should treat that file as the source of truth for per-token SC rates.
 
 ---
 
@@ -115,11 +107,11 @@ The engine produces an **exact fractional result**. Systems that require discret
 | Value | Description |
 |-------|-------------|
 | `exact_usage_sc` | Precise `Decimal` value (e.g., `3.27`) |
-| `finalized_usage` | Discrete value after rounding (e.g., `4`) |
+| `finalized_usage` | Discrete value after rounding (caller-defined) |
 
 ### Caller-Applied Finalization
 
-The engine **does not mandate** a specific rounding rule. It exports both exact and finalized values, allowing the caller to choose:
+The engine **does not mandate** a specific rounding rule. It exports exact values and allows the caller to choose how to finalize:
 
 ```python
 # Engine provides

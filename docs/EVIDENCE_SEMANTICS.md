@@ -1,6 +1,8 @@
 # Evidence Semantics in Spectrue
 ## Scoring vs Corroboration (v1)
 
+**Status:** Design reference. The full two-channel SE/CE model is not fully implemented in the current engine. Treat this as intended behavior and verify against code before relying on these fields.
+
 ### Motivation
 Spectrue must avoid a policy contradiction:
 

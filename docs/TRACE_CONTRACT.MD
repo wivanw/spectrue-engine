@@ -1,63 +1,73 @@
 # Trace Contract
-## Required events, fields, and invariant coverage
+## Emitted events and minimum fields (current)
 
-This document defines required trace events and their minimum field payloads.
-Any pipeline variant must emit these events with consistent schemas.
+This document lists trace events that are **currently emitted** by the engine and their minimum fields.
+If an event is not listed here, treat it as optional or debug-only.
 
 ---
 
 ## 1) Claim extraction / coverage
 
-### 1.1 `claim_extraction.guard.missing_instructions`
-**Purpose:** Proves I1.
+### 1.1 `claim_extraction.guard.instructions_injected`
+**Purpose:** Ensure extraction instructions are always present.
 **Fields:**
-- `task_name` (e.g., `claims.coverage.skeleton` / `claims.coverage.gapfill` / `rgba.audit.*`)
-- `injected_default` (bool)
-- `provider` (string)
-- `instructions_chars_before` (int)
+- `instructions_len` (int)
+- `fallback_used` (bool)
 
-### 1.2 `claims.coverage.anchors`
-**Purpose:** Proves I2 baseline.
+### 1.2 `claim_extraction.anchors`
+**Purpose:** Record deterministic anchors detected for extraction.
 **Fields:**
-- `counts` `{time:int, number:int, quote:int}`
-- `anchors` list of `{anchor_id, kind, preview}` (preview <= 40 chars)
+- `anchor_count` (int)
+- `anchor_ids` (list[str])
 
-### 1.3 `claims.coverage.gaps`
-**Purpose:** Proves I2 + drives I3.
+### 1.3 `claims.coverage.anchors`
+**Purpose:** Record anchor counts by type.
+**Fields:**
+- `counts` `{time:int, number:int, quote:int, total:int}`
+- `anchors` list of `{anchor_id, kind, preview}`
+
+### 1.4 `claims.coverage.gaps`
+**Purpose:** Record missing anchors after skeleton extraction.
 **Fields:**
 - `missing_anchor_ids` list[str]
-- `missing_counts` by kind
-- `covered_count` (int)
-- `skipped_count` (int)
-- `total_count` (int)
+- `missing_count` (int)
+- `missing_by_kind` (dict)
 
-### 1.4 `claims.coverage.gapfill`
-**Purpose:** Proves I3 one-shot repair path.
+### 1.5 `claims.coverage.gapfill.incomplete`
+**Purpose:** Record remaining gaps after a gap-fill attempt.
 **Fields:**
-- `missing_before` list[str]
-- `added_items_count` (int)
-- `still_missing_after` list[str]
-- `provider_used` (primary/fallback)
+- `still_missing` list[str]
+- `count` (int)
 
-### 1.5 `claims.coverage.final`
-**Purpose:** Confirms final coverage state.
+### 1.6 `claims.skeleton.created`
+**Purpose:** Coverage skeleton stats.
+**Fields:**
+- `events`, `measurements`, `quotes`, `policies` (counts)
+
+### 1.7 `claims.skeleton.to_claims`
+**Purpose:** Skeleton-to-claims conversion stats.
+**Fields:**
+- `skeleton_count` (int)
+- `claims_emitted` (int)
+- `claims_dropped` (int)
+
+### 1.8 `claim_extraction.stats`
+**Purpose:** Aggregated extraction stats.
+**Fields:**
+- `claims_extracted_total` (int)
+- `claims_dropped_nonverifiable` (int)
+- `claims_emitted_targets` (int)
+- `drop_reason_counts` (dict)
+
+### 1.9 `claim_extraction.coverage_summary`
+**Purpose:** Final extraction coverage ratio.
 **Fields:**
 - `total_anchors` (int)
-- `covered_anchors` (int)
-- `skipped_anchors` (int)
-- `missing_anchors` (int)
-- `claims_emitted` (int)
+- `claims_extracted` (int)
+- `coverage_ratio` (float)
 
-### 1.6 `claims.coverage.incomplete_terminal`
-**Purpose:** Proves I3 terminal stop before search.
-**Fields:**
-- `missing_anchor_ids` list[str]
-- `missing_counts` by kind
-- `message` (short)
-- `stop_before_search` (bool, must be true)
-
-### 1.7 `claims.context.anchored`
-**Purpose:** Proves I4 context inheritance happened.
+### 1.10 `claims.context.anchored`
+**Purpose:** Context inheritance applied to a claim.
 **Fields:**
 - `claim_id`
 - `added_context_entities` list[str]
@@ -68,31 +78,32 @@ Any pipeline variant must emit these events with consistent schemas.
 ## 2) Retrieval planning / search
 
 ### 2.1 `search.query.variants`
-**Purpose:** Proves I5 (non-empty variants) + supports debugging.
+**Purpose:** Query variants prepared for a claim.
 **Fields:**
 - `claim_id`
-- `variants` list of `{query_id, text, strategy}` (text <= 80 chars)
+- `variants` list of `{query_id, text, strategy}`
+- `count` (int)
 - `included_context_entities_count` (int)
 
 ### 2.2 `search.query.empty_blocked`
-**Purpose:** Proves I5 enforcement.
+**Purpose:** Empty query blocked.
 **Fields:**
 - `claim_id`
 - `reason` (string)
-- `stage` (e.g., `variant_build` / `select_query`)
+- `stage` (string)
 
 ### 2.3 `search.escalation`
-**Purpose:** Proves I10 and supports cost analysis.
+**Purpose:** Search escalation pass details.
 **Fields:**
 - `claim_id`
 - `pass_id` (`A|B|C|D`)
 - `query_id` (`Q1|Q2|Q3`)
-- `params` `{search_depth, max_results, include_domains_relaxed, include_domains_count}`
-- `outcome` `{sources_count, best_relevance, usable_snippets_count}`
 - `reason_codes` list[str]
+- `params` `{search_depth, max_results, include_domains_relaxed, include_domains_count}`
+- `outcome` `{sources_count, best_relevance, usable_snippets_count, ...}`
 
 ### 2.4 `search.sanity`
-**Purpose:** Proves I6.
+**Purpose:** Off-topic detection result.
 **Fields:**
 - `claim_id`
 - `pass_id`
@@ -103,91 +114,66 @@ Any pipeline variant must emit these events with consistent schemas.
 - `reasons` list[str]
 
 ### 2.5 `search.summary`
-**Purpose:** Trace final retrieval outcome per claim.
+**Purpose:** End-of-retrieval summary.
 **Fields:**
 - `claim_id`
 - `passes_executed` (int)
 - `tavily_calls` (int)
+- `best_relevance_final` (float)
+- `usable_snippets_final` (int)
 - `domains_relaxed` (bool)
-- `final_outcome` `{sources_count, best_relevance, usable_snippets_count}`
-- `sanity_final` `pass|off_topic`
+
+### 2.6 `target_selection.completed`
+**Purpose:** Target selection summary for retrieval.
+**Fields:**
+- `total_claims` (int)
+- `targets_count` (int)
+- `deferred_count` (int)
+- `evidence_sharing_count` (int)
+- `max_targets` (int)
+- `budget_class` (string)
+- `anchor_claim_id` (string|null)
+- `anchor_forced` (bool)
 
 ---
 
-## 3) LLM audit
+## 3) LLM audit (RGBA audit pipeline)
 
-### 3.1 `rgba.audit.claim.done`
-**Purpose:** Proves I7 (LLM audit emitted structured labels).
+### 3.1 `claim_audit.complete`
+**Purpose:** Claim-level audit completion.
 **Fields:**
-- `claim_id`
-- `predicate_type`
-- `audit_confidence`
-- `assertion_strength`
-- `risk_facets_count` (int)
-- `honesty_facets_count` (int)
+- `count` (int)
+- `error_count` (int)
 
-### 3.2 `rgba.audit.evidence.done`
-**Purpose:** Proves I7 and helps detect drift.
+### 3.2 `evidence_audit.complete`
+**Purpose:** Evidence-level audit completion.
 **Fields:**
-- `claim_id`
-- `evidence_count` (int)
-- `stance_distribution` `{support:int, refute:int, unclear:int, unrelated:int}`
-- `avg_extraction_confidence` (float)
+- `count` (int)
+- `error_count` (int)
 
 ---
 
-## 4) Independence / aggregation
+## 4) Provider fallback
 
-### 4.1 `rgba.cluster.done`
-**Purpose:** Proves independence handling exists.
+### 4.1 `llm.call.failed`
+**Purpose:** Failure detection and classification.
 **Fields:**
-- `claim_id`
-- `tau` (float)
-- `cluster_count` (int)
-- `max_cluster_size` (int)
-
-### 4.2 `rgba.aggregate.claim`
-**Purpose:** Proves I8 (statuses) + contribution trace.
-**Fields:**
-- `claim_id`
-- `G_status` (enum)
-- `B_status` (enum)
-- `A_status` (enum)
-- `support_mass` (float)
-- `refute_mass` (float)
-- `conflict` (float)
-- `top_contributors` list of `{source_id, cluster_id, delta}` (bounded length)
-
-### 4.3 `rgba.aggregate.run`
-**Purpose:** Final summary.
-**Fields:**
-- `R_status`, `G_status`, `B_status`, `A_status`
-- `global_reasons` list[str]
-- `claims_count` (int)
-- `evidence_count_total` (int)
-
----
-
-## 5) Provider fallback
-
-### 5.1 `llm.call.failed`
-**Purpose:** Confirms failure detection.
-**Fields:**
-- `task_name`
-- `provider`
+- `task` (string)
+- `provider` (string)
 - `failure_kind` (enum)
-- `attempt` (int)
+- `error_type` (string)
+- `error_message` (string)
 
-### 5.2 `llm.fallback.used`
-**Purpose:** Confirms fallback happened only on failure.
+### 4.2 `llm.fallback.used`
+**Purpose:** Fallback invocation.
 **Fields:**
-- `task_name`
-- `primary_provider`
-- `fallback_provider`
-- `failure_kind`
+- `task` (string)
+- `primary_provider` (string)
+- `fallback_provider` (string)
+- `failure_kind` (string)
 
 ---
 
 ## Compliance
-A pipeline run is "trace-compliant" if it emits all required events for the executed path.
-Missing required events indicates a contract breach and must be treated as a bug.
+A run is trace-compliant if it emits the events relevant to its executed path.
+Missing events indicate a contract drift and should be investigated.

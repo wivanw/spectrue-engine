@@ -2,13 +2,13 @@
 
 ## Overview
 
-Deep Mode is Spectrue's high-fidelity verification capability. Unlike Standard Mode, which offers a quick "glance" verdict, Deep Mode treats every claim as an independent investigation.
+Deep Mode is Spectrue's high-fidelity verification capability. Unlike Standard Mode, which offers a quick "glance" verdict, Deep Mode treats every claim as an independent investigation. The engine currently maps `"deep"` to `"deep_v2"` at runtime.
 
 ### v5 Evolution
 **v2**: 1:1 Claim-to-Search execution. Expensive, slow (N claims = N searches).
-**v5**: Cluster-Centric Execution + EVOI Stopping.
+**v5**: Cluster-Centric Execution + EVOI Gating.
 - **Clustered Retrieval**: Similar claims share search budgets.
-- **EVOI Stopping**: Stops searching once status is decisive.
+- **EVOI Gating**: Controls optional steps (stance/cluster) based on expected value.
 - **Graph-Aware**: Can verify "Load-Bearing Claims" only.
 
 ---
@@ -23,7 +23,7 @@ Deep Mode is Spectrue's high-fidelity verification capability. Unlike Standard M
 ## 2. What It Intentionally Does NOT Do
 
 - **Global Context Smoothing**: It does NOT try to make the article "look good". If 90% of claims are flukes, it reports 90% errors.
-- **Fallback Guessing**: If the LLM judge fails or evidence is missing, it returns `status: error` or `status: insufficient_evidence`. It **NEVER** returns `0.5`.
+- **Fallback Guessing**: If the LLM judge fails, it returns `status: error` with `rgba: null`. It **NEVER** returns `0.5`.
 - **Latency Optimization**: It allows itself to be slower (seconds to minutes) to ensure correctness.
 
 ---
@@ -67,21 +67,9 @@ For each claim (or cluster), we ask: "Will more search change the verdict?"
 
 ---
 
-## 5. Execution Modes
+## 5. Execution Scope
 
-Deep Mode can run in two sub-modes via `process_all_claims`:
-
-### `process_all_claims: true` (Exhaustive)
-- Verifies **every** extracted claim.
-- Maximum cost, maximum coverage.
-- Used for: Legal reviews, deep forensic audits.
-
-### `process_all_claims: false` (Graph-Optimized)
-- Builds the **Claim Graph** first.
-- Identifies **Central Claims** (PageRank) and **Roots** (Dependencies).
-- Verifies *only* the top K load-bearing claims.
-- **Assumption**: If the core premises hold, the peripheral claims are likely okay (or less critical).
-- Used for: Casual user verification, "Check this article" button.
+Deep Mode (currently `deep_v2`) verifies all extracted claims, subject to a safety guard that caps the maximum number of claims per run.
 
 ---
 
@@ -115,9 +103,9 @@ If the Judge fails (schema violation, refusal, timeout):
 
 Deep Mode v5 exposes rigid counters for downstream consumers:
 - `evidence_stats.direct_quotes`: Number of sources with verbatim matches.
-- `evidence_stats.unique_publishers`: Distinct domains.
+- `evidence_stats.publishers_total`: Distinct publishers/domains.
 - `confirmation_counts`:
-    - `precise`: High-relevance, high-trust sources.
-    - `corroboration`: Lower-relevance or cluster-based support.
+    - `C_precise`: High-relevance, high-trust sources.
+    - `C_corr`: Lower-relevance or cluster-based support.
 
 These stats allow the UI/API consumer to display: "Verified by 2 independent sources (Reuters, AP)."

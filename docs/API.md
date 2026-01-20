@@ -1,6 +1,6 @@
 # Spectrue Engine API Reference
 
-This document describes the public API of Spectrue Engine.
+This document describes the Python API of Spectrue Engine.
 
 ## Table of Contents
 
@@ -34,31 +34,30 @@ engine = SpectrueEngine(config)
 
 ### Methods
 
-#### `analyze_text(text, lang, mode, progress_callback)`
+#### `analyze_text(text, lang, analysis_mode, progress_callback, max_credits, sentences)`
 
 Analyze text for factual accuracy.
 
 **Parameters:**
 - `text` (str): The text to analyze
-- `lang` (str): Language code (e.g., "en", "uk", "de")
-- `mode` (str): Analysis mode - "lite" or "deep"
+- `lang` (str): UI language code (e.g., "en", "uk", "de")
+- `analysis_mode` (str): `"general"`, `"deep"`, or `"deep_v2"`
 - `progress_callback` (Callable, optional): Progress callback function
+- `max_credits` (int, optional): Budget cap (credits)
+- `sentences` (list[str], optional): Pre-segmented sentences (skip segmentation)
 
 **Returns:** `dict` with:
-- `verified_score` (float): Factual accuracy score (0-1)
-- `danger_score` (float): Potential harm score (0-1)
-- `style_score` (float): Presentation quality score (0-1)
-- `explainability_score` (float): How well sources explain the verdict (0-1)
-- `rationale` (str): Human-readable explanation
-- `claim_verdicts` (list): Per-claim verdicts
-- `sources` (list): Evidence sources used
+- Standard mode (`analysis_mode="general"`): article-level `rgba`, `verified_score`, `rationale`, `sources`, `claim_verdicts`, plus trace/billing metadata.
+- Deep modes (`analysis_mode="deep"`/`"deep_v2"`): `deep_analysis.claim_results[]` with per-claim results and `cost_summary`.
+
+**Note:** `"deep"` is currently remapped to `"deep_v2"` inside the engine.
 
 **Example:**
 ```python
 result = await engine.analyze_text(
     text="NASA discovered a new moon orbiting Earth.",
     lang="en",
-    mode="deep"
+    analysis_mode="deep_v2"
 )
 ```
 
@@ -72,10 +71,9 @@ result = await engine.analyze_text(
 from spectrue_core.config import SpectrueConfig
 
 config = SpectrueConfig(
-    openai_api_key="sk-...",           # Required
-    tavily_api_key="tvly-...",         # Required
+    openai_api_key="sk-...",           # Optional
+    tavily_api_key="tvly-...",         # Optional
     google_fact_check_key="...",       # Optional
-    openai_model="gpt-5",               # Model for analysis
     min_confidence_threshold=0.7,      # Minimum confidence
     max_search_depth=3                 # Search iteration limit
 )
@@ -89,24 +87,29 @@ config = SpectrueConfig(
 | `OPENAI_API_KEY` | OpenAI API key | Required |
 | `TAVILY_API_KEY` | Tavily search API key | Required |
 | `GOOGLE_FACT_CHECK_KEY` | Google Fact Check API key | Optional |
+| `GOOGLE_SEARCH_API_KEY` | Google CSE API key | Optional |
+| `GOOGLE_SEARCH_CSE_ID` | Google CSE engine ID | Optional |
 | `DEEPSEEK_API_KEY` | DeepSeek API key (for heavy reasoning) | Optional |
 | **Engine Control** | | |
 | `SPECTRUE_MAX_CONCURRENT_SEARCHES` | Max parallel searches (PhaseRunner) | `3` |
 | `SPECTRUE_LOCALE_PRIMARY` | Default analysis language | `en` |
 | `SPECTRUE_LOCALE_FALLBACKS` | Secondary languages (CSV) | `uk` |
+| `SPECTRUE_LOCALE_MAX_FALLBACKS` | Max fallback locales | `2` |
 | `SPECTRUE_ENGINE_DEBUG` | Enable debug logging | `false` |
 | **LLM & Models** | | |
 | `OPENAI_CONCURRENCY` | LLM client max concurrency | `6` |
 | `OPENAI_TIMEOUT` | Main LLM timeout (seconds) | `60.0` |
 | `DEEPSEEK_BASE_URL` | DeepSeek API Base URL | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL_NAMES` | CSV of models routing to DeepSeek | `(empty)` |
-| `MODEL_CLAIM_EXTRACTION` | Override model for extraction | `gpt-4o` |
+| `DEEPSEEK_MODEL_NAMES` | CSV of models routing to DeepSeek | `deepseek-chat,deepseek-reasoner` |
+| `MODEL_CLAIM_EXTRACTION` | Override model for extraction | `deepseek-chat` |
+| `MODEL_CLAIM_EXTRACTION_FALLBACK` | Fallback model for extraction | `gpt-5.2` |
 | `MODEL_INLINE_SOURCE_VERIFICATION` | Override model for inline checks | `gpt-5-nano` |
-| `MODEL_CLUSTERING_STANCE` | Override model for clustering | `gpt-4o-mini` |
+| `MODEL_CLUSTERING_STANCE` | Override model for clustering | `gpt-5-nano` |
 | **Search Configuration** | | |
 | `TAVILY_CONCURRENCY` | Max Tavily API concurrency | `5` |
 | `SPECTRUE_TAVILY_EXCLUDE_DOMAINS` | Domains to ignore in search (CSV) | `(empty)` |
 | `SPECTRUE_TAVILY_INCLUDE_RAW_CONTENT` | Fetch full pages (`true`, `false`, `auto`) | `auto` |
+| `SPECTRUE_TAVILY_RAW_MAX_RESULTS` | Max raw-content results | `4` |
 | `SPECTRUE_GOOGLE_CSE_COST` | Cost per Google search (credits) | `0` |
 | **Claim Graph (Advanced)** | | |
 | `CLAIM_GRAPH_TOP_K` | Number of claims to select | `12` |
@@ -120,12 +123,15 @@ config = SpectrueConfig(
 | `FEATURE_RETRIEVAL_STEPS` | Enable fine-grained retrieval steps | `false` |
 | `FEATURE_COVERAGE_CHUNKING` | Enable large-text chunking | `false` |
 | `FEATURE_INLINE_SOURCE_VERIFICATION` | Enable inline source checking | `true` |
+| `FEATURE_STANCE_ANNOTATE` | Enable stance annotation | `false` |
+| `FEATURE_CLUSTER_EVIDENCE` | Enable evidence clustering | `false` |
+| `FEATURE_EVIDENCE_SUMMARIZE` | Enable evidence summaries | `true` |
 | **Trace & Safety** | | |
 | `TRACE_SAFE_PAYLOADS` | Sanitize PII/sensitive data in traces | `false` |
 | `TRACE_MAX_HEAD_CHARS` | Truncation limit for trace logs | `120` |
+| `SPECTRUE_LANGDETECT_MIN_PROB` | Min probability to accept detected language | `0.80` |
 
-Retrieval pipeline behavior is fixed. There is no experiment-mode flag or
-alternate retriever configuration.
+Core retrieval pipeline behavior is fixed; feature flags only toggle optional steps.
 
 ---
 
@@ -173,15 +179,17 @@ What aspect of the claim to verify.
 
 Role of claim in document structure.
 
-| Value | Weight | Description |
-|-------|--------|-------------|
-| `CORE` | 1.0 | Central claim of the article |
-| `SUPPORT` | 0.8 | Supporting evidence |
-| `ATTRIBUTION` | 0.7 | Quote attribution |
-| `AGGREGATED` | 0.6 | Summary from multiple sources |
-| `SUBCLAIM` | 0.5 | Subordinate detail |
-| `CONTEXT` | 0.0 | Background (no verification) |
-| `META` | 0.0 | About the article itself |
+| Value | Description |
+|-------|-------------|
+| `CORE` | Central claim of the article |
+| `SUPPORT` | Supporting evidence |
+| `ATTRIBUTION` | Quote attribution |
+| `AGGREGATED` | Summary from multiple sources |
+| `SUBCLAIM` | Subordinate detail |
+| `CONTEXT` | Background (no verification) |
+| `META` | About the article itself |
+
+Additional roles exist in `ClaimRole` (e.g., `THESIS`, `BACKGROUND`, `EXAMPLE`, `HEDGE`, `COUNTERCLAIM`, `DEFINITION`, `FORECAST`).
 
 ### `EvidenceChannel`
 
@@ -206,8 +214,8 @@ if metadata.should_skip_search:
 if metadata.is_explain_only:
     print("Claim is context only")
 
-# Get RGBA weight
-weight = metadata.role_weight  # 0.0 for CONTEXT, 1.0 for CORE
+# Get role weight (see runtime_config defaults)
+weight = metadata.role_weight
 ```
 
 ---
@@ -219,8 +227,8 @@ weight = metadata.role_weight  # 0.0 for CONTEXT, 1.0 for CORE
 Builds execution plans for claims based on metadata.
 
 ```python
-from spectrue_core.verification.orchestrator import ClaimOrchestrator
-from spectrue_core.verification.execution_plan import BudgetClass
+from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
+from spectrue_core.verification.orchestration.execution_plan import BudgetClass
 
 orchestrator = ClaimOrchestrator()
 
@@ -243,15 +251,15 @@ Search budget levels.
 | Value | Description |
 |-------|-------------|
 | `MINIMAL` | Quick check (Phase A only, k=3) |
-| `STANDARD` | Normal analysis (A+B, k=5) |
-| `DEEP` | Thorough analysis (A+B+C+D, k=7) |
+| `BALANCED` | Normal analysis (A+B, k=5) |
+| `COMPREHENSIVE` | Thorough analysis (A+B+C+D, k=7) |
 
 ### `Phase`
 
 Search phase configuration.
 
 ```python
-from spectrue_core.verification.execution_plan import Phase, phase_a, phase_b
+from spectrue_core.verification.orchestration.execution_plan import Phase, phase_a, phase_b
 
 # Factory functions
 phase = phase_a("en")  # Primary locale, authoritative, k=3
@@ -274,7 +282,7 @@ print(phase.max_results)   # 3, 5, or 7
 Executes progressive widening with early exit.
 
 ```python
-from spectrue_core.verification.phase_runner import PhaseRunner
+from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
 
 runner = PhaseRunner(
     search_mgr=search_manager,

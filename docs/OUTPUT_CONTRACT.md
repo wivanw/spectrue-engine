@@ -22,7 +22,7 @@ They are explicitly **not** intended to:
 - replace expert judgment,
 - or provide final answers.
 
-All outputs are scoped **per claim**, not per document.
+Per-claim outputs are the primary unit. In standard mode, the engine may also emit **article-level aggregates** derived from per-claim results.
 
 ---
 
@@ -46,11 +46,9 @@ Spectrue may emit **verdict-like labels** at the claim level.
 These labels are categorical summaries of the analytical state, not truth assertions.
 
 Typical labels include:
-- **Supported** — available evidence supports the claim as stated.
-- **Refuted** — available evidence contradicts the claim as stated.
-- **Mixed** — evidence partially supports and partially contradicts the claim.
-- **NEI (Not Enough Information)** — evidence is insufficient to confirm or refute the claim.
-- **Unverifiable** — the claim cannot be verified with accessible evidence (e.g. vague, future-oriented, or undefined).
+- **Verified / Refuted / Ambiguous / Unverified / Partially Verified** (see `VerdictStatus` in code).
+- **Supported / Refuted / Conflicted / Insufficient Evidence** (see `VerdictState` in code).
+These label sets represent different layers of the verdict model.
 
 ### Important:
 - A verdict label does **not** imply certainty.
@@ -65,7 +63,7 @@ Uncertainty in Spectrue is represented explicitly through **statuses**, not impl
 
 Spectrue distinguishes between implemented status codes and conceptual uncertainty categories.
 
-Implemented status codes currently include:
+Implemented status codes currently include (RGBA audit layer):
 - `INSUFFICIENT_EVIDENCE`
 - `CONFLICTING_EVIDENCE`
 - `EVIDENCE_MISMATCH`
@@ -82,7 +80,7 @@ but are already reflected in trace data and analytical outcomes.
 Statuses indicate **why** a claim cannot be resolved, not merely *that* it cannot.
 
 A claim may have:
-- one or more uncertainty statuses,
+- one or more RGBA audit statuses,
 - alongside a verdict label or instead of one.
 
 ---
