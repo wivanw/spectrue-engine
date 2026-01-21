@@ -138,7 +138,7 @@ def validate_core_claim(claim: dict) -> tuple[bool, list[str]]:
         valid_terms = [t for t in seed_terms if isinstance(t, str) and len(t) >= 2]
         if len(valid_terms) < 3:
             reason_codes.append("insufficient_retrieval_seed_terms")
-        elif len(valid_terms) > 15:
+        elif len(valid_terms) > 10:
             reason_codes.append("too_many_retrieval_seed_terms")
     
     # 4. Falsifiability validation

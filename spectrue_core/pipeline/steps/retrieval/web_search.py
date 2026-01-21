@@ -205,7 +205,7 @@ class WebSearchStep:
     search_mgr: Any
     agent: Any
     name: str = "web_search"
-    weight: float = 15.0
+    weight: float = 25.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

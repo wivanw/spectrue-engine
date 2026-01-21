@@ -267,8 +267,8 @@ QUERY_GENERATION_SCHEMA: dict[str, Any] = {
     "properties": {
         "queries": {
             "type": "array",
-            "minItems": 1,
-            "maxItems": 5,
+            "minItems": 2,
+            "maxItems": 2,
             "items": {"type": "string", "minLength": 4, "maxLength": 220},
         },
         "topics": {
@@ -504,7 +504,7 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string", "minLength": 1},
                         "minItems": 1,
-                        "maxItems": 12,
+                        "maxItems": 5,
                         "description": "Canonical entity names (person, org, place) - required for search",
                     },
                     # Predicate classification
@@ -572,7 +572,7 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string", "minLength": 2, "maxLength": 40},
                         "minItems": 3,
-                        "maxItems": 15,
+                        "maxItems": 10,
                         "description": "Keywords for search, derived from entities + key noun phrases",
                     },
                     # Importance score (kept but not sole gate)
@@ -665,7 +665,7 @@ CLAIM_RETRIEVAL_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string", "maxLength": 80},
             "minItems": 1,
-            "maxItems": 10,
+            "maxItems": 5,
         },
         "evidence_req": {
             "type": "object",

@@ -177,7 +177,7 @@ class SummarizeEvidenceStep(Step):
     
     Uses EvidenceSummarizerSkill to categorize evidence by stance.
     """
-    weight: float = 5.0
+    weight: float = 10.0
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client

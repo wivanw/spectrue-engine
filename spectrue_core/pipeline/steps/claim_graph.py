@@ -41,7 +41,7 @@ class ClaimGraphStep:
     claim_graph: Any  # ClaimGraphBuilder instance
     runtime_config: Any  # RuntimeConfig
     name: str = "claim_graph"
-    weight: float = 3.0
+    weight: float = 5.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Build claim graph."""

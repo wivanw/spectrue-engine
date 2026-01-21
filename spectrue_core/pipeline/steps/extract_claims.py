@@ -44,7 +44,7 @@ class ExtractClaimsStep:
     agent: Any  # FactCheckerAgent
     stage: str = "retrieval_planning"
     name: str = "extract_claims"
-    weight: float = 8.0
+    weight: float = 25.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Extract claims from fact."""

@@ -47,7 +47,7 @@ class PrepareInputStep:
     search_mgr: Any  # SearchManager
     config: Any  # SpectrueConfig
     name: str = "prepare_input"
-    weight: float = 3.0
+    weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Prepare input text."""
