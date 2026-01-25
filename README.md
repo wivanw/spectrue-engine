@@ -498,7 +498,7 @@ See [LICENSE](LICENSE) for full details.
 
 ## 🛡️ Security
 
-Found a security issue? Please email **wivanw@gmail.com** instead of opening a public issue.
+Found a security issue? Please email **admin@spectrue.net** instead of opening a public issue.
 
 See [SECURITY.md](SECURITY.md) for our security policy.
 
@@ -506,7 +506,7 @@ See [SECURITY.md](SECURITY.md) for our security policy.
 
 - **Issues**: [GitHub Issues](https://github.com/wivanw/spectrue-engine/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/wivanw/spectrue-engine/discussions)
-- **Email**: wivanw@gmail.com
+- **Email**: admin@spectrue.net
 
 ## 🙏 Acknowledgments
 

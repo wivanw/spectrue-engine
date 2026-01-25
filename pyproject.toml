@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "AGPL-3.0-only"
 authors = [
-    { name = "Ivan Bondarenko", email = "wivanw@gmail.com" },
+    { name = "Ivan Bondarenko", email = "admin@spectrue.net" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
