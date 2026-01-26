@@ -92,6 +92,7 @@ Rules:
 - Extract events, measurements, quantities, dates, and quoted statements.
 - Each claim must be atomic and independently verifiable.
 - Output must strictly follow the provided JSON schema.
+- For 'article_intent', use ONLY: "news", "evergreen", "official", "opinion", "prediction", "unknown", "other".
 """
 
 

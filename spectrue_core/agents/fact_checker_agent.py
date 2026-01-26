@@ -50,7 +50,7 @@ class FactCheckerAgent:
         openai_client = LLMClient(
             openai_api_key=api_key,
             default_timeout=float(self.runtime.llm.nano_timeout_sec),
-            max_retries=3,
+            max_retries=1,
         )
 
         # Create DeepSeek client (Native API compatible with Chat Completions)
@@ -60,7 +60,7 @@ class FactCheckerAgent:
                 openai_api_key=self.runtime.llm.deepseek_api_key,
                 base_url=self.runtime.llm.deepseek_base_url,
                 default_timeout=float(self.runtime.llm.cluster_timeout_sec),
-                max_retries=3,
+                max_retries=1,
             )
 
         # Create router that directs models to appropriate clients
