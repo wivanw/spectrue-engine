@@ -19,6 +19,11 @@ from typing import Any
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.contracts import CLAIMS_KEY, ClaimItem, Claims
 from spectrue_core.pipeline.errors import PipelineExecutionError
+from spectrue_core.use_cases.claims.extract import (
+    dedup_claims_after_extraction,
+    ensure_anchors,
+    extract_claims_from_text,
+)
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -105,13 +110,9 @@ class ExtractClaimsStep:
                 anchor_claim_id = str(anchor_claim.get("id", "c1"))
                 
                 # Extract anchors for downstream steps (even with preloaded claims)
-                from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
                 fact = ctx.get_extra("prepared_fact") or ctx.get_extra("raw_fact", "")
                 cached_anchors = ctx.get_extra("extracted_anchors")
-                if cached_anchors is None:
-                    anchors = extract_all_anchors(fact)
-                else:
-                    anchors = cached_anchors
+                anchors = ensure_anchors(fact=fact, cached_anchors=cached_anchors)
                 
                 Trace.event(
                     "extract_claims.completed",
@@ -140,57 +141,21 @@ class ExtractClaimsStep:
             if progress_callback:
                 await progress_callback("extracting_claims")
 
-            # Pre-extract anchors and cache them for downstream steps (build_queries, build_cluster_queries)
-            # This prevents duplicate anchor extraction and trace events
-            from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
             cached_anchors = ctx.get_extra("extracted_anchors")
-            if cached_anchors is None:
-                anchors = extract_all_anchors(fact)
-                # Store anchors in a local variable to pass to context later
-            else:
-                anchors = cached_anchors
+            anchors = ensure_anchors(fact=fact, cached_anchors=cached_anchors)
 
             # Delegate to agent wrapper
-            result_tuple = await self.agent.extract_claims(
-                text=fact,
+            claims, check_oracle, intent, fast_query = await extract_claims_from_text(
+                agent=self.agent,
+                fact=fact,
                 lang=ctx.lang,
                 anchors=anchors,
             )
-            claims, check_oracle, intent, fast_query = result_tuple
-            if not claims:
-                # Fallback: use full text as single claim
-                claims = [{"id": "c1", "text": fact[:500], "importance": 1.0}]
 
             # Semantic claim dedup right after extraction (pre-oracle/graph/search).
             # This reduces cost + prevents anchor/secondary duplicates.
-            from spectrue_core.verification.claims.claim_dedup import dedup_claims_post_extraction_async
             try:
-                before_n = len(claims)
-                claims, dedup_pairs = await dedup_claims_post_extraction_async(claims, tau=0.90)
-                after_n = len(claims)
-                if dedup_pairs:
-                    Trace.event(
-                        "claims.dedup_post_extraction",
-                        {
-                            "before": before_n,
-                            "after": after_n,
-                            "removed": max(before_n - after_n, 0),
-                            "tau": 0.90,
-                            "pairs": [
-                                {
-                                    "canonical_id": p.canonical_id,
-                                    "duplicate_id": p.duplicate_id,
-                                    "sim": p.similarity,
-                                }
-                                for p in dedup_pairs[:50]  # trace safety cap
-                            ],
-                        },
-                    )
-                else:
-                    Trace.event(
-                        "claims.dedup_post_extraction",
-                        {"before": before_n, "after": after_n, "removed": 0, "tau": 0.90, "pairs": []},
-                    )
+                claims, _ = await dedup_claims_after_extraction(claims)
             except Exception as e:
                 # Non-fatal: if embeddings unavailable or error occurs, proceed with raw claims.
                 Trace.event("claims.dedup_post_extraction.failed", {"error": str(e)})

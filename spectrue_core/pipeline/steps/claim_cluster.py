@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from spectrue_core.use_cases.claims.clustering import build_soft_clusters
 from spectrue_core.pipeline.core import PipelineContext, Step
 from spectrue_core.utils.trace import Trace
 
@@ -38,51 +39,10 @@ class ClaimClusterStep(Step):
             Trace.event("claim_cluster.skipped", {"reason": "no_claim_graph"})
             return ctx
 
-        # Map claim IDs to their objects (dicts) from the context
-        claim_map = {str(c.get("id")): c for c in ctx.claims if c.get("id")}
-        
-        clusters = []
-        # connected_components() returns list of lists of claim IDs
-        for component_ids in graph_result.connected_components():
-            component_claims = [claim_map[cid] for cid in component_ids if cid in claim_map]
-            if not component_claims:
-                continue
-
-            shared_assertions = set()
-            topic_tags = set()
-
-            for claim in component_claims:
-                # 1. Collect assertion keys (non-heuristic metadata)
-                assertions = claim.get("assertions", [])
-                if isinstance(assertions, list):
-                    for a in assertions:
-                        key = None
-                        if hasattr(a, "key"):
-                            key = a.key
-                        elif isinstance(a, dict):
-                            key = a.get("key")
-                        if key:
-                            shared_assertions.add(key)
-                
-                # 2. Collect topic tags (from ClaimMetadata object)
-                metadata = claim.get("metadata")
-                if metadata:
-                    # Attempt to get topic_tags from datatlass or dict
-                    tags = getattr(metadata, "topic_tags", []) if not isinstance(metadata, dict) else metadata.get("topic_tags", [])
-                    if isinstance(tags, (list, set)):
-                        topic_tags.update(tags)
-
-            clusters.append({
-                "cluster_id": f"cluster_{len(clusters)}",
-                "claim_ids": [str(c.get("id")) for c in component_claims],
-                "shared_assertion_keys": list(shared_assertions),
-                "topic_tags": list(topic_tags),
-            })
-
-        cluster_map = {}
-        for c in clusters:
-            for cid in c["claim_ids"]:
-                cluster_map[cid] = c["cluster_id"]
+        clusters, cluster_map = build_soft_clusters(
+            claims=ctx.claims,
+            graph_result=graph_result,
+        )
 
         Trace.event("claim_cluster.completed", {
             "cluster_count": len(clusters),

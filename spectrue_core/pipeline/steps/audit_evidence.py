@@ -12,17 +12,17 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
 
 from spectrue_core.agents.llm_client import LLMClient
-from spectrue_core.agents.skills.evidence_audit import EvidenceAuditSkill
+from spectrue_core.adapters.llm.evidence_audit import EvidenceAuditSkill
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.pipeline.steps.deep_claim import DeepClaimContext
 from spectrue_core.schema.rgba_audit import EvidenceAudit, RGBAStatus
+from spectrue_core.use_cases.evidence.audit import run_audit
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -48,38 +48,18 @@ class AuditEvidenceStep:
             skill = EvidenceAuditSkill(self.llm_client)
             errors: dict[str, Any] = dict(ctx.get_extra("audit_errors") or {})
             evidence_errors = dict(errors.get("evidence_audit", {}))
-            audits: list[EvidenceAudit] = []
 
-            tasks = []
-            for frame in deep_ctx.claim_frames:
-                for evidence in frame.evidence_items:
-                    tasks.append((frame, evidence))
-
-            if not tasks:
+            if not deep_ctx.claim_frames:
                 Trace.event("evidence_audit.skip", {"reason": "no_evidence"})
                 return ctx
-
-            async def audit_one(frame, evidence):
-                try:
-                    audit = await skill.audit(frame, evidence)
-                    return ("ok", evidence.evidence_id, audit)
-                except Exception as exc:
-                    return ("error", evidence.evidence_id, exc)
-
-            results = await asyncio.gather(
-                *[audit_one(frame, evidence) for frame, evidence in tasks],
-                return_exceptions=False,
+            result = await run_audit(
+                claim_frames=deep_ctx.claim_frames,
+                audit_fn=skill.audit,
+                error_status=RGBAStatus.PIPELINE_ERROR,
             )
 
-            for status, evidence_id, payload in results:
-                if status == "ok":
-                    audits.append(payload)
-                else:
-                    evidence_errors[str(evidence_id)] = {
-                        "status": RGBAStatus.PIPELINE_ERROR,
-                        "error_type": "audit_failed",
-                        "message": str(payload),
-                    }
+            audits: list[EvidenceAudit] = list(result.audits)
+            evidence_errors.update(result.errors)
 
             if evidence_errors:
                 errors["evidence_audit"] = evidence_errors
@@ -92,10 +72,7 @@ class AuditEvidenceStep:
                 },
             )
 
-            return (
-                ctx.set_extra("evidence_audits", audits)
-                .set_extra("audit_errors", errors)
-            )
+            return ctx.set_extra("evidence_audits", audits).set_extra("audit_errors", errors)
 
         except Exception as e:
             logger.exception("[AuditEvidenceStep] Failed: %s", e)

@@ -27,6 +27,23 @@ We explicitly model uncertainty. If evidence is insufficient, contradictory, or 
 
 ---
 
+## 1.1 Layer Boundaries (Domain Architecture)
+
+The engine enforces a strict dependency direction using `import-linter`. The goal is to keep domain logic centralized and keep orchestration layers thin.
+
+**Layers and allowed dependencies:**
+- **domain**: Pure business logic. May not import from use_cases, pipeline, adapters, schema, agents, verification, or graph.
+- **adapters**: External service boundaries (LLM, retrieval, graph, persistence). May depend on domain only.
+- **use_cases**: Orchestration for domain + adapters. May depend on domain and adapters only.
+- **pipeline**: Step orchestration. May depend on use_cases and schema only.
+- **schema**: Data contracts/types. May depend on domain types only.
+
+**Dependency checks:**
+- Config: `SpectrueBack/spectrue-engine/.importlinter`
+- Runner: `SpectrueBack/spectrue-engine/scripts/run_dependency_checks.sh`
+
+---
+
 ## 2. Claims Model
 
 ### Atomic Claims

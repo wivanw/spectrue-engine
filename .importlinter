@@ -1,0 +1,67 @@
+[importlinter]
+root_packages =
+    spectrue_core
+
+[importlinter:contract:domain_independence]
+name = Domain is pure (no upward dependencies)
+type = forbidden
+source_modules =
+    spectrue_core.domain
+forbidden_modules =
+    spectrue_core.use_cases
+    spectrue_core.pipeline
+    spectrue_core.adapters
+    spectrue_core.schema
+    spectrue_core.agents
+    spectrue_core.verification
+    spectrue_core.graph
+
+[importlinter:contract:use_cases_dependencies]
+name = Use cases depend only on domain + adapters
+type = forbidden
+source_modules =
+    spectrue_core.use_cases
+forbidden_modules =
+    spectrue_core.pipeline
+    spectrue_core.schema
+    spectrue_core.agents
+    spectrue_core.verification
+    spectrue_core.graph
+
+[importlinter:contract:adapters_dependencies]
+name = Adapters depend only on domain
+type = forbidden
+source_modules =
+    spectrue_core.adapters
+forbidden_modules =
+    spectrue_core.pipeline
+    spectrue_core.use_cases
+    spectrue_core.schema
+    spectrue_core.agents
+    spectrue_core.verification
+    spectrue_core.graph
+
+[importlinter:contract:schema_dependencies]
+name = Schema depends only on domain types
+type = forbidden
+source_modules =
+    spectrue_core.schema
+forbidden_modules =
+    spectrue_core.pipeline
+    spectrue_core.use_cases
+    spectrue_core.adapters
+    spectrue_core.agents
+    spectrue_core.verification
+    spectrue_core.graph
+
+[importlinter:contract:pipeline_dependencies]
+name = Pipeline depends only on use cases + schema
+type = forbidden
+source_modules =
+    spectrue_core.pipeline
+forbidden_modules =
+    spectrue_core.domain
+    spectrue_core.adapters
+    spectrue_core.agents
+    spectrue_core.verification
+    spectrue_core.graph

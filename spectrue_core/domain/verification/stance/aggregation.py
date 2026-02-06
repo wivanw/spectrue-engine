@@ -1,0 +1,1 @@
+"""Stance aggregation logic."""

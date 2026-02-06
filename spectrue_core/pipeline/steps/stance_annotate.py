@@ -20,10 +20,8 @@ from spectrue_core.pipeline.contracts import GATES_KEY, Gates
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.pipeline.pipeline_evidence import (
-    EvidenceFlowInput,
-    annotate_evidence_stance,
-)
+from spectrue_core.verification.pipeline.pipeline_evidence import EvidenceFlowInput
+from spectrue_core.use_cases.evidence.stance import annotate_stance
 from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
 from spectrue_core.verification.evidence.evidence_stats import EvidenceStats
 
@@ -82,7 +80,7 @@ class StanceAnnotateStep:
                 progress_callback=ctx.get_extra("progress_callback"),
             )
 
-            annotated = await annotate_evidence_stance(
+            annotated = await annotate_stance(
                 agent=self.agent,
                 inp=inp,
                 claims=ctx.claims,

@@ -28,10 +28,8 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.pipeline.pipeline_evidence import (
-    EvidenceFlowInput,
-    collect_evidence,
-)
+from spectrue_core.verification.pipeline.pipeline_evidence import EvidenceFlowInput
+from spectrue_core.use_cases.evidence.collection import collect_evidence_packs
 
 logger = logging.getLogger(__name__)
 
@@ -177,13 +175,9 @@ class EvidenceCollectStep:
                 progress_callback=progress_callback,
             )
 
-            from spectrue_core.verification.evidence.evidence import build_evidence_pack
-
-            collection = await collect_evidence(
+            collection = await collect_evidence_packs(
                 agent=self.agent,
                 search_mgr=self.search_mgr,
-                build_evidence_pack=build_evidence_pack,
-                calibration_registry=None,
                 inp=inp,
                 claims=claims,
                 sources=sources,

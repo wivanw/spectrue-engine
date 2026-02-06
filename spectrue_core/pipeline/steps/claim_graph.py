@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.use_cases.claims.graph import build_claim_graph
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -45,8 +46,6 @@ class ClaimGraphStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Build claim graph."""
-        from spectrue_core.verification.pipeline.pipeline_claim_graph import run_claim_graph_flow
-
         try:
             eligible_claims = ctx.get_extra("eligible_claims", ctx.claims)
 
@@ -57,7 +56,7 @@ class ClaimGraphStep:
 
             progress_callback = ctx.get_extra("progress_callback")
             
-            result = await run_claim_graph_flow(
+            result = await build_claim_graph(
                 self.claim_graph,
                 claims=eligible_claims,
                 runtime_config=self.runtime_config,
