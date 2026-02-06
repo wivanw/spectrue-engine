@@ -307,7 +307,8 @@ def decide_claim_policy(metadata: ClaimMetadata | None) -> ClaimPolicyDecision:
     if metadata is None:
         return ClaimPolicyDecision(mode=PolicyMode.FULL, reason_codes=["metadata_missing"])
 
-    if metadata.should_skip_search:
+    from spectrue_core.domain.claims.policy import should_skip_search
+    if should_skip_search(metadata):
         return ClaimPolicyDecision(
             mode=PolicyMode.SKIP,
             reason_codes=["skip_signal"],

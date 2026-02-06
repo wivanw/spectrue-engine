@@ -588,12 +588,13 @@ class ClaimExtractionSkill(BaseSkill):
 
         search_queries = merged.get("search_queries", [])
         query_candidates = merged.get("query_candidates", [])
-        should_skip_search = (
+        from spectrue_core.domain.claims.policy import should_skip_search
+        should_skip_search_val = (
             satire_likelihood >= 0.8
             or claim_category == "SATIRE"
-            or metadata.should_skip_search
+            or should_skip_search(metadata)
         )
-        if should_skip_search:
+        if should_skip_search_val:
             search_queries = []
             query_candidates = []
         
@@ -715,7 +716,8 @@ class ClaimExtractionSkill(BaseSkill):
                 confidence_dist[confidence] = confidence_dist.get(confidence, 0) + 1
 
                 # Skip search count
-                if metadata.should_skip_search:
+                from spectrue_core.domain.claims.policy import should_skip_search
+                if should_skip_search(metadata):
                     skip_search_count += 1
 
         # Emit trace event

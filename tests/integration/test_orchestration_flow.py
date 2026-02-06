@@ -239,7 +239,8 @@ async def test_horoscope_claims_skip_search(claim_skill, mock_llm_client):
         metadata = claim.get("metadata")
         assert metadata is not None
         # should_skip_search is a computed property that checks if target is NONE
-        assert metadata.should_skip_search is True, \
+        from spectrue_core.domain.claims.policy import should_skip_search
+        assert should_skip_search(metadata) is True, \
             f"Horoscope claim should skip search. Target: {metadata.verification_target}"
 
 

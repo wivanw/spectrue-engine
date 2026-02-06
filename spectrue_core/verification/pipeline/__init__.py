@@ -1,7 +1,7 @@
 """Pipeline modules."""
 
 from .pipeline import ValidationPipeline
-from .pipeline_evidence import run_evidence_flow, EvidenceFlowInput
+from spectrue_core.pipeline.evidence_flow import run_evidence_flow, EvidenceFlowInput
 
 __all__ = [
     "ValidationPipeline",

@@ -210,9 +210,11 @@ def claim_to_score(
     # Get metadata
     metadata = claim.get("metadata")
     if metadata and isinstance(metadata, ClaimMetadata):
-        role_weight = metadata.role_weight
+        from spectrue_core.domain.claims.policy import get_role_weight
+        role_weight = get_role_weight(metadata)
         check_worthiness = metadata.check_worthiness
     else:
+
         # Default: full weight for backward compat
         role_weight = 1.0
         check_worthiness = 0.5

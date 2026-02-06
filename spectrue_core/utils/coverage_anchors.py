@@ -195,5 +195,4 @@ def anchors_to_prompt_context(anchors: list[Anchor]) -> str:
     if not anchors:
         return ""
     lines = ["- " + a.span_text.strip() for a in anchors if a.span_text]
-    return "
-".join(lines)
+    return "\n".join(lines)
