@@ -8,7 +8,7 @@
 # (at your option) any later version.
 
 from .base_skill import BaseSkill, logger
-from spectrue_core.verification.evidence.evidence_pack import Claim
+from spectrue_core.domain.evidence.evidence_pack import Claim
 from spectrue_core.llm.model_registry import ModelID
 
 class RelevanceSkill(BaseSkill):

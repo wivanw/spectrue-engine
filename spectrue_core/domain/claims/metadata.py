@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from spectrue_core.schema import ClaimDomain, ClaimType
+from spectrue_core.domain.claims.model import ClaimDomain, ClaimType
 
 
 TOPIC_GROUPS = [

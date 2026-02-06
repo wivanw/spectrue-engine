@@ -249,6 +249,11 @@ class LLMClient:
         self._sem = asyncio.Semaphore(8)  # Concurrency limit
         self._meter = meter
 
+    @property
+    def _aclient(self) -> AsyncOpenAI:
+        """Expose the underlying AsyncOpenAI client."""
+        return self.client
+
     @staticmethod
     def _extract_first_json(raw: str) -> str | None:
         """

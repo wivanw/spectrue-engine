@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from spectrue_core.pipeline.mode import AnalysisMode
 
-from spectrue_core.verification.evidence.evidence_pack import Claim, EvidencePack, ArticleIntent
+from spectrue_core.domain.evidence.evidence_pack import Claim, EvidencePack, ArticleIntent
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.agents.llm_client import LLMClient

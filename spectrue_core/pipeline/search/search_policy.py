@@ -338,25 +338,7 @@ def decide_claim_policy(metadata: ClaimMetadata | None) -> ClaimPolicyDecision:
     return ClaimPolicyDecision(mode=PolicyMode.FULL, reason_codes=["default_worthiness"])
 
 
-def resolve_stance_pass_mode(profile_name: SearchProfileName | str) -> StancePassMode:
-    """
-    Resolve stance pass mode from profile name.
-    
-    Args:
-        profile_name: SearchProfileName enum or string
-        
-    Returns:
-        StancePassMode enum (TWO_PASS for deep profile, SINGLE otherwise)
-    """
-    # Handle enum or string input
-    if isinstance(profile_name, SearchProfileName):
-        normalized = profile_name.value
-    else:
-        normalized = (profile_name or SearchProfileName.GENERAL.value).strip().lower()
-    
-    if normalized == SearchProfileName.DEEP.value:
-        return StancePassMode.TWO_PASS
-    return StancePassMode.SINGLE
+from spectrue_core.domain.verification.verdict.model import resolve_stance_pass_mode
 
 
 def rerank_search_results(

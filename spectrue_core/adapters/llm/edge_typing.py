@@ -20,7 +20,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from spectrue_core.utils.trace import Trace
-from spectrue_core.graph.types import (
+from spectrue_core.domain.graph_types import (
     CandidateEdge,
     ClaimNode,
     EdgeRelation,

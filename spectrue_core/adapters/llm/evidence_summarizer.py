@@ -24,7 +24,7 @@ from spectrue_core.adapters.llm.evidence_summarizer_prompts import (
     build_evidence_summarizer_prompt,
     build_evidence_summarizer_system_prompt,
 )
-from spectrue_core.schema.claim_frame import (
+from spectrue_core.domain.claims.frame import (
     ClaimFrame,
     EvidenceReference,
     EvidenceSummary,

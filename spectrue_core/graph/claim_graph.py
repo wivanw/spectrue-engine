@@ -1,3 +1,5 @@
 """Backward-compatible exports for claim graph builder."""
 
-from spectrue_core.domain.claims.graph import *  # noqa: F401,F403
+from spectrue_core.graph.builder import ClaimGraphBuilder
+
+__all__ = ["ClaimGraphBuilder"]

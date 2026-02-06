@@ -359,3 +359,203 @@ def _normalize_channel_token(token: str) -> str:
     return token.strip().lower().replace("-", "_").replace(" ", "_")
 
 
+class Dimension(str, Enum):
+    """
+    Assertion dimension - determines verification behavior.
+    """
+    FACT = "FACT"
+    """Must be proven/refuted by evidence. Strict verification."""
+
+    CONTEXT = "CONTEXT"
+    """Contextual framing (time zone, audience). Informational only."""
+
+    INTERPRETATION = "INTERPRETATION"
+    """Parser interpretation from ambiguous text. Bounded, flagged."""
+
+
+class VerificationScope(str, Enum):
+    """How strictly to verify this assertion."""
+    STRICT = "STRICT"
+    """For FACT assertions - can be VERIFIED/REFUTED/AMBIGUOUS."""
+
+    SOFT = "SOFT"
+    """For CONTEXT - only VERIFIED/AMBIGUOUS unless explicitly contradicted."""
+
+
+class ClaimDomain(str, Enum):
+    """High-level domain of the claim."""
+    NEWS = "news"
+    SCIENCE = "science"
+    POLITICS = "politics"
+    FINANCE = "finance"
+    HEALTH = "health"
+    SPORTS = "sports"
+    TECHNOLOGY = "technology"
+    ENTERTAINMENT = "entertainment"
+    HISTORY = "history"
+    OTHER = "other"
+
+
+class ClaimType(str, Enum):
+    """Type of claim for search/verification strategy."""
+    EVENT = "event"
+    """Something happened at a time/place."""
+
+    ATTRIBUTION = "attribution"
+    """Someone said/did something."""
+
+    NUMERIC = "numeric"
+    """Specific numbers, statistics, measurements."""
+
+    DEFINITION = "definition"
+    """What something is/means."""
+
+    COMPARISON = "comparison"
+    """X is greater/less/equal to Y."""
+
+    POLICY = "policy"
+    """Rules, laws, regulations."""
+
+    TIMELINE = "timeline"
+    """Sequence of events, dates."""
+
+    BIOGRAPHY = "biography"
+    """Facts about a person."""
+
+    OTHER = "other"
+
+
+class ClaimStructureType(str, Enum):
+    """Logical structure type of the claim."""
+    EMPIRICAL_NUMERIC = "empirical_numeric"
+    EVENT = "event"
+    CAUSAL = "causal"
+    ATTRIBUTION = "attribution"
+    DEFINITION = "definition"
+    POLICY_PLAN = "policy_plan"
+    FORECAST = "forecast"
+    EXISTENCE = "existence"
+    META_SCIENTIFIC = "meta_scientific"
+    OTHER = "other"
+
+
+@dataclass
+class ClaimStructure:
+    """Structured representation of claim logic."""
+    type: ClaimStructureType = ClaimStructureType.OTHER
+    premises: list[str] = field(default_factory=list)
+    conclusion: str | None = None
+    dependencies: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EvidenceRequirementSpec:
+    """What evidence is required to verify this assertion."""
+    needs_primary: bool = False
+    needs_2_independent: bool = False
+
+
+@dataclass
+class SourceSpan:
+    """Location of text in original article."""
+    start: int
+    end: int
+    text: str
+
+
+@dataclass
+class Assertion:
+    """A single field-level fact within a ClaimUnit."""
+    key: str
+    value: Any
+    value_raw: str | None = None
+    dimension: Dimension = Dimension.FACT
+    evidence_requirement: EvidenceRequirementSpec = field(default_factory=EvidenceRequirementSpec)
+    verification_scope: VerificationScope = VerificationScope.STRICT
+    importance: float = 1.0
+    is_inferred: bool = False
+
+
+@dataclass
+class LocationQualifier:
+    """Structured location information."""
+    venue: str | None = None
+    city: str | None = None
+    region: str | None = None
+    country: str | None = None
+    is_inferred: bool = False
+
+
+@dataclass
+class EventRules:
+    """Rules for sports/competition events."""
+    max_rounds: int | None = None
+    glove_oz: float | None = None
+    ring_size_ft: str | None = None
+    weight_class: str | None = None
+
+
+@dataclass
+class BroadcastInfo:
+    """Broadcast/streaming information."""
+    platform: str | None = None
+    start_time_local: str | None = None
+    region_restrictions: str | None = None
+
+
+@dataclass
+class EventQualifiers:
+    """Structured qualifiers for event-type claims."""
+    event_date: Any | None = None
+    event_time: Any | None = None
+    datetime_utc: str | None = None
+    timezone: str | None = None
+    time_reference: str | None = None
+    location: LocationQualifier | None = None
+    participants: list[str] = field(default_factory=list)
+    rules: EventRules | None = None
+    broadcast: BroadcastInfo | None = None
+
+
+@dataclass
+class ClaimUnit:
+    """A structured, schema-grounded claim."""
+    id: str
+    domain: ClaimDomain = ClaimDomain.OTHER
+    claim_type: ClaimType = ClaimType.OTHER
+    claim_role: ClaimRole = ClaimRole.CORE
+    structure: ClaimStructure | None = None
+    subject: str | None = None
+    predicate: str = ""
+    object: str | None = None
+    qualifiers: EventQualifiers | None = None
+    assertions: list[Assertion] = field(default_factory=list)
+    importance: float = 1.0
+    check_worthiness: float = 0.5
+    extraction_confidence: float = 1.0
+    source_span: SourceSpan | None = None
+    language: str = "en"
+    text: str = ""
+    normalized_text: str = ""
+    topic_group: str = "Other"
+    topic_key: str = ""
+
+    def get_fact_assertions(self) -> list[Assertion]:
+        """Get only FACT assertions (for strict verification)."""
+        return [a for a in self.assertions if a.dimension == Dimension.FACT]
+
+    def get_context_assertions(self) -> list[Assertion]:
+        """Get only CONTEXT assertions (informational)."""
+        return [a for a in self.assertions if a.dimension == Dimension.CONTEXT]
+
+    def has_location(self) -> bool:
+        """Check if claim has explicit location (FACT)."""
+        if self.qualifiers and self.qualifiers.location:
+            loc = self.qualifiers.location
+            return any([loc.venue, loc.city, loc.region, loc.country])
+        return any(
+            a.key.startswith("event.location") and a.dimension == Dimension.FACT
+            for a in self.assertions
+        )
+
+

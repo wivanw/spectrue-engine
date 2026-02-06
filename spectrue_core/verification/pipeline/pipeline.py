@@ -163,11 +163,16 @@ class ValidationPipeline:
                 .set_extra("progress_callback", progress_callback)
             )
 
+            # Load EmbeddingClient for Deep V2 clustering if needed
+            from spectrue_core.adapters.embedding_client import EmbeddingClient
+            embedding_client = EmbeddingClient(openai_client=self.agent.llm_client._aclient) # Using agent's async client
+
             # Build DAG (with extraction logic if needed)
             dag = PipelineFactory(
                 search_mgr=self.search_mgr,
                 agent=self.agent,
                 claim_graph=self._claim_graph,
+                embedding_client=embedding_client,
             ).build(
                 mode_name, config=self.config, extraction_only=extract_claims_only
             )

@@ -1,16 +1,25 @@
-# Copyright (C) 2025 Ivan Bondarenko
-#
-# This file is part of Spectrue Engine.
-#
-# Spectrue Engine is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as published
-# by the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+from __future__ import annotations
 
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field
-import math
+from pydantic import Field
+
+from spectrue_core.schema.serialization import SchemaModel
+from spectrue_core.domain.verification.verdict.model import (
+    BeliefState as DomainBeliefState,
+    ConsensusState as DomainConsensusState,
+    log_odds_to_prob,
+)
+
+__all__ = [
+    "ClaimRole",
+    "RelationType",
+    "BeliefState",
+    "ClaimNode",
+    "ClaimEdge",
+    "ScoringTraceStep",
+    "ConsensusState",
+]
 
 class ClaimRole(str, Enum):
     THESIS = "thesis"
@@ -23,37 +32,34 @@ class RelationType(str, Enum):
     CONTRADICTS = "contradicts"
     ENTAILS = "entails"
 
-class BeliefState(BaseModel):
+class BeliefState(SchemaModel, DomainBeliefState):
     log_odds: float = Field(..., description="Belief in log-odds space")
     confidence: float = Field(0.0, description="Measure of certainty/variance")
 
     @property
     def probability(self) -> float:
-        try:
-            return 1.0 / (1.0 + math.exp(-self.log_odds))
-        except OverflowError:
-            return 0.0 if self.log_odds < 0 else 1.0
+        return log_odds_to_prob(self.log_odds)
 
-class ClaimNode(BaseModel):
+class ClaimNode(SchemaModel):
     claim_id: str
     text: str
     role: ClaimRole
     local_belief: Optional[BeliefState] = None
     propagated_belief: Optional[BeliefState] = None
 
-class ClaimEdge(BaseModel):
+class ClaimEdge(SchemaModel):
     source_id: str
     target_id: str
     relation: RelationType
     weight: float = Field(..., ge=0.0, le=1.0, description="Semantic strength of the connection")
 
-class ScoringTraceStep(BaseModel):
+class ScoringTraceStep(SchemaModel):
     step_id: int
     description: str
     delta: float = Field(..., description="Change in log-odds")
     new_belief: float = Field(..., description="Resulting log-odds")
 
-class ConsensusState(BaseModel):
+class ConsensusState(SchemaModel, DomainConsensusState):
     score: float = Field(..., ge=0.0, le=1.0, description="Normalized consensus level")
     stability: float = Field(..., description="Temporal stability")
     source_count: int = Field(..., description="Number of independent sources")

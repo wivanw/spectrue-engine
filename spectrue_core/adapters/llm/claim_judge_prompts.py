@@ -19,9 +19,9 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from spectrue_core.pipeline.mode import AnalysisMode
+    from spectrue_core.domain.verification.verdict.model import AnalysisMode
 
-from spectrue_core.schema.claim_frame import (
+from spectrue_core.domain.claims.frame import (
     ClaimFrame,
     EvidenceItemFrame,
     EvidenceSummary,

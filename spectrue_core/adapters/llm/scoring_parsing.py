@@ -7,16 +7,16 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.schema import (
+from spectrue_core.domain.verification.verdict.model import (
     AssertionVerdict,
     ClaimVerdict,
     StructuredDebug,
     StructuredVerdict,
     VerdictStatus,
     VerdictState,
+    ScoringMode,
 )
 from spectrue_core.adapters.llm.scoring_sanitization import maybe_drop_style_section, strip_internal_source_markers
-from spectrue_core.pipeline.mode import ScoringMode
 from spectrue_core.utils.trace import Trace
 import logging
 

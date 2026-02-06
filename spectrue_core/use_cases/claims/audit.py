@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 
 from spectrue_core.adapters.llm.claim_audit import ClaimAuditSkill
-from spectrue_core.schema.rgba_audit import RGBAStatus
+from spectrue_core.domain.verification.verdict.model import RGBAStatus
 
 
 async def run_claim_audit(*, claim_frames: list[Any], llm_client: Any):

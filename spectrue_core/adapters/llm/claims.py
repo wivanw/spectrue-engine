@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.verification.evidence.evidence_pack import Claim, ClaimAnchor, EvidenceRequirement, ArticleIntent
+from spectrue_core.domain.evidence.evidence_pack import Claim, ClaimAnchor, EvidenceRequirement, ArticleIntent
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace
@@ -44,14 +44,14 @@ from .schema_logger import (
     log_claim_field_defaults,
 )
 
-# Import schema module for structured claims
-from spectrue_core.schema import (
+# Import domain types for structured claims
+from spectrue_core.domain.claims.model import (
     ClaimStructureType,
 )
 from spectrue_core.models import DEFAULT_MODEL_OPENAI_NANO
 
 # Import claim metadata types
-from spectrue_core.schema.claim_metadata import (
+from spectrue_core.domain.claims.model import (
     ClaimMetadata,
     VerificationTarget,
     EvidenceChannel,

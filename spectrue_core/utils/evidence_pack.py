@@ -358,7 +358,7 @@ class Claim(TypedDict, total=False):
     # Layer 4: Evidence-Need Routing
     evidence_need: Literal[
         "empirical_study", "guideline", "official_stats",
-        "expert_opinion", "anecdotal", "news_report", "unknown"
+        "expert_opinion", "anecdotal", "news_report", "definition", "unknown"
     ]
     # Safety & Coverage
     anchor: ClaimAnchor

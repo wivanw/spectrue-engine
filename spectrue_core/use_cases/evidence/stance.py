@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from spectrue_core.pipeline.evidence_flow import EvidenceFlowInput, annotate_evidence_stance
+from spectrue_core.domain.verification.verdict.model import EvidenceFlowInput
+from .flow_logic import annotate_evidence_stance
 
 
 def annotate_stance(*, agent: Any, inp: EvidenceFlowInput, claims: list[dict], sources: list[dict]) -> list[dict]:

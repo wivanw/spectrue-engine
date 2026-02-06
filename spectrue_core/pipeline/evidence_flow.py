@@ -16,9 +16,12 @@ from typing import Any, Awaitable, Callable
 import logging
 
 from spectrue_core.utils.embedding_service import EmbedService
+from spectrue_core.schema.verdict import (
+    AnalysisMode,
+    EvidenceFlowInput,
+    EvidenceCollection,
+)
 from spectrue_core.schema.signals import TimeWindow
-from spectrue_core.schema.scoring import BeliefState
-# Bayesian scoring imports moved to bayesian_update.py (M119)
 from spectrue_core.utils.temporal import (
     label_evidence_timeliness,
     normalize_time_window,
@@ -87,238 +90,16 @@ def _aggregation_policy(search_mgr) -> dict:
 
 
 
-ProgressCallback = Callable[[str], Awaitable[None]]
 
 
-@dataclass(frozen=True, slots=True)
-class EvidenceFlowInput:
-    fact: str
-    original_fact: str
-    lang: str
-    content_lang: str | None
-    analysis_mode: AnalysisMode
-    progress_callback: ProgressCallback | None
-    prior_belief: BeliefState | None = None
-    context_graph: Any | None = None
-    claim_extraction_text: str = ""
-    # Pipeline field removed - mode determined by score_mode parameter in run_evidence_flow()
 
 
-@dataclass(frozen=True, slots=True)
-class EvidenceCollection:
-    """Output of evidence collection prior to judging."""
-
-    pack: EvidencePack
-    claims: list[dict[str, Any]]
-    sources: list[dict[str, Any]]
-    claim_text_map: dict[str, str]
-    anchor_claim: dict[str, Any] | None
-    anchor_claim_id: str | None
-    time_windows: dict[str, TimeWindow]
-    current_cost: float
 
 
-async def collect_evidence(
-    *,
-    agent,
-    search_mgr,
-    build_evidence_pack,
-    calibration_registry: CalibrationRegistry | None = None,
-    inp: EvidenceFlowInput,
-    claims: list[dict],
-    sources: list[dict],
-) -> EvidenceCollection:
-    """Collect and structure evidence without invoking the judge."""
-    if inp.progress_callback:
-        await inp.progress_callback("ai_analysis")
-
-    # Use default model for cost calculation
-    current_cost = search_mgr.calculate_cost()
-
-    sources = canonicalize_sources(sources)
-
-    time_windows: dict[str, TimeWindow] = {}
-    if claims:
-        default_relative_days = getattr(
-            getattr(getattr(search_mgr, "config", None), "runtime", None),
-            "temporal",
-            None,
-        )
-        default_days = getattr(default_relative_days, "relative_window_days", None)
-        default_days = int(default_days) if isinstance(default_days, int) else None
-
-        for claim in claims:
-            claim_id = str(claim.get("id") or "c1")
-            metadata = claim.get("metadata")
-            time_signals = []
-            time_sensitive = False
-            if metadata:
-                time_signals = list(getattr(metadata, "time_signals", []) or [])
-                time_sensitive = bool(getattr(metadata, "time_sensitive", False))
-
-            req = claim.get("evidence_requirement") or {}
-            if isinstance(req, dict) and req.get("is_time_sensitive"):
-                time_sensitive = True
-            if isinstance(req, dict) and req.get("needs_recent_source"):
-                time_sensitive = True
-
-            if time_signals or time_sensitive:
-                time_windows[claim_id] = normalize_time_window(
-                    time_signals,
-                    reference_date=date.today(),
-                    default_relative_days=default_days or 30,
-                )
-            else:
-                time_windows[claim_id] = normalize_time_window(
-                    [],
-                    reference_date=date.today(),
-                    default_relative_days=default_days or 30,
-                )
-
-        for claim_id, window in time_windows.items():
-            claim_sources = [s for s in sources if s.get("claim_id") == claim_id]
-            if not claim_sources and len(time_windows) == 1:
-                label_evidence_timeliness(sources, time_window=window)
-            else:
-                label_evidence_timeliness(claim_sources, time_window=window)
-
-    claim_text_map: dict[str, str] = {}
-    if claims:
-        for c in claims:
-            if not isinstance(c, dict):
-                continue
-            cid = c.get("id") or c.get("claim_id")
-            if not cid:
-                continue
-            claim_text_map[str(cid)] = c.get("normalized_text") or c.get("text") or ""
-
-    anchor_claim = None
-    anchor_claim_id = None
-    if claims:
-        anchor_claim = (
-            pick_ui_main_claim(
-                claims,
-                calibration_registry=calibration_registry,
-            )
-            or claims[0]
-        )
-        anchor_claim_id = anchor_claim.get("id") or anchor_claim.get("claim_id")
-
-    # Language consistency validation (optional, just for tracing)
-    if claims and inp.content_lang:
-        from spectrue_core.utils.language_validation import (
-            validate_claims_language_consistency,
-        )
-        lang_valid, lang_mismatches = validate_claims_language_consistency(
-            claims, inp.content_lang, pipeline_mode="collect", min_confidence=0.7,
-        )
-        if not lang_valid:
-            Trace.event("pipeline.language_mismatch_ignored", {
-                "expected": inp.content_lang, "mismatches": lang_mismatches,
-            })
-
-    # NOTE: Claim sorting moved to TargetSelectionStep (M124 - no side-effects)
-
-    pack = build_evidence_pack(
-        fact=inp.original_fact,
-        claims=claims,
-        sources=sources,
-        search_results_clustered=None,
-        content_lang=inp.content_lang or inp.lang,
-        article_context={"text_excerpt": inp.fact[:500]}
-        if inp.fact != inp.original_fact
-        else None,
-        anchor_claim_id=anchor_claim_id,
-    )
-
-    return EvidenceCollection(
-        pack=pack,
-        claims=claims,
-        sources=sources,
-        claim_text_map=claim_text_map,
-        anchor_claim=anchor_claim,
-        anchor_claim_id=anchor_claim_id,
-        time_windows=time_windows,
-        current_cost=current_cost,
-    )
-
-
-async def annotate_evidence_stance(
-    *,
-    agent,
-    inp: EvidenceFlowInput,
-    claims: list[dict],
-    sources: list[dict],
-) -> list[dict]:
-    """Optional stance annotation using clustering skill output."""
-    if not claims or not sources:
-        return []
-    if inp.progress_callback:
-        await inp.progress_callback("stance_annotation")
-    
-    # Map analysis_mode to profile
-    if inp.analysis_mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
-        profile_name = SearchProfileName.DEEP
-    else:
-        profile_name = SearchProfileName.GENERAL
-
-    stance_pass_mode = resolve_stance_pass_mode(profile_name)
-    evidence_items = await agent.cluster_evidence(
-        claims,
-        sources,
-        stance_pass_mode=stance_pass_mode,
-    )
-
-    # Mapping of claim components for normalization (v5-final-2)
-    KNOWN_COVERS = {"entity", "time", "location", "quantity", "attribution", "causal", "other"}
-
-    for ev in evidence_items or []:
-        if not isinstance(ev, dict):
-            continue
-
-        # Parse and normalize 'covers' field from LLM output (ClusteringSkill)
-        raw_covers = ev.get("covers")
-        normalized_covers = []
-        if isinstance(raw_covers, list):
-            for c in raw_covers:
-                c_norm = str(c).strip().lower()
-                if c_norm in KNOWN_COVERS:
-                    normalized_covers.append(c_norm)
-
-        # If LLM failed or returned garbage, keep empty (spillover will fallback to assertion_key)
-        ev["covers"] = list(set(normalized_covers))
-
-    # Deterministic event signature stamping for routing.
-    # We inherit signature from the claim that the evidence was annotated against.
-    claim_lookup = {}
-    for idx, c in enumerate(claims or []):
-        if not isinstance(c, dict):
-            continue
-        cid = str(c.get("id") or c.get("claim_id") or f"c{idx+1}")
-        claim_lookup[cid] = c
-
-    for ev in evidence_items or []:
-        if not isinstance(ev, dict):
-            continue
-        cid = ev.get("claim_id")
-        if not cid:
-            continue
-        claim = claim_lookup.get(str(cid))
-        if not isinstance(claim, dict):
-            continue
-
-        md = claim.get("metadata") if isinstance(claim.get("metadata"), dict) else {}
-        ents = claim.get("subject_entities") if isinstance(claim.get("subject_entities"), list) else []
-        ts = md.get("time_signals") if isinstance(md.get("time_signals"), dict) else {}
-        ls = md.get("locale_signals") if isinstance(md.get("locale_signals"), dict) else {}
-
-        ev["event_signature"] = {
-            "entities": [str(x).strip()[:48] for x in ents[:5] if x],
-            "time_bucket": str(ts.get("time_bucket") or ts.get("year") or "").strip()[:32],
-            "locale": str(ls.get("country") or ls.get("locale") or "").strip()[:32],
-        }
-
-    return evidence_items
+from spectrue_core.use_cases.evidence.flow_logic import (
+    collect_evidence,
+    annotate_evidence_stance,
+)
 
 
 def rebuild_evidence_pack(

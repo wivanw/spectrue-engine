@@ -19,8 +19,8 @@ from spectrue_core.adapters.llm.audit_prompts import (
     build_claim_audit_prompt,
     build_claim_audit_system_prompt,
 )
-from spectrue_core.schema.claim_frame import ClaimFrame
-from spectrue_core.schema.rgba_audit import ClaimAudit
+from spectrue_core.domain.claims.frame import ClaimFrame
+from spectrue_core.domain.verification.verdict.model import ClaimAudit
 from spectrue_core.utils.trace import Trace
 from spectrue_core.llm.model_registry import ModelID
 

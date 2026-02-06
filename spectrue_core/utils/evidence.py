@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.verification.evidence.evidence_pack import (
+from spectrue_core.utils.evidence_pack import (
     ArticleContext, Claim, ClaimMetrics, ConfidenceConstraints,
     EvidenceItem, EvidenceMetrics, EvidencePack, EvidencePackStats,
     SearchResult, AssertionMetrics
@@ -699,8 +699,8 @@ def build_evidence_pack(
         r_contextual = None
         
         if claim_obj:
-            v_target = str(claim_obj.get("verification_target", "")).lower()
-            c_structure = str(claim_obj.get("structure", {}).get("type", "")).lower()
+            v_target = str(claim_obj.get("verification_target", "") or "").lower()
+            c_structure = str((claim_obj.get("structure") or {}).get("type", "") or "").lower()
             is_attribution = v_target == "attribution" or "attribution" in c_structure
             
             if is_attribution:

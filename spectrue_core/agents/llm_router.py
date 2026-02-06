@@ -203,6 +203,11 @@ class LLMRouter:
         )
 
     @property
+    def _aclient(self) -> Any:
+        """Expose the underlying AsyncOpenAI client from openai_client."""
+        return self.openai_client._aclient
+
+    @property
     def _meter(self) -> Any | None:
         """Get the current meter."""
         return getattr(self.openai_client, "_meter", None)

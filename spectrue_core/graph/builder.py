@@ -29,11 +29,11 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 
 from spectrue_core.graph.candidates import build_knn_edges, mst_connectivity
-from spectrue_core.graph.embedding_util import EmbeddingClient
+from spectrue_core.adapters.embedding_client import EmbeddingClient
 from spectrue_core.graph.quality_gates import confidence_from_density
 from spectrue_core.graph.ranking import compute_pagerank_with_ranks
 from spectrue_core.graph.selection import greedy_budgeted_submodular
-from spectrue_core.graph.types import (
+from spectrue_core.domain.graph_types import (
     ClaimNode,
     ClaimPostGraphMeta,
     ClaimPreGraphMeta,
@@ -640,21 +640,3 @@ class ClaimGraphBuilder:
                 kept.append(node)
 
         return kept
-
-
-def build_query_clusters(claims: list[dict]) -> dict[str, list[str]]:
-    """
-    Group claims into clusters for shared query planning.
-    """
-    clusters: dict[str, list[str]] = {}
-    for idx, claim in enumerate(claims or []):
-        claim_id = str(claim.get("id") or f"c{idx + 1}")
-        cluster_key = (
-            claim.get("topic_key")
-            or claim.get("topic_group")
-            or claim.get("id")
-            or claim.get("claim_id")
-            or "cluster_default"
-        )
-        clusters.setdefault(cluster_key, []).append(claim_id)
-    return clusters

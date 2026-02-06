@@ -35,8 +35,11 @@ from spectrue_core.pipeline.contracts import (
 )
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.utils.trace import Trace
-from spectrue_core.domain.evidence.gating import ClusterWeights, StanceWeights
-from spectrue_core.use_cases.evidence.gating import compute_gates
+from spectrue_core.use_cases.evidence.gating import (
+    compute_gates,
+    ClusterWeights,
+    StanceWeights,
+)
 
 logger = logging.getLogger(__name__)
 

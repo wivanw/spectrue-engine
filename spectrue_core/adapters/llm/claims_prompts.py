@@ -713,7 +713,7 @@ ARTICLE CONTEXT:
 - search_method: "news" | "general_search" | "academic" (DEFAULT to "news" for recent events)
 - search_queries: ["keyword query 1", "keyword query 2"] (REQUIRED, non-empty, 2-8 words each)
 - evidence_req: {{"needs_primary": true/false, "needs_2_independent": true/false}}
-- evidence_need: "empirical_study" | "guideline" | "official_stats" | "expert_opinion" | "anecdotal" | "news_report" | "unknown"
+- evidence_need: "empirical_study" | "guideline" | "official_stats" | "expert_opinion" | "anecdotal" | "news_report" | "definition" | "unknown"
 - check_oracle: true/false
 
 Output the JSON object now (no markdown, no wrapper):

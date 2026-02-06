@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from spectrue_core.agents.llm_client import LLMClient
-from spectrue_core.adapters.llm.evidence_audit import EvidenceAuditSkill
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.pipeline.steps.deep_claim import DeepClaimContext
@@ -45,7 +44,6 @@ class AuditEvidenceStep:
                 Trace.event("evidence_audit.skip", {"reason": "no_frames"})
                 return ctx
 
-            skill = EvidenceAuditSkill(self.llm_client)
             errors: dict[str, Any] = dict(ctx.get_extra("audit_errors") or {})
             evidence_errors = dict(errors.get("evidence_audit", {}))
 
@@ -54,7 +52,7 @@ class AuditEvidenceStep:
                 return ctx
             result = await run_audit(
                 claim_frames=deep_ctx.claim_frames,
-                audit_fn=skill.audit,
+                llm_client=self.llm_client,
                 error_status=RGBAStatus.PIPELINE_ERROR,
             )
 

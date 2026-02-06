@@ -21,8 +21,8 @@ from spectrue_core.adapters.llm.audit_prompts import (
     build_evidence_audit_prompt,
     build_evidence_audit_system_prompt,
 )
-from spectrue_core.schema.claim_frame import ClaimFrame, EvidenceItemFrame
-from spectrue_core.schema.rgba_audit import EvidenceAudit
+from spectrue_core.domain.claims.frame import ClaimFrame, EvidenceItemFrame
+from spectrue_core.domain.verification.verdict.model import EvidenceAudit
 from spectrue_core.utils.trace import Trace
 from spectrue_core.llm.model_registry import ModelID
 

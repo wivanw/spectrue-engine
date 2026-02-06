@@ -24,38 +24,12 @@ Reference: Good, I.J. (1950). Probability and the Weighing of Evidence.
 import math
 from typing import List
 
-from spectrue_core.schema.scoring import BeliefState, ConsensusState
-
-
-def prob_to_log_odds(p: float, epsilon: float = 1e-9) -> float:
-    """
-    Convert probability to log-odds (logit function).
-    Clips probability to [epsilon, 1-epsilon] to avoid infinity.
-    
-    Mathematical rationale:
-    -----------------------
-    Log-odds is defined as: log_odds = log(p / (1 - p))
-    
-    Properties:
-    1. Additivity: Posterior(LO) = Prior(LO) + log(Likelihood Ratio)
-    2. Unbounded range: [-∞, +∞] vs probability's [0, 1]
-    3. Symmetry: log_odds(p) = -log_odds(1-p)
-    """
-    p = max(epsilon, min(1.0 - epsilon, p))
-    return math.log(p / (1.0 - p))
-
-
-def log_odds_to_prob(log_odds: float) -> float:
-    """
-    Convert log-odds to probability using the logistic function.
-    Handles overflow for large negative/positive log-odds.
-    
-    Formula: p = 1 / (1 + exp(-log_odds))
-    """
-    try:
-        return 1.0 / (1.0 + math.exp(-log_odds))
-    except OverflowError:
-        return 0.0 if log_odds < 0 else 1.0
+from spectrue_core.domain.verification.verdict.model import (
+    BeliefState,
+    ConsensusState,
+    prob_to_log_odds,
+    log_odds_to_prob,
+)
 
 
 def update_belief(current_belief: BeliefState, evidence_log_odds: float) -> BeliefState:

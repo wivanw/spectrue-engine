@@ -31,36 +31,10 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Literal
 
+from spectrue_core.schema.verdict import AnalysisMode, ScoringMode
 from spectrue_core.schema.verification_types import SearchDepth
-
-
-class AnalysisMode(str, Enum):
-    """API-facing analysis mode names.
-    
-    This is the single source of truth for analysis_mode values
-    in API responses. Maps internal pipeline mode names to
-    frontend-compatible names.
-    
-    Mapping:
-        - internal "general" → API "general"
-        - internal "deep" → API "deep"
-        - internal "deep_v2" → API "deep_v2"
-    """
-    GENERAL = "general"  # Standard single-claim analysis
-    DEEP = "deep"        # Multi-claim per-claim RGBA
-    DEEP_V2 = "deep_v2"  # Clustered retrieval + evidence stats
-
-    def __str__(self) -> str:
-        return self.value
-
-
-class ScoringMode(str, Enum):
-    """Scoring validation modes."""
-    STANDARD = "standard"  # Full validation and clamping
-    DEEP = "deep"          # Per-claim judging, minimal validation
 
 
 @dataclass(frozen=True)

@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any
 
-from spectrue_core.graph.types import GraphResult
+from spectrue_core.domain.graph_types import GraphResult
 
 
 @dataclass(frozen=True)

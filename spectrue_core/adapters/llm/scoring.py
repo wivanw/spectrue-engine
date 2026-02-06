@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.verification.evidence.evidence_pack import EvidencePack
+from spectrue_core.domain.evidence.evidence_pack import EvidencePack
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
@@ -20,8 +20,11 @@ import asyncio
 import json
 from typing import Literal
 
-from spectrue_core.pipeline.mode import AnalysisMode
-from spectrue_core.scoring.belief import prob_to_log_odds, log_odds_to_prob
+from spectrue_core.domain.verification.verdict.model import (
+    AnalysisMode,
+    prob_to_log_odds,
+    log_odds_to_prob,
+)
 
 # Structured output schemas
 from spectrue_core.agents.llm_schemas import (
@@ -51,16 +54,16 @@ from .scoring_sanitization import (
     strip_internal_source_markers,
 )
 
-# Schema imports for structured scoring
-from spectrue_core.schema import (
-    ClaimUnit,
+# Domain imports for structured scoring
+from spectrue_core.domain.claims.model import ClaimUnit
+from spectrue_core.domain.verification.verdict.model import (
     StructuredVerdict,
     StructuredDebug,
 )
 
 
 # price-aware per-claim judge routing
-from spectrue_core.verification.scoring.judge_model_routing import (
+from .judge_model_routing import (
     select_judge_model,
 )
 from spectrue_core.llm.model_registry import ModelID
@@ -628,7 +631,7 @@ class ScoringSkill(BaseSkill):
             prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
             cache_key = f"score_single_v1_{prompt_hash}"
 
-            # --- MODEL ROUTING using spectrue_core.verification.scoring.judge_model_routing ---
+            # --- MODEL ROUTING using spectrue_core.adapters.llm.judge_model_routing ---
             # Fast-path: no evidence => deterministic unverified; no LLM call.
             if not evidence:
                 return {

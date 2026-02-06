@@ -6,7 +6,7 @@ from typing import Any
 
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.coverage_anchors import extract_all_anchors
-from spectrue_core.verification.claims.claim_dedup import dedup_claims_post_extraction_async
+from spectrue_core.domain.claims.dedup import dedup_claims_post_extraction_async
 
 
 async def extract_claims_from_text(*, agent: Any, fact: str, lang: str, anchors: list[str] | None):

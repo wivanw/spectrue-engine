@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from spectrue_core.schema.claim_frame import ClaimFrame, EvidenceItemFrame
+from spectrue_core.domain.claims.frame import ClaimFrame, EvidenceItemFrame
 
 
 def build_claim_audit_system_prompt() -> str:

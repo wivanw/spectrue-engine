@@ -10,11 +10,11 @@
 import logging
 from typing import Union
 
-from spectrue_core.schema import ClaimUnit
-from spectrue_core.verification.evidence.evidence_pack import SearchResult
+from spectrue_core.domain.claims.model import ClaimUnit
+from spectrue_core.domain.evidence.evidence_pack import SearchResult
 from spectrue_core.utils.trace import Trace
 
-from spectrue_core.verification.evidence.evidence import merge_stance_passes
+from spectrue_core.domain.evidence.clustering import merge_stance_passes
 from .base_skill import BaseSkill
 from .clustering_contract import VALID_STANCES
 from .clustering_parsing import (

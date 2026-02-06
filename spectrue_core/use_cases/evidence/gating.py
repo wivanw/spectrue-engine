@@ -11,6 +11,12 @@ from spectrue_core.domain.evidence.gating import (
     StanceWeights,
 )
 
+__all__ = [
+    "compute_gates",
+    "ClusterWeights",
+    "StanceWeights",
+]
+
 
 def compute_gates(*, evidence_index, claims: list[dict], ledger, stance_weights: StanceWeights, cluster_weights: ClusterWeights):
     features = extract_evidence_features(evidence_index, claims)

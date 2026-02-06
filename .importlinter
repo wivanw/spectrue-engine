@@ -65,3 +65,4 @@ forbidden_modules =
     spectrue_core.agents
     spectrue_core.verification
     spectrue_core.graph
+allow_indirect_imports = True

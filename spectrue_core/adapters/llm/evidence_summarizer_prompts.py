@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from spectrue_core.schema.claim_frame import ClaimFrame, EvidenceItemFrame
+    from spectrue_core.domain.claims.frame import ClaimFrame, EvidenceItemFrame
 
 
 def _format_evidence_item(item: EvidenceItemFrame, index: int) -> str:

@@ -24,15 +24,14 @@ from spectrue_core.adapters.llm.claim_judge_prompts import (
     build_claim_judge_prompt,
     build_claim_judge_system_prompt,
 )
-from spectrue_core.schema.claim_frame import (
+from spectrue_core.domain.claims.frame import (
     ClaimFrame,
     EvidenceSummary,
     JudgeOutput,
     RGBAScore,
 )
 from spectrue_core.utils.trace import Trace
-from spectrue_core.pipeline.mode import AnalysisMode
-from spectrue_core.verification.scoring.judge_normalize import normalize_verdict_enum
+from spectrue_core.domain.verification.verdict.model import AnalysisMode, normalize_verdict_enum
 from spectrue_core.llm.model_registry import ModelID
 
 

@@ -25,7 +25,7 @@ from spectrue_core.domain.claims.metadata import (
     normalize_channel_token,
     parse_claim_metadata_fields,
 )
-from spectrue_core.schema.claim_metadata import (
+from spectrue_core.domain.claims.model import (
     ClaimMetadata,
     ClaimRole,
     EvidenceChannel,

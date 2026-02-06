@@ -41,6 +41,7 @@ EVIDENCE_NEED_VALUES = [
     "expert_opinion",
     "anecdotal",
     "news_report",
+    "definition",
     "unknown",
 ]
 
