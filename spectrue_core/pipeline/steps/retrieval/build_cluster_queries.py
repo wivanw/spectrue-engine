@@ -22,14 +22,14 @@ from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
-from spectrue_core.verification.pipeline.pipeline_queries import (
+from spectrue_core.utils.coverage_anchors import extract_all_anchors
+from spectrue_core.pipeline.legacy.pipeline_queries import (
     normalize_and_sanitize,
     resolve_budgeted_max_queries,
     select_diverse_queries,
 )
-from spectrue_core.verification.retrieval.cegs_mvp import build_doc_query_plan
-from spectrue_core.verification.search.search_policy import (
+from spectrue_core.pipeline.retrieval.cegs_mvp import build_doc_query_plan
+from spectrue_core.pipeline.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )

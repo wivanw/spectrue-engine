@@ -20,10 +20,10 @@ from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.retrieval.cluster_attribution import (
+from spectrue_core.pipeline.retrieval.cluster_attribution import (
     attribute_cluster_evidence,
 )
-from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
+from spectrue_core.utils.retrieval_urls import normalize_url
 
 
 @dataclass

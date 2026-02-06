@@ -26,9 +26,9 @@ from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.tools.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.url_utils import get_registrable_domain
-from spectrue_core.verification.orchestration.sufficiency import check_sufficiency_for_claim, SufficiencyStatus
-from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url, source_id_for_url
-from spectrue_core.verification.search.search_policy import (
+from spectrue_core.pipeline.orchestration.sufficiency import check_sufficiency_for_claim, SufficiencyStatus
+from spectrue_core.utils.retrieval_urls import normalize_url, source_id_for_url
+from spectrue_core.pipeline.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )

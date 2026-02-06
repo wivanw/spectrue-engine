@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
-from spectrue_core.verification.types import SearchDepth
+from spectrue_core.schema.verification_types import SearchDepth
 
 
 class AnalysisMode(str, Enum):

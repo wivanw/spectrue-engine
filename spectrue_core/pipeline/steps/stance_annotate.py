@@ -20,10 +20,10 @@ from spectrue_core.pipeline.contracts import GATES_KEY, Gates
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.pipeline.pipeline_evidence import EvidenceFlowInput
+from spectrue_core.pipeline.evidence_flow import EvidenceFlowInput
 from spectrue_core.use_cases.evidence.stance import annotate_stance
-from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
-from spectrue_core.verification.evidence.evidence_stats import EvidenceStats
+from spectrue_core.utils.retrieval_urls import normalize_url
+from spectrue_core.pipeline.evidence.evidence_stats import EvidenceStats
 
 logger = logging.getLogger(__name__)
 

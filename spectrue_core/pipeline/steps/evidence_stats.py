@@ -15,7 +15,7 @@ from spectrue_core.use_cases.evidence.stats import compute_stats
 from spectrue_core.pipeline.core import PipelineContext, Step
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
+from spectrue_core.utils.retrieval_urls import normalize_url
 
 
 @dataclass

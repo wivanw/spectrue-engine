@@ -28,7 +28,7 @@ from spectrue_core.agents.skills.claim_judge_prompts import (
     build_claim_judge_prompt,
     build_claim_judge_system_prompt,
 )
-from spectrue_core.verification.scoring.judge_evidence_stats import build_judge_evidence_stats
+from spectrue_core.pipeline.scoring.judge_evidence_stats import build_judge_evidence_stats
 from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
 from spectrue_core.pipeline.mode import ScoringMode
 from spectrue_core.pipeline.contracts import (
@@ -46,7 +46,7 @@ from spectrue_core.schema.claim_frame import (
 )
 from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.claims.claim_frame_builder import (
+from spectrue_core.pipeline.claims.claim_frame_builder import (
     build_claim_frames_from_pipeline,
 )
 from spectrue_core.llm.model_registry import ModelID
@@ -500,7 +500,7 @@ class AssembleDeepResultStep(Step):
                 # Deep v2: use deterministic confirmation counts
                 # Use value from runtime config if available
                 from spectrue_core.runtime_config import DeepV2Config
-                from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
+                from spectrue_core.pipeline.scoring.confirmation_counts import compute_confirmation_counts
                 
                 runtime = getattr(self._config, "runtime", None)
                 deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())

@@ -20,19 +20,19 @@ from typing import Any
 from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
-from spectrue_core.verification.pipeline.pipeline_queries import (
+from spectrue_core.utils.coverage_anchors import extract_all_anchors
+from spectrue_core.pipeline.legacy.pipeline_queries import (
     is_fuzzy_duplicate,
     normalize_and_sanitize,
     resolve_budgeted_max_queries,
     select_diverse_queries,
 )
-from spectrue_core.verification.retrieval.cegs_mvp import build_doc_query_plan
-from spectrue_core.verification.search.search_policy import (
+from spectrue_core.pipeline.retrieval.cegs_mvp import build_doc_query_plan
+from spectrue_core.pipeline.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )
-from spectrue_core.verification.search.search_escalation import (
+from spectrue_core.pipeline.search.search_escalation import (
     build_query_variants,
     trace_query_variants,
 )

@@ -12,13 +12,13 @@ from spectrue_core.pipeline.core import PipelineContext, Step
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
-from spectrue_core.verification.evidence.slot_maps import (
+from spectrue_core.utils.retrieval_urls import normalize_url
+from spectrue_core.pipeline.evidence.slot_maps import (
     merge_covers,
     required_slots_for_verification_target,
     slots_from_assertion_key,
 )
-from spectrue_core.verification.evidence.event_signature import (
+from spectrue_core.pipeline.evidence.event_signature import (
     claim_event_signature,
     evidence_event_signature,
     signature_compatible,

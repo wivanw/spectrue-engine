@@ -87,7 +87,7 @@ class OracleFlowStep:
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Check Oracle for known status."""
-        from spectrue_core.verification.pipeline.pipeline_oracle import (
+        from spectrue_core.pipeline.legacy.pipeline_oracle import (
             OracleFlowInput, run_oracle_flow,
             ORACLE_CHECK_INTENT, ORACLE_SKIP_INTENT
         )

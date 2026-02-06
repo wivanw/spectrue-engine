@@ -1,10 +1,2 @@
-"""RGBA audit scoring and aggregation helpers."""
-
-from .config import RGBAAuditConfig, default_rgba_audit_config
-from .aggregation import aggregate_rgba_audit
-
-__all__ = [
-    "RGBAAuditConfig",
-    "default_rgba_audit_config",
-    "aggregate_rgba_audit",
-]
+"""Backward-compatible shim for rgba_audit.__init__."""
+from spectrue_core.pipeline.scoring.rgba_audit.__init__ import *  # noqa: F401,F403

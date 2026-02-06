@@ -18,13 +18,12 @@ import logging
 from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.schema.signals import TimeWindow
 from spectrue_core.schema.scoring import BeliefState
-from spectrue_core.graph.context import ClaimContextGraph
 # Bayesian scoring imports moved to bayesian_update.py (M119)
-from spectrue_core.verification.temporal.temporal import (
+from spectrue_core.utils.temporal import (
     label_evidence_timeliness,
     normalize_time_window,
 )
-from spectrue_core.verification.search.source_utils import canonicalize_sources
+from spectrue_core.utils.source_utils import canonicalize_sources
 
 # Suppress deprecation warning - full migration to Bayesian scoring is future work
 import warnings
@@ -32,35 +31,35 @@ import warnings
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-from spectrue_core.verification.scoring.rgba_aggregation import (
+from spectrue_core.pipeline.scoring.rgba_aggregation import (
     apply_dependency_penalties,
     apply_conflict_explainability_penalty,
 )
-from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
-from spectrue_core.verification.claims.claim_selection import pick_ui_main_claim
-from spectrue_core.verification.evidence.evidence_pack import EvidencePack
-from spectrue_core.verification.search.search_policy import (
+from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.utils.claim_selection import pick_ui_main_claim
+from spectrue_core.utils.evidence_pack import EvidencePack
+from spectrue_core.pipeline.search.search_policy import (
     SearchProfileName,
     resolve_stance_pass_mode,
 )
 from spectrue_core.utils.trace import Trace
 
 # Extracted scoring helpers from previous refactoring
-from spectrue_core.verification.evidence.evidence_scoring import (
+from spectrue_core.utils.evidence_scoring import (
     norm_id as _norm_id,
     mark_anchor_duplicates_async as _mark_anchor_duplicates_async,
 )
 
 # Explainability and stance processing modules
 # Claim verdict processing
-from spectrue_core.verification.evidence_verdict_processing import (
+from spectrue_core.pipeline.scoring.evidence_verdict_processing import (
     process_claim_verdicts,
     enrich_all_claim_verdicts,
 )
 from spectrue_core.pipeline.mode import ScoringMode
 
 # Bayesian update logic (M119)
-from spectrue_core.verification.evidence.bayesian_update import apply_bayesian_update
+from spectrue_core.pipeline.scoring.bayesian_update import apply_bayesian_update
 from spectrue_core.pipeline.mode import AnalysisMode
 
 
@@ -100,7 +99,7 @@ class EvidenceFlowInput:
     analysis_mode: AnalysisMode
     progress_callback: ProgressCallback | None
     prior_belief: BeliefState | None = None
-    context_graph: ClaimContextGraph | None = None
+    context_graph: Any | None = None
     claim_extraction_text: str = ""
     # Pipeline field removed - mode determined by score_mode parameter in run_evidence_flow()
 

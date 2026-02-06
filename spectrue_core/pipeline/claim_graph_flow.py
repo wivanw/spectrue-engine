@@ -15,7 +15,7 @@ from typing import Awaitable, Callable
 import logging
 
 from spectrue_core.utils.trace import Trace
-from spectrue_core.graph.claim_graph import build_query_clusters
+from spectrue_core.utils.claim_clusters import build_query_clusters
 
 logger = logging.getLogger(__name__)
 
