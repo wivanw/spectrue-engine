@@ -1,2 +1,1 @@
-"""Backward-compatible shim for sufficiency checks."""
-from spectrue_core.pipeline.orchestration.sufficiency import *  # noqa: F401,F403
+from spectrue_core.use_cases.verification.orchestration.sufficiency import *  # noqa: F401,F403

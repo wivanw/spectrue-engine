@@ -2,8 +2,8 @@
 import pytest
 from unittest.mock import MagicMock
 
-from spectrue_core.pipeline.steps.evidence_spillover import (
-    EvidenceSpilloverStep,
+from spectrue_core.pipeline.steps.evidence_spillover import EvidenceSpilloverStep
+from spectrue_core.domain.evidence.spillover import (
     _claim_topic_signature,
     _topic_overlap_boost,
 )

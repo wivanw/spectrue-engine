@@ -1,6 +1,4 @@
-"""Pipeline modules."""
-
-from .pipeline import ValidationPipeline
+from spectrue_core.use_cases.verification.pipeline import ValidationPipeline
 from spectrue_core.pipeline.evidence_flow import run_evidence_flow, EvidenceFlowInput
 
 __all__ = [
@@ -8,4 +6,3 @@ __all__ = [
     "run_evidence_flow",
     "EvidenceFlowInput",
 ]
-

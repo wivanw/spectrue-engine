@@ -188,6 +188,37 @@ class SourceCluster:
     size: int
 
 
+class RelationType(str, Enum):
+    SUPPORTS = "supports"
+    CONTRADICTS = "contradicts"
+    ENTAILS = "entails"
+
+
+@dataclass
+class ClaimNode:
+    claim_id: str
+    text: str
+    role: str
+    local_belief: BeliefState | None = None
+    propagated_belief: BeliefState | None = None
+
+
+@dataclass
+class ClaimEdge:
+    source_id: str
+    target_id: str
+    relation: RelationType | str
+    weight: float
+
+
+@dataclass
+class ScoringTraceStep:
+    step_id: int
+    description: str
+    delta: float
+    new_belief: float
+
+
 class VerdictStatus(str, Enum):
     """Verdict outcome for an assertion or claim."""
     VERIFIED = "verified"

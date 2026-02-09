@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from spectrue_core.pipeline.mode import AnalysisMode
+    from spectrue_core.domain.verification.verdict.model import AnalysisMode
 
 from spectrue_core.domain.evidence.evidence_pack import Claim, EvidencePack, ArticleIntent
 from spectrue_core.config import SpectrueConfig

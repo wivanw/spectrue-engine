@@ -40,3 +40,53 @@ class UsePolicy(str, Enum):
 
     LEAD_ONLY = "lead_only"
     """Channel can only provide leads, not definitive evidence."""
+
+
+def norm_claim_id(x: Any) -> str | None:
+    """Normalize claim ID for consistent lookup."""
+    if x is None:
+        return None
+    s = str(x).strip().lower()
+    if s in ("", "none", "null", "undefined"):
+        return None
+    return s
+
+
+def get_tier_rank(tier: str | None) -> int:
+    """
+    Get numeric rank for evidence tier.
+    """
+    if not tier:
+        return 0
+    return {"D": 1, "C": 2, "B": 3, "A'": 3, "A": 4}.get(
+        str(tier).strip().upper(), 0
+    )
+
+
+def find_best_tier_for_claim(
+    claim_id: str | None,
+    evidence_items: list[dict[str, Any]],
+) -> str | None:
+    """
+    Find best (highest-ranked) evidence tier for a claim.
+    """
+    best_tier = None
+    
+    for item in evidence_items:
+        if not isinstance(item, dict):
+            continue
+        
+        item_claim_id = item.get("claim_id")
+        if claim_id and item_claim_id not in (None, claim_id):
+            continue
+        
+        tier = item.get("tier")
+        if tier and (
+            best_tier is None or get_tier_rank(tier) > get_tier_rank(best_tier)
+        ):
+            best_tier = tier
+    
+    return best_tier
+
+
+from typing import Any

@@ -20,11 +20,13 @@ Philosophy:
 - LLM = judge with constraints (verdict, explanation)
 """
 
-from typing import Literal, TypedDict, Any
+from typing import Literal, TypedDict, Any, TYPE_CHECKING
 
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.calibration.calibration_models import logistic_score
-from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
+
+if TYPE_CHECKING:
+    from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
 
 def _has_evidence_chunk(source: Any) -> bool:
     """Check whether a source includes a usable evidence chunk."""
@@ -244,11 +246,13 @@ def _evidence_feature_row(src: dict) -> dict[str, float]:
 def score_evidence_likeness(
     sources: list[dict],
     *,
-    calibration_registry: CalibrationRegistry | None = None,
+    calibration_registry: "CalibrationRegistry | None" = None,
 ) -> float:
     """
     Calibrated evidence-likeness scoring for retrieval evaluation.
     """
+    from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
+
     if not sources:
         return 0.0
 

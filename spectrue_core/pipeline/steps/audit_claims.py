@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.pipeline.steps.deep_claim import DeepClaimContext

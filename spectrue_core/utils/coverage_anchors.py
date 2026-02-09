@@ -32,13 +32,13 @@ class Anchor:
 # ================= Time Anchors =================
 
 TIME_PATTERNS = [
-    (r"(\d{4})-(\d{2})-(\d{2})", "iso_date"),
-    (r"(\d{1,2})[./](\d{1,2})[./](\d{4})", "eu_date"),
-    (r"(\d{1,2})/(\d{1,2})/(\d{4})", "us_date"),
-    (r"(\d{4})-(\d{2})", "year_month"),
-    (r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})", "month_year"),
-    (r"[Qq]([1-4])\s*(\d{4})", "quarter"),
-    (r"(19\d{2}|20\d{2})", "year"),
+    (r"\b(\d{4})-(\d{2})-(\d{2})\b", "iso_date"),
+    (r"\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b", "eu_date"),
+    (r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", "us_date"),
+    (r"\b(\d{4})-(\d{2})\b", "year_month"),
+    (r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b", "month_year"),
+    (r"\b[Qq]([1-4])\s*(\d{4})\b", "quarter"),
+    (r"\b(19\d{2}|20\d{2})\b", "year"),
 ]
 
 
@@ -87,12 +87,12 @@ def extract_time_anchors(text: str) -> list[Anchor]:
 # ================= Numeric Anchors =================
 
 NUMERIC_PATTERNS = [
-    (r"[$€£¥]\s*[\d,]+(?:\.\d+)?(?:\s*(?:million|billion|trillion|k|m|b))?", "currency"),
-    (r"\d+(?:\.\d+)?\s*%", "percentage"),
-    (r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", "large_number"),
-    (r"\d+(?:\.\d+)?\s*(?:km|m|cm|mm|kg|g|mg|lb|oz|°[CF]|mph|kph)", "number_with_unit"),
-    (r"\d+\.\d+", "decimal"),
-    (r"\d{2,}", "integer"),
+    (r"[$€£¥]\s*[\d,]+(?:\.\d+)?(?:\s*(?:million|billion|trillion|k|m|b))?\b", "currency"),
+    (r"\b\d+(?:\.\d+)?\s*%", "percentage"),
+    (r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b", "large_number"),
+    (r"\b\d+(?:\.\d+)?\s*(?:km|m|cm|mm|kg|g|mg|lb|oz|°[CF]|mph|kph)\b", "number_with_unit"),
+    (r"\b\d+\.\d+\b", "decimal"),
+    (r"\b\d{2,}\b", "integer"),
 ]
 
 
@@ -194,5 +194,11 @@ def get_anchor_ids(anchors: list[Anchor]) -> set[str]:
 def anchors_to_prompt_context(anchors: list[Anchor]) -> str:
     if not anchors:
         return ""
-    lines = ["- " + a.span_text.strip() for a in anchors if a.span_text]
+
+    lines = []
+    for a in anchors:
+        lines.append(
+            f"- [{a.anchor_id}] {a.kind.value}: \"{a.span_text}\" (context: {a.context_window[:60]}...)"
+        )
+
     return "\n".join(lines)

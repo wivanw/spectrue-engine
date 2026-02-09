@@ -1,18 +1,28 @@
 from __future__ import annotations
 
-from enum import Enum
 from typing import Optional
 from pydantic import Field
 
 from spectrue_core.schema.serialization import SchemaModel
 from spectrue_core.domain.verification.verdict.model import (
+    AnalysisMode,
+    ScoringMode,
+    VerdictStatus,
+    VerdictState,
     BeliefState as DomainBeliefState,
     ConsensusState as DomainConsensusState,
+    RelationType,
+    ClaimNode as DomainClaimNode,
+    ClaimEdge as DomainClaimEdge,
+    ScoringTraceStep as DomainScoringTraceStep,
     log_odds_to_prob,
 )
 
 __all__ = [
-    "ClaimRole",
+    "AnalysisMode",
+    "ScoringMode",
+    "VerdictStatus",
+    "VerdictState",
     "RelationType",
     "BeliefState",
     "ClaimNode",
@@ -21,16 +31,6 @@ __all__ = [
     "ConsensusState",
 ]
 
-class ClaimRole(str, Enum):
-    THESIS = "thesis"
-    SUPPORT = "support"
-    BACKGROUND = "background"
-    COUNTER = "counter"
-
-class RelationType(str, Enum):
-    SUPPORTS = "supports"
-    CONTRADICTS = "contradicts"
-    ENTAILS = "entails"
 
 class BeliefState(SchemaModel, DomainBeliefState):
     log_odds: float = Field(..., description="Belief in log-odds space")
@@ -40,24 +40,28 @@ class BeliefState(SchemaModel, DomainBeliefState):
     def probability(self) -> float:
         return log_odds_to_prob(self.log_odds)
 
-class ClaimNode(SchemaModel):
+
+class ClaimNode(SchemaModel, DomainClaimNode):
     claim_id: str
     text: str
-    role: ClaimRole
+    role: str
     local_belief: Optional[BeliefState] = None
     propagated_belief: Optional[BeliefState] = None
 
-class ClaimEdge(SchemaModel):
+
+class ClaimEdge(SchemaModel, DomainClaimEdge):
     source_id: str
     target_id: str
-    relation: RelationType
+    relation: RelationType | str
     weight: float = Field(..., ge=0.0, le=1.0, description="Semantic strength of the connection")
 
-class ScoringTraceStep(SchemaModel):
+
+class ScoringTraceStep(SchemaModel, DomainScoringTraceStep):
     step_id: int
     description: str
     delta: float = Field(..., description="Change in log-odds")
     new_belief: float = Field(..., description="Resulting log-odds")
+
 
 class ConsensusState(SchemaModel, DomainConsensusState):
     score: float = Field(..., ge=0.0, le=1.0, description="Normalized consensus level")

@@ -19,7 +19,7 @@ from spectrue_core.utils.temporal import (
     normalize_time_window,
 )
 from spectrue_core.utils.claim_selection import pick_ui_main_claim
-from spectrue_core.utils.evidence import build_evidence_pack
+from spectrue_core.utils.evidence import build_evidence_pack as build_evidence_pack_imported
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -106,6 +106,7 @@ async def collect_evidence(
     inp: EvidenceFlowInput,
     claims: list[dict],
     sources: list[dict],
+    build_evidence_pack: Any = None,
     calibration_registry = None,
 ) -> EvidenceCollection:
     """Collect and structure evidence without invoking the judge."""
@@ -180,7 +181,8 @@ async def collect_evidence(
                 "expected": inp.content_lang, "mismatches": lang_mismatches,
             })
 
-    pack = build_evidence_pack(
+    build_ev_pack = build_evidence_pack or build_evidence_pack_imported
+    pack = build_ev_pack(
         fact=inp.original_fact,
         claims=claims,
         sources=sources,

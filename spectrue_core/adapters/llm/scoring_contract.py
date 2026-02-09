@@ -363,3 +363,31 @@ def build_stance_matrix_prompt(*, claims_lite: list[dict], sources_lite: list[di
         f"{json.dumps(sources_lite or [], indent=2, ensure_ascii=False)}\n\n"
         "Return JSON matching the requested schema."
     )
+
+
+CLAIM_JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "claim_id": {"type": "string"},
+        "verdict_score": {"type": "number"},
+        "verdict": {"type": "string"},
+        "reason": {"type": "string"},
+        "rgba": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 4,
+            "maxItems": 4,
+        },
+        "prior_score": {"type": "number"},
+        "prior_reason": {"type": "string"},
+    },
+    "required": [
+        "claim_id",
+        "verdict_score",
+        "verdict",
+        "reason",
+        "rgba",
+        "prior_score",
+        "prior_reason",
+    ],
+}

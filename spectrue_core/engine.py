@@ -127,7 +127,7 @@ class SpectrueEngine:
             Trace.event(
                 "engine.analyze_text.start",
                 {
-                    "analysis_mode": str(analysis_mode),
+                    "analysis_mode": analysis_mode.value,
                     "text_len": len(text),
                 },
             )
@@ -261,7 +261,7 @@ class SpectrueEngine:
                     "detected_lang": detected_lang,
                     "detected_lang_prob": detected_prob,
                     "search_lang": content_lang,
-                    "analysis_mode": str(analysis_mode),
+                    "analysis_mode": analysis_mode.value,
                 }
                 if max_credits is not None:
                     final["budget"] = {

@@ -1,2 +1,1 @@
-"""Backward-compatible shim for bayesian update."""
-from spectrue_core.pipeline.scoring.bayesian_update import *  # noqa: F401,F403
+from spectrue_core.use_cases.verification.verdict import *  # noqa: F401,F403

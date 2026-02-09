@@ -8,6 +8,6 @@ from spectrue_core.domain.verification.verdict.model import EvidenceFlowInput
 from .flow_logic import annotate_evidence_stance
 
 
-def annotate_stance(*, agent: Any, inp: EvidenceFlowInput, claims: list[dict], sources: list[dict]) -> list[dict]:
+async def annotate_stance(*, agent: Any, inp: EvidenceFlowInput, claims: list[dict], sources: list[dict]) -> list[dict]:
     """Annotate evidence stance using the LLM clustering adapter."""
-    return annotate_evidence_stance(agent=agent, inp=inp, claims=claims, sources=sources)
+    return await annotate_evidence_stance(agent=agent, inp=inp, claims=claims, sources=sources)

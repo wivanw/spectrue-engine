@@ -62,7 +62,7 @@ class TestApplyBayesianUpdate:
     @pytest.fixture
     def mock_trace(self):
         """Mock Trace to avoid side effects."""
-        with patch("spectrue_core.verification.evidence.bayesian_update.Trace") as mock:
+        with patch("spectrue_core.use_cases.verification.verdict.Trace") as mock:
             mock.event = MagicMock()
             mock.event_full = MagicMock()
             yield mock
