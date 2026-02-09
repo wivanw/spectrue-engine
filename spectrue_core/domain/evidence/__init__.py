@@ -1,7 +1,7 @@
 """Evidence domain package."""
 
-from .model import EvidenceChannel, UsePolicy
-from .evidence_pack import Claim, EvidencePack, SearchResult, OracleStatus
+from .model import EvidenceChannel, UsePolicy, OracleStatus
+from spectrue_core.utils.evidence_pack import Claim, EvidencePack, SearchResult
 
 __all__ = [
     "EvidenceChannel",

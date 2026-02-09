@@ -1,14 +1,16 @@
 """Search and retrieval modules."""
 
 from .search_mgr import SearchManager
-from .search_policy import (
+from spectrue_core.domain.verification.verdict.model import (
     SearchDepth,
     SearchProfileName,
     StancePassMode,
-    resolve_profile_name,
     resolve_stance_pass_mode,
 )
-from .source_utils import canonicalize_sources
+from spectrue_core.domain.verification.search.search_policy import (
+    resolve_profile_name,
+)
+from spectrue_core.utils.source_utils import canonicalize_sources
 
 __all__ = [
     "SearchManager",

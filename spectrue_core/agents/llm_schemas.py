@@ -29,7 +29,7 @@ from spectrue_core.schema.claim_metadata import (
 )
 from spectrue_core.schema.claims import ClaimStructureType
 from spectrue_core.tools.trusted_sources import AVAILABLE_TOPICS
-from spectrue_core.graph.types import EdgeRelation
+from spectrue_core.domain.claims.graph.types import EdgeRelation
 
 
 CLAIM_CATEGORY_VALUES = ["FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"]

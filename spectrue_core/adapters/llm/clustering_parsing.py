@@ -14,7 +14,7 @@ from typing import Iterable, Union
 
 from spectrue_core.domain.claims.model import ClaimUnit
 from spectrue_core.utils.trace import Trace
-from spectrue_core.domain.evidence.evidence_pack import SearchResult
+from spectrue_core.utils.evidence_pack import SearchResult
 from spectrue_core.utils.source_utils import has_evidence_chunk
 from spectrue_core.domain.verification.stance.model import StanceFeatures
 from spectrue_core.domain.verification.stance import (

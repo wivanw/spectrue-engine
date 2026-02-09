@@ -13,13 +13,12 @@ import logging
 from typing import Any
 
 from spectrue_core.domain.verification.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.domain.claims.graph.builder import ClaimGraphBuilder
 from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import ContentBudgetConfig
-from spectrue_core.agents.fact_checker_agent import FactCheckerAgent
-from spectrue_core.graph import ClaimGraphBuilder
-from spectrue_core.use_cases.verification.pipeline_input import apply_content_budget, TrimResult
-from spectrue_core.pipeline.dag import PipelineContext
+from spectrue_core.domain.verification.pipeline_types import PipelineContext
+from spectrue_core.domain.verification.agent import FactCheckerAgentProtocol
 from spectrue_core.utils.trace import Trace
 from spectrue_core.use_cases.verification.pipeline_metering import attach_cost_summary
 import time
@@ -31,7 +30,7 @@ class ValidationPipeline:
     """
     Orchestrates the fact-checking waterfall process.
     """
-    def __init__(self, config: SpectrueConfig, agent: FactCheckerAgent, translation_service=None, search_mgr=None):
+    def __init__(self, config: SpectrueConfig, agent: FactCheckerAgentProtocol, translation_service=None, search_mgr=None):
         self.config = config
         self.agent = agent
         self._calibration_registry = CalibrationRegistry.from_runtime(
@@ -54,9 +53,13 @@ class ValidationPipeline:
         claim_graph_cfg = getattr(runtime_cfg, "claim_graph", None)
         
         if config and claim_graph_cfg:
+            aclient = getattr(agent.llm_client, "_aclient", None)
+            from spectrue_core.adapters.embedding_client import EmbeddingClient
+            embedding_client = EmbeddingClient(openai_client=aclient)
             self._claim_graph = ClaimGraphBuilder(
                 config=claim_graph_cfg,
                 edge_typing_skill=agent.edge_typing_skill,
+                embedding_client=embedding_client,
             )
 
         self._content_budget_config = (
@@ -163,9 +166,11 @@ class ValidationPipeline:
                 .set_extra("progress_callback", progress_callback)
             )
 
-            # Load EmbeddingClient for Deep V2 clustering if needed
-            from spectrue_core.adapters.embedding_client import EmbeddingClient
-            embedding_client = EmbeddingClient(openai_client=self.agent.llm_client._aclient) # Using agent's async client
+            # Retrieve EmbeddingClient from claim_graph if it exists, else create new
+            embedding_client = getattr(self._claim_graph, "embedding_client", None)
+            if not embedding_client:
+                from spectrue_core.adapters.embedding_client import EmbeddingClient
+                embedding_client = EmbeddingClient(openai_client=self.agent.llm_client._aclient)
 
             # Build DAG (with extraction logic if needed)
             dag = PipelineFactory(

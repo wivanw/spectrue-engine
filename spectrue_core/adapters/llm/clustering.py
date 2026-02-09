@@ -11,7 +11,7 @@ import logging
 from typing import Union
 
 from spectrue_core.domain.claims.model import ClaimUnit
-from spectrue_core.domain.evidence.evidence_pack import SearchResult
+from spectrue_core.utils.evidence_pack import SearchResult
 from spectrue_core.utils.trace import Trace
 
 from spectrue_core.domain.evidence.clustering import merge_stance_passes

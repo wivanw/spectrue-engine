@@ -57,7 +57,7 @@ from spectrue_core.use_cases.verification.orchestration.execution_plan import (
 from spectrue_core.utils.trace import Trace
 
 if TYPE_CHECKING:
-    from spectrue_core.verification.evidence.evidence_pack import Claim
+    from spectrue_core.utils.evidence_pack import Claim
 
 logger = logging.getLogger(__name__)
 

@@ -11,12 +11,13 @@ from spectrue_core.domain.verification.verdict.model import (
     VerdictState,
     BeliefState as DomainBeliefState,
     ConsensusState as DomainConsensusState,
-    RelationType,
     ClaimNode as DomainClaimNode,
     ClaimEdge as DomainClaimEdge,
     ScoringTraceStep as DomainScoringTraceStep,
     log_odds_to_prob,
 )
+from spectrue_core.domain.claims.model import ClaimRole
+from spectrue_core.domain.claims.graph.types import EdgeRelation as RelationType
 
 __all__ = [
     "AnalysisMode",
@@ -27,8 +28,11 @@ __all__ = [
     "BeliefState",
     "ClaimNode",
     "ClaimEdge",
+    "ClaimNode",
+    "ClaimEdge",
     "ScoringTraceStep",
     "ConsensusState",
+    "ClaimRole",
 ]
 
 

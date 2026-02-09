@@ -26,7 +26,7 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.pipeline.orchestration.sufficiency import SUFFICIENCY_P_THRESHOLD
+from spectrue_core.domain.claims.sufficiency import SUFFICIENCY_P_THRESHOLD, check_sufficiency_for_claim
 from spectrue_core.utils.retrieval_urls import (
     ExtractedContent,
     FixedPipelineContext,
@@ -318,7 +318,6 @@ class WebSearchStep:
                 bind_after_extract()
 
                 # Record final Bayesian sufficiency for each claim
-                from spectrue_core.pipeline.orchestration.sufficiency import check_sufficiency_for_claim
                 for claim_id, claim in claim_id_map.items():
                     # bind_after_extract ensures state.bindings.audited is up to date
                     claim_urls = state.bindings.audited.get(claim_id, set())

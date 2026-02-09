@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from spectrue_core.domain.evidence.evidence_pack import SearchResult
+from spectrue_core.utils.evidence_pack import SearchResult
 
 logger = logging.getLogger(__name__)
 

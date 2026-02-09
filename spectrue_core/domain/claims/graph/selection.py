@@ -105,4 +105,3 @@ def greedy_budgeted_submodular(
         )
 
     return selected, trace
-

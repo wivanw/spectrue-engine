@@ -15,7 +15,7 @@ ClaimGraph Type Definitions (Legacy Shim)
 Re-exports from spectrue_core.domain.graph_types.
 """
 
-from spectrue_core.domain.graph_types import (
+from spectrue_core.domain.claims.graph.types import (
     ClaimNode,
     ClaimPreGraphMeta,
     ClaimPostGraphMeta,

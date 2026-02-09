@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 
-from spectrue_core.graph.types import GraphResult
+from .types import GraphResult
 
 logger = logging.getLogger(__name__)
 

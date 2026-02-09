@@ -49,10 +49,10 @@ from spectrue_core.agents.skills.query import generate_followup_query_from_evide
 from spectrue_core.utils.trace import Trace
 from spectrue_core.tools.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.domain.claims.model import EvidenceChannel
-from spectrue_core.verification.search.source_utils import canonicalize_sources, extract_domain
-from spectrue_core.verification.search.retrieval_eval import evaluate_retrieval_confidence
+from spectrue_core.utils.source_utils import canonicalize_sources, extract_domain
+from spectrue_core.adapters.retrieval.retrieval_eval import evaluate_retrieval_confidence
 from spectrue_core.use_cases.verification.orchestration.stop_decision import EVStopParams, evaluate_stop_decision
-from spectrue_core.verification.search.search_escalation import (
+from spectrue_core.domain.verification.search.search_escalation import (
     build_query_variants,
     select_topic_from_claim,
     compute_retrieval_outcome,
@@ -71,8 +71,8 @@ from spectrue_core.verification.search.search_escalation import (
 from spectrue_core.llm.model_registry import ModelID
 
 if TYPE_CHECKING:
-    from spectrue_core.verification.search.search_mgr import SearchManager
-    from spectrue_core.verification.evidence.evidence_pack import Claim
+    from spectrue_core.adapters.retrieval.search_mgr import SearchManager
+    from spectrue_core.domain.evidence.model import Claim
 
 logger = logging.getLogger(__name__)
 

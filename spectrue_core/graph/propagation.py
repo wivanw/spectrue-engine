@@ -1,1 +1,0 @@
-from spectrue_core.domain.verification.verdict.propagation import *  # noqa: F401,F403

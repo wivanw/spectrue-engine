@@ -41,7 +41,7 @@ from spectrue_core.pipeline.scoring.rgba_aggregation import (
 from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
 from spectrue_core.utils.claim_selection import pick_ui_main_claim
 from spectrue_core.utils.evidence_pack import EvidencePack
-from spectrue_core.pipeline.search.search_policy import (
+from spectrue_core.domain.verification.search.search_policy import (
     SearchProfileName,
     resolve_stance_pass_mode,
 )

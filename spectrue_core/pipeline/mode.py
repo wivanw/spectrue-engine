@@ -30,63 +30,10 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
+from spectrue_core.domain.verification.pipeline_types import PipelineMode
+from spectrue_core.domain.verification.verdict.model import AnalysisMode, ScoringMode
+from spectrue_core.domain.verification.search.types import SearchDepth
 
-from spectrue_core.schema.verdict import AnalysisMode, ScoringMode
-from spectrue_core.schema.verification_types import SearchDepth
-
-
-@dataclass(frozen=True)
-class PipelineMode:
-    """
-    Frozen configuration for a pipeline mode.
-
-    This is the single source of truth for mode invariants.
-    All mode-specific logic should consult these flags instead
-    of checking string mode names.
-
-    Attributes:
-        name: Mode name ("general", "deep", or "deep_v2")
-        allow_batch: Whether batch claim processing is allowed
-        allow_clustering: Whether stance clustering is enabled
-        require_single_language: Whether input must be single-language
-        require_metering: Whether cost metering is required
-        max_claims_for_scoring: Maximum number of claims to score (0 = unlimited)
-        search_depth: Default search depth ("basic" or "advanced")
-    """
-
-    name: Literal["general", "deep", "deep_v2"]
-    allow_batch: bool
-    allow_clustering: bool
-    require_single_language: bool
-    require_metering: bool
-    max_claims_for_scoring: int
-    search_depth: Literal["basic", "advanced"]
-
-    def __str__(self) -> str:
-        return f"PipelineMode({self.name})"
-
-    def __repr__(self) -> str:
-        return (
-            f"PipelineMode(name={self.name!r}, allow_batch={self.allow_batch}, "
-            f"allow_clustering={self.allow_clustering}, "
-            f"require_single_language={self.require_single_language}, "
-            f"max_claims={self.max_claims_for_scoring}, "
-            f"search_depth={self.search_depth!r})"
-        )
-
-    @property
-    def api_analysis_mode(self) -> AnalysisMode:
-        """Get API-facing analysis mode name.
-        
-        Maps internal mode name to frontend-compatible AnalysisMode enum.
-        Use this for all API responses instead of raw mode.name.
-        """
-        try:
-            return AnalysisMode(self.name)
-        except ValueError:
-            return AnalysisMode.GENERAL
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Canonical Mode Instances

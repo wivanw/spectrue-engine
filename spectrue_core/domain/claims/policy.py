@@ -11,6 +11,21 @@ from spectrue_core.domain.claims.model import (
     RetrievalPolicy,
 )
 from spectrue_core.domain.evidence.model import EvidenceChannel, UsePolicy
+from enum import Enum
+from dataclasses import dataclass
+class PolicyMode(str, Enum):
+    """Per-claim policy decision for search routing."""
+    SKIP = "SKIP"
+    CHEAP = "CHEAP"
+    FULL = "FULL"
+
+
+@dataclass(frozen=True)
+class ClaimPolicyDecision:
+    """Routing decision result for a claim before query building."""
+    mode: PolicyMode
+    reason_codes: list[str]
+
 
 
 def get_role_weight(metadata: ClaimMetadata) -> float:

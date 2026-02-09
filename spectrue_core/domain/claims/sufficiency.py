@@ -33,14 +33,14 @@ from enum import Enum
 from typing import Any, TYPE_CHECKING
 from urllib.parse import urlparse
 
-from spectrue_core.schema.claim_metadata import VerificationTarget, EvidenceChannel
+from spectrue_core.domain.claims.model import VerificationTarget, EvidenceChannel
 from spectrue_core.tools.trusted_sources import get_domain_tier, is_authoritative
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from spectrue_core.pipeline.search.search_policy import SearchPolicyProfile
+    from spectrue_core.domain.verification.search.search_policy import SearchPolicyProfile
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -17,7 +17,7 @@ Uses LLM to compute relevance_score (0-1) instead of binary yes/no.
 """
 
 from spectrue_core.adapters.llm.base_skill import BaseSkill
-from spectrue_core.domain.evidence.evidence_pack import OracleStatus
+from spectrue_core.domain.evidence.model import OracleStatus
 from spectrue_core.utils.trace import Trace
 from spectrue_core.llm.model_registry import ModelID
 import logging

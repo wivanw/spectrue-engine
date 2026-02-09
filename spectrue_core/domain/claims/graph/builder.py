@@ -26,14 +26,13 @@ import logging
 import math
 import time
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
-from spectrue_core.graph.candidates import build_knn_edges, mst_connectivity
-from spectrue_core.adapters.embedding_client import EmbeddingClient
-from spectrue_core.graph.quality_gates import confidence_from_density
-from spectrue_core.graph.ranking import compute_pagerank_with_ranks
-from spectrue_core.graph.selection import greedy_budgeted_submodular
-from spectrue_core.domain.graph_types import (
+from .candidates import build_knn_edges, mst_connectivity
+from .quality_gates import confidence_from_density
+from .ranking import compute_pagerank_with_ranks
+from .selection import greedy_budgeted_submodular
+from .types import (
     ClaimNode,
     ClaimPostGraphMeta,
     ClaimPreGraphMeta,
@@ -53,6 +52,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class Embedder(Protocol):
+    """Protocol for embedding clients to avoid domain -> adapter dependency."""
+    async def embed_texts(self, texts: list[str], *, purpose: str = "document") -> list[list[float]]:
+        ...
+
+    def build_similarity_matrix(self, embeddings: list[list[float]]) -> list[list[float]]:
+        ...
+
+
 class ClaimGraphBuilder:
     """
     Deterministic ClaimGraph builder (no heuristics, no hard caps).
@@ -63,10 +71,10 @@ class ClaimGraphBuilder:
         config: "ClaimGraphConfig",
         openai_client: "AsyncOpenAI | None" = None,
         edge_typing_skill: object | None = None,  # kept for interface compatibility
-        embedding_client: EmbeddingClient | None = None,
+        embedding_client: Embedder | None = None,
     ):
         self.config = config
-        self.embedding_client = embedding_client or EmbeddingClient(openai_client)
+        self.embedding_client = embedding_client
         self.edge_typing_skill = edge_typing_skill
 
     async def build(self, claims: list[dict]) -> GraphResult:
@@ -79,6 +87,10 @@ class ClaimGraphBuilder:
 
         if not claims:
             return result
+
+        if not self.embedding_client:
+             logger.warning("ClaimGraphBuilder: No embedding client provided.")
+             return result
 
         try:
             position_map = {str(c.get("id") or f"c{i+1}"): i + 1 for i, c in enumerate(claims)}
@@ -169,7 +181,7 @@ class ClaimGraphBuilder:
             kept_edges = []
             min_edge_score = 0.6
             for te in typed_edges or []:
-                if not te or te.relation == EdgeRelation.UNRELATED:
+                if not hasattr(te, "relation") or te.relation == EdgeRelation.UNRELATED:
                     continue
                 if float(te.score) < min_edge_score:
                     continue
@@ -209,7 +221,7 @@ class ClaimGraphBuilder:
             # Selection (budgeted submodular)
             id_to_idx = {n.claim_id: i for i, n in enumerate(nodes)}
 
-            def sim(a: str, b: str) -> float:
+            def sim_fn(a: str, b: str) -> float:
                 ia = id_to_idx.get(a)
                 ib = id_to_idx.get(b)
                 if ia is None or ib is None:
@@ -248,7 +260,7 @@ class ClaimGraphBuilder:
             elif budget > 0 and cost_map:
                 selected, selection_trace = greedy_budgeted_submodular(
                     nodes=node_ids,
-                    sim=sim,
+                    sim=sim_fn,
                     pagerank=pr_scores,
                     cost=cost_map,
                     budget=budget,

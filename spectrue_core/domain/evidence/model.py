@@ -3,6 +3,63 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any, Literal, TypedDict
+
+
+class OracleStatus(str, Enum):
+    """
+    Oracle verdict status:
+    - CONFIRMED: Fact-check confirms the claim is true
+    - REFUTED: Fact-check says the claim is false/fake
+    - MIXED: Fact-check says partially true or needs context
+    - EMPTY: No relevant fact-check found
+    - ERROR: API failure (check error_status_code)
+    - DISABLED: Oracle validator not configured
+    """
+    CONFIRMED = "CONFIRMED"
+    REFUTED = "REFUTED"
+    MIXED = "MIXED"
+    EMPTY = "EMPTY"
+    ERROR = "ERROR"
+    DISABLED = "DISABLED"
+
+
+class ArticleIntent(str, Enum):
+    """
+    Article intent classification for Oracle triggering:
+    - news: Current events, breaking news (CHECK Oracle)
+    - evergreen: Science facts, historical claims, health info (CHECK Oracle)
+    - official: Government/company announcements (CHECK Oracle)
+    - opinion: Editorial, commentary (SKIP Oracle)
+    - prediction: Future events (SKIP Oracle)
+    """
+    NEWS = "news"
+    EVERGREEN = "evergreen"
+    OFFICIAL = "official"
+    OPINION = "opinion"
+    PREDICTION = "prediction"
+
+
+class OracleCheckResult(TypedDict, total=False):
+    """
+    Result from Google Fact Check API with LLM semantic validation.
+    
+    Used in hybrid Oracle flow:
+    - JACKPOT (relevance > 0.9): Stop pipeline, return immediately
+    - EVIDENCE (0.5 < relevance <= 0.9): Add to evidence pack, continue search
+    - MISS (relevance <= 0.5 or EMPTY): Ignore, proceed to standard search
+    """
+    status: OracleStatus | str        # Verdict from fact-check
+    url: str | None                   # URL of the fact-check article
+    claim_reviewed: str | None        # The claim text from the external fact-check
+    summary: str | None               # The verdict/explanation
+    relevance_score: float            # 0.0 to 1.0 (Calculated by LLM)
+    is_jackpot: bool                  # True if relevance > 0.9 (Stop search immediately)
+    publisher: str | None             # Fact-check publisher name (Snopes, PolitiFact, etc.)
+    rating: str | None                # Original textual rating from fact-checker
+    source_provider: str | None       # UX: "Snopes via Google Fact Check"
+    error_status_code: int | None     # HTTP status code on failure
+    error_detail: str | None          # Error message
 
 
 class EvidenceChannel(str, Enum):

@@ -36,8 +36,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from spectrue_core.schema.claim_metadata import EvidenceChannel, UsePolicy
-from spectrue_core.schema.verification_types import SearchDepth
+from spectrue_core.domain.evidence.model import EvidenceChannel, UsePolicy
+from spectrue_core.domain.verification.search.types import SearchDepth
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,18 +61,7 @@ class BudgetClass(str, Enum):
     """All phases (A/B/C/D). Maximum coverage. For high-priority claims."""
 
 
-class PolicyMode(str, Enum):
-    """Per-claim policy decision for search routing."""
-    SKIP = "SKIP"
-    CHEAP = "CHEAP"
-    FULL = "FULL"
-
-
-@dataclass(frozen=True)
-class ClaimPolicyDecision:
-    """Routing decision result for a claim before query building."""
-    mode: PolicyMode
-    reason_codes: list[str]
+from spectrue_core.domain.claims.policy import PolicyMode, ClaimPolicyDecision
 
 
 # ─────────────────────────────────────────────────────────────────────────────

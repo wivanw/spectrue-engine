@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from spectrue_core.graph.embedding_util import EmbeddingClient, cosine_similarity
+from spectrue_core.adapters.embedding_client import EmbeddingClient, cosine_similarity
 from spectrue_core.runtime_config import DeepV2Config
 
 

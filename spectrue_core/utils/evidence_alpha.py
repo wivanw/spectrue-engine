@@ -19,7 +19,7 @@ import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from spectrue_core.verification.evidence.evidence_pack import EvidenceItem
+    from spectrue_core.utils.evidence_pack import EvidenceItem
 
 
 def sigmoid(x: float) -> float:
@@ -60,7 +60,7 @@ def compute_A_det(items: list[EvidenceItem], claim_id: str | None) -> float:
     - item.quote exists (direct anchor)
     - item.r_eff is not None
     """
-    from spectrue_core.verification.evidence.evidence_explainability import norm_claim_id
+    from spectrue_core.domain.evidence.model import norm_claim_id
     target_cid = norm_claim_id(claim_id)
     sum_contrib = 0.0
     

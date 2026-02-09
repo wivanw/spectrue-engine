@@ -23,7 +23,6 @@ Philosophy:
 from typing import Literal, TypedDict, Any, TYPE_CHECKING
 
 from spectrue_core.utils.trace import Trace
-from spectrue_core.utils.calibration.calibration_models import logistic_score
 
 if TYPE_CHECKING:
     from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
@@ -252,6 +251,7 @@ def score_evidence_likeness(
     Calibrated evidence-likeness scoring for retrieval evaluation.
     """
     from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
+    from spectrue_core.utils.calibration.calibration_models import logistic_score
 
     if not sources:
         return 0.0

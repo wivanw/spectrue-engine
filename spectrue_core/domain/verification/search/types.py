@@ -47,4 +47,3 @@ Canonical response type for search operations:
 
 
 JsonDict = dict[str, Any]
-

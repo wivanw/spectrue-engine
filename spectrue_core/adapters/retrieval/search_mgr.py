@@ -11,20 +11,21 @@ from spectrue_core.tools.web_search_tool import WebSearchTool
 from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
-from spectrue_core.verification.evidence.evidence_pack import OracleCheckResult
+from spectrue_core.domain.evidence.model import OracleCheckResult
 from spectrue_core.utils.evidence import (
     needs_evidence_acquisition_ladder,
     extract_quote_candidates,
 )
 from spectrue_core.domain.evidence.signals import LocaleDecision
-from spectrue_core.schema.verification_types import SearchResponse
-from .search_policy import (
+from spectrue_core.domain.verification.search.types import SearchResponse
+from spectrue_core.domain.verification.search.search_policy import (
     build_context_from_sources,
     filter_search_results,
     rerank_search_results,
     prefer_fallback_results,
     should_fallback_news_to_general,
     SearchPolicyProfile,
+    resolve_profile_name,
 )
 from spectrue_core.scoring.budget_allocation import GlobalBudgetTracker
 from spectrue_core.utils.trace import Trace
@@ -558,7 +559,7 @@ class SearchManager:
         # This keeps BudgetState.total_sources/relevant_sources consistent
         # even when fetch_count == 0 (cache_only/snippet-only paths).
         # ------------------------------------------------------------------
-        from spectrue_core.verification.evidence.evidence_stats_reconcile import (
+        from spectrue_core.scoring.budget_reconcile import (
             reconcile_budget_state_from_sources,
         )
         reconcile_budget_state_from_sources(

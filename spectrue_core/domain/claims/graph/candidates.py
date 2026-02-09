@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Tuple
 
-from spectrue_core.graph.types import CandidateEdge, ClaimNode
+from .types import CandidateEdge, ClaimNode
 
 logger = logging.getLogger(__name__)
 

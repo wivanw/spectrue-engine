@@ -29,7 +29,7 @@ from spectrue_core.pipeline.legacy.pipeline_queries import (
     select_diverse_queries,
 )
 from spectrue_core.pipeline.retrieval.cegs_mvp import build_doc_query_plan
-from spectrue_core.pipeline.search.search_policy import (
+from spectrue_core.domain.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )

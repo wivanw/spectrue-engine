@@ -19,8 +19,8 @@ from spectrue_core.constants import (
 from spectrue_core.domain.claims.model import EvidenceChannel, SearchLocalePlan, UsePolicy
 from spectrue_core.domain.evidence.signals import LocaleDecision
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.orchestration.execution_plan import BudgetClass, ExecutionPlan, Phase
-from spectrue_core.adapters.retrieval.search_policy import LocalePolicy, SearchPolicyProfile
+from spectrue_core.use_cases.verification.orchestration.execution_plan import BudgetClass, ExecutionPlan, Phase
+from spectrue_core.domain.verification.search.search_policy import LocalePolicy, SearchPolicyProfile
 
 if TYPE_CHECKING:
     from spectrue_core.pipeline_builder.spec import PipelineProfile

@@ -16,7 +16,7 @@ from uuid import uuid4
 from datetime import datetime
 
 from spectrue_core.config import SpectrueConfig
-from spectrue_core.verification.verifier import FactVerifier
+from spectrue_core.use_cases.verification.verifier import FactVerifier
 from spectrue_core.utils.trace import Trace
 from spectrue_core.billing.cost_ledger import CostLedger
 from spectrue_core.billing.metering import TavilyMeter

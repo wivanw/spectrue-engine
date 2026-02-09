@@ -146,6 +146,16 @@ def is_fallback_eligible(exc: Exception) -> bool:
     return True
 
 
+def is_schema_failure(exc: Exception) -> bool:
+    """
+    Check if exception is a schema validation failure.
+    
+    Returns True if failure is INVALID_JSON or SCHEMA_VALIDATION_FAILED.
+    """
+    kind = classify_llm_failure(exc)
+    return kind in (LLMFailureKind.SCHEMA_VALIDATION_FAILED, LLMFailureKind.INVALID_JSON)
+
+
 def failure_kind_to_trace_data(kind: LLMFailureKind | None, exc: Exception) -> dict[str, Any]:
     """
     Convert failure info to trace event data.

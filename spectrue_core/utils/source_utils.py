@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
-from spectrue_core.schema.verification_types import Source
+from spectrue_core.domain.verification.search.types import Source
 from spectrue_core.tools.trusted_sources import get_tier_ceiling_for_domain
 
 
