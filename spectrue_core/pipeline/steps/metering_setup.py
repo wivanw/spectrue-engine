@@ -61,7 +61,7 @@ class MeteringSetupStep:
         from spectrue_core.billing.config_loader import load_pricing_policy
         from spectrue_core.billing.progress_emitter import CostProgressEmitter
         from spectrue_core.utils.embedding_service import EmbedService
-        from spectrue_core.verification.pipeline.pipeline_metering import create_progress_callback
+        from spectrue_core.use_cases.verification.pipeline_metering import create_progress_callback
 
         # Skip if already initialized (prevents duplicate setup in deep pipeline with preloaded claims)
         if ctx.get_extra("metering_initialized"):

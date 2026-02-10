@@ -7,8 +7,8 @@ from spectrue_core.pipeline.core import PipelineContext, Step
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.pipeline.pipeline_evidence import annotate_evidence_stance
-from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
+from spectrue_core.use_cases.evidence.stance import annotate_stance
+from spectrue_core.utils.retrieval_urls import normalize_url
 
 
 def _group_by_claim(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -138,7 +138,7 @@ class TransferredStanceAnnotateStep(Step):
             # annotate_evidence_stance expects sources + claims (batch) + inp
             # We send a single-claim batch to bind stance to this claim.
             # Create minimal EvidenceFlowInput for stance annotation
-            from spectrue_core.verification.pipeline.pipeline_evidence import EvidenceFlowInput
+            from spectrue_core.pipeline.evidence_flow import EvidenceFlowInput
             fact_text = ctx.get_extra("prepared_fact") or ctx.get_extra("input_text") or ""
             stance_inp = EvidenceFlowInput(
                 fact=fact_text,
@@ -150,7 +150,7 @@ class TransferredStanceAnnotateStep(Step):
             )
             
             total_pairs += len(chosen)
-            result_items = await annotate_evidence_stance(
+            result_items = await annotate_stance(
                 agent=self.agent,
                 inp=stance_inp,
                 sources=chosen,

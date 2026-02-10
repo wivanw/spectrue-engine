@@ -17,7 +17,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from spectrue_core.graph.embedding_util import EmbeddingClient
 from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
@@ -26,12 +25,13 @@ from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.tools.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.url_utils import get_registrable_domain
-from spectrue_core.verification.orchestration.sufficiency import check_sufficiency_for_claim, SufficiencyStatus
-from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url, source_id_for_url
-from spectrue_core.verification.search.search_policy import (
+from spectrue_core.use_cases.claims.sufficiency import check_sufficiency_for_claim, SufficiencyStatus
+from spectrue_core.utils.retrieval_urls import normalize_url, source_id_for_url
+from spectrue_core.domain.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )
+from spectrue_core.use_cases.retrieval.clustering import assign_similarity_clusters
 
 logger = logging.getLogger(__name__)
 
@@ -51,67 +51,13 @@ def _stable_cluster_id(urls: list[str]) -> str:
     return f"doc_{digest}"
 
 
-def _quantile(values: list[float], q: float) -> float:
-    if not values:
-        return 0.0
-    q = max(0.0, min(1.0, float(q)))
-    ordered = sorted(values)
-    idx = int(round(q * (len(ordered) - 1)))
-    return float(ordered[idx])
-
-
-def _assign_similarity_clusters(
-    urls: list[str],
-    sim_matrix: list[list[float]],
-    *,
-    quantile: float,
-) -> dict[str, str]:
-    if len(urls) <= 1:
-        return {urls[0]: _stable_cluster_id(urls)} if urls else {}
-
-    sims: list[float] = []
-    for i in range(len(sim_matrix)):
-        for j in range(i + 1, len(sim_matrix)):
-            sims.append(float(sim_matrix[i][j]))
-    tau = _quantile(sims, quantile)
-
-    adjacency: dict[str, set[str]] = {u: set() for u in urls}
-    for i, src in enumerate(urls):
-        for j, dst in enumerate(urls):
-            if i >= j:
-                continue
-            if float(sim_matrix[i][j]) >= tau:
-                adjacency[src].add(dst)
-                adjacency[dst].add(src)
-
-    visited: set[str] = set()
-    clusters: dict[str, str] = {}
-    for url in urls:
-        if url in visited:
-            continue
-        queue = [url]
-        visited.add(url)
-        component: list[str] = []
-        while queue:
-            current = queue.pop()
-            component.append(current)
-            for neighbor in adjacency.get(current, set()):
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append(neighbor)
-        cluster_id = _stable_cluster_id(component)
-        for item in component:
-            clusters[item] = cluster_id
-
-    return clusters
-
-
 @dataclass
 class ClusterWebSearchStep:
     """Execute cluster-level search/extract for deep_v2."""
 
     config: Any
     search_mgr: Any
+    embedding_client: Any | None = None  # Injected dependency
     name: str = "cluster_web_search"
     weight: float = 25.0
 
@@ -222,21 +168,29 @@ class ClusterWebSearchStep:
                 ordered_urls.append(url)
                 ordered_texts.append(str(text))
 
-            embedding_client = EmbeddingClient()
-            # Document embeddings must not use full page blobs. Use a bounded excerpt.
-            # This is a semantic 'document' embedding, not corpus indexing.
-            ordered_embed_texts: list[str] = []
-            for t in ordered_texts:
-                s = str(t)
-                # Prefer early part; heavy pages often append nav/related content later.
-                ordered_embed_texts.append(s[:8000])
-            embeddings = await embedding_client.embed_texts(ordered_embed_texts, purpose="document")
-            sim_matrix = embedding_client.build_similarity_matrix(embeddings)
-            cluster_ids = _assign_similarity_clusters(
-                ordered_urls,
-                sim_matrix,
-                quantile=deep_v2_cfg.doc_cluster_quantile,
-            )
+            # Rely on injected EmbeddingClient
+            # If not provided, skip clustering (each URL is its own cluster)
+            cluster_ids: dict[str, str] = {}
+            embeddings: list[list[float]] = []
+
+            if self.embedding_client:
+                # Document embeddings must not use full page blobs. Use a bounded excerpt.
+                # This is a semantic 'document' embedding, not corpus indexing.
+                ordered_embed_texts: list[str] = []
+                for t in ordered_texts:
+                    s = str(t)
+                    # Prefer early part; heavy pages often append nav/related content later.
+                    ordered_embed_texts.append(s[:8000])
+                
+                embeddings = await self.embedding_client.embed_texts(ordered_embed_texts, purpose="document")
+                sim_matrix = self.embedding_client.build_similarity_matrix(embeddings)
+                
+                # Use shared logic from use case
+                cluster_ids = assign_similarity_clusters(
+                    ordered_urls,
+                    sim_matrix,
+                    quantile=deep_v2_cfg.doc_cluster_quantile,
+                )
 
             for idx, url in enumerate(ordered_urls):
                 cleaned_text = ordered_texts[idx]

@@ -21,8 +21,8 @@ from urllib.parse import urlparse
 
 from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.calibration.calibration_models import logistic_score
-from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.domain.verification.calibration.calibration_models import logistic_score
+from spectrue_core.domain.verification.calibration.calibration_registry import CalibrationRegistry
 from spectrue_core.tools.trusted_sources import ALL_TRUSTED_DOMAINS as TRUSTED_DOMAINS
 
 logger = logging.getLogger(__name__)

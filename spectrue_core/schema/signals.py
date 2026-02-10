@@ -18,17 +18,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, List
 
-from enum import Enum
-
 from pydantic import Field, model_validator
 
 from spectrue_core.schema.serialization import SchemaModel
+from spectrue_core.domain.evidence.signals import (
+    RetrievalSignals as DomainRetrievalSignals,
+    CoverageSignals as DomainCoverageSignals,
+    TimelinessSignals as DomainTimelinessSignals,
+    EvidenceSignals as DomainEvidenceSignals,
+    TimeGranularity,
+    TimeWindow as DomainTimeWindow,
+    LocaleDecision as DomainLocaleDecision,
+)
 
 if TYPE_CHECKING:
     from typing import Self
 
 
-class RetrievalSignals(SchemaModel):
+class RetrievalSignals(SchemaModel, DomainRetrievalSignals):
     """Signals about source retrieval."""
 
     total_sources_found: int = Field(default=0, ge=0)
@@ -55,7 +62,7 @@ class RetrievalSignals(SchemaModel):
         return self
 
 
-class CoverageSignals(SchemaModel):
+class CoverageSignals(SchemaModel, DomainCoverageSignals):
     """Signals about assertion coverage."""
 
     # Default is 1 to avoid division by zero, but pipeline must set true value.
@@ -72,7 +79,7 @@ class CoverageSignals(SchemaModel):
         return self
 
 
-class TimelinessSignals(SchemaModel):
+class TimelinessSignals(SchemaModel, DomainTimelinessSignals):
     """Signals about evidence timeliness."""
 
     newest_source_age_hours: float | None = Field(default=None, ge=0.0)
@@ -89,7 +96,7 @@ class TimelinessSignals(SchemaModel):
         return self
 
 
-class EvidenceSignals(SchemaModel):
+class EvidenceSignals(SchemaModel, DomainEvidenceSignals):
     """Complete sensor signals."""
 
     retrieval: RetrievalSignals = Field(default_factory=RetrievalSignals)
@@ -107,16 +114,7 @@ class EvidenceSignals(SchemaModel):
         return self.coverage.assertions_covered / self.coverage.assertions_total
 
 
-class TimeGranularity(str, Enum):
-    DAY = "day"
-    WEEK = "week"
-    MONTH = "month"
-    YEAR = "year"
-    RANGE = "range"
-    RELATIVE = "relative"
-
-
-class TimeWindow(SchemaModel):
+class TimeWindow(SchemaModel, DomainTimeWindow):
     """Interpreted time window for a claim."""
 
     start_date: str | None = None
@@ -126,7 +124,7 @@ class TimeWindow(SchemaModel):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
-class LocaleDecision(SchemaModel):
+class LocaleDecision(SchemaModel, DomainLocaleDecision):
     """Recorded locale selection decision for retrieval."""
 
     primary_locale: str

@@ -30,7 +30,7 @@ from spectrue_core.pipeline.core import (
     PipelineContext,
     Step,
 )
-from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
+from spectrue_core.use_cases.verification.scoring.confirmation_counts import compute_confirmation_counts
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace

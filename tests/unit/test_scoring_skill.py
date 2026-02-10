@@ -10,7 +10,7 @@ from spectrue_core.llm.model_registry import ModelID
 
 
 import pytest
-from spectrue_core.agents.skills.scoring import ScoringSkill
+from spectrue_core.adapters.llm.scoring import ScoringSkill
 
 @pytest.mark.unit
 class TestScoringSkill:

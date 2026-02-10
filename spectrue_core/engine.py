@@ -16,7 +16,7 @@ from uuid import uuid4
 from datetime import datetime
 
 from spectrue_core.config import SpectrueConfig
-from spectrue_core.verification.verifier import FactVerifier
+from spectrue_core.pipeline.orchestration.verifier import FactVerifier
 from spectrue_core.utils.trace import Trace
 from spectrue_core.billing.cost_ledger import CostLedger
 from spectrue_core.billing.metering import TavilyMeter
@@ -127,7 +127,7 @@ class SpectrueEngine:
             Trace.event(
                 "engine.analyze_text.start",
                 {
-                    "analysis_mode": str(analysis_mode),
+                    "analysis_mode": analysis_mode.value,
                     "text_len": len(text),
                 },
             )
@@ -261,7 +261,7 @@ class SpectrueEngine:
                     "detected_lang": detected_lang,
                     "detected_lang_prob": detected_prob,
                     "search_lang": content_lang,
-                    "analysis_mode": str(analysis_mode),
+                    "analysis_mode": analysis_mode.value,
                 }
                 if max_credits is not None:
                     final["budget"] = {

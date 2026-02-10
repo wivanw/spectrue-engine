@@ -21,15 +21,15 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient, is_schema_failure
-from spectrue_core.agents.llm_schemas import CLAIM_JUDGE_SCHEMA
-from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
-from spectrue_core.agents.skills.claim_judge_prompts import (
-    build_claim_judge_prompt,
-    build_claim_judge_system_prompt,
+from spectrue_core.llm.llm_client import LLMClient
+from spectrue_core.use_cases.claims.deep_judge import (
+    summarize_evidence_for_claims,
+    judge_claims_independently,
+    _root_cause,
+    _is_format_error,
+    _extract_missing_fields,
+    _build_error_payload,
 )
-from spectrue_core.verification.scoring.judge_evidence_stats import build_judge_evidence_stats
-from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
 from spectrue_core.pipeline.mode import ScoringMode
 from spectrue_core.pipeline.contracts import (
     JUDGMENTS_KEY,
@@ -46,7 +46,7 @@ from spectrue_core.schema.claim_frame import (
 )
 from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.claims.claim_frame_builder import (
+from spectrue_core.pipeline.claims.claim_frame_builder import (
     build_claim_frames_from_pipeline,
 )
 from spectrue_core.llm.model_registry import ModelID
@@ -64,51 +64,6 @@ class DeepClaimContext:
     judge_outputs: dict[str, JudgeOutput] = field(default_factory=dict)
     claim_results: list[dict[str, Any]] = field(default_factory=list)
     errors: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-_SCHEMA_MISSING_RE = re.compile(r"\$\.(?P<field>[A-Za-z0-9_\\[\\].]+): missing required field")
-
-
-def _root_cause(exc: Exception) -> Exception:
-    seen: set[int] = set()
-    current: Exception = exc
-    while True:
-        next_exc = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
-        if not isinstance(next_exc, Exception):
-            return current
-        next_id = id(next_exc)
-        if next_id in seen:
-            return current
-        seen.add(next_id)
-        current = next_exc
-
-
-def _is_format_error(exc: Exception) -> bool:
-    if is_schema_failure(exc):
-        return True
-    msg = str(exc).lower()
-    return "json parse" in msg or "invalid json" in msg
-
-
-def _extract_missing_fields(message: str) -> list[str]:
-    if not message:
-        return []
-    return list({match.group("field") for match in _SCHEMA_MISSING_RE.finditer(message)})
-
-
-def _build_error_payload(
-    *,
-    error_type: str,
-    message: str,
-    missing_fields: list[str] | None = None,
-    repair_attempted: bool = False,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {"error_type": error_type, "message": message}
-    if missing_fields:
-        payload["missing_fields"] = missing_fields
-    if repair_attempted:
-        payload["repair_attempted"] = True
-    return payload
 
 
 class BuildClaimFramesStep(Step):
@@ -194,23 +149,10 @@ class SummarizeEvidenceStep(Step):
                 Trace.event("summarize_evidence.skip", {"reason": "no_frames"})
                 return ctx
 
-            skill = EvidenceSummarizerSkill(self._llm)
-
-            # Process all claims in parallel
-            async def summarize_one(frame: ClaimFrame) -> tuple[str, EvidenceSummary]:
-                summary = await skill.summarize(frame)
-                return frame.claim_id, summary
-
-            tasks = [summarize_one(frame) for frame in deep_ctx.claim_frames]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            summaries: dict[str, EvidenceSummary] = {}
-            for result in results:
-                if isinstance(result, Exception):
-                    Trace.event("summarize_evidence.task_error", {"error": str(result)})
-                    continue
-                claim_id, summary = result
-                summaries[claim_id] = summary
+            summaries = await summarize_evidence_for_claims(
+                claim_frames=deep_ctx.claim_frames,
+                llm_client=self._llm,
+            )
 
             deep_ctx.evidence_summaries = summaries
 
@@ -228,7 +170,7 @@ class JudgeClaimsStep(Step):
     """
     Step that produces verdicts for each claim.
     
-    Uses ClaimJudgeSkill to generate RGBA scores and verdicts.
+    Uses judge_claims_independently use case to generate RGBA scores and verdicts.
     Output is returned unchanged to the frontend.
     """
     weight: float = 20.0
@@ -248,8 +190,6 @@ class JudgeClaimsStep(Step):
                 Trace.event("judge_claims.skip", {"reason": "no_frames"})
                 return ctx
 
-            skill = ClaimJudgeSkill(self._llm)
-            
             # Get UI locale from pipeline context
             # This is the user's interface language from the API request
             ui_locale = ctx.lang or "en"
@@ -258,126 +198,15 @@ class JudgeClaimsStep(Step):
             corr_by_claim = ctx.get_extra("corroboration_by_claim") or {}
             est_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
 
-            async def _repair_claim_output(
-                frame: ClaimFrame,
-                summary: EvidenceSummary | None,
-            ) -> JudgeOutput:
-                base_prompt = build_claim_judge_prompt(
-                    frame,
-                    summary,
-                    ui_locale=ui_locale,
-                    analysis_mode=analysis_mode,
-                )
-                repair_prompt = (
-                    "Your previous response was invalid or missing required fields. "
-                    "Return ONLY valid JSON matching the schema with keys: "
-                    "claim_id, rgba{R,G,B,A}, confidence, verdict, explanation, "
-                    "sources_used, missing_evidence.\n\n"
-                    f"{base_prompt}"
-                )
-                repair_system = build_claim_judge_system_prompt(lang=ui_locale)
-                repair_system = f"{repair_system}\nReturn only JSON; no markdown or extra text."
-
-                response = await self._llm.call_json(
-                    model=self._llm.model or ModelID.NANO,
-                    input=repair_prompt,
-                    instructions=repair_system,
-                    response_schema=CLAIM_JUDGE_SCHEMA,
-                    reasoning_effort="low",
-                    trace_kind="claim_judge.repair",
-                )
-
-                repaired = skill._parse_response(response, frame)
-                return skill._validate_sources_used(repaired, frame)
-
-            # Process all claims in parallel
-            async def judge_one(frame: ClaimFrame) -> tuple[str, JudgeOutput | None, dict[str, Any] | None]:
-                summary = deep_ctx.evidence_summaries.get(frame.claim_id)
-                try:
-                    Trace.event(
-                        "judge_claims.invoked",
-                        {
-                            "claim_id": frame.claim_id,
-                            "has_summary": summary is not None,
-                            "ui_locale": ui_locale,
-                        },
-                    )
-                    # Pass ui_locale to generate explanation in user's language
-                    evidence_stats = build_judge_evidence_stats(
-                        claim_id=frame.claim_id,
-                        corroboration_by_claim=corr_by_claim if isinstance(corr_by_claim, dict) else None,
-                        evidence_stats_by_claim=est_by_claim if isinstance(est_by_claim, dict) else None,
-                    )
-
-                    output = await skill.judge(
-                        frame,
-                        summary,
-                        ui_locale=ui_locale,
-                        analysis_mode=analysis_mode,
-                        evidence_stats=evidence_stats,
-                    )
-                    return frame.claim_id, output, None
-                except Exception as e:
-                    root = _root_cause(e)
-                    message = str(root)
-                    missing_fields = _extract_missing_fields(message)
-
-                    if _is_format_error(root):
-                        Trace.event(
-                            "judge_claims.schema_mismatch",
-                            {
-                                "claim_id": frame.claim_id,
-                                "missing_fields": missing_fields,
-                                "error": message[:300],
-                            },
-                        )
-                        try:
-                            Trace.event(
-                                "judge_claims.repair_needed",
-                                {"claim_id": frame.claim_id, "missing_fields": missing_fields},
-                            )
-                            repaired = await _repair_claim_output(frame, summary)
-                            Trace.event(
-                                "judge_claims.repair_succeeded",
-                                {"claim_id": frame.claim_id},
-                            )
-                            return frame.claim_id, repaired, None
-                        except Exception as repair_error:
-                            repair_root = _root_cause(repair_error)
-                            repair_message = str(repair_root)
-                            repair_missing = _extract_missing_fields(repair_message) or missing_fields
-                            Trace.event(
-                                "judge_claims.repair_failed",
-                                {
-                                    "claim_id": frame.claim_id,
-                                    "error": repair_message[:300],
-                                },
-                            )
-                            return frame.claim_id, None, _build_error_payload(
-                                error_type="llm_failed",
-                                message=repair_message,
-                                missing_fields=repair_missing,
-                                repair_attempted=True,
-                            )
-
-                    return frame.claim_id, None, _build_error_payload(
-                        error_type="llm_failed",
-                        message=message,
-                        missing_fields=missing_fields,
-                    )
-
-            tasks = [judge_one(frame) for frame in deep_ctx.claim_frames]
-            results = await asyncio.gather(*tasks)
-
-            outputs: dict[str, JudgeOutput] = {}
-            errors: dict[str, dict[str, Any]] = {}
-            for claim_id, output, error in results:
-                if error:
-                    Trace.event("judge_claims.task_error", {"claim_id": claim_id, "error": error.get("message")})
-                    errors[claim_id] = error
-                    continue
-                if output:
-                    outputs[claim_id] = output
+            outputs, errors = await judge_claims_independently(
+                claim_frames=deep_ctx.claim_frames,
+                evidence_summaries=deep_ctx.evidence_summaries,
+                llm_client=self._llm,
+                ui_locale=ui_locale,
+                analysis_mode=analysis_mode,
+                evidence_stats_by_claim=est_by_claim,
+                corroboration_by_claim=corr_by_claim,
+            )
 
             deep_ctx.judge_outputs = outputs
             deep_ctx.errors = errors
@@ -500,7 +329,7 @@ class AssembleDeepResultStep(Step):
                 # Deep v2: use deterministic confirmation counts
                 # Use value from runtime config if available
                 from spectrue_core.runtime_config import DeepV2Config
-                from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
+                from spectrue_core.use_cases.verification.scoring.confirmation_counts import compute_confirmation_counts
                 
                 runtime = getattr(self._config, "runtime", None)
                 deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())

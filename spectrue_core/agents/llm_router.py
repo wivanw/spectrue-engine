@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient, ReasoningEffort
+from spectrue_core.llm.llm_client import LLMClient, ReasoningEffort
 from spectrue_core.llm.model_registry import ModelID
 
 logger = logging.getLogger(__name__)
@@ -201,6 +201,11 @@ class LLMRouter:
             trace_kind=trace_kind,
             temperature=temperature,
         )
+
+    @property
+    def _aclient(self) -> Any:
+        """Expose the underlying AsyncOpenAI client from openai_client."""
+        return self.openai_client._aclient
 
     @property
     def _meter(self) -> Any | None:

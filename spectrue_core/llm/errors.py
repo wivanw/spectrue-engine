@@ -4,9 +4,13 @@ from enum import Enum
 
 
 class LLMFailureKind(str, Enum):
-    INVALID_JSON = "invalid_json"
-    SCHEMA_VALIDATION = "schema_validation"
+    """Classification of LLM call failures."""
+    
+    CONNECTION_ERROR = "connection_error"
+    TIMEOUT = "timeout"
     PROVIDER_ERROR = "provider_error"
+    INVALID_JSON = "invalid_json"
+    SCHEMA_VALIDATION_FAILED = "schema_validation_failed"
     UNKNOWN = "unknown"
 
 

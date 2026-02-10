@@ -21,7 +21,7 @@ from spectrue_core.verification.retrieval.cegs_mvp import (
     collect_seed_terms,
     _extract_entities_from_claim,
 )
-from spectrue_core.verification.claims.coverage_anchors import (
+from spectrue_core.utils.coverage_anchors import (
     Anchor,
     AnchorKind,
 )

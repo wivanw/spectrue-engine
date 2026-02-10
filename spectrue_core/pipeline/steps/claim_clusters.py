@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from spectrue_core.graph.claim_clusters import build_claim_clusters
+from spectrue_core.use_cases.claims.clustering import build_clusters
 from spectrue_core.pipeline.core import PipelineContext, Step
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
@@ -41,7 +41,7 @@ class ClaimClustersStep(Step):
         runtime = getattr(self.config, "runtime", None)
         deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
 
-        clusters = build_claim_clusters(
+        clusters = build_clusters(
             claims=claims,
             graph_result=graph_result,
             quantile=deep_v2_cfg.claim_cluster_quantile,

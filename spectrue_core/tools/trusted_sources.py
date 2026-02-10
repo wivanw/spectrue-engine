@@ -1,6 +1,6 @@
 # Copyright (C) 2025 Ivan Bondarenko
 #
-from spectrue_core.schema.claim_metadata import EvidenceChannel
+from spectrue_core.domain.claims.model import EvidenceChannel
 
 
 # This file is part of Spectrue Engine.

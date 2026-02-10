@@ -61,6 +61,7 @@ class PipelineFactory:
     search_mgr: Any  # SearchManager
     agent: Any  # FactCheckerAgent
     claim_graph: Any | None = None  # ClaimGraphBuilder (optional)
+    embedding_client: Any | None = None  # EmbeddingClient (optional)
 
     def build(
         self,
@@ -668,7 +669,11 @@ class PipelineFactory:
                 depends_on=["claim_clusters", "verify_inline_sources"],
             ),
             StepNode(
-                step=ClusterWebSearchStep(config=config, search_mgr=self.search_mgr),
+                step=ClusterWebSearchStep(
+                    config=config, 
+                    search_mgr=self.search_mgr,
+                    embedding_client=self.embedding_client,
+                ),
                 depends_on=["build_cluster_queries"],
             ),
             StepNode(

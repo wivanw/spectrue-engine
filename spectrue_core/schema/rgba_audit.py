@@ -6,31 +6,37 @@
 # it under the terms of the GNU Affero General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-#
+
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
-"""RGBA audit schema contracts and helpers."""
+"""RGBA audit schema contracts and helpers (Schema Adapter)."""
 
 from __future__ import annotations
 
-from enum import Enum
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
 from spectrue_core.schema.serialization import SchemaModel
+from spectrue_core.domain.verification.verdict.model import (
+    RGBAStatus,
+    RGBAMetric as DomainRGBAMetric,
+    RGBAResult as DomainRGBAResult,
+    ClaimAudit as DomainClaimAudit,
+    EvidenceAudit as DomainEvidenceAudit,
+    SourceCluster as DomainSourceCluster,
+)
 
-
-class RGBAStatus(str, Enum):
-    OK = "OK"
-    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
-    CONFLICTING_EVIDENCE = "CONFLICTING_EVIDENCE"
-    UNVERIFIABLE_BY_NATURE = "UNVERIFIABLE_BY_NATURE"
-    PIPELINE_ERROR = "PIPELINE_ERROR"
-    OUT_OF_SCOPE = "OUT_OF_SCOPE"
-    EVIDENCE_MISMATCH = "EVIDENCE_MISMATCH"
-    """Evidence retrieved is non-empty but not about the claim topic (off-topic)."""
-
+__all__ = [
+    "RGBAStatus",
+    "RGBAMetric",
+    "RGBAResult",
+    "ClaimAudit",
+    "EvidenceAudit",
+    "SourceCluster",
+    "rgba_status_to_legacy_code",
+    "legacy_code_to_rgba_status",
+]
 
 RGBA_STATUS_LEGACY_CODES: dict[RGBAStatus, int] = {
     RGBAStatus.OK: 0,
@@ -55,7 +61,7 @@ def legacy_code_to_rgba_status(code: int) -> RGBAStatus | None:
     return LEGACY_CODE_TO_STATUS.get(int(code))
 
 
-class RGBAMetric(SchemaModel):
+class RGBAMetric(SchemaModel, DomainRGBAMetric):
     status: RGBAStatus
     value: float | None = Field(default=None, ge=0.0, le=1.0)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -84,7 +90,7 @@ class RGBAMetric(SchemaModel):
         }
 
 
-class RGBAResult(SchemaModel):
+class RGBAResult(SchemaModel, DomainRGBAResult):
     R: RGBAMetric
     G: RGBAMetric
     B: RGBAMetric
@@ -103,7 +109,7 @@ class RGBAResult(SchemaModel):
         }
 
 
-class ClaimAudit(SchemaModel):
+class ClaimAudit(SchemaModel, DomainClaimAudit):
     claim_id: str
     predicate_type: Literal[
         "event",
@@ -124,7 +130,7 @@ class ClaimAudit(SchemaModel):
     audit_confidence: float = Field(ge=0.0, le=1.0)
 
 
-class EvidenceAudit(SchemaModel):
+class EvidenceAudit(SchemaModel, DomainEvidenceAudit):
     claim_id: str
     evidence_id: str
     source_id: str
@@ -138,7 +144,7 @@ class EvidenceAudit(SchemaModel):
     audit_confidence: float = Field(ge=0.0, le=1.0)
 
 
-class SourceCluster(SchemaModel):
+class SourceCluster(SchemaModel, DomainSourceCluster):
     cluster_id: str
     source_ids: list[str]
     representative_source_id: str

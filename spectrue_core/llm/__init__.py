@@ -13,6 +13,7 @@ from .failures import (
     LLMFailureKind,
     classify_llm_failure,
     is_fallback_eligible,
+    is_schema_failure,
     failure_kind_to_trace_data,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "LLMFailureKind",
     "classify_llm_failure",
     "is_fallback_eligible",
+    "is_schema_failure",
     "failure_kind_to_trace_data",
 ]

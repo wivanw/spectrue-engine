@@ -87,6 +87,9 @@ class EvidenceNeedType(str, Enum):
     NEWS_REPORT = "news_report"
     """Requires journalistic coverage of events."""
 
+    DEFINITION = "definition"
+    """Requires term definition or concept explanation."""
+
     UNKNOWN = "unknown"
     """Cannot determine what evidence is needed."""
 

@@ -18,7 +18,7 @@ Tests cover:
 - Coverage validation
 """
 
-from spectrue_core.verification.claims.coverage_anchors import (
+from spectrue_core.utils.coverage_anchors import (
     AnchorKind,
     extract_time_anchors,
     extract_numeric_anchors,

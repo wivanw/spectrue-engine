@@ -20,7 +20,7 @@ from spectrue_core.pipeline.contracts import GATES_KEY, Gates
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.pipeline.pipeline_evidence import (
+from spectrue_core.pipeline.evidence_flow import (
     EvidenceFlowInput,
     annotate_evidence_stance,
     rebuild_evidence_pack,
@@ -94,7 +94,7 @@ class ClusterEvidenceStep:
             if not clustered:
                 return ctx
 
-            from spectrue_core.verification.evidence.evidence import build_evidence_pack
+            from spectrue_core.utils.evidence import build_evidence_pack
 
             updated_collection = rebuild_evidence_pack(
                 build_evidence_pack=build_evidence_pack,

@@ -12,17 +12,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient
-from spectrue_core.agents.skills.claim_audit import ClaimAuditSkill
+from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.pipeline.steps.deep_claim import DeepClaimContext
-from spectrue_core.schema.rgba_audit import ClaimAudit, RGBAStatus
+from spectrue_core.use_cases.claims.audit import run_claim_audit
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -45,32 +43,14 @@ class AuditClaimsStep:
                 Trace.event("claim_audit.skip", {"reason": "no_frames"})
                 return ctx
 
-            skill = ClaimAuditSkill(self.llm_client)
             errors: dict[str, Any] = dict(ctx.get_extra("audit_errors") or {})
             claim_errors = dict(errors.get("claim_audit", {}))
-            audits: list[ClaimAudit] = []
-
-            async def audit_one(frame):
-                try:
-                    audit = await skill.audit(frame)
-                    return ("ok", frame.claim_id, audit)
-                except Exception as exc:
-                    return ("error", frame.claim_id, exc)
-
-            results = await asyncio.gather(
-                *[audit_one(frame) for frame in deep_ctx.claim_frames],
-                return_exceptions=False,
+            audits, errors_payload = await run_claim_audit(
+                claim_frames=deep_ctx.claim_frames,
+                llm_client=self.llm_client,
             )
-
-            for status, claim_id, payload in results:
-                if status == "ok":
-                    audits.append(payload)
-                else:
-                    claim_errors[str(claim_id)] = {
-                        "status": RGBAStatus.PIPELINE_ERROR,
-                        "error_type": "audit_failed",
-                        "message": str(payload),
-                    }
+            if errors_payload:
+                claim_errors.update(errors_payload)
 
             if claim_errors:
                 errors["claim_audit"] = claim_errors

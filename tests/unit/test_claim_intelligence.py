@@ -125,6 +125,7 @@ class TestEvidenceNeedType:
             "expert_opinion",
             "anecdotal",
             "news_report",
+            "definition",
             "unknown",
         }
         actual = {e.value for e in EvidenceNeedType}

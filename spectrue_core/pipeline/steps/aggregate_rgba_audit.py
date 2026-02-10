@@ -19,7 +19,7 @@ from spectrue_core.pipeline.contracts import RGBA_AUDIT_KEY
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.scoring.rgba_audit.aggregation import aggregate_rgba_audit
+from spectrue_core.use_cases.verification.scoring.rgba_audit.aggregation import aggregate_rgba_audit
 
 logger = logging.getLogger(__name__)
 

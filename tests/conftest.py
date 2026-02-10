@@ -11,7 +11,7 @@ from spectrue_core.llm.model_registry import ModelID
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.tools.web_search_tool import WebSearchTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig

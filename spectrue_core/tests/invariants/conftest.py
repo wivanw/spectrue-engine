@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
-from spectrue_core.verification.evidence.evidence_pack import (
+from spectrue_core.utils.evidence_pack import (
     EvidencePack, EvidenceMetrics, EvidencePackStats
 )
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.llm.llm_client import LLMClient
 
 @pytest.fixture
 def mock_llm_client():
