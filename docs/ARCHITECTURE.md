@@ -38,9 +38,34 @@ The engine enforces a strict dependency direction using `import-linter`. The goa
 - **pipeline**: Step orchestration. May depend on use_cases and schema only.
 - **schema**: Data contracts/types. May depend on domain types only.
 
-**Dependency checks:**
-- Config: `SpectrueBack/spectrue-engine/.importlinter`
-- Runner: `SpectrueBack/spectrue-engine/scripts/run_dependency_checks.sh`
+---
+
+## 1.2 DAG Pipeline Architecture
+
+The engine executes verification as a **Directed Acyclic Graph (DAG)** of thin, focused steps. This allows for parallel execution and clear separation of concerns.
+
+### Standard Mode DAG (Single-Claim)
+
+```
+MeteringSetup → PrepareInput → ExtractClaims → AssertNonEmptyClaims
+             → (VerifyInlineSources + EvaluateSemanticGating + ClaimGraph + ClaimCluster + OracleFlow)
+             → TargetSelection → BuildQueries → WebSearch → Rerank → (FetchChunks) → AssembleRetrievalItems
+             → EvidenceCollect → EvidenceSpillover → EvidenceGating → (StanceAnnotate) → (ClusterEvidence)
+             → JudgeStandard → AssembleStandardResult → CostSummary
+```
+
+### Deep Mode DAG (Multi-Claim)
+
+```
+MeteringSetup → PrepareInput → ExtractClaims → AssertNonEmptyClaims → AssertMaxClaims
+             → VerifyInlineSources → TargetSelection (process_all_claims)
+             → BuildQueries → WebSearch → Rerank → (FetchChunks) → AssembleRetrievalItems
+             → EvidenceCollect → EvidenceGating → (StanceAnnotate) → (ClusterEvidence)
+             → BuildClaimFrames → (AuditClaims/AuditEvidence) → AggregateRGBAAudit → (SummarizeEvidence)
+             → JudgeClaims → AssembleDeepResult → CostSummary
+```
+
+**Note**: Pipeline steps are "thin" wrappers (typically <= 50 lines) that delegate all domain logic to the **Use Case** layer.
 
 ---
 

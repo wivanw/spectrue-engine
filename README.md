@@ -31,28 +31,27 @@
 
 ## ✨ Features
 
-- **Claim-Centric Orchestration**: Each claim gets metadata-driven verification routing
-- **Progressive Widening Search**: Cost-aware phases with early exit when evidence is sufficient
-- **Multi-Agent Architecture**: Orchestrates Oracle, Analyst, and Verifier agents
-- **Hallucination Resistance**: Strict source verification with 'Aletheia-X' prompts
-- **Smart Waterfall Search**: Optimized strategy (Oracle → Tier 1 → Deep Dive)
-- **Content-Aware Localization**: Detects content language and uses native sources
-- **RGBA Analysis**: Returns orthogonal scores for Danger, Veracity, Honesty, and Explainability
-- **Fail-Soft Architecture**: Graceful degradation on component failures
+- **Layered Architecture (DDD)**: Strict separation of Domain, Use Cases, Adapters, and Pipeline layers.
+- **Step-Based DAG Pipeline**: Asynchronous Directed Acyclic Graph orchestration with thin, reusable steps.
+- **Claim-Centric Orchestration**: Each claim gets metadata-driven verification routing.
+- **Progressive Widening Search**: Cost-aware phases with early exit when evidence is sufficient.
+- **Multi-Agent Architecture**: Orchestrates Oracle, Analyst, and Verifier agents.
+- **Hallucination Resistance**: Strict source verification with 'Aletheia-X' prompts.
+- **RGBA Analysis**: Returns orthogonal scores for Danger, Veracity, Honesty, and Explainability.
+- **Fail-Soft Architecture**: Graceful degradation on component failures.
 
 
 ## 📚 Documentation
 
-- Engine Architecture: `docs/ARCHITECTURE.md`
-- Algorithms & Contracts: `docs/ALGORITHMS.md`
-- Resource Accounting: `docs/RESOURCE_ACCOUNTING.md`
-- Trace Debugging: `docs/TRACE_GUIDE.md`
-- Media Explainer: `docs/MEDIA_EXPLAINER.md`
-- Scoring Calibration: `docs/CALIBRATION.md`
+- **Core Architecture**: `docs/ARCHITECTURE.md` (Layers, Boundaries, Design Principles)
+- **Algorithms & Contracts**: `docs/ALGORITHMS.md` (Bayesian scoring, EAL, Graph propagation)
+- **Deep Mode**: `docs/DEEP_MODE.md` (Per-claim judging, deep v2 clustered retrieval)
+- **Resource Accounting**: `docs/RESOURCE_ACCOUNTING.md` (Cost metering, credits)
+- **Trace Debugging**: `docs/TRACE_GUIDE.md` (How to read execution traces)
 
-## 🔄 Verification Pipeline
+## 🔄 Verification Pipeline (DAG)
 
-The core verification process follows this pipeline:
+The engine executes verification as a **Directed Acyclic Graph (DAG)** of thin, focused steps:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -61,90 +60,92 @@ The core verification process follows this pipeline:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  1. CLAIM EXTRACTION + METADATA                                 │
-│     • LLM extracts atomic verifiable claims                     │
-│     • Each claim gets ClaimMetadata:                            │
-│       - verification_target: reality|attribution|existence|none │
-│       - claim_role: core|support|context|meta                   │
-│       - search_locale_plan: primary + fallback languages        │
-│       - retrieval_policy: allowed evidence channels             │
-│       - metadata_confidence: high|medium|low                    │
-│     • "Search Strategist" approach: LLM reasons about           │
-│       intent, authority, language, risks (Chain of Thought)     │
+│  1. PREPARATION & CLEANING                                      │
+│     • MeteringSetup: Initialize cost tracking                    │
+│     • PrepareInput: Normalize text and locale                    │
+│     • ArticleCleaner: Markdown-aware cleaning                    │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  2. ORCHESTRATOR → EXECUTION PLAN                               │
-│     • ClaimOrchestrator builds ExecutionPlan per claim          │
-│     • Phases based on metadata:                                 │
-│       - Phase A: Primary locale, authoritative sources, k=3    │
-│       - Phase B: +local media, advanced depth, k=5             │
-│       - Phase C: Fallback locale (e.g., English), k=3          │
-│       - Phase D: All channels, deep search, k=7                │
-│       - Phase A-light: Fail-open for low-confidence, k=2       │
-│     • verification_target=none → 0 phases (skip search)        │
+│  2. CLAIM EXTRACTION & GRAPH                                    │
+│     • ExtractClaims: LLM decomposes text into atomic claims      │
+│     • ClaimGraph: Build semantic dependency graph                │
+│     • ClaimClusters: Group similar claims (Deep v2)              │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  3. ORACLE CHECK (Hybrid Mode)                                  │
-│     • Smart Validator: LLM compares claim vs fact-check         │
-│     • JACKPOT (>0.9): Stop pipeline immediately                 │
-│     • EVIDENCE (0.5-0.9): Add to evidence pack (Tier A)         │
-│     • MISS (<0.5): Proceed to web search                        │
+│  3. RETRIEVAL ORCHESTRATION                                     │
+│     • TargetSelection: Bayesian EVOI selection (which to verify) │
+│     • BuildQueries: Multi-phase query generation                 │
+│     • OracleFlow: Smart fact-check validation                    │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  4. PROGRESSIVE WIDENING (PhaseRunner)                          │
-│     • Execute phases sequentially: A → B → C → D                │
-│     • After each phase: check evidence sufficiency              │
-│     • Sufficiency Rules:                                        │
-│       Rule 1: 1 authoritative source with quote = STOP          │
-│       Rule 2: 2 independent reputable sources = STOP            │
-│       Rule 3: 1 origin source (for attribution) = STOP          │
-│     • Early exit: Skip remaining phases when sufficient         │
-│     • Parallel execution within each phase (semaphore-limited)  │
+│  4. WEB SEARCH & RERANKING                                      │
+│     • WebSearch: Parallel retrieval (Tavily, Google)             │
+│     • Rerank: Relevance filtering and duplicate removal           │
+│     • FetchChunks: Deep content acquisition                      │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  5. STANCE CLUSTERING                                           │
-│     • LLM maps search results to claims                         │
-│     • Assigns stance: support | contradict | context            │
-│     • Calculates relevance score per source-claim pair          │
+│  5. EVIDENCE PROCESSING                                         │
+│     • EvidenceCollect: Payload assembly and chunking             │
+│     • EvidenceGating: Semantic relevance filtering               │
+│     • StanceAnnotate: Support / Refute / Context classification  │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  6. EVIDENCE PACK BUILDING                                      │
-│     • Structures evidence for LLM scorer                        │
-│     • Computes per-claim metrics:                               │
-│       - independent_domains, primary_present, official_present  │
-│       - stance_distribution, coverage                           │
-│     • Sets confidence constraints based on evidence quality     │
+│  6. ANALYSIS & JUDGING                                          │
+│     • Standard: Global batch scoring + RGBA aggregation          │
+│     • Deep: Per-claim independent judging (ClaimFrames)          │
+│     • SummarizeEvidence: Stance-based categorization             │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  7. WEIGHTED RGBA SCORING                                       │
-│     • Quote Highlighting: "📌 QUOTE" markers for key evidence   │
-│     • Generates verdict per-claim with semantic scale           │
-│     • Aggregates with role-based weighting:                     │
-│       - CORE claims: weight=1.0                                 │
-│       - CONTEXT claims (horoscopes, predictions): weight=0.0    │
-│       - ATTRIBUTION claims: weight=0.7                          │
-│     • Result: Context claims don't dilute factual scores        │
+│  7. ASSEMBLY & COSTING                                          │
+│     • ResultAssembly: Final response serialization               │
+│     • CostSummary: Accurate fractional SC accounting             │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       OUTPUT (Result)                           │
-│  verified_score, danger_score, style_score, explainability,     │
-│  rationale, claim_verdicts, sources, phase_trace                │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## 🏗️ Architecture (DDD)
+
+The codebase is organized into four strictly decoupled layers:
+
+### 📦 Layer 1: Domain (`spectrue_core/domain/`)
+Pure business logic and models. Zero dependencies on external services or orchestration.
+- **`claims/`**: Models, extraction logic, and graph algorithms.
+- **`evidence/`**: Deduplication, clustering, and corroboration rules.
+- **`verification/`**: Stance evaluation and Bayesian verdict updates.
+
+### 📦 Layer 2: Use Cases (`spectrue_core/use_cases/`)
+Coordinates domain logic and adapters to perform application-level operations.
+- **`claims/`**, **`evidence/`**, **`verification/`**: Flow orchestration.
+
+### 📦 Layer 3: Adapters (`spectrue_core/adapters/`)
+Interface boundaries for external systems.
+- **`llm/`**: Skill-based LLM adapters (Claims, Queries, Scoring).
+- **`retrieval/`**: Search provider integrations (Tavily, Google).
+- **`graph/`**: NetworkX and embedding service adapters.
+
+### 📦 Layer 4: Pipeline (`spectrue_core/pipeline/`)
+The execution engine for the verification DAG.
+- **`steps/`**: "Thin" orchestration units (<= 50 lines) that invoke use cases.
+- **`dag.py`**: Topological sort and parallel execution logic.
+- **`factory.py`**: Mode-to-steps mapping (General vs Deep).
+
+---
 
 ## 🎯 Claim-Centric Orchestration
 
@@ -284,100 +285,18 @@ print(f"Analysis: {result['rationale']}")
 ### With Claim Orchestration
 
 ```python
-from spectrue_core.verification.orchestrator import ClaimOrchestrator
-from spectrue_core.verification.phase_runner import PhaseRunner
-from spectrue_core.verification.execution_plan import BudgetClass
+from spectrue_core.use_cases.verification.verdict import VerdictUseCase
+from spectrue_core.pipeline.factory import PipelineFactory
+from spectrue_core.pipeline.mode import PipelineMode
 
-# Build execution plan
-orchestrator = ClaimOrchestrator()
-plan = orchestrator.build_execution_plan(claims, BudgetClass.STANDARD)
+# Build execution plan and run pipeline
+factory = PipelineFactory()
+pipeline = factory.build(PipelineMode.GENERAL_MODE)
 
-# Run progressive widening
-runner = PhaseRunner(search_manager, max_concurrent=3)
-evidence = await runner.run_all_claims(claims, plan)
+# Context handles state across steps
+ctx = await pipeline.execute(text="...", lang="en")
 
-# Evidence is keyed by claim_id
-for claim_id, sources in evidence.items():
-    print(f"Claim {claim_id}: {len(sources)} sources found")
-```
-
-### Checking Evidence Sufficiency
-
-```python
-from spectrue_core.verification.sufficiency import evidence_sufficiency
-from spectrue_core.schema.claim_metadata import VerificationTarget
-
-result = evidence_sufficiency(
-    claim_id="c1",
-    sources=search_results,
-    verification_target=VerificationTarget.REALITY
-)
-
-if result.status == "sufficient":
-    print(f"✓ Stopped early: {result.rule_matched}")
-else:
-    print(f"Continue searching: {result.reason}")
-```
-
-## 🏗️ Architecture
-
-```
-spectrue_core/
-├── engine.py              # Main entry point
-├── config.py              # Configuration management
-├── runtime_config.py      # Feature flags & tunables
-│
-├── agents/                # LLM agents
-│   └── skills/            # Modular skills
-│       ├── claims.py      # Claim extraction + metadata
-│       ├── clustering.py  # Stance clustering
-│       ├── coverage_skeleton.py # Coverage skeleton extraction
-│       ├── scoring.py     # Evidence scoring
-│       └── relevance.py   # Semantic gating
-│
-├── schema/                # Data types
-│   ├── claim_metadata.py  # ClaimMetadata, VerificationTarget
-│   ├── claims.py          # ClaimUnit, Assertion
-│   ├── verdict.py         # StructuredVerdict
-│   └── serialization.py   # Canonical JSON-safe serialization helpers
-│
-├── pipeline/              # Pipeline Composition (DAG)
-│   ├── factory.py         # PipelineFactory (Mode -> DAG)
-│   ├── dag.py             # DAGPipeline & Execution Engine
-│   ├── core.py            # Step protocols & Context
-│   └── steps/             # Decomposed Pipeline Steps (Native)
-│
-├── verification/          # Verification Logic
-│   ├── pipeline.py        # Pipeline Facade (DAG Entry Point)
-│   ├── pipeline_metering.py # Cost tracking & PhaseTracker
-│   ├── evidence_scoring.py # Evidence scoring helpers
-│   ├── orchestrator.py    # ClaimOrchestrator
-│   ├── execution_plan.py  # Phase, ExecutionPlan
-│   ├── phase_runner.py    # PhaseRunner (Progressive Widening)
-│   ├── sufficiency.py     # Evidence sufficiency
-│   ├── rgba_aggregation.py# Weighted RGBA
-│   ├── evidence.py        # Evidence pack builder
-│   ├── evidence_pack.py   # Data structures
-│   ├── search_mgr.py      # Search orchestration
-│   └── search/            # Search Logic
-│       ├── search_escalation.py  # Escalation policy
-│       └── search_policy_adapter.py # Policy enforcement
-│
-├── graph/                 # ClaimGraph
-│   ├── claim_graph.py     # Build pipeline orchestration
-│   ├── candidates.py      # B-stage: candidate generation
-│   ├── ranking.py         # Ranking (PageRank)
-│   ├── quality_gates.py   # Gate checks (kept_ratio bounds)
-│   └── embedding_util.py  # Embedding client
-│
-├── utils/                 # Utilities
-│   ├── trace.py           # Debug tracing (safe payloads)
-│   └── trust_utils.py     # Source reputation
-│
-└── tools/                 # External APIs
-    ├── search_tool.py     # Tavily API
-    ├── google_fact_check.py  # Google Fact Check
-    └── google_cse_search.py  # Google Custom Search
+print(f"Result: {ctx.verdict}")
 ```
 
 ## 🔧 Configuration
@@ -399,18 +318,6 @@ export SPECTRUE_MAX_CONCURRENT_SEARCHES=3    # Parallel search limit
 # Trace Configuration
 export TRACE_SAFE_PAYLOADS=false   # Sanitize logs (default: false)
 export TRACE_MAX_HEAD_CHARS=120    # Truncation limit
-```
-
-### Programmatic Configuration
-
-```python
-config = SpectrueConfig(
-    openai_api_key="...",           # Required for analysis
-    tavily_api_key="...",           # Required for search
-    openai_model="gpt-5",            # Model for analysis
-    min_confidence_threshold=0.7,   # Minimum confidence
-    max_search_depth=3              # Search recursion depth
-)
 ```
 
 ## 🧪 Testing
