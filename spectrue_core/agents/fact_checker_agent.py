@@ -17,7 +17,7 @@ from spectrue_core.utils.evidence_pack import Claim, EvidencePack
 from spectrue_core.domain.evidence.model import ArticleIntent
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.llm.llm_client import LLMClient
 
 
 from spectrue_core.llm.model_registry import ModelID
@@ -32,16 +32,16 @@ class FactCheckerAgent:
     def __init__(self, config: SpectrueConfig | None = None):
         # Lazy import to avoid circular dependency with pipeline
         from spectrue_core.agents.llm_router import LLMRouter
-        from spectrue_core.agents.skills.claims import ClaimExtractionSkill
-        from spectrue_core.agents.skills.clustering import ClusteringSkill
-        from spectrue_core.agents.skills.scoring import ScoringSkill
-        from spectrue_core.agents.skills.query import QuerySkill
-        from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
-        from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
-        from spectrue_core.agents.skills.relevance import RelevanceSkill
-        from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
-        from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
-        from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
+        from spectrue_core.adapters.llm.claims import ClaimExtractionSkill
+        from spectrue_core.adapters.llm.clustering import ClusteringSkill
+        from spectrue_core.adapters.llm.scoring import ScoringSkill
+        from spectrue_core.adapters.llm.query import QuerySkill
+        from spectrue_core.adapters.llm.article_cleaner import ArticleCleanerSkill
+        from spectrue_core.adapters.llm.oracle_validation import OracleValidationSkill
+        from spectrue_core.adapters.llm.relevance import RelevanceSkill
+        from spectrue_core.adapters.llm.edge_typing import EdgeTypingSkill
+        from spectrue_core.adapters.llm.evidence_summarizer import EvidenceSummarizerSkill
+        from spectrue_core.adapters.llm.claim_judge import ClaimJudgeSkill
         
         self.config = config
         self.runtime = (config.runtime if config else None) or EngineRuntimeConfig.load_from_env()

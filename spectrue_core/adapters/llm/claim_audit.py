@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.agents.llm_schemas import CLAIM_AUDIT_SCHEMA
 from spectrue_core.adapters.llm.audit_prompts import (
     build_claim_audit_prompt,

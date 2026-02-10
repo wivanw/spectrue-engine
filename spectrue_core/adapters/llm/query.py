@@ -14,7 +14,7 @@ from spectrue_core.tools.trusted_sources import AVAILABLE_TOPICS
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.agents.static_instructions import UNIVERSAL_METHODOLOGY_APPENDIX
 from spectrue_core.agents.llm_schemas import QUERY_GENERATION_SCHEMA
-from spectrue_core.agents.llm_client import is_schema_failure
+from spectrue_core.llm import is_schema_failure
 from spectrue_core.llm.model_registry import ModelID
 
 FOLLOWUP_QUERY_TYPES = {

@@ -12,9 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable, TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from spectrue_core.pipeline.mode import AnalysisMode
-
+from spectrue_core.domain.verification.verdict.model import AnalysisMode
 from spectrue_core.domain.claims.model import (
     EvidenceChannel,
     UsePolicy,
@@ -217,7 +215,7 @@ class SearchPolicy:
         return self.profiles.get(key, self.profiles[SearchProfileName.GENERAL.value])
 
 
-def resolve_profile_name(mode: "AnalysisMode | str | None") -> SearchProfileName:
+def resolve_profile_name(mode: AnalysisMode | str | None) -> SearchProfileName:
     """
     Map AnalysisMode to search policy profile name.
     
@@ -225,13 +223,10 @@ def resolve_profile_name(mode: "AnalysisMode | str | None") -> SearchProfileName
         mode: AnalysisMode enum or string value
         
     Returns:
-        SearchProfileName.DEEP for DEEP/DEEP_V2 modes, SearchProfileName.GENERAL otherwise
+        SearchProfileName matching available profile
     """
-    # Lazy import to avoid circular dependency
-    from spectrue_core.pipeline.mode import AnalysisMode
-    
     if mode is None:
-        return SearchProfileName.GENERAL
+        return SearchProfileName.STANDARD
     
     # Handle AnalysisMode enum directly
     if isinstance(mode, AnalysisMode):

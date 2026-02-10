@@ -23,7 +23,7 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.pipeline.evidence_flow import EvidenceFlowInput
 from spectrue_core.use_cases.evidence.stance import annotate_stance
 from spectrue_core.utils.retrieval_urls import normalize_url
-from spectrue_core.pipeline.evidence.evidence_stats import EvidenceStats
+from spectrue_core.domain.evidence.stats import EvidenceStats
 
 logger = logging.getLogger(__name__)
 

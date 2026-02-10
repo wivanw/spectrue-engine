@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient, ReasoningEffort
+from spectrue_core.llm.llm_client import LLMClient, ReasoningEffort
 from spectrue_core.llm.model_registry import ModelID
 
 logger = logging.getLogger(__name__)

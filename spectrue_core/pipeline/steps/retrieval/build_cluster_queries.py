@@ -23,7 +23,7 @@ from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.coverage_anchors import extract_all_anchors
-from spectrue_core.pipeline.legacy.pipeline_queries import (
+from spectrue_core.use_cases.verification.pipeline_queries import (
     normalize_and_sanitize,
     resolve_budgeted_max_queries,
     select_diverse_queries,

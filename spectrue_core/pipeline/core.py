@@ -40,7 +40,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from spectrue_core.domain.verification.pipeline_types import PipelineMode, PipelineContext, Step
+from spectrue_core.use_cases.verification.pipeline_types import PipelineMode, PipelineContext, Step
 from spectrue_core.pipeline.errors import PipelineExecutionError, PipelineViolation
 from spectrue_core.utils.trace import Trace
 

@@ -25,7 +25,7 @@ from typing import Literal, TypedDict, Any, TYPE_CHECKING
 from spectrue_core.utils.trace import Trace
 
 if TYPE_CHECKING:
-    from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
+    from spectrue_core.domain.verification.calibration.calibration_registry import CalibrationRegistry
 
 def _has_evidence_chunk(source: Any) -> bool:
     """Check whether a source includes a usable evidence chunk."""
@@ -250,8 +250,8 @@ def score_evidence_likeness(
     """
     Calibrated evidence-likeness scoring for retrieval evaluation.
     """
-    from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
-    from spectrue_core.utils.calibration.calibration_models import logistic_score
+    from spectrue_core.domain.verification.calibration.calibration_registry import CalibrationRegistry
+    from spectrue_core.domain.verification.calibration.calibration_models import logistic_score
 
     if not sources:
         return 0.0

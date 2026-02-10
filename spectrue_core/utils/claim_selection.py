@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Iterable
 
 from spectrue_core.utils.trace import Trace
-from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.domain.verification.calibration.calibration_registry import CalibrationRegistry
 from spectrue_core.utils.claim_utility import score_claim_utility
 
 

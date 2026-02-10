@@ -15,7 +15,7 @@ import logging
 
 from spectrue_core.utils.trace import Trace
 import re
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
 import asyncio

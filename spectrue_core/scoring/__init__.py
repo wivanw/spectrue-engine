@@ -14,7 +14,7 @@ Bayesian credibility scoring with log-odds belief updates.
 """
 
 # Core functions
-from spectrue_core.scoring.belief import (
+from spectrue_core.domain.verification.verdict.bayesian_update import (
     prob_to_log_odds,
     log_odds_to_prob,
     update_belief,
@@ -25,13 +25,13 @@ from spectrue_core.scoring.belief import (
 )
 
 # RGBA Belief State
-from spectrue_core.scoring.rgba_belief import (
+from spectrue_core.domain.verification.verdict.rgba_belief import (
     RGBABeliefState,
     create_rgba_belief_from_tier,
 )
 
 # Consensus
-from spectrue_core.scoring.consensus import calculate_consensus
+from spectrue_core.domain.verification.verdict.consensus import calculate_consensus
 
 # Budget allocation
 from spectrue_core.scoring.budget_allocation import (

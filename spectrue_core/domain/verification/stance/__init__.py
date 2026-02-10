@@ -1,7 +1,7 @@
 """Stance domain package."""
 
 from .model import StanceFeatures, StancePosterior
-from spectrue_core.verification.scoring.stance_posterior import (
+from .posterior import (
     compute_stance_posterior,
     source_prior_from_tier,
 )

@@ -21,7 +21,7 @@ from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.coverage_anchors import extract_all_anchors
-from spectrue_core.pipeline.legacy.pipeline_queries import (
+from spectrue_core.use_cases.verification.pipeline_queries import (
     is_fuzzy_duplicate,
     normalize_and_sanitize,
     resolve_budgeted_max_queries,
@@ -32,7 +32,7 @@ from spectrue_core.domain.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )
-from spectrue_core.domain.verification.search.search_escalation import (
+from spectrue_core.use_cases.verification.search.search_escalation import (
     build_query_variants,
     trace_query_variants,
 )

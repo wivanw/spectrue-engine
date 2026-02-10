@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.agents.llm_schemas import CLAIM_JUDGE_SCHEMA
 from spectrue_core.adapters.llm.claim_judge_prompts import (
     build_claim_judge_prompt,

@@ -31,8 +31,8 @@ from openai import AsyncOpenAI
 from spectrue_core.billing.metering import LLMMeter
 from spectrue_core.billing.meter_context import get_current_llm_meter
 from spectrue_core.utils.trace import Trace
-from spectrue_core.llm.errors import LLMFailureKind
-from spectrue_core.llm.errors import LLMCallError
+from spectrue_core.llm.errors import LLMFailureKind, LLMCallError
+from spectrue_core.llm.failures import is_schema_failure
 from spectrue_core.llm.model_registry import ModelID
 
 logger = logging.getLogger(__name__)
@@ -173,19 +173,6 @@ def _validate_schema(
     return errors
 
 
-_SCHEMA_ERROR_MARKERS = (
-    "llm schema validation failed",
-    "invalid_json_schema",
-    "text.format.schema",
-    "text.format.name",
-    "missing_explainability_score",
-    "invalid_explainability_score",
-)
-
-
-def is_schema_failure(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return any(marker in msg for marker in _SCHEMA_ERROR_MARKERS)
 
 
 class LLMClient:

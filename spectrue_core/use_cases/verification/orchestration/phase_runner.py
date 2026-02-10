@@ -32,27 +32,31 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from spectrue_core.use_cases.verification.orchestration.execution_plan import (
+from spectrue_core.domain.verification.plan import (
     Phase,
     ExecutionPlan,
+)
+from spectrue_core.use_cases.verification.orchestration.execution_state import (
     ExecutionState,
 )
-from spectrue_core.use_cases.verification.orchestration.sufficiency import (
+from spectrue_core.domain.claims.sufficiency import (
+    SufficiencyDecision,
+    SufficiencyStatus,
+)
+from spectrue_core.use_cases.claims.sufficiency import (
     check_sufficiency_for_claim,
     judge_sufficiency_for_claim,
     verdict_ready_for_claim,
-    SufficiencyDecision,
-    SufficiencyStatus,
-    get_domain_tier,  # returns EvidenceChannel (enum)
 )
-from spectrue_core.agents.skills.query import generate_followup_query_from_evidence
+from spectrue_core.tools.trusted_sources import get_domain_tier
+from spectrue_core.adapters.llm.query import generate_followup_query_from_evidence
 from spectrue_core.utils.trace import Trace
 from spectrue_core.tools.trusted_sources import get_trusted_domains_by_lang
 from spectrue_core.domain.claims.model import EvidenceChannel
 from spectrue_core.utils.source_utils import canonicalize_sources, extract_domain
 from spectrue_core.adapters.retrieval.retrieval_eval import evaluate_retrieval_confidence
 from spectrue_core.use_cases.verification.orchestration.stop_decision import EVStopParams, evaluate_stop_decision
-from spectrue_core.domain.verification.search.search_escalation import (
+from spectrue_core.use_cases.verification.search.search_escalation import (
     build_query_variants,
     select_topic_from_claim,
     compute_retrieval_outcome,
@@ -64,6 +68,8 @@ from spectrue_core.domain.verification.search.search_escalation import (
     trace_escalation_pass,
     trace_search_stop,
     trace_search_summary,
+)
+from spectrue_core.domain.verification.search.escalation_model import (
     EscalationConfig,
     QueryVariant,
     RetrievalOutcome,

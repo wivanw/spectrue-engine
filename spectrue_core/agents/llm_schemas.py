@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from spectrue_core.agents.skills.claims_parsing import ARTICLE_INTENTS
+from spectrue_core.adapters.llm.claims_parsing import ARTICLE_INTENTS
 from spectrue_core.schema.claim_metadata import (
     ClaimRole,
     EvidenceChannel,

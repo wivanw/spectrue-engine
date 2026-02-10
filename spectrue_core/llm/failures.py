@@ -18,18 +18,10 @@ Defines failure types that trigger provider fallback:
 - SCHEMA_VALIDATION_FAILED: JSON doesn't match required schema
 """
 
-from enum import Enum
+from .errors import LLMFailureKind
+
+
 from typing import Any
-
-
-class LLMFailureKind(Enum):
-    """Classification of LLM call failures that trigger fallback."""
-    
-    CONNECTION_ERROR = "connection_error"
-    TIMEOUT = "timeout"
-    PROVIDER_ERROR = "provider_error"
-    INVALID_JSON = "invalid_json"
-    SCHEMA_VALIDATION_FAILED = "schema_validation_failed"
 
 
 # Keywords that indicate connection errors
@@ -89,6 +81,12 @@ _SCHEMA_ERROR_KEYWORDS = (
     "expected array",
     "expected string",
     "does not match",
+    "llm schema validation failed",
+    "invalid_json_schema",
+    "text.format.schema",
+    "text.format.name",
+    "missing_explainability_score",
+    "invalid_explainability_score",
 )
 
 

@@ -26,7 +26,7 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.domain.claims.sufficiency import SUFFICIENCY_P_THRESHOLD, check_sufficiency_for_claim
+from spectrue_core.use_cases.claims.sufficiency import check_sufficiency_for_claim, SUFFICIENCY_P_THRESHOLD
 from spectrue_core.utils.retrieval_urls import (
     ExtractedContent,
     FixedPipelineContext,

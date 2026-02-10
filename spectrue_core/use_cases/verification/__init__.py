@@ -1,2 +1,2 @@
 """Verification use cases."""
-from .pipeline import ValidationPipeline  # noqa: F401
+# ValidationPipeline and FactVerifier moved to spectrue_core.pipeline.orchestration

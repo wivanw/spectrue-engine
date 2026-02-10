@@ -26,15 +26,15 @@ from spectrue_core.schema.claim_frame import (
     ContextMeta,
     EvidenceItemFrame,
 )
-from spectrue_core.pipeline.evidence.evidence_stats import (
+from spectrue_core.domain.evidence.stats import (
     build_evidence_stats,
 )
-from spectrue_core.pipeline.scoring.confirmation_counts import compute_confirmation_counts
+from spectrue_core.use_cases.verification.scoring.confirmation_counts import compute_confirmation_counts
 from spectrue_core.pipeline.retrieval.retrieval_trace import (
     create_empty_retrieval_trace,
     format_retrieval_trace,
 )
-from spectrue_core.pipeline.orchestration.execution_plan import ClaimExecutionState
+from spectrue_core.use_cases.verification.orchestration.execution_state import ClaimExecutionState
 from spectrue_core.utils.retrieval_urls import source_id_for_url
 from spectrue_core.utils.text_structure import TextStructure, extract_text_structure
 

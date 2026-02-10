@@ -3,7 +3,7 @@ from spectrue_core.pipeline.steps.deep_claim import JudgeClaimsStep, DeepClaimCo
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.mode import DEEP_MODE
 from spectrue_core.schema.claim_frame import ClaimFrame, ContextExcerpt, ContextMeta
-from spectrue_core.agents.llm_client import LLMFailureKind, LLMCallError
+from spectrue_core.llm.errors import LLMFailureKind, LLMCallError
 
 @pytest.mark.asyncio
 async def test_inv_040_no_fallback_0_5(mock_llm_client):

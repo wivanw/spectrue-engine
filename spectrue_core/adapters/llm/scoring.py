@@ -13,7 +13,7 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.utils.security import sanitize_input
 from spectrue_core.agents.prompts import get_prompt
-from spectrue_core.agents.llm_client import is_schema_failure
+from spectrue_core.llm import is_schema_failure
 from datetime import datetime
 import hashlib
 import asyncio

@@ -14,7 +14,7 @@ from typing import Awaitable, Callable
 
 import logging
 
-from spectrue_core.agents.skills.oracle_validation import EVIDENCE_THRESHOLD
+from spectrue_core.adapters.llm.oracle_validation import EVIDENCE_THRESHOLD
 from spectrue_core.utils.text_processing import normalize_search_query
 from spectrue_core.utils.trace import Trace
 

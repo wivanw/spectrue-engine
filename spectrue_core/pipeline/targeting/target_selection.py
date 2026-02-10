@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.utils.trace import Trace
-from spectrue_core.pipeline.orchestration.execution_plan import BudgetClass
+from spectrue_core.domain.verification.plan import BudgetClass
 
 logger = logging.getLogger(__name__)
 

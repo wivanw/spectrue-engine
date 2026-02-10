@@ -11,7 +11,7 @@
 Unit tests for Bayesian Stance Posterior Estimator.
 """
 
-from spectrue_core.verification.scoring.stance_posterior import (
+from spectrue_core.domain.verification.stance.posterior import (
     StanceFeatures,
     StancePosterior,
     compute_stance_posterior,

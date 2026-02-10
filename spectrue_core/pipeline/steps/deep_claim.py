@@ -329,7 +329,7 @@ class AssembleDeepResultStep(Step):
                 # Deep v2: use deterministic confirmation counts
                 # Use value from runtime config if available
                 from spectrue_core.runtime_config import DeepV2Config
-                from spectrue_core.pipeline.scoring.confirmation_counts import compute_confirmation_counts
+                from spectrue_core.use_cases.verification.scoring.confirmation_counts import compute_confirmation_counts
                 
                 runtime = getattr(self._config, "runtime", None)
                 deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())

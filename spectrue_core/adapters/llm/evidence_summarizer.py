@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.agents.llm_schemas import EVIDENCE_SUMMARIZER_SCHEMA
 from spectrue_core.adapters.llm.evidence_summarizer_prompts import (
     build_evidence_summarizer_prompt,

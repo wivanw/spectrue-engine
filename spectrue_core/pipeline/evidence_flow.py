@@ -34,11 +34,11 @@ import warnings
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-from spectrue_core.pipeline.scoring.rgba_aggregation import (
+from spectrue_core.domain.verification.stance.aggregation import (
     apply_dependency_penalties,
     apply_conflict_explainability_penalty,
 )
-from spectrue_core.utils.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.domain.verification.calibration.calibration_registry import CalibrationRegistry
 from spectrue_core.utils.claim_selection import pick_ui_main_claim
 from spectrue_core.utils.evidence_pack import EvidencePack
 from spectrue_core.domain.verification.search.search_policy import (
@@ -55,14 +55,14 @@ from spectrue_core.utils.evidence_scoring import (
 
 # Explainability and stance processing modules
 # Claim verdict processing
-from spectrue_core.pipeline.scoring.evidence_verdict_processing import (
+from spectrue_core.use_cases.verification.scoring.evidence_verdict_processing import (
     process_claim_verdicts,
     enrich_all_claim_verdicts,
 )
 from spectrue_core.pipeline.mode import ScoringMode
 
 # Bayesian update logic (M119)
-from spectrue_core.pipeline.scoring.bayesian_update import apply_bayesian_update
+from spectrue_core.use_cases.verification.verdict import apply_bayesian_update
 from spectrue_core.pipeline.mode import AnalysisMode
 
 

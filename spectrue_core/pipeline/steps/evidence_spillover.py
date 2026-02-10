@@ -13,16 +13,6 @@ from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.retrieval_urls import normalize_url
-from spectrue_core.pipeline.evidence.slot_maps import (
-    merge_covers,
-    required_slots_for_verification_target,
-    slots_from_assertion_key,
-)
-from spectrue_core.pipeline.evidence.event_signature import (
-    claim_event_signature,
-    evidence_event_signature,
-    signature_compatible,
-)
 
 
 @dataclass
@@ -68,12 +58,6 @@ class EvidenceSpilloverStep(Step):
             cluster_map=cluster_map,
             top_k=top_k,
             normalize_url=normalize_url,
-            slots_from_assertion_key=slots_from_assertion_key,
-            required_slots_for_verification_target=required_slots_for_verification_target,
-            merge_covers=merge_covers,
-            claim_event_signature=claim_event_signature,
-            evidence_event_signature=evidence_event_signature,
-            signature_compatible=signature_compatible,
             evidence_by_claim=by_claim,
         )
 

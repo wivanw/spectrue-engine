@@ -43,10 +43,12 @@ from spectrue_core.domain.claims.model import (
     MetadataConfidence,
     RetrievalPolicy,
 )
-from spectrue_core.use_cases.verification.orchestration.execution_plan import (
+from spectrue_core.domain.verification.plan import (
     Phase,
     ExecutionPlan,
     BudgetClass,
+)
+from spectrue_core.use_cases.verification.orchestration.execution_plan_presets import (
     phase_a,
     phase_a_light,
     phase_a_origin,

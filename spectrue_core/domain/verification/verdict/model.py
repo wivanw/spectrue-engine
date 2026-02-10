@@ -4,6 +4,10 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import Any, Literal, Awaitable, Callable
 
+from .belief import BeliefState, ConsensusState, prob_to_log_odds, log_odds_to_prob
+from .rgba import RGBAStatus, RGBAMetric, RGBAResult, normalize_rgba
+from .audit import ClaimAudit, EvidenceAudit
+
 
 # --- Base Verification Types ---
 
@@ -79,105 +83,8 @@ class StancePassMode(str, Enum):
     TWO_PASS = "two_pass"
 
 
-@dataclass
-class BeliefState:
-    log_odds: float
-    confidence: float = 0.0
-
-    @property
-    def probability(self) -> float:
-        return log_odds_to_prob(self.log_odds)
 
 
-@dataclass
-class ConsensusState:
-    score: float
-    stability: float
-    source_count: int
-
-
-def prob_to_log_odds(p: float, epsilon: float = 1e-9) -> float:
-    """Convert probability to log-odds (logit function)."""
-    p = max(epsilon, min(1.0 - epsilon, p))
-    import math
-    return math.log(p / (1.0 - p))
-
-
-def log_odds_to_prob(log_odds: float) -> float:
-    """Convert log-odds to probability (logistic function)."""
-    import math
-    try:
-        return 1.0 / (1.0 + math.exp(-log_odds))
-    except OverflowError:
-        return 0.0 if log_odds < 0 else 1.0
-
-
-class RGBAStatus(str, Enum):
-    OK = "OK"
-    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
-    CONFLICTING_EVIDENCE = "CONFLICTING_EVIDENCE"
-    UNVERIFIABLE_BY_NATURE = "UNVERIFIABLE_BY_NATURE"
-    PIPELINE_ERROR = "PIPELINE_ERROR"
-    OUT_OF_SCOPE = "OUT_OF_SCOPE"
-    EVIDENCE_MISMATCH = "EVIDENCE_MISMATCH"
-    """Evidence retrieved is non-empty but not about the claim topic (off-topic)."""
-
-
-@dataclass
-class RGBAMetric:
-    status: RGBAStatus
-    value: float | None = None
-    confidence: float | None = None
-    uncertainty: dict[str, Any] | None = None
-    reasons: list[str] = field(default_factory=list)
-    trace: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class RGBAResult:
-    R: RGBAMetric
-    G: RGBAMetric
-    B: RGBAMetric
-    A: RGBAMetric
-    global_reasons: list[str] = field(default_factory=list)
-    summary_trace: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ClaimAudit:
-    claim_id: str
-    predicate_type: Literal[
-        "event",
-        "measurement",
-        "quote",
-        "policy",
-        "ranking",
-        "causal",
-        "other",
-    ]
-    truth_conditions: list[str]
-    expected_evidence_types: list[str]
-    failure_modes: list[str]
-    assertion_strength: Literal["weak", "medium", "strong"]
-    risk_facets: list[str]
-    honesty_facets: list[str]
-    what_would_change_mind: list[str]
-    audit_confidence: float
-
-
-@dataclass
-class EvidenceAudit:
-    claim_id: str
-    evidence_id: str
-    source_id: str
-    stance: Literal["support", "refute", "unclear", "unrelated"]
-    directness: Literal["direct", "indirect", "tangential"]
-    specificity: Literal["high", "medium", "low"]
-    quote_integrity: Literal["ok", "partial", "out_of_context", "not_applicable"]
-    extraction_confidence: float
-    novelty_vs_copy: Literal["original", "syndicated", "unknown"]
-    dependency_hints: list[str]
-    audit_confidence: float
 
 
 @dataclass
@@ -329,41 +236,6 @@ def normalize_verdict_enum(value: Any) -> str:
     return _STANCE_CANON.get(s, "NEI")
 
 
-def clamp_unit(x: Any, default: float = 0.0) -> float:
-    try:
-        v = float(x)
-    except Exception:
-        return default
-    import math
-    if v != v:  # NaN
-        return default
-    if v < 0.0:
-        return 0.0
-    if v > 1.0:
-        return 1.0
-    return v
-
-
-def normalize_rgba(rgba: Any) -> list[float] | None:
-    """Normalize RGBA into [R,G,B,A]."""
-    if not isinstance(rgba, list) or len(rgba) != 4:
-        return None
-    try:
-        r = float(rgba[0])
-        g = float(rgba[1])
-        b = float(rgba[2])
-        a = float(rgba[3])
-    except Exception:
-        return None
-
-    r = clamp_unit(r, 0.0)
-    b = clamp_unit(b, 0.0)
-    a = clamp_unit(a, 0.0)
-
-    if not (g == -1.0 or (0.0 <= g <= 1.0)):
-        g = -1.0
-
-    return [r, g, b, a]
 
 
 def sanitize_judge_payload(payload: dict[str, Any]) -> dict[str, Any]:
