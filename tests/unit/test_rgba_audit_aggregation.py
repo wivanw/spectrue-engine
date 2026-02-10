@@ -11,7 +11,7 @@
 # Copyright (c) 2024-2025 Spectrue Contributors
 
 from spectrue_core.schema.rgba_audit import RGBAStatus
-from spectrue_core.verification.scoring.rgba_audit.aggregation import aggregate_rgba_audit
+from spectrue_core.use_cases.verification.scoring.rgba_audit.aggregation import aggregate_rgba_audit
 from tests.fixtures.rgba_audit_fixtures import (
     make_claim_audit,
     make_evidence_audit,

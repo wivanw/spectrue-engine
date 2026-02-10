@@ -1,6 +1,6 @@
 
 import pytest
-from spectrue_core.agents.skills.scoring_contract import (
+from spectrue_core.adapters.llm.scoring_contract import (
     build_stance_matrix_instructions,
     build_stance_matrix_prompt,
     STANCE_PASS_SINGLE

@@ -38,6 +38,7 @@ from spectrue_core.domain.verification.plan import (
 )
 from spectrue_core.use_cases.verification.orchestration.execution_state import (
     ExecutionState,
+    RetrievalHop,
 )
 from spectrue_core.domain.claims.sufficiency import (
     SufficiencyDecision,
@@ -94,31 +95,6 @@ class PhaseSearchResult:
     phase_id: str
     sources: list[dict]
     error: str | None = None
-
-
-@dataclass
-class RetrievalHop:
-    """Minimal hop state for iterative retrieval."""
-    hop_index: int
-    query: str
-    decision: SufficiencyDecision
-    reason: str
-    phase_id: str | None = None
-    query_type: str | None = None
-    results: list[dict] | None = None
-    retrieval_eval: dict | None = None
-
-    def to_dict(self) -> dict:
-        return {
-            "hop_index": int(self.hop_index),
-            "query": self.query,
-            "decision": self.decision.value,
-            "reason": self.reason,
-            "phase_id": self.phase_id,
-            "query_type": self.query_type,
-            "results_count": len(self.results or []),
-            "retrieval_eval": self.retrieval_eval or {},
-        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

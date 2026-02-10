@@ -10,7 +10,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from spectrue_core.verification.pipeline import ValidationPipeline
+from spectrue_core.pipeline.orchestration.validation_pipeline import ValidationPipeline
 
 @pytest.mark.unit
 class TestOracleOptimization:

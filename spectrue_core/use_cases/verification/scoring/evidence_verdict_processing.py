@@ -36,7 +36,19 @@ if TYPE_CHECKING:
     from spectrue_core.pipeline.mode import ScoringMode
 
 # M133: compute_explainability_tier_adjustment removed
-from spectrue_core.utils.evidence_scoring import norm_id as _norm_id
+from spectrue_core.utils.evidence_scoring import (
+    norm_id, 
+    is_prob, 
+    logit, 
+    sigmoid, 
+    claim_text, 
+    explainability_factor_for_tier, 
+    tier_rank, 
+    compute_article_g_from_anchor, 
+    select_anchor_for_article_g,
+    TIER_A_BASELINE,
+)
+from spectrue_core.domain.evidence.model import get_tier_rank, find_best_tier_for_claim
 
 logger = logging.getLogger(__name__)
 
@@ -162,14 +174,14 @@ def process_claim_verdicts(
         if not isinstance(cv, dict):
             continue
         
-        claim_id = _norm_id(cv.get("claim_id"))
+        claim_id = norm_id(cv.get("claim_id"))
         if not claim_id and claims:
-            claim_id = _norm_id(claims[0].get("id") or "c1")
+            claim_id = norm_id(claims[0].get("id") or "c1")
             cv["claim_id"] = claim_id
 
         claim_obj = None
         for c in claims or []:
-            if _norm_id(c.get("id") or c.get("claim_id")) == claim_id:
+            if norm_id(c.get("id") or c.get("claim_id")) == claim_id:
                 claim_obj = c
                 break
         

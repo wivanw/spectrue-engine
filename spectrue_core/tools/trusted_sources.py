@@ -437,17 +437,17 @@ def is_authoritative(domain: str) -> bool:
         if d.endswith(suffix):
             return True
 
-    # Check explicit lists
-    if d in TRUSTED_SOURCES.get("international_public_bodies", []):
-        return True
-    if d in TRUSTED_SOURCES.get("science_and_health", []):
-        return True
-    if d in TRUSTED_SOURCES.get("astronomy_tier_a", []):
-        return True
-    if d in TRUSTED_SOURCES.get("global_news_agencies", []):
-        return True
-    if d in TRUSTED_SOURCES.get("fact_checking_ifcn", []):
-        return True
+    # Check explicit lists (Tier A only)
+    tier_a_categories = [
+        "global_news_agencies",
+        "science_and_health",
+        "astronomy_tier_a",
+        "international_public_bodies",
+        "fact_checking_ifcn",
+    ]
+    for category in tier_a_categories:
+        if d in TRUSTED_SOURCES.get(category, []):
+            return True
 
     return False
 

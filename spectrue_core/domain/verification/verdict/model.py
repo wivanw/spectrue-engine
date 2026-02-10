@@ -4,8 +4,18 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
-from .belief import BeliefState
-from .rgba import normalize_rgba
+from .belief import (
+    BeliefState,
+    ConsensusState,
+    prob_to_log_odds,
+    log_odds_to_prob,
+    update_belief,
+    process_updates,
+    calculate_evidence_impact,
+    sigmoid_impact,
+)
+from .rgba import RGBAStatus, RGBAMetric, RGBAResult, normalize_rgba
+from .audit import ClaimAudit, EvidenceAudit
 
 
 # --- Base Verification Types ---
@@ -67,6 +77,7 @@ class ScoringMode(str, Enum):
 class SearchProfileName(str, Enum):
     """Search policy profile names."""
     GENERAL = "general"
+    STANDARD = "general"  # Alias
     DEEP = "deep"
 
 

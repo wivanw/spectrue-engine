@@ -19,11 +19,11 @@ Tests for the retrieval regression fix:
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from spectrue_core.agents.skills.claims import (
+from spectrue_core.adapters.llm.claims import (
     sanitize_retrieval_response,
     extract_keywords_deterministic,
 )
-from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
 
 
 class TestKeywordExtraction:
@@ -79,7 +79,7 @@ class TestSanitizeRetrievalResponse:
         }
         claim_text = "Українські війська звільнили місто Херсон"
         
-        with patch("spectrue_core.agents.skills.claims.Trace"):
+        with patch("spectrue_core.adapters.llm.claims.Trace"):
             result = sanitize_retrieval_response(data, claim_text=claim_text)
         
         assert "search_queries" in result
@@ -94,7 +94,7 @@ class TestSanitizeRetrievalResponse:
         }
         claim_text = "Different claim text"
         
-        with patch("spectrue_core.agents.skills.claims.Trace"):
+        with patch("spectrue_core.adapters.llm.claims.Trace"):
             result = sanitize_retrieval_response(data, claim_text=claim_text)
         
         assert result["search_queries"] == ["Ukraine offensive Kherson"]
@@ -116,7 +116,7 @@ class TestSelectClaimQueryNoNormalizedText:
             "query_candidates": [],
         }
         
-        with patch("spectrue_core.verification.orchestration.phase_runner.Trace"):
+        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
             query = runner._select_claim_query(claim)
         
         assert "English" not in query
@@ -134,7 +134,7 @@ class TestSelectClaimQueryNoNormalizedText:
             "search_queries": ["Explicit query from planner"],
         }
         
-        with patch("spectrue_core.verification.orchestration.phase_runner.Trace"):
+        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
             query = runner._select_claim_query(claim)
         
         assert query == "Explicit query from planner"
@@ -157,7 +157,7 @@ class TestDefaultTopicIsNews:
             "search_queries": ["test query"],
         }
         
-        with patch("spectrue_core.verification.orchestration.phase_runner.Trace"):
+        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
             await runner._search_by_phase(claim, phase=None, query_override="test")
         
         call_args = search_mgr.search_phase.call_args
@@ -180,7 +180,7 @@ class TestDefaultTopicIsNews:
             "search_method": "general_search",
         }
         
-        with patch("spectrue_core.verification.orchestration.phase_runner.Trace"):
+        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
             await runner._search_by_phase(claim, phase=None, query_override="test")
         
         call_args = search_mgr.search_phase.call_args
@@ -207,7 +207,7 @@ class TestRegressionGoldenScenario:
             "query_candidates": [],
         }
         
-        with patch("spectrue_core.verification.orchestration.phase_runner.Trace"):
+        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
             query = runner._select_claim_query(claim)
         
         assert "earthquake" not in query.lower()

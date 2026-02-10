@@ -3,22 +3,18 @@
 from __future__ import annotations
 
 from typing import List, Any
-from .model import BeliefState
+from .model import BeliefState, ScoringTraceStep
 
 
-def propagate_belief(graph: Any) -> List[Any]:
+def propagate_belief(graph: Any) -> List[ScoringTraceStep]:
     """
     Propagates belief through the claim graph using message passing on DAG.
     Updates `propagated_belief` on each node.
     """
-    
-    # Deferred imports to avoid circular deps if any
-    # We use Any for graph to avoid concrete dependency on graph module in domain if possible,
-    # OR we move graph interfaces to domain.
-    
+    trace = []
     sorted_ids = graph.topological_sort()
 
-    for claim_id in sorted_ids:
+    for idx, claim_id in enumerate(sorted_ids):
         node = graph.get_node(claim_id)
         if not node:
             continue
@@ -51,8 +47,21 @@ def propagate_belief(graph: Any) -> List[Any]:
             log_odds=final_log_odds, 
             confidence=current_belief.confidence
         )
+        
+        # Add trace entry using ScoringTraceStep
+        description = f"Propagated belief for {claim_id}"
+        if incoming_edges:
+            rels = [str(getattr(e, "relation", "")).upper() for e in incoming_edges]
+            description += f" via {', '.join(rels)}"
+        
+        trace.append(ScoringTraceStep(
+            step_id=idx,
+            description=description,
+            delta=total_message_log_odds,
+            new_belief=final_log_odds,
+        ))
 
-    return [] # Trace omitted for domain simplicity or moved elsewhere
+    return trace
 
 
 def propagation_routing_signals(graph: Any) -> dict[str, float]:

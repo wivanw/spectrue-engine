@@ -16,8 +16,8 @@ have contradictory relationships.
 Scenario: A thesis is supported by one claim but contradicted by another.
 The final belief should reflect the combined influence.
 """
-from spectrue_core.graph.context import ClaimContextGraph
-from spectrue_core.graph.propagation import propagate_belief
+from spectrue_core.adapters.graph.context import ClaimContextGraph
+from spectrue_core.domain.verification.verdict.propagation import propagate_belief
 from spectrue_core.schema.scoring import (
     BeliefState,
     ClaimEdge,
@@ -161,7 +161,7 @@ def test_conflicting_evidence_net_effect():
     contra_claim = ClaimNode(
         claim_id="contra",
         text="Strong evidence against the thesis",
-        role=ClaimRole.COUNTER,
+        role=ClaimRole.COUNTERCLAIM,
         local_belief=BeliefState(log_odds=2.0, confidence=0.9),
     )
     

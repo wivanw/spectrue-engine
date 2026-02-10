@@ -12,8 +12,8 @@ from pathlib import Path
 FORBIDDEN = (":4000", ":8000")
 ROOT = Path(__file__).resolve().parents[2]
 TARGET_FILES = [
-    ROOT / "spectrue_core" / "verification" / "pipeline" / "pipeline.py",
-    ROOT / "spectrue_core" / "agents" / "skills" / "claims.py",
+    ROOT / "spectrue_core" / "pipeline" / "orchestration" / "validation_pipeline.py",
+    ROOT / "spectrue_core" / "adapters" / "llm" / "claims.py",
 ]
 
 

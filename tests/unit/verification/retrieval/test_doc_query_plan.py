@@ -15,7 +15,7 @@ Tests cover:
 - Module wiring verification
 """
 
-from spectrue_core.verification.retrieval.cegs_mvp import (
+from spectrue_core.pipeline.retrieval.cegs_mvp import (
     build_doc_query_plan,
     collect_document_entities,
     collect_seed_terms,
@@ -276,7 +276,7 @@ class TestModuleWiring:
 
     def test_module_path_correct(self):
         """Verify correct module is imported."""
-        import spectrue_core.verification.retrieval.cegs_mvp as cegs
+        import spectrue_core.pipeline.retrieval.cegs_mvp as cegs
         
         assert "spectrue_core" in cegs.__name__
         assert "cegs_mvp" in cegs.__file__

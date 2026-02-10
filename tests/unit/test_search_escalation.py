@@ -14,7 +14,7 @@
 Unit tests for M126 search escalation module.
 """
 
-from spectrue_core.verification.search.search_escalation import (
+from spectrue_core.use_cases.verification.search.search_escalation import (
     EscalationConfig,
     build_query_variants,
     select_topic_from_claim,

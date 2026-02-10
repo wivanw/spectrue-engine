@@ -1,7 +1,8 @@
 import pytest
-from spectrue_core.verification.evidence.dedup_fingerprints import (
+from spectrue_core.domain.evidence.deduplication import (
     simhash64,
-    simhash_bucket_id
+    simhash_bucket_id,
+    normalize_text_for_hash,
 )
 from spectrue_core.pipeline.steps.evidence_dedup import EvidenceDedupStep
 from spectrue_core.pipeline.steps.evidence_corroboration import EvidenceCorroborationStep
@@ -14,7 +15,6 @@ def test_fingerprint_logic():
     t2 = "The quick brown fox jumps over the lazy dog!" # punctuation/case diff
     t3 = "A completely different sentence."
 
-    from spectrue_core.verification.evidence.dedup_fingerprints import normalize_text_for_hash
     n1 = normalize_text_for_hash(t1)
     n2 = normalize_text_for_hash(t2)
     assert n1 == n2

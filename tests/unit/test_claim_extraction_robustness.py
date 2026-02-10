@@ -15,7 +15,7 @@ Tests for:
 - Topic-based round-robin query selection
 """
 import pytest
-from spectrue_core.agents.skills.claims import ClaimExtractionSkill
+from spectrue_core.adapters.llm.claims import ClaimExtractionSkill
 
 
 @pytest.mark.unit

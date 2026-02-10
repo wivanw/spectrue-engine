@@ -8,7 +8,7 @@
 # (at your option) any later version.
 
 import math
-from spectrue_core.scoring.belief import sigmoid_impact, calculate_evidence_impact
+from spectrue_core.domain.verification.verdict.belief import sigmoid_impact, calculate_evidence_impact
 
 def test_sigmoid_impact_saturation():
     # Weak strength (0.1) should have near-zero impact

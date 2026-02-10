@@ -16,7 +16,7 @@ M133: compute_explainability_tier_adjustment removed.
 
 
 
-from spectrue_core.verification.evidence.evidence_explainability import (
+from spectrue_core.use_cases.verification.scoring.evidence_verdict_processing import (
     get_tier_rank,
     find_best_tier_for_claim,
 )

@@ -1,0 +1,41 @@
+"""Compatibility layer for legacy fixed_pipeline imports."""
+
+from spectrue_core.utils.retrieval_urls import (
+    ClaimBindings,
+    ClaimId,
+    ExtractedContent,
+    ExtractorQueue,
+    FixedPipelineContext,
+    FixedPipelineState,
+    GlobalUrlRegistry,
+    NormalizedUrl,
+    UrlMeta,
+    bind_after_extract,
+    compute_sufficiency,
+    current_stage,
+    extract_all_batches,
+    init_state,
+    normalize_url,
+    register_urls,
+    source_id_for_url,
+)
+
+__all__ = [
+    "ClaimBindings",
+    "ClaimId",
+    "ExtractedContent",
+    "ExtractorQueue",
+    "FixedPipelineContext",
+    "FixedPipelineState",
+    "GlobalUrlRegistry",
+    "NormalizedUrl",
+    "UrlMeta",
+    "bind_after_extract",
+    "compute_sufficiency",
+    "current_stage",
+    "extract_all_batches",
+    "init_state",
+    "normalize_url",
+    "register_urls",
+    "source_id_for_url",
+]

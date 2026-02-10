@@ -11,7 +11,7 @@
 Tests for validate_core_claim() - verifiability contract enforcement.
 """
 
-from spectrue_core.agents.skills.claims import (
+from spectrue_core.adapters.llm.claims import (
     validate_core_claim,
     ExtractionStats,
     TIME_ANCHOR_EXEMPT_PREDICATES,

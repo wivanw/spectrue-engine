@@ -16,7 +16,7 @@ Tests the invariant that quote fields are preserved through
 the evidence matrix pipeline.
 """
 
-from spectrue_core.agents.skills.clustering_parsing import (
+from spectrue_core.adapters.llm.clustering_parsing import (
     get_source_text_for_llm,
     build_sources_lite,
 )

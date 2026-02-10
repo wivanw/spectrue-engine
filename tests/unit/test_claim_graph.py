@@ -28,10 +28,10 @@ from pathlib import Path
 
 import pytest
 
-from spectrue_core.graph.candidates import mst_connectivity
-from spectrue_core.graph.claim_graph import ClaimGraphBuilder
-from spectrue_core.graph.ranking import compute_pagerank_with_ranks
-from spectrue_core.graph.selection import greedy_budgeted_submodular
+from spectrue_core.domain.claims.graph.candidates import mst_connectivity
+from spectrue_core.adapters.graph.claim_graph import ClaimGraphBuilder
+from spectrue_core.domain.claims.graph.ranking import compute_pagerank_with_ranks
+from spectrue_core.domain.claims.graph.selection import greedy_budgeted_submodular
 from spectrue_core.runtime_config import ClaimGraphConfig
 
 

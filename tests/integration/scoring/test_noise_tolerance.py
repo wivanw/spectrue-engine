@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.scoring.belief import BeliefState, process_updates, calculate_evidence_impact
+from spectrue_core.domain.verification.verdict.belief import BeliefState, process_updates, calculate_evidence_impact
 
 def test_noise_tolerance():
     """

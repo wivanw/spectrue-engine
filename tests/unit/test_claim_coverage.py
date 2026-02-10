@@ -27,7 +27,7 @@ from spectrue_core.utils.coverage_anchors import (
     get_anchor_ids,
     anchors_to_prompt_context,
 )
-from spectrue_core.agents.skills.claims import (
+from spectrue_core.adapters.llm.claims import (
     DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS,
 )
 
@@ -252,7 +252,7 @@ class TestCoverageValidation:
 
     def test_validate_coverage_all_covered(self):
         """No gap when all anchors are covered."""
-        from spectrue_core.verification.claims.coverage_validator import (
+        from spectrue_core.domain.claims.extraction import (
             validate_coverage,
         )
         
@@ -268,7 +268,7 @@ class TestCoverageValidation:
 
     def test_validate_coverage_with_skipped(self):
         """Skipped anchors are not gaps."""
-        from spectrue_core.verification.claims.coverage_validator import (
+        from spectrue_core.domain.claims.extraction import (
             validate_coverage,
         )
         
@@ -284,7 +284,7 @@ class TestCoverageValidation:
 
     def test_validate_coverage_detects_gaps(self):
         """Detect missing anchors."""
-        from spectrue_core.verification.claims.coverage_validator import (
+        from spectrue_core.domain.claims.extraction import (
             validate_coverage,
         )
         
@@ -304,7 +304,7 @@ class TestGapFillHelpers:
 
     def test_build_gapfill_prompt(self):
         """Verify gap-fill prompt structure."""
-        from spectrue_core.verification.claims.coverage_validator import (
+        from spectrue_core.domain.claims.extraction import (
             build_gapfill_prompt,
         )
         
@@ -321,7 +321,7 @@ class TestGapFillHelpers:
 
     def test_merge_gapfill_result(self):
         """Verify gapfill merge works correctly."""
-        from spectrue_core.verification.claims.coverage_validator import (
+        from spectrue_core.domain.claims.extraction import (
             merge_gapfill_result,
         )
         
@@ -346,7 +346,7 @@ class TestGapFillHelpers:
 
     def test_check_remaining_gaps(self):
         """Verify remaining gap detection after merge."""
-        from spectrue_core.verification.claims.coverage_validator import (
+        from spectrue_core.domain.claims.extraction import (
             check_remaining_gaps,
         )
         

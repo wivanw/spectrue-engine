@@ -1,6 +1,6 @@
 import pytest
-from spectrue_core.verification.evidence.evidence import build_evidence_pack
-from spectrue_core.verification.evidence.evidence_stance import assign_claim_rgba
+from spectrue_core.utils.evidence import build_evidence_pack
+from spectrue_core.use_cases.verification.scoring.evidence_stance import assign_claim_rgba
 from spectrue_core.pipeline.mode import ScoringMode
 
 def test_quote_propagation_to_rgba():

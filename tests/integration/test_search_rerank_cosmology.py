@@ -18,8 +18,8 @@ reranking keeps low-relevance results instead of discarding them.
 import pytest
 from unittest.mock import AsyncMock
 
-from spectrue_core.verification.search.search_mgr import SearchManager
-from spectrue_core.verification.search.search_policy import SearchPolicyProfile, QualityThresholds, SearchProfileName
+from spectrue_core.adapters.retrieval.search_mgr import SearchManager
+from spectrue_core.domain.verification.search.search_policy import SearchPolicyProfile, QualityThresholds, SearchProfileName
 
 
 @pytest.mark.asyncio

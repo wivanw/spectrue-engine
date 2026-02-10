@@ -10,8 +10,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 
-from spectrue_core.verification.scoring.rgba_audit.aggregation import cluster_sources
-from spectrue_core.verification.scoring.rgba_audit.config import RGBAAuditConfig
+from spectrue_core.use_cases.verification.scoring.rgba_audit.aggregation import cluster_sources
+from spectrue_core.use_cases.verification.scoring.rgba_audit.config import RGBAAuditConfig
 
 
 def test_redundancy_clustering_is_reproducible():

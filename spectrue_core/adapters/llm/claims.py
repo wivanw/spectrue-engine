@@ -20,6 +20,7 @@ from spectrue_core.domain.claims.extraction import (
     extract_keywords_deterministic,
     get_anchor_ids,
     validate_core_claim,
+    TIME_ANCHOR_EXEMPT_PREDICATES,
 )
 from spectrue_core.llm.fallback import call_with_fallback
 import re

@@ -16,7 +16,7 @@ Tests the stance classification and conflict detection extracted in M119.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from spectrue_core.verification.evidence.evidence_stance import (
+from spectrue_core.use_cases.verification.scoring.evidence_stance import (
     CANONICAL_VERDICT_STATES,
     count_stance_evidence,
     derive_verdict_state_from_llm_score,

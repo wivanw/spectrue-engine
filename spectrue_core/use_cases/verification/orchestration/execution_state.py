@@ -16,24 +16,37 @@ class RetrievalHop:
     """A single retrieval hop for a claim."""
     hop_index: int
     query: str
-    locale: str
-    channels: list[EvidenceChannel]
-    search_depth: str
-    results_count: int
-    decision: str
-    decision_reason: str
-    cost_credits: float
+    decision: Any  # SufficiencyDecision
+    reason: str
+    phase_id: str | None = None
+    query_type: str | None = None
+    results: list[dict] = field(default_factory=list)
+    retrieval_eval: dict = field(default_factory=dict)
+    
+    # Optional fields for backward compatibility
+    locale: str = ""
+    channels: list[EvidenceChannel] = field(default_factory=list)
+    search_depth: str = ""
+    results_count: int = 0
+    cost_credits: float = 0.0
+
+    def __post_init__(self) -> None:
+        if not self.results_count and self.results:
+            self.results_count = len(self.results)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "hop_index": self.hop_index,
             "query": self.query,
+            "decision": self.decision.value if hasattr(self.decision, "value") else str(self.decision),
+            "reason": self.reason,
+            "phase_id": self.phase_id,
+            "query_type": self.query_type,
+            "results_count": self.results_count or len(self.results),
+            "retrieval_eval": self.retrieval_eval,
             "locale": self.locale,
             "channels": [c.value if hasattr(c, 'value') else str(c) for c in self.channels],
             "search_depth": self.search_depth,
-            "results_count": self.results_count,
-            "decision": self.decision,
-            "decision_reason": self.decision_reason,
             "cost_credits": self.cost_credits,
         }
 
@@ -106,7 +119,7 @@ class ClaimExecutionState:
         tavily_calls = 0
         for hop in self.hops:
             tavily_calls += 1
-            total_results += hop.results_count
+            total_results += (hop.results_count or len(hop.results))
 
         return {
             "claim_id": self.claim_id,

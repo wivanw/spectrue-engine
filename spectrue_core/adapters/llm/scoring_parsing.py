@@ -7,7 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from spectrue_core.domain.verification.verdict.model import (
+from spectrue_core.schema.verdict import (
     AssertionVerdict,
     ClaimVerdict,
     StructuredDebug,

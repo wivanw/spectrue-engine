@@ -132,7 +132,43 @@ def _compute_delta_utility(uncertainty: float, base_utility: float = 0.05) -> fl
 # FEATURE EXTRACTION FROM EVIDENCE INDEX
 # =============================================================================
 
+def extract_evidence_features(evidence_index: Any, claims: list[dict]) -> dict[str, float]:
+    """
+    Extracts summary features from the current evidence state for gating logic.
+    """
+    all_items = _collect_all_items(evidence_index)
+    n_evidence = len(all_items)
+    n_claims = len(claims)
 
+    if n_evidence == 0:
+        return {
+            "n_evidence": 0.0,
+            "n_claims": float(n_claims),
+            "unlabeled_ratio": 1.0,
+            "low_tier_ratio": 0.0,
+            "log_claims": math.log(max(1, n_claims)),
+        }
+
+    unlabeled = 0
+    low_tier = 0
+    for it in all_items:
+        # check stance
+        stance = getattr(it, "stance", None)
+        if stance is None:
+            unlabeled += 1
+        
+        # check tier
+        tier = getattr(it, "tier", "D")
+        if tier in ("C", "D"):
+            low_tier += 1
+
+    return {
+        "n_evidence": float(n_evidence),
+        "n_claims": float(n_claims),
+        "unlabeled_ratio": unlabeled / n_evidence,
+        "low_tier_ratio": low_tier / n_evidence,
+        "log_claims": math.log(max(1, n_claims)),
+    }
 
 
 # =============================================================================
