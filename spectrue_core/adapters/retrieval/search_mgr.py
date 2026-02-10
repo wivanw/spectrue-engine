@@ -16,7 +16,6 @@ from spectrue_core.utils.evidence import (
     needs_evidence_acquisition_ladder,
     extract_quote_candidates,
 )
-from spectrue_core.domain.evidence.signals import LocaleDecision
 from spectrue_core.domain.verification.search.types import SearchResponse
 from spectrue_core.domain.verification.search.search_policy import (
     build_context_from_sources,
@@ -25,7 +24,6 @@ from spectrue_core.domain.verification.search.search_policy import (
     prefer_fallback_results,
     should_fallback_news_to_general,
     SearchPolicyProfile,
-    resolve_profile_name,
 )
 from spectrue_core.scoring.budget_allocation import GlobalBudgetTracker
 from spectrue_core.utils.trace import Trace

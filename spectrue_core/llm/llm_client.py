@@ -32,7 +32,6 @@ from spectrue_core.billing.metering import LLMMeter
 from spectrue_core.billing.meter_context import get_current_llm_meter
 from spectrue_core.utils.trace import Trace
 from spectrue_core.llm.errors import LLMFailureKind, LLMCallError
-from spectrue_core.llm.failures import is_schema_failure
 from spectrue_core.llm.model_registry import ModelID
 
 logger = logging.getLogger(__name__)

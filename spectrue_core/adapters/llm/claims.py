@@ -16,7 +16,6 @@ from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.domain.claims.extraction import (
     DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS,
     ExtractionStats,
-    TIME_ANCHOR_EXEMPT_PREDICATES,
     extract_all_anchors,
     extract_keywords_deterministic,
     get_anchor_ids,

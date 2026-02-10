@@ -21,6 +21,8 @@ from spectrue_core.use_cases.verification.pipeline_types import PipelineContext
 from spectrue_core.domain.verification.agent import FactCheckerAgentProtocol
 from spectrue_core.utils.trace import Trace
 from spectrue_core.use_cases.verification.pipeline_metering import attach_cost_summary
+from spectrue_core.use_cases.verification.pipeline_input import apply_content_budget
+from spectrue_core.analysis.content_budgeter import TrimResult
 import time
 
 logger = logging.getLogger(__name__)

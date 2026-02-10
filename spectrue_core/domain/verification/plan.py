@@ -37,7 +37,6 @@ from enum import Enum
 from typing import Any
 
 from spectrue_core.domain.evidence.model import EvidenceChannel, UsePolicy
-from spectrue_core.domain.verification.search.types import SearchDepth
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +60,6 @@ class BudgetClass(str, Enum):
     """All phases (A/B/C/D). Maximum coverage. For high-priority claims."""
 
 
-from spectrue_core.domain.claims.policy import PolicyMode, ClaimPolicyDecision
 
 
 # ─────────────────────────────────────────────────────────────────────────────

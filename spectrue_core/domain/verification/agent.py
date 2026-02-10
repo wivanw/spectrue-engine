@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from typing import Protocol, Any, TYPE_CHECKING
-from spectrue_core.domain.evidence.model import OracleCheckResult
 
 if TYPE_CHECKING:
-    from spectrue_core.domain.claims.model import Claim
-    from spectrue_core.domain.evidence.model import ArticleIntent
+    pass
 
 
 class FactCheckerAgentProtocol(Protocol):

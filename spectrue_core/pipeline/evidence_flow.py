@@ -9,24 +9,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date
-from typing import Any, Awaitable, Callable
 
 import logging
 
 from spectrue_core.utils.embedding_service import EmbedService
 from spectrue_core.schema.verdict import (
-    AnalysisMode,
     EvidenceFlowInput,
     EvidenceCollection,
 )
-from spectrue_core.schema.signals import TimeWindow
-from spectrue_core.utils.temporal import (
-    label_evidence_timeliness,
-    normalize_time_window,
-)
-from spectrue_core.utils.source_utils import canonicalize_sources
 
 # Suppress deprecation warning - full migration to Bayesian scoring is future work
 import warnings
@@ -39,12 +29,6 @@ from spectrue_core.domain.verification.stance.aggregation import (
     apply_conflict_explainability_penalty,
 )
 from spectrue_core.domain.verification.calibration.calibration_registry import CalibrationRegistry
-from spectrue_core.utils.claim_selection import pick_ui_main_claim
-from spectrue_core.utils.evidence_pack import EvidencePack
-from spectrue_core.domain.verification.search.search_policy import (
-    SearchProfileName,
-    resolve_stance_pass_mode,
-)
 from spectrue_core.utils.trace import Trace
 
 # Extracted scoring helpers from previous refactoring
@@ -63,7 +47,10 @@ from spectrue_core.pipeline.mode import ScoringMode
 
 # Bayesian update logic (M119)
 from spectrue_core.use_cases.verification.verdict import apply_bayesian_update
-from spectrue_core.pipeline.mode import AnalysisMode
+from spectrue_core.use_cases.evidence.flow_logic import (
+    collect_evidence,
+    annotate_evidence_stance,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -87,19 +74,6 @@ def _aggregation_policy(search_mgr) -> dict:
         "penalty_temporal_weight": float(calibration.penalty_temporal_weight),
         "penalty_diversity_weight": float(calibration.penalty_diversity_weight),
     }
-
-
-
-
-
-
-
-
-
-from spectrue_core.use_cases.evidence.flow_logic import (
-    collect_evidence,
-    annotate_evidence_stance,
-)
 
 
 def rebuild_evidence_pack(

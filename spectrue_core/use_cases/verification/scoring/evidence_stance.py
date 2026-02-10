@@ -26,14 +26,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from spectrue_core.domain.verification.stance.derivation import (
-    CANONICAL_VERDICT_STATES,
-    count_stance_evidence,
-    derive_verdict_state_from_llm_score,
-    derive_verdict_from_score,
-    detect_evidence_conflict,
-    check_has_direct_evidence,
-)
 
 
 def assign_claim_rgba(

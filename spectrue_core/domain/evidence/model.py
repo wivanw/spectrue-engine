@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal, TypedDict
+from typing import Any, TypedDict
 
 
 class OracleStatus(str, Enum):
@@ -146,4 +146,3 @@ def find_best_tier_for_claim(
     return best_tier
 
 
-from typing import Any

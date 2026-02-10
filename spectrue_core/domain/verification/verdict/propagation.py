@@ -11,7 +11,6 @@ def propagate_belief(graph: Any) -> List[Any]:
     Propagates belief through the claim graph using message passing on DAG.
     Updates `propagated_belief` on each node.
     """
-    from .model import RGBAStatus # Just checking availability
     
     # Deferred imports to avoid circular deps if any
     # We use Any for graph to avoid concrete dependency on graph module in domain if possible,

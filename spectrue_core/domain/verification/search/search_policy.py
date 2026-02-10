@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, TYPE_CHECKING
+from typing import Iterable
 
 from spectrue_core.domain.verification.verdict.model import AnalysisMode
 from spectrue_core.domain.claims.model import (
@@ -26,6 +26,7 @@ from .types import (
     SearchProfileName,
     StancePassMode,
 )
+from spectrue_core.domain.verification.verdict.model import resolve_stance_pass_mode
 
 
 # Re-export for backward compatibility
@@ -332,9 +333,6 @@ def decide_claim_policy(metadata: ClaimMetadata | None) -> ClaimPolicyDecision:
         )
 
     return ClaimPolicyDecision(mode=PolicyMode.FULL, reason_codes=["default_worthiness"])
-
-
-from spectrue_core.domain.verification.verdict.model import resolve_stance_pass_mode
 
 
 def rerank_search_results(

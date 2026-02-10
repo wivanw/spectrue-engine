@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable, Literal, TYPE_CHECKING
 from spectrue_core.domain.verification.verdict.model import AnalysisMode
 
 if TYPE_CHECKING:
-    from spectrue_core.utils.trace import Trace
+    pass
 
 logger = logging.getLogger(__name__)
 

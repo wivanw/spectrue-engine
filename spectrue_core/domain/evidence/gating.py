@@ -7,7 +7,6 @@ from typing import Any
 import math
 
 from .weights import StanceWeights, ClusterWeights, DEFAULT_STANCE_WEIGHTS, DEFAULT_CLUSTER_WEIGHTS
-from .features import extract_evidence_features
 
 
 # =============================================================================

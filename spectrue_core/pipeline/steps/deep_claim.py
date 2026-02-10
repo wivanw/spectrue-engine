@@ -16,8 +16,6 @@ evaluated independently with its own ClaimFrame and JudgeOutput.
 
 from __future__ import annotations
 
-import asyncio
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,9 +23,6 @@ from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.use_cases.claims.deep_judge import (
     summarize_evidence_for_claims,
     judge_claims_independently,
-    _root_cause,
-    _is_format_error,
-    _extract_missing_fields,
     _build_error_payload,
 )
 from spectrue_core.pipeline.mode import ScoringMode
@@ -49,7 +44,6 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.pipeline.claims.claim_frame_builder import (
     build_claim_frames_from_pipeline,
 )
-from spectrue_core.llm.model_registry import ModelID
 
 
 @dataclass

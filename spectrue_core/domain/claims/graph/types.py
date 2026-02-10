@@ -18,11 +18,9 @@ Dataclasses for claim graph nodes, edges, and results.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Dict, Literal, Any
 
 from .nodes import ClaimNode, ClaimPreGraphMeta, ClaimPostGraphMeta
-from .edges import EdgeRelation, CandidateEdge, TypedEdge, RELATION_MULTIPLIERS, STRUCTURAL_RELATIONS
+from .edges import TypedEdge
 
 
 

@@ -27,7 +27,7 @@ Beliefs are represented in log-odds (logit) space where updates become additive:
 Posterior(log-odds) = Prior(log-odds) + Evidence(log-odds)
 ```
 
-**Code location:** `spectrue_core/scoring/belief.py` → `prob_to_log_odds()`, `update_belief()`
+**Code location:** `spectrue_core/domain/verification/verdict/belief.py` → `prob_to_log_odds()`, `update_belief()`
 
 **Why log-odds:**
 - Additive updates (vs multiplicative in probability space)
@@ -49,7 +49,7 @@ class BeliefState:
     confidence: float  # Meta-certainty [0, 1]
 ```
 
-**Code location:** `spectrue_core/schema/scoring.py`
+**Code location:** `spectrue_core/schema/verdict.py`
 
 ---
 
@@ -68,7 +68,7 @@ x₀ = 0.5      # Midpoint
 L_max = 2.0   # Maximum log-odds impact
 ```
 
-**Code location:** `spectrue_core/scoring/belief.py` → `sigmoid_impact()`
+**Code location:** `spectrue_core/domain/verification/verdict/belief.py` → `sigmoid_impact()`
 
 > ⚠️ **Epistemological Note:** This is an **engineering decision** inspired by 
 > logistic weighting, NOT derived from Bayesian inference or Pearl's framework.
@@ -88,7 +88,7 @@ if consensus.source_count >= 2:
     posterior = min(posterior, consensus_limit)
 ```
 
-**Code location:** `spectrue_core/scoring/belief.py` → `apply_consensus_bound()`
+**Code location:** `spectrue_core/domain/verification/verdict/belief.py` → `apply_consensus_bound()`
 
 > ⚠️ **Epistemological Note:** This is a **hard constraint**, NOT a Bayesian update.
 > It implements the principle that a single article cannot exceed scientific consensus.
@@ -110,7 +110,7 @@ For each node in topological order:
 sign = -1 if CONTRADICTS else +1
 ```
 
-**Code location:** `spectrue_core/graph/propagation.py` → `propagate_belief()`
+**Code location:** `spectrue_core/domain/verification/verdict/propagation.py` → `propagate_belief()`
 
 **Formal basis:**
 - Single-pass BP is exact for DAGs (no loopy approximation needed)
@@ -123,10 +123,10 @@ sign = -1 if CONTRADICTS else +1
 
 | Doc Step | Runtime Behavior | Code Location |
 |----------|------------------|---------------|
-| Topological sort for DAG processing | `ClaimContextGraph.topological_sort()` | `spectrue_core/graph/context.py` |
-| Message passing with edge sign/weight | `message = source_log_odds * edge.weight * sign` | `spectrue_core/graph/propagation.py` |
-| Update propagated belief | `node.propagated_belief = local + Σ messages` | `spectrue_core/graph/propagation.py` |
-| Use in scoring flow | Context graph passed into evidence pipeline | `spectrue_core/verification/pipeline_evidence.py` |
+| Topological sort for DAG processing | `ClaimContextGraph.topological_sort()` | `spectrue_core/adapters/graph/context.py` |
+| Message passing with edge sign/weight | `message = source_log_odds * edge.weight * sign` | `spectrue_core/domain/verification/verdict/propagation.py` |
+| Update propagated belief | `node.propagated_belief = local + Σ messages` | `spectrue_core/domain/verification/verdict/propagation.py` |
+| Use in scoring flow | Context graph passed into evidence pipeline | `spectrue_core/pipeline/evidence_flow.py` |
 
 ---
 
@@ -152,7 +152,7 @@ G_final = sigmoid(L_final)
 - `prior_score = -1.0`: Unknown. Update is SKIPPED ($W_{prior} = 0.0$).
 - `prior_score = 0.5`: Neutral. Informative signal (contribution to $L_{final}$ is $0$).
 
-**Code location:** `spectrue_core/agents/skills/scoring.py`
+**Code location:** `spectrue_core/adapters/llm/scoring.py`
 
 > **Reference:** Good, I.J. (1950). *Probability and the Weighing of Evidence*.
 > This implements a conservative Bayesian update where internal model knowledge 
@@ -173,7 +173,7 @@ Each dimension is tracked independently:
 | B (Honesty) | Presentation honesty | Neutral (0.5) |
 | A (Explainability) | Evidence availability | Neutral (0.5) |
 
-**Code location:** `spectrue_core/scoring/rgba_belief.py`
+**Code location:** `spectrue_core/domain/verification/verdict/rgba_belief.py`
 
 > ⚠️ **Epistemological Note:** The independence assumption is an **engineering choice**.
 > Factual accuracy may correlate with presentation honesty in practice.
@@ -261,7 +261,7 @@ There are no additional heuristics or early-stop rules beyond `S < S_min`.
 - `extract_batch_finished(success_count)`
 - `bind_completed(stage)`
 
-**Code location:** `spectrue_core/verification/retrieval/fixed_pipeline.py`,
+**Code location:** `spectrue_core/adapters/retrieval/extraction_coordinator.py`,
 `spectrue_core/pipeline/steps/retrieval/web_search.py`
 
 ---
@@ -280,7 +280,7 @@ Escalation strategy to enrich sources with quotes:
 3. Extract quotes (semantic or heuristic)
 4. Use Bayesian EVOI model to decide when to stop fetching
 
-**Code location:** `spectrue_core/verification/search/search_mgr.py` → `apply_evidence_acquisition_ladder()`
+**Code location:** `spectrue_core/adapters/retrieval/search_mgr.py` → `apply_evidence_acquisition_ladder()`
 
 #### Bayesian Budget Allocation
 
@@ -359,7 +359,7 @@ results, emitted, dropped = skeleton_to_claims(skeleton)
 # dropped claims logged with reason_codes
 ```
 
-**Code location:** `spectrue_core/agents/skills/coverage_skeleton.py`
+**Code location:** `spectrue_core/adapters/llm/coverage_skeleton.py`
 
 > ⚠️ **Epistemological Note:** The tolerance threshold (0.5) and regex patterns are
 > **engineering choices** tuned for precision/recall balance. Quote detection pattern
@@ -403,7 +403,7 @@ def validate_core_claim(claim: dict) -> tuple[bool, list[str]]:
 TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence"}
 ```
 
-**Code location:** `spectrue_core/agents/skills/claims.py`
+**Code location:** `spectrue_core/adapters/llm/claims.py`
 
 > ⚠️ **Epistemological Note:** These are **structural rules**, not truth heuristics.
 > A claim passing validation is retrievable and scorable, not necessarily true.
@@ -416,9 +416,9 @@ TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence"}
 
 | Paper | Concept Used | Code Location |
 |-------|--------------|---------------|
-| [Pearl (1988)](https://www.sciencedirect.com/book/9780080514895/probabilistic-reasoning-in-intelligent-systems) | Belief Propagation on DAGs | `graph/propagation.py` |
-| [ReAct](https://arxiv.org/abs/2210.03629) | Interleaved search-reason loop | `verification/phase_runner.py` |
-| [Self-RAG](https://arxiv.org/abs/2310.11511) | Adaptive retrieval stopping | `verification/pipeline_evidence.py` |
+| [Pearl (1988)](https://www.sciencedirect.com/book/9780080514895/probabilistic-reasoning-in-intelligent-systems) | Belief Propagation on DAGs | `domain/verification/verdict/propagation.py` |
+| [ReAct](https://arxiv.org/abs/2210.03629) | Interleaved search-reason loop | `use_cases/verification/orchestration/phase_runner.py` |
+| [Self-RAG](https://arxiv.org/abs/2310.11511) | Adaptive retrieval stopping | `pipeline/evidence_flow.py` |
 
 ### Datasets for Terminology
 
@@ -467,7 +467,7 @@ TIME_ANCHOR_EXEMPT_PREDICATES = {"quote", "policy", "ranking", "existence"}
 
 **Status:** DEPRECATED
 
-Replaced by Bayesian Scoring. See `spectrue_core.scoring.belief`.
+Replaced by Bayesian Scoring. See `spectrue_core.domain.verification.verdict.belief`.
 
 ---
 
@@ -485,7 +485,7 @@ We treat tier as a calibrated *prior reliability signal* for how interpretable/d
 class of sources involved.
 
 Deterministic adjustment is applied in the explainability pipeline (see
-`spectrue_core/verification/evidence/evidence_scoring.py`). The exact formula
+`spectrue_core/utils/evidence_scoring.py`). The exact formula
 may evolve with calibration; treat tier-based explainability as a deterministic
 post-processing step rather than a verdict driver.
 

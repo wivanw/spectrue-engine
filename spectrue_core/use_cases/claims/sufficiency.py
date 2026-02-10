@@ -14,8 +14,6 @@ enabling early exit from progressive widening.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
 

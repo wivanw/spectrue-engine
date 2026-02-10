@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from spectrue_core.adapters.llm.claim_judge import ClaimJudgeSkill
@@ -34,7 +35,6 @@ def _root_cause(exc: Exception) -> Exception:
         current = next_exc
 
 
-import re
 _SCHEMA_MISSING_RE = re.compile(r"\$\.(?P<field>[A-Za-z0-9_\\[\\].]+): missing required field")
 
 

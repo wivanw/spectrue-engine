@@ -9,7 +9,6 @@ from .model import (
     BeliefState,
     ConsensusState,
     prob_to_log_odds,
-    log_odds_to_prob,
 )
 
 
