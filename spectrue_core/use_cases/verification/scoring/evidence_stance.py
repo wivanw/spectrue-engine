@@ -23,14 +23,6 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from spectrue_core.pipeline.mode import ScoringMode
 
-from spectrue_core.domain.verification.stance.derivation import (
-    CANONICAL_VERDICT_STATES,
-    count_stance_evidence,
-    derive_verdict_state_from_llm_score,
-    derive_verdict_from_score,
-    detect_evidence_conflict,
-    check_has_direct_evidence,
-)
 
 
 logger = logging.getLogger(__name__)

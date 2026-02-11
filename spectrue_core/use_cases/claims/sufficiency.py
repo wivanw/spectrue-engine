@@ -26,11 +26,6 @@ from spectrue_core.domain.claims.sufficiency import (
     SufficiencyDecisionResult,
     evidence_sufficiency,
     _extract_domain,
-    BASE_PRIOR_P,
-    SUFFICIENCY_P_THRESHOLD,
-    TIER_SUPPORT_PROBABILITIES,
-    verdict_ready_for_claim,
-    is_origin_source,
 )
 from spectrue_core.domain.verification.search.search_policy import SearchPolicyProfile
 

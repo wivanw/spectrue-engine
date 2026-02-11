@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 from spectrue_core.pipeline.steps.evidence_spillover import EvidenceSpilloverStep
 from spectrue_core.domain.evidence.spillover import (
-    _claim_topic_signature,
-    _topic_overlap_boost,
+    claim_topic_signature,
+    topic_overlap_boost,
 )
 from spectrue_core.pipeline.core import PipelineContext, PipelineMode
 from spectrue_core.pipeline.mode import AnalysisMode
@@ -21,7 +21,7 @@ def test_claim_topic_signature_extraction():
         "retrieval_seed_terms": ["election fraud"]
     }
     
-    sig = _claim_topic_signature(claim)
+    sig = claim_topic_signature(claim)
     
     expected = {
         "topic_group:politics",
@@ -42,19 +42,19 @@ def test_topic_overlap_boost_calculation():
     c4 = {"topic_group": "sports"} # No overlap
     
     # 1 overlap (topic_group) -> 0.02
-    assert _topic_overlap_boost(c1, c2) == 0.02
+    assert topic_overlap_boost(c1, c2) == 0.02
     
     # 1 overlap (entity) -> 0.02
-    assert _topic_overlap_boost(c1, c3) == 0.02
+    assert topic_overlap_boost(c1, c3) == 0.02
     
     # 0 overlap -> 0.0
-    assert _topic_overlap_boost(c1, c4) == 0.0
+    assert topic_overlap_boost(c1, c4) == 0.0
     
     # Max cap test
     c_heavy_1 = {"metadata": {"topic_tags": [f"t{i}" for i in range(10)]}}
     c_heavy_2 = {"metadata": {"topic_tags": [f"t{i}" for i in range(10)]}}
     # 10 overlaps * 0.02 = 0.20, should cap at 0.10
-    assert _topic_overlap_boost(c_heavy_1, c_heavy_2) == 0.10
+    assert topic_overlap_boost(c_heavy_1, c_heavy_2) == 0.10
 
 @pytest.mark.asyncio
 async def test_evidence_spillover_ranking_with_boost():

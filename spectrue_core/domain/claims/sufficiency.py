@@ -10,7 +10,7 @@ from spectrue_core.domain.claims.model import (
     VerificationTarget,
     EvidenceChannel,
 )
-from spectrue_core.tools.trusted_sources import get_domain_tier, is_authoritative
+from spectrue_core.tools.trusted_sources import get_domain_tier
 from spectrue_core.domain.verification.verdict.belief import prob_to_log_odds, log_odds_to_prob
 
 logger = logging.getLogger(__name__)
