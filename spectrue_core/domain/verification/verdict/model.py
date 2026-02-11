@@ -5,9 +5,25 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from .belief import (
-    BeliefState,
+    BeliefState as BeliefState,
+    ConsensusState as ConsensusState,
+    prob_to_log_odds as prob_to_log_odds,
+    log_odds_to_prob as log_odds_to_prob,
+    update_belief as update_belief,
+    process_updates as process_updates,
+    calculate_evidence_impact as calculate_evidence_impact,
+    sigmoid_impact as sigmoid_impact,
 )
-from .rgba import normalize_rgba
+from .rgba import (
+    RGBAStatus as RGBAStatus, 
+    RGBAMetric as RGBAMetric, 
+    RGBAResult as RGBAResult, 
+    normalize_rgba as normalize_rgba
+)
+from .audit import (
+    ClaimAudit as ClaimAudit, 
+    EvidenceAudit as EvidenceAudit
+)
 
 
 # --- Base Verification Types ---

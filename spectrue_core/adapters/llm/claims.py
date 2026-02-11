@@ -14,12 +14,13 @@ from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.domain.claims.extraction import (
-    DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS,
-    ExtractionStats,
-    extract_all_anchors,
-    extract_keywords_deterministic,
-    get_anchor_ids,
-    validate_core_claim,
+    DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS as DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS,
+    ExtractionStats as ExtractionStats,
+    extract_all_anchors as extract_all_anchors,
+    extract_keywords_deterministic as extract_keywords_deterministic,
+    get_anchor_ids as get_anchor_ids,
+    validate_core_claim as validate_core_claim,
+    TIME_ANCHOR_EXEMPT_PREDICATES as TIME_ANCHOR_EXEMPT_PREDICATES,
 )
 from spectrue_core.llm.fallback import call_with_fallback
 import re

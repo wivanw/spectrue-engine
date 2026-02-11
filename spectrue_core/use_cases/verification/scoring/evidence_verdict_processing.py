@@ -37,7 +37,20 @@ if TYPE_CHECKING:
 
 # M133: compute_explainability_tier_adjustment removed
 from spectrue_core.utils.evidence_scoring import (
-    norm_id,
+    norm_id as norm_id,
+    is_prob as is_prob,
+    logit as logit,
+    sigmoid as sigmoid,
+    claim_text as claim_text,
+    explainability_factor_for_tier as explainability_factor_for_tier,
+    tier_rank as tier_rank,
+    compute_article_g_from_anchor as compute_article_g_from_anchor,
+    select_anchor_for_article_g as select_anchor_for_article_g,
+    TIER_A_BASELINE as TIER_A_BASELINE,
+)
+from spectrue_core.domain.evidence.model import (
+    get_tier_rank as get_tier_rank,
+    find_best_tier_for_claim as find_best_tier_for_claim,
 )
 
 logger = logging.getLogger(__name__)

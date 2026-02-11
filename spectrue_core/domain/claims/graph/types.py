@@ -20,7 +20,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .nodes import ClaimNode, ClaimPreGraphMeta, ClaimPostGraphMeta
-from .edges import TypedEdge
+from .edges import (
+    EdgeRelation as EdgeRelation, 
+    CandidateEdge as CandidateEdge, 
+    TypedEdge as TypedEdge, 
+    RELATION_MULTIPLIERS as RELATION_MULTIPLIERS, 
+    STRUCTURAL_RELATIONS as STRUCTURAL_RELATIONS
+)
 
 
 

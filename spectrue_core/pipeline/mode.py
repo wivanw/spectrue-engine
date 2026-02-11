@@ -31,6 +31,10 @@ Usage:
 from __future__ import annotations
 
 from spectrue_core.use_cases.types import PipelineMode, SearchDepth
+from spectrue_core.domain.verification.verdict.model import (
+    AnalysisMode as AnalysisMode,
+    ScoringMode as ScoringMode,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -20,12 +20,17 @@ from spectrue_core.domain.claims.model import (
     VerificationTarget,
 )
 from spectrue_core.domain.claims.sufficiency import (
-    SufficiencyStatus,
-    SufficiencyDecision,
-    SufficiencyResult,
-    SufficiencyDecisionResult,
-    evidence_sufficiency,
-    _extract_domain,
+    SufficiencyStatus as SufficiencyStatus,
+    SufficiencyDecision as SufficiencyDecision,
+    SufficiencyResult as SufficiencyResult,
+    SufficiencyDecisionResult as SufficiencyDecisionResult,
+    evidence_sufficiency as evidence_sufficiency,
+    _extract_domain as _extract_domain,
+    BASE_PRIOR_P as BASE_PRIOR_P,
+    SUFFICIENCY_P_THRESHOLD as SUFFICIENCY_P_THRESHOLD,
+    TIER_SUPPORT_PROBABILITIES as TIER_SUPPORT_PROBABILITIES,
+    verdict_ready_for_claim as verdict_ready_for_claim,
+    is_origin_source as is_origin_source,
 )
 from spectrue_core.domain.verification.search.search_policy import SearchPolicyProfile
 

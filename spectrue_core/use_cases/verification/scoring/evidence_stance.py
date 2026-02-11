@@ -24,6 +24,16 @@ if TYPE_CHECKING:
     from spectrue_core.pipeline.mode import ScoringMode
 
 
+from spectrue_core.domain.verification.stance.derivation import (
+    CANONICAL_VERDICT_STATES as CANONICAL_VERDICT_STATES,
+    count_stance_evidence as count_stance_evidence,
+    derive_verdict_state_from_llm_score as derive_verdict_state_from_llm_score,
+    derive_verdict_from_score as derive_verdict_from_score,
+    detect_evidence_conflict as detect_evidence_conflict,
+    check_has_direct_evidence as check_has_direct_evidence,
+)
+
+
 
 logger = logging.getLogger(__name__)
 
