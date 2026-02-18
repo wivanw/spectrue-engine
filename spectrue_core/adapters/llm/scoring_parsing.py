@@ -19,6 +19,7 @@ from spectrue_core.schema.verdict import (
 from spectrue_core.adapters.llm.scoring_sanitization import maybe_drop_style_section, strip_internal_source_markers
 from spectrue_core.utils.trace import Trace
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,45 @@ def safe_score(val, default: float = -1.0) -> float:
     if default < 0 and (f < 0.0 or f > 1.0):
         return default
     return max(0.0, min(1.0, f))
+
+
+def _normalize_summary_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _normalize_simple_summary(value: object, *, fallback: str = "") -> str:
+    text = _normalize_summary_text(value)
+    if not text:
+        text = _normalize_summary_text(fallback)
+    if not text:
+        return ""
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+
+    bullets: list[str] = []
+    numbered_re = re.compile(r"^\d+[\.\)]\s+")
+    for line in lines:
+        body = line
+        if body.startswith("- "):
+            body = body[2:].strip()
+        elif body.startswith("* "):
+            body = body[2:].strip()
+        elif body.startswith("• "):
+            body = body[2:].strip()
+        else:
+            body = numbered_re.sub("", body).strip()
+        if body:
+            bullets.append(f"- {body}")
+        if len(bullets) >= 5:
+            break
+
+    return "\n".join(bullets) if bullets else ""
 
 
 def clamp_score_evidence_result(result: dict, *, scoring_mode: ScoringMode | str = ScoringMode.STANDARD) -> dict:
@@ -88,6 +128,13 @@ def clamp_score_evidence_result(result: dict, *, scoring_mode: ScoringMode | str
 
     result["danger_score"] = safe_score(result.get("danger_score"), default=-1.0)
     result["style_score"] = safe_score(result.get("style_score"), default=-1.0)
+    rationale_text = _normalize_summary_text(result.get("rationale"))
+    result["rationale"] = rationale_text
+    result["expert_summary"] = _normalize_summary_text(result.get("expert_summary")) or rationale_text
+    result["simple_summary"] = _normalize_simple_summary(
+        result.get("simple_summary"),
+        fallback=rationale_text,
+    )
 
     # Canonical verdict sets
     CANONICAL_VERDICTS = {"verified", "refuted", "ambiguous"}
