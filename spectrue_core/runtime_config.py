@@ -351,6 +351,10 @@ class DeepV2Config:
     # Re-stance for transferred evidence
     restace_transferred_top_k: int = 2
 
+    tiered_search_enabled: bool = True
+    freshness_gating_enabled: bool = True
+    decision_impact_logging_enabled: bool = True
+
 
 @dataclass(frozen=True)
 class ClaimGraphConfig:
@@ -569,6 +573,15 @@ class EngineRuntimeConfig:
             restace_transferred_top_k=_parse_int(
                 os.getenv("DEEP_V2_RESTANCE_TRANSFERRED_TOP_K"), default=2, min_v=1, max_v=5
             ),
+            tiered_search_enabled=_parse_bool(
+                os.getenv("DEEP_V2_TIERED_SEARCH"), default=True
+            ),
+            freshness_gating_enabled=_parse_bool(
+                os.getenv("DEEP_V2_FRESHNESS_GATING"), default=True
+            ),
+            decision_impact_logging_enabled=_parse_bool(
+                os.getenv("DEEP_V2_DECISION_IMPACT_LOGGING"), default=True
+            ),
         )
 
         # Model assignments (can be overridden via ENV)
@@ -742,6 +755,10 @@ class EngineRuntimeConfig:
                 "representative_max_k": int(self.deep_v2.representative_max_k),
                 "precision_top_k": int(self.deep_v2.precision_top_k),
                 "corroboration_top_k": int(self.deep_v2.corroboration_top_k),
+                "restace_transferred_top_k": int(self.deep_v2.restace_transferred_top_k),
+                "tiered_search_enabled": bool(self.deep_v2.tiered_search_enabled),
+                "freshness_gating_enabled": bool(self.deep_v2.freshness_gating_enabled),
+                "decision_impact_logging_enabled": bool(self.deep_v2.decision_impact_logging_enabled),
             },
             "claim_graph": {
                 # enabled flag removed - ClaimGraph always on
