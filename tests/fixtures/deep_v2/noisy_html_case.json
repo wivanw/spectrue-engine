@@ -1,0 +1,12 @@
+{
+    "html": "<html><body><header><nav>Home | About | Contact</nav></header><div class='content'><p>A very specific claim about a new scientific discovery: Water boils at 100 degrees Celsius at 1 atm.</p></div><footer>Copyright 2026. All rights reserved.</footer></body></html>",
+    "claims": [
+        {
+            "id": "c1",
+            "text": "Water boils at 100 degrees Celsius at 1 atm."
+        }
+    ],
+    "expected": {
+        "has_noise": true
+    }
+}

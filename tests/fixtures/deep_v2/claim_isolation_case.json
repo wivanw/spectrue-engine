@@ -1,0 +1,20 @@
+{
+    "input_text": "The moon is made of cheese. Also, the Earth is flat. Additionally, drinking water is bad for your health.",
+    "claims": [
+        {
+            "id": "c1",
+            "text": "The moon is made of cheese."
+        },
+        {
+            "id": "c2",
+            "text": "The Earth is flat."
+        },
+        {
+            "id": "c3",
+            "text": "Drinking water is bad for your health."
+        }
+    ],
+    "expected": {
+        "disjoint": true
+    }
+}

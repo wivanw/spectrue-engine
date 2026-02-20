@@ -1,0 +1,12 @@
+{
+    "input_text": "A recent study found that the mRNA vaccine alters human DNA.",
+    "claims": [
+        {
+            "id": "c1",
+            "text": "The mRNA vaccine alters human DNA."
+        }
+    ],
+    "expected": {
+        "escalation_required": true
+    }
+}
