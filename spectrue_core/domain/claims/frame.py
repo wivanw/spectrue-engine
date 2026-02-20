@@ -211,6 +211,7 @@ class JudgeOutput:
     confidence: float  # 0..1
     verdict: str  # Supported, Refuted, NEI, etc.
     explanation: str
+    simple_summary: str = ""
     sources_used: tuple[str, ...] = ()  # subset of EvidenceItemFrame.url
     missing_evidence: tuple[str, ...] = ()
 

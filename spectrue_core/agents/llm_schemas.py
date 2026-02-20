@@ -67,6 +67,8 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
         "explainability_score",
         "danger_score",
         "style_score",
+        "simple_summary",
+        "expert_summary",
         "rationale",
     ],
     "properties": {
@@ -122,6 +124,14 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
         "explainability_score": {"type": "number", "minimum": 0, "maximum": 1},
         "danger_score": {"type": "number", "minimum": 0, "maximum": 1},
         "style_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "simple_summary": {
+            "type": "string",
+            "description": "Simplified summary for non-expert users (max 5 bullet points, no jargon).",
+        },
+        "expert_summary": {
+            "type": "string",
+            "description": "Detailed technical summary for expert mode.",
+        },
         "rationale": {"type": "string"},
     },
 }

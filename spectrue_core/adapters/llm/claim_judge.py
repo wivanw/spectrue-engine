@@ -165,7 +165,11 @@ class ClaimJudgeSkill:
         confidence = float(response.get("confidence", 0.3))
         # Normalize verdict to canonical enum (SUPPORT/REFUTE/MIXED/NEI)
         verdict = normalize_verdict_enum(response.get("verdict"))
-        explanation = str(response.get("explanation", ""))
+        # Extract summary fields
+        simple_summary = str(response.get("simple_summary", ""))
+        
+        # Extract explanation: prefer response field, fallback to simple_summary
+        explanation = str(response.get("explanation", simple_summary))
 
         # Extract sources_used and missing_evidence
         sources_used = tuple(str(s) for s in response.get("sources_used", []))
@@ -177,6 +181,7 @@ class ClaimJudgeSkill:
             confidence=confidence,
             verdict=verdict,
             explanation=explanation,
+            simple_summary=simple_summary,
             sources_used=sources_used,
             missing_evidence=missing_evidence,
         )
@@ -214,6 +219,7 @@ class ClaimJudgeSkill:
                 confidence=output.confidence,
                 verdict=output.verdict,
                 explanation=output.explanation,
+                simple_summary=output.simple_summary,
                 sources_used=valid_sources,
                 missing_evidence=output.missing_evidence,
             )

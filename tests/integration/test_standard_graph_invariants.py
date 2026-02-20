@@ -51,6 +51,8 @@ async def test_standard_result_contract_fields():
         "judge_mode": ScoringMode.STANDARD,
         "rgba": [0.1, 0.2, 0.3, 0.4],
         "rationale": "Example rationale",
+        "simple_summary": "- Checked multiple sources.\n- Evidence is mixed.",
+        "expert_summary": "Detailed analysis of source agreement and uncertainty.",
         "sources": [{"url": "https://example.com", "title": "Example"}],
         "anchor_claim": {"id": "c1", "text": "Example claim"},
         "claim_verdicts": [
@@ -75,6 +77,9 @@ async def test_standard_result_contract_fields():
     assert isinstance(final_result["details"], list)
     assert final_result["anchor_claim"]["id"] == "c1"
     assert final_result["rgba"] == [0.1, 0.2, 0.3, 0.4]
+    assert isinstance(final_result["summary"], dict)
+    assert final_result["summary"]["simple"].startswith("- ")
+    assert "Detailed analysis" in final_result["summary"]["expert"]
     assert "deep_analysis" not in final_result
     assert "cost_summary" in final_result
     assert final_result.get("credits") == 2

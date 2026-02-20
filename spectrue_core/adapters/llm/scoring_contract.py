@@ -92,6 +92,9 @@ Set `verified_score` to **0.5** as a placeholder.
 - **Tone**: Natural, journalistic style.
 - **FORBIDDEN TERMS**: Do not use "JSON", "dataset", "primary source", "relevance score", "cap" in readable text.
   - Instead of "lack of primary source", say "no official confirmation found".
+- You MUST generate TWO summaries:
+  1) `simple_summary`: Max 5 bullet points, one sentence per bullet, no technical jargon, no absolute "true/false" language.
+  2) `expert_summary`: Detailed technical narrative for expert readers.
 
 # OUTPUT FORMAT
 Return valid JSON:
@@ -103,6 +106,8 @@ Return valid JSON:
   "explainability_score": 0.8,
   "danger_score": 0.1,
   "style_score": 0.9,
+  "simple_summary": "- ...\\n- ...",
+  "expert_summary": "Detailed technical summary in {lang_name}...",
   "rationale": "Global summary in {lang_name}..."
 }}
 

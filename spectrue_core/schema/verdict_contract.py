@@ -58,6 +58,13 @@ class VerdictHighlight(SchemaModel):
     note: str = Field(default="")
 
 
+class VerdictSummary(SchemaModel):
+    """Dual summary payload for default and expert presentation modes."""
+
+    simple: str = Field(default="", description="Simplified 5-bullet summary")
+    expert: str = Field(default="", description="Detailed technical summary")
+
+
 class Verdict(SchemaModel):
     """
     Complete verdict output - the Data Contract.
@@ -79,7 +86,8 @@ class Verdict(SchemaModel):
     time_window: TimeWindow | None = None
     locale_decision: LocaleDecision | None = None
 
-    summary: str = Field(default="")
+    # Backward compatible: legacy string or structured dual summary
+    summary: VerdictSummary | str = Field(default="")
     rationale: str = Field(default="")
     highlights: list[VerdictHighlight] = Field(default_factory=list)
 
@@ -139,12 +147,17 @@ class Verdict(SchemaModel):
 
     def to_summary_dict(self) -> dict[str, Any]:
         """Export as summary dict with derived status."""
+        summary_value: dict[str, Any] | str
+        if isinstance(self.summary, VerdictSummary):
+            summary_value = self.summary.model_dump()
+        else:
+            summary_value = self.summary
         return {
             "status": self.status_default.value,
             "veracity_score": self.veracity_score,
             "confidence_score": self.confidence_score,
             "error_state": self.error_state.value,
             "decision_path": self.decision_path.value,
-            "summary": self.summary,
+            "summary": summary_value,
             "has_evidence": self.has_evidence(),
         }
