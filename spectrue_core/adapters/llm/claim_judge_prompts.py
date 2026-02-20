@@ -232,7 +232,6 @@ Return JSON with:
 - confidence: 0.0-1.0
 - verdict: "Supported|Refuted|Mixed|NEI"
 - simple_summary: 1-3 bullet points for non-experts
-- expert_summary: STRUCTURED analysis (Evidence, Gaps, Verdict, Style)
 - sources_used: [urls]
 - missing_evidence: [text]
 
@@ -284,13 +283,7 @@ Increase R for claims that:
 
 ## EXPLANATION FORMAT
 
-Generate two versions:
-1. **simple_summary**: 1-3 concise bullet points for a general audience. No jargon.
-2. **expert_summary**: STRUCTURED analysis:
-   - "Evidence: [cite specific sources/domains]"
-   - "Gaps: [what's missing]"
-   - "Verdict: [conclusion]"
-   - "Style: [manipulation issues]" — ONLY if B < 0.7
+Generate **simple_summary**: 1-3 concise bullet points for a general audience. No jargon.
 
 ## ABSOLUTE RULES
 

@@ -830,11 +830,6 @@ CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": "Human-readable explanation of the verdict",
         },
-        },
-        "expert_summary": {
-            "type": "string",
-            "description": "Detailed technical analysis for expert mode.",
-        },
         "prior_score": {
             "type": "number",
             "minimum": -1,
