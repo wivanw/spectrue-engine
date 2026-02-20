@@ -226,8 +226,17 @@ Claim Language: {frame.claim_language}
 {stats_section}
 
 ## OUTPUT FORMAT
-Return JSON with: claim_id, rgba, confidence, verdict, explanation, sources_used, missing_evidence.
-Explanation MUST be in {ui_locale} (user's interface language).
+Return JSON with: 
+- claim_id
+- rgba: {{R, G, B, A}}
+- confidence: 0.0-1.0
+- verdict: "Supported|Refuted|Mixed|NEI"
+- simple_summary: 1-3 bullet points for non-experts
+- expert_summary: STRUCTURED analysis (Evidence, Gaps, Verdict, Style)
+- sources_used: [urls]
+- missing_evidence: [text]
+
+All textual explanations MUST be in {ui_locale} (user's interface language).
 """
 
 
@@ -275,16 +284,18 @@ Increase R for claims that:
 
 ## EXPLANATION FORMAT
 
-Use structured labels:
-- "Evidence: [cite specific sources/domains]"
-- "Gaps: [what's missing]"
-- "Verdict: [conclusion]"
-- "Style: [manipulation issues]" — ONLY if B < 0.7
+Generate two versions:
+1. **simple_summary**: 1-3 concise bullet points for a general audience. No jargon.
+2. **expert_summary**: STRUCTURED analysis:
+   - "Evidence: [cite specific sources/domains]"
+   - "Gaps: [what's missing]"
+   - "Verdict: [conclusion]"
+   - "Style: [manipulation issues]" — ONLY if B < 0.7
 
 ## ABSOLUTE RULES
 
 1. **G MUST match verdict**: Supported→0.7-1.0, Refuted→0.0-0.3, Mixed→0.3-0.7, NEI/Unverifiable→-1
 2. **sources_used MUST be from evidence list** — never invent URLs
-3. **Explanation in claim's language** — match exactly
+3. **Explanations in ui_locale language** — match exactly
 4. **Never all zeros** — use -1 for "cannot assess"
 5. **-1 over 0.5** — honest uncertainty is better than fake neutrality"""

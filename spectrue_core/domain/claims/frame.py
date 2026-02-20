@@ -212,6 +212,7 @@ class JudgeOutput:
     verdict: str  # Supported, Refuted, NEI, etc.
     explanation: str
     sources_used: tuple[str, ...] = ()  # subset of EvidenceItemFrame.url
+    sources_used: tuple[str, ...] = ()  # subset of EvidenceItemFrame.url
     missing_evidence: tuple[str, ...] = ()
 
 
