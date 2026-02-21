@@ -77,6 +77,7 @@ def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
     Seed terms are joined into a keyword query (not full sentences).
     """
     queries: list[str] = []
+    has_llm_queries = bool(claim.get("retrieval_seed_terms")) or bool(claim.get("search_queries"))
 
     # Priority 1 - retrieval_seed_terms (joined as keyword query)
     seed_terms = claim.get("retrieval_seed_terms")
@@ -116,6 +117,14 @@ def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
     fallback = claim.get("normalized_text") or claim.get("text")
     if fallback:
         _append_query(queries, fallback)
+
+    # Log when no LLM-generated queries were available
+    if not has_llm_queries and queries:
+        Trace.event("retrieval.fallback_entity_query", {
+            "claim_id": claim.get("id") or claim.get("claim_id") or "unknown",
+            "reason": "no_llm_search_queries",
+            "fallback_query_count": len(queries),
+        })
 
     return queries[:max_queries]
 

@@ -16,6 +16,8 @@ class ClaimExecutionContext:
     retrieval_plan: dict[str, Any] | None = None
     evidence_items: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     state: ClaimExecutionState = field(default_factory=lambda: ClaimExecutionState(claim_id="unknown"))
+    search_queries: tuple[str, ...] = field(default_factory=tuple)
+    entities: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def create(
@@ -45,38 +47,74 @@ class ClaimExecutionContext:
             safe_state = copy.deepcopy(state)
             safe_state.claim_id = claim_id
             
+        # Extract structured fields from claim
+        safe_queries = tuple(str(q) for q in (claim.get("search_queries") or []) if isinstance(q, str))
+        safe_entities = tuple(sorted(set(
+            str(e) for e in (claim.get("entities") or []) if isinstance(e, str)
+        )))
+
         return cls(
             claim_id=claim_id,
             claim=safe_claim,
             retrieval_plan=safe_plan,
             evidence_items=safe_evidence,
             state=safe_state,
+            search_queries=safe_queries,
+            entities=safe_entities,
         )
 
     def with_evidence(self, new_evidence: list[dict[str, Any]]) -> ClaimExecutionContext:
         """Return a new context with added evidence items."""
         merged_evidence = list(self.evidence_items) + new_evidence
-        return ClaimExecutionContext.create(
+        ctx = ClaimExecutionContext.create(
             claim=self.claim,
             retrieval_plan=self.retrieval_plan,
             evidence_items=merged_evidence,
             state=self.state,
         )
+        # Preserve search_queries/entities from original context
+        return ClaimExecutionContext(
+            claim_id=ctx.claim_id,
+            claim=ctx.claim,
+            retrieval_plan=ctx.retrieval_plan,
+            evidence_items=ctx.evidence_items,
+            state=ctx.state,
+            search_queries=self.search_queries,
+            entities=self.entities,
+        )
 
     def with_state_update(self, state: ClaimExecutionState) -> ClaimExecutionContext:
         """Return a new context with an updated state."""
-        return ClaimExecutionContext.create(
+        ctx = ClaimExecutionContext.create(
             claim=self.claim,
             retrieval_plan=self.retrieval_plan,
             evidence_items=list(self.evidence_items),
             state=state,
         )
+        return ClaimExecutionContext(
+            claim_id=ctx.claim_id,
+            claim=ctx.claim,
+            retrieval_plan=ctx.retrieval_plan,
+            evidence_items=ctx.evidence_items,
+            state=ctx.state,
+            search_queries=self.search_queries,
+            entities=self.entities,
+        )
 
     def with_retrieval_plan(self, plan: dict[str, Any]) -> ClaimExecutionContext:
         """Return a new context with an updated retrieval plan."""
-        return ClaimExecutionContext.create(
+        ctx = ClaimExecutionContext.create(
             claim=self.claim,
             retrieval_plan=plan,
             evidence_items=list(self.evidence_items),
             state=self.state,
+        )
+        return ClaimExecutionContext(
+            claim_id=ctx.claim_id,
+            claim=ctx.claim,
+            retrieval_plan=ctx.retrieval_plan,
+            evidence_items=ctx.evidence_items,
+            state=ctx.state,
+            search_queries=self.search_queries,
+            entities=self.entities,
         )

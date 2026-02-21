@@ -297,6 +297,31 @@ class ArticleCleanerSkill:
         )
         return merged, chunks
 
+    @staticmethod
+    def sanitize_evidence_html(raw_text: str) -> str:
+        """Strip HTML boilerplate tags before evidence summarization.
+
+        Removes script, style, nav, header, footer, aside tags and their content,
+        then strips remaining HTML tags and markdown link artifacts.
+        Uses regex only — no BeautifulSoup dependency.
+        """
+        if not raw_text:
+            return raw_text
+        text = raw_text
+        # Remove block-level boilerplate tags and content
+        for tag in ("script", "style", "nav", "header", "footer", "aside"):
+            text = re.sub(
+                rf"<{tag}[^>]*>.*?</{tag}>", " ", text,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+        # Strip remaining HTML tags
+        text = re.sub(r"<[^>]+>", " ", text)
+        # Remove markdown link artifacts [text](url)
+        text = re.sub(r"\[.*?\]\(.*?\)", "", text)
+        # Collapse whitespace
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
     def clean_evidence_item(self, text: str) -> tuple[str, dict]:
         """
         Cleans a small evidence snippet or quote by removing boilerplate regex patterns.

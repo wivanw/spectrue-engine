@@ -67,6 +67,8 @@ class EvidenceSummarizerSkill:
                 continue
                 
             text_to_clean = item.snippet or item.quote or ""
+            # HTML sanitization before regex cleaning
+            text_to_clean = ArticleCleanerSkill.sanitize_evidence_html(text_to_clean)
             cleaned_text, meta = cleaner.clean_evidence_item(text_to_clean)
             record = EvidenceCleanlinessRecord(**meta)
             

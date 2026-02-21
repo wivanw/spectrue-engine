@@ -55,11 +55,22 @@ class ClaimGraphStep:
                 key_ids = [c.get("id") for c in eligible_claims] if eligible_claims else []
                 return ctx.set_extra("graph_result", None).set_extra("key_claim_ids", key_ids)
                 
-            # Adaptive execution gate (T031)
-            # If the budget allows all claims to be selected, graph ranking adds zero value
+            # Adaptive execution gate (T031 + T033)
+            # If the claims fit within top_k, graph ranking adds zero value
             # and only incurs latency and LLM costs.
             cfg = getattr(self.runtime_config, "claim_graph", None)
             if cfg:
+                top_k = getattr(cfg, "top_k", 12)
+                if len(eligible_claims) <= top_k:
+                    Trace.event("claim_graph.skipped", {
+                        "reason": "claims_within_top_k",
+                        "claims_count": len(eligible_claims),
+                        "top_k": top_k,
+                    })
+                    key_ids = [c.get("id") or f"c{i}" for i, c in enumerate(eligible_claims)]
+                    return ctx.set_extra("graph_result", None).set_extra("key_claim_ids", key_ids)
+
+                # Budget-based skip: if budget allows all claims, skip graph
                 budget = getattr(cfg, "selection_budget", None)
                 default_cost = getattr(cfg, "default_claim_cost", 1.0)
                 if budget is not None and budget > 0:
@@ -77,6 +88,15 @@ class ClaimGraphStep:
                 runtime_config=self.runtime_config,
                 progress_callback=progress_callback,
             )
+
+            # Decision-impact: did the graph actually prune claims?
+            input_ids = {c.get("id") or f"c{i}" for i, c in enumerate(eligible_claims)}
+            graph_effective = set(result.key_claim_ids) != input_ids
+            Trace.event("claim_graph.effect", {
+                "effective": graph_effective,
+                "input_count": len(input_ids),
+                "selected_count": len(result.key_claim_ids),
+            })
 
             Trace.event(
                 "claim_graph.completed",
