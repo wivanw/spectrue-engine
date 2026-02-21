@@ -155,7 +155,11 @@ class SpectrueEngine:
                 
                 async def _on_dag_event(event_type: str, *args, **kwargs):
                     if event_type == "init" and args:
-                        progress_estimator.set_planned_nodes(args[0])
+                        # DAG calls: progress_callback("init", None, self.nodes)
+                        # args = (None, nodes_list) — skip the None placeholder
+                        nodes = next((a for a in args if a is not None), None)
+                        if nodes is not None:
+                            progress_estimator.set_planned_nodes(nodes)
                     elif event_type == "step_start" and args:
                         await progress_estimator.on_step_start(args[0])
                     elif event_type == "step_end" and args:
