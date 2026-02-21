@@ -369,6 +369,7 @@ class LLMClient:
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
         stage: str | None = None,
+        fail_on_schema_error: bool = True,
     ) -> dict:
         """
         Execute LLM call using Chat Completions API for local endpoints.
@@ -567,6 +568,9 @@ class LLMClient:
                                             output_text=repair_content,
                                             instructions=None,
                                         )
+                                    else:
+                                        # Handle case where usage is missing (e.g. OpenAI Response API mock or local)
+                                        pass
                                 except Exception:
                                     pass  # Metering failure is non-critical
                                 
@@ -589,9 +593,13 @@ class LLMClient:
                                             "remaining_errors": repair_errors[:5],
                                             "payload_hash": payload_hash,
                                         })
-                                        raise ValueError(f"LLM schema validation failed after repair: {repair_errors[0]}")
+                                        if fail_on_schema_error:
+                                            raise ValueError(f"LLM schema validation failed after repair: {repair_errors[0]}")
                                 else:
-                                    raise ValueError("LLM schema repair returned invalid JSON")
+                                    if fail_on_schema_error:
+                                        raise ValueError("LLM schema repair returned invalid JSON")
+                            except LLMCallError:
+                                raise
                             except Exception as repair_exc:
                                 logger.warning("[LLMClient] Schema repair failed: %s", repair_exc)
                                 Trace.event(f"{trace_kind}.schema_repair_exception", {
@@ -599,7 +607,8 @@ class LLMClient:
                                     "error": str(repair_exc)[:200],
                                     "payload_hash": payload_hash,
                                 })
-                                raise ValueError(f"LLM schema validation failed: {schema_errors[0]}") from repair_exc
+                                if fail_on_schema_error:
+                                    raise ValueError(f"LLM schema validation failed: {schema_errors[0]}") from repair_exc
 
                 # Extract usage info
                 usage = None
@@ -655,6 +664,10 @@ class LLMClient:
                 return result
 
             except Exception as e:
+                # If it's a validation error we already handled (via raise inside loops), re-raise it
+                if isinstance(e, (ValueError, LLMCallError)) and fail_on_schema_error:
+                    raise
+                
                 last_error = e
                 error_str = str(e)[:200]
                 is_connection_error = "connection" in error_str.lower() or "timeout" in error_str.lower()
@@ -692,6 +705,7 @@ class LLMClient:
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
         stage: str | None = None,
+        fail_on_schema_error: bool = True,
     ) -> dict:
         """
         Execute LLM call using Responses API (OpenAI) or Chat Completions API (local).
@@ -710,6 +724,7 @@ class LLMClient:
             timeout: Request timeout in seconds (uses default if not specified)
             max_output_tokens: Maximum number of tokens to generate
             trace_kind: Event kind for tracing
+            fail_on_schema_error: If False, return parsed JSON even if it fails schema validation
             
         Returns:
             Dict with keys:
@@ -720,7 +735,7 @@ class LLMClient:
             - "usage": Token usage info if available
             
         Raises:
-            ValueError: If response is empty after all retries
+            ValueError: If response is empty after all retries or schema validation fails (if fail_on_schema_error=True)
         """
         # Route to Chat Completions API for local endpoints
         if self._use_chat_completions:
@@ -735,6 +750,7 @@ class LLMClient:
                 max_output_tokens=max_output_tokens,
                 trace_kind=trace_kind,
                 stage=stage,
+                fail_on_schema_error=fail_on_schema_error,
             )
 
         effective_timeout = timeout or self.default_timeout
@@ -908,7 +924,8 @@ class LLMClient:
                                     "payload_hash": payload_hash,
                                 },
                             )
-                            raise ValueError(f"LLM schema validation failed: {schema_errors[0]}")
+                            if fail_on_schema_error:
+                                raise ValueError(f"LLM schema validation failed: {schema_errors[0]}")
 
                 # Extract usage info
                 usage = None
@@ -1044,6 +1061,7 @@ class LLMClient:
         temperature: float | None = None,
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
+        fail_on_schema_error: bool = True,
     ) -> dict:
         """
         Convenience method for JSON output calls.
@@ -1062,6 +1080,7 @@ class LLMClient:
             temperature=temperature,
             max_output_tokens=max_output_tokens,
             trace_kind=trace_kind,
+            fail_on_schema_error=fail_on_schema_error,
         )
         return result["parsed"]
 
@@ -1078,6 +1097,7 @@ class LLMClient:
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
         temperature: float | None = None,
+        fail_on_schema_error: bool = True,
     ) -> dict:
         """
         Structured output call with JSON schema.
@@ -1111,6 +1131,7 @@ class LLMClient:
             max_output_tokens=max_output_tokens,
             trace_kind=trace_kind,
             temperature=temperature,
+            fail_on_schema_error=fail_on_schema_error,
         )
 
     async def close(self) -> None:

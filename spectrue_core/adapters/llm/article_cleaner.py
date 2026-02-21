@@ -299,27 +299,60 @@ class ArticleCleanerSkill:
 
     @staticmethod
     def sanitize_evidence_html(raw_text: str) -> str:
-        """Strip HTML boilerplate tags before evidence summarization.
-
-        Removes script, style, nav, header, footer, aside tags and their content,
-        then strips remaining HTML tags and markdown link artifacts.
-        Uses regex only — no BeautifulSoup dependency.
+        """Refined text cleaner (v3.1) for evidence snippets.
+        
+        1. Strips HTML boilerplate tags (nav, footer, script, etc.)
+        2. Strips Wiki edit artifacts [ред. | ред. код]
+        3. Strips Markdown headers (noise from Tavily text export)
+        4. Removes navigation blocks (See also, References, etc.)
         """
         if not raw_text:
             return raw_text
+        
         text = raw_text
-        # Remove block-level boilerplate tags and content
+        before_len = len(text)
+        
+        # 1. HTML tag removal
         for tag in ("script", "style", "nav", "header", "footer", "aside"):
             text = re.sub(
                 rf"<{tag}[^>]*>.*?</{tag}>", " ", text,
                 flags=re.DOTALL | re.IGNORECASE,
             )
-        # Strip remaining HTML tags
         text = re.sub(r"<[^>]+>", " ", text)
-        # Remove markdown link artifacts [text](url)
-        text = re.sub(r"\[.*?\]\(.*?\)", "", text)
-        # Collapse whitespace
-        text = re.sub(r"\s+", " ", text).strip()
+        
+        # 2. Wikipedia edit artifacts [ред. | ред. код]
+        text = re.sub(r"\[ред\.\s*\|\s*ред\.\s*код\]", "", text)
+        
+        # 3. Markdown headers (noise from scraping)
+        text = re.sub(r"^#{1,6}\s.*$", "", text, flags=re.MULTILINE)
+        
+        # 4. Navigation blocks (blacklist)
+        blacklist = [
+            "Див. також", "Примітки", "Посилання", "Література",
+            "See also", "References", "Further reading", "Notes", "External links"
+        ]
+        for header in blacklist:
+            # Match header at start of line and everything until next section or EOF
+            text = re.sub(
+                rf"^{header}.*?(?=\n#|\Z)", "", text,
+                flags=re.DOTALL | re.IGNORECASE | re.MULTILINE
+            )
+            
+        # 5. Markdown links [text](url) -> text
+        text = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", text)
+        
+        # 6. Whitespace collapse
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{2,}", "\n\n", text).strip()
+        
+        after_len = len(text)
+        if before_len > 0:
+            Trace.event("sanitizer.stats", {
+                "before": before_len,
+                "after": after_len,
+                "ratio": round(after_len / before_len, 2)
+            })
+            
         return text
 
     def clean_evidence_item(self, text: str) -> tuple[str, dict]:

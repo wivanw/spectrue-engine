@@ -119,6 +119,8 @@ def convert_evidence_items(
     Returns:
         Tuple of EvidenceItemFrame objects
     """
+    from spectrue_core.adapters.llm.article_cleaner import ArticleCleanerSkill
+
     items: list[EvidenceItemFrame] = []
 
     for idx, ev in enumerate(raw_evidence):
@@ -141,6 +143,12 @@ def convert_evidence_items(
                 retention_ratio=cleanliness_dict.get("retention_ratio", 1.0)
             )
 
+        # Sanitize snippet and quote to remove HTML boilerplate (nav, footer, etc.)
+        raw_snippet = ev.get("snippet") or ev.get("content")
+        raw_quote = ev.get("quote")
+        clean_snippet = ArticleCleanerSkill.sanitize_evidence_html(raw_snippet) if raw_snippet else raw_snippet
+        clean_quote = ArticleCleanerSkill.sanitize_evidence_html(raw_quote) if raw_quote else raw_quote
+
         item = EvidenceItemFrame(
             evidence_id=evidence_id,
             claim_id=claim_id,
@@ -150,8 +158,8 @@ def convert_evidence_items(
             source_tier=ev.get("tier") or ev.get("source_tier"),
             source_type=ev.get("source_type"),
             stance=ev.get("stance"),
-            quote=ev.get("quote"),
-            snippet=ev.get("snippet") or ev.get("content"),
+            quote=clean_quote,
+            snippet=clean_snippet,
             relevance=ev.get("relevance") or ev.get("score"),
             content_hash=ev.get("content_hash"),
             publisher_id=ev.get("publisher_id"),
