@@ -143,7 +143,7 @@ class SummarizeEvidenceStep(Step):
     
     Uses EvidenceSummarizerSkill to categorize evidence by stance.
     """
-    weight: float = 10.0
+    weight: float = 9.0  # ~9s actual
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
@@ -190,7 +190,7 @@ class JudgeClaimsStep(Step):
     Uses judge_claims_independently use case to generate RGBA scores and verdicts.
     Output is returned unchanged to the frontend.
     """
-    weight: float = 20.0
+    weight: float = 25.0  # ~25s actual (LLM judging per claim)
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client

@@ -63,7 +63,7 @@ class ClusterWebSearchStep:
     search_mgr: Any
     embedding_client: Any | None = None  # Injected dependency
     name: str = "cluster_web_search"
-    weight: float = 25.0
+    weight: float = 83.0  # ~83s actual
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

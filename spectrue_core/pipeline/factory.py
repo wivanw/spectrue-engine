@@ -252,6 +252,7 @@ class PipelineFactory:
                     agent=self.agent,
                     stage="post_evidence",
                     name="enrich_claims_post_evidence",
+                    weight=1.0,  # ~0s (enrichment only, no extraction)
                 ),
                 depends_on=["evidence_collect"],
                 optional=True,
@@ -442,6 +443,7 @@ class PipelineFactory:
                     agent=self.agent,
                     stage="post_evidence",
                     name="enrich_claims_post_evidence",
+                    weight=1.0,  # ~0s (enrichment only, no extraction)
                 ),
                 depends_on=["evidence_collect"],
                 optional=True,
@@ -703,6 +705,7 @@ class PipelineFactory:
                     agent=self.agent,
                     stage="post_evidence",
                     name="enrich_claims_post_evidence",
+                    weight=1.0,  # ~0s (enrichment only, no extraction)
                 ),
                 depends_on=["evidence_collect"],
                 optional=True,
