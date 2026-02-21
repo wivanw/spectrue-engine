@@ -347,11 +347,21 @@ class ArticleCleanerSkill:
         
         after_len = len(text)
         if before_len > 0:
+            ratio = round(after_len / before_len, 2)
             Trace.event("sanitizer.stats", {
                 "before": before_len,
                 "after": after_len,
-                "ratio": round(after_len / before_len, 2)
+                "ratio": ratio
             })
+            
+            # Production Guard (V3.1): Monitoring aggressiveness
+            if ratio < 0.2 and after_len > 0:
+                 Trace.event("sanitizer.heavy_prune", {
+                     "before": before_len,
+                     "after": after_len,
+                     "ratio": ratio,
+                     "head_orig": raw_text[:120].replace("\n", " "),
+                 })
             
         return text
 

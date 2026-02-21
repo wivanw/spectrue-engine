@@ -40,6 +40,7 @@ from spectrue_core.pipeline.retrieval.retrieval_trace import (
 )
 from spectrue_core.use_cases.verification.orchestration.execution_state import ClaimExecutionState
 from spectrue_core.utils.retrieval_urls import source_id_for_url
+from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.text_structure import TextStructure, extract_text_structure
 
 
@@ -148,6 +149,34 @@ def convert_evidence_items(
         raw_quote = ev.get("quote")
         clean_snippet = ArticleCleanerSkill.sanitize_evidence_html(raw_snippet) if raw_snippet else raw_snippet
         clean_quote = ArticleCleanerSkill.sanitize_evidence_html(raw_quote) if raw_quote else raw_quote
+
+        # Production Guard (V3.1): Skip empty or low-signal snippets
+        snippet_len = len(clean_snippet.strip()) if clean_snippet else 0
+        quote_len = len(clean_quote.strip()) if clean_quote else 0
+
+        if snippet_len == 0 and quote_len == 0:
+            Trace.event("sanitizer.empty_snippet", {
+                "claim_id": claim_id,
+                "url": ev.get("url")[:120],
+                "source_id": source_id,
+            })
+            continue
+
+        # Signal check: preserve short items if they have explicit labels (stance/attribution)
+        has_signal = (
+            ev.get("stance") is not None or 
+            ev.get("attribution") == "precise" or
+            ev.get("tier") in ("A", "B")
+        )
+
+        if not has_signal and snippet_len < 60 and quote_len < 60:
+            Trace.event("sanitizer.low_signal", {
+                "claim_id": claim_id,
+                "url": ev.get("url")[:120],
+                "snippet_len": snippet_len,
+                "quote_len": quote_len,
+            })
+            continue
 
         item = EvidenceItemFrame(
             evidence_id=evidence_id,
