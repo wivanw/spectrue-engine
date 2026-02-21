@@ -81,7 +81,16 @@ def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
     # Priority 1 - retrieval_seed_terms (joined as keyword query)
     seed_terms = claim.get("retrieval_seed_terms")
     if seed_terms and isinstance(seed_terms, list):
-        valid_terms = [t for t in seed_terms if isinstance(t, str) and len(t) >= 2]
+        valid_terms = []
+        seen_lower = set()
+        for t in seed_terms:
+            if isinstance(t, str) and len(t) >= 2:
+                t_lower = t.strip().lower()
+                # Deduplicate tokens case-insensitively to prevent generated queries like "apple apple"
+                if t_lower not in seen_lower:
+                    seen_lower.add(t_lower)
+                    valid_terms.append(t.strip())
+                    
         if len(valid_terms) >= 3:
             # Join first 6 seed terms into a keyword query
             keyword_query = " ".join(valid_terms[:6])
