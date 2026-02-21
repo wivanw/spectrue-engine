@@ -150,13 +150,19 @@ class SpectrueEngine:
             if progress_callback:
                 progress_estimator = ProgressEstimator(progress_callback)
                 
-                async def _on_dag_event(event_type: str, step_name: str | None = None, *args):
+                async def _on_dag_event(event_type: str, step_name: str | None = None, *args, **kwargs):
                     if event_type == "init" and args:
                         progress_estimator.set_planned_nodes(args[0])
                     elif event_type == "step_start" and step_name:
                         await progress_estimator.on_step_start(step_name)
                     elif event_type == "step_end" and step_name:
                         await progress_estimator.on_step_end(step_name)
+                    else:
+                        # Forward fine-grained internal events directly to the UI
+                        try:
+                            await progress_callback(event_type, *args, **kwargs)
+                        except Exception:
+                            pass
                 
                 dag_progress_callback = _on_dag_event
 

@@ -168,6 +168,7 @@ class SummarizeEvidenceStep(Step):
             summaries = await summarize_evidence_for_claims(
                 claim_frames=deep_ctx.claim_frames,
                 llm_client=self._llm,
+                progress_callback=ctx.get_extra("progress_callback"),
             )
 
             deep_ctx.evidence_summaries = summaries
@@ -217,6 +218,7 @@ class JudgeClaimsStep(Step):
                 llm_client=self._llm,
                 ui_locale=ui_locale,
                 analysis_mode=analysis_mode,
+                progress_callback=ctx.get_extra("progress_callback"),
             )
 
             deep_ctx.judge_outputs = outputs

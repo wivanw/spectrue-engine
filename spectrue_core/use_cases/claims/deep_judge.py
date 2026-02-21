@@ -97,6 +97,7 @@ async def summarize_evidence_for_claims(
     *,
     claim_frames: list[ClaimFrame],
     llm_client: Any,
+    progress_callback: Any | None = None,
 ) -> dict[str, EvidenceSummary]:
     """Summarize evidence for each claim in parallel."""
     if not claim_frames:
@@ -104,8 +105,20 @@ async def summarize_evidence_for_claims(
 
     skill = EvidenceSummarizerSkill(llm_client)
 
+    processed = 0
+    total = len(claim_frames)
+
     async def summarize_one(frame: ClaimFrame) -> tuple[str, EvidenceSummary]:
+        nonlocal processed
+        
         summary = await skill.summarize(frame)
+        
+        processed += 1
+        if progress_callback:
+            try:
+                await progress_callback("analyzing_sentences", processed=processed, total=total)
+            except Exception:
+                pass
         return frame.claim_id, summary
 
     tasks = [summarize_one(frame) for frame in claim_frames]
@@ -129,11 +142,15 @@ async def judge_claims_independently(
     llm_client: Any,
     ui_locale: str = "en",
     analysis_mode: Any = "general",
+    progress_callback: Any | None = None,
 ) -> tuple[dict[str, JudgeOutput], dict[str, dict[str, Any]]]:
     """Judge claims independently in parallel with repair logic."""
     if not claim_frames:
         return {}, {}
 
+    processed = 0
+    total = len(claim_frames)
+    
     skill = ClaimJudgeSkill(llm_client)
     
     # Internal helper for repair logic
@@ -246,6 +263,12 @@ async def judge_claims_independently(
                     "after_snapshot": {"confidence": new_conf, "verdict": new_verdict},
                 })
 
+            processed += 1
+            if progress_callback:
+                try:
+                    await progress_callback("analyzing_sentences", processed=processed, total=total)
+                except Exception:
+                    pass
             return frame.claim_id, output, None
         except Exception as e:
             root = _root_cause(e)
@@ -255,11 +278,23 @@ async def judge_claims_independently(
             if _is_format_error(root):
                 try:
                     repaired = await _repair_claim_output(frame, summary)
+                    processed += 1
+                    if progress_callback:
+                        try:
+                            await progress_callback("analyzing_sentences", processed=processed, total=total)
+                        except Exception:
+                            pass
                     return frame.claim_id, repaired, None
                 except Exception as repair_error:
                     repair_root = _root_cause(repair_error)
                     repair_message = str(repair_root)
                     repair_missing = _extract_missing_fields(repair_message) or missing_fields
+                    processed += 1
+                    if progress_callback:
+                        try:
+                            await progress_callback("analyzing_sentences", processed=processed, total=total)
+                        except Exception:
+                            pass
                     return frame.claim_id, None, _build_error_payload(
                         error_type="llm_failed",
                         message=repair_message,
@@ -267,6 +302,12 @@ async def judge_claims_independently(
                         repair_attempted=True,
                     )
 
+            processed += 1
+            if progress_callback:
+                try:
+                    await progress_callback("analyzing_sentences", processed=processed, total=total)
+                except Exception:
+                    pass
             return frame.claim_id, None, _build_error_payload(
                 error_type="llm_failed",
                 message=message,
