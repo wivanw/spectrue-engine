@@ -42,8 +42,10 @@ from spectrue_core.schema.claim_frame import (
 from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
 from spectrue_core.pipeline.claims.claim_frame_builder import (
-    build_claim_frames_from_pipeline,
+    build_claim_frames_from_contexts,
 )
+from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
+from spectrue_core.adapters.llm.evidence_summarizer import EvidenceSummarizerSkill
 
 
 @dataclass
@@ -86,7 +88,24 @@ class BuildClaimFramesStep(Step):
             execution_states = ctx.extras.get("execution_states", {})
             corroboration_by_claim = ctx.get_extra("corroboration_by_claim")
 
-            if not claims:
+            # Lookup or create claim contexts
+            claim_contexts: dict[str, ClaimExecutionContext] = ctx.extras.get("claim_contexts", {})
+            
+            if not claim_contexts and claims:
+                for claim in claims:
+                    cid = claim.get("id") or claim.get("claim_id") or "unknown"
+                    if cid not in claim_contexts:
+                        st = execution_states.get(cid)
+                        evs = evidence_by_claim.get(cid, [])
+                        claim_contexts[cid] = ClaimExecutionContext.create(
+                            claim=claim,
+                            evidence_items=evs,
+                            state=st
+                        )
+                # Persist context backwards to pipeline
+                ctx = ctx.set_extra("claim_contexts", claim_contexts)
+
+            if not claim_contexts:
                 Trace.event("build_claim_frames.skip", {"reason": "no_claims"})
                 return ctx.set_extra("deep_claim_ctx", DeepClaimContext())
 
@@ -97,12 +116,10 @@ class BuildClaimFramesStep(Step):
                 deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
                 confirmation_lambda = deep_v2_cfg.confirmation_lambda
 
-            # Build frames
-            frames = build_claim_frames_from_pipeline(
-                claims=claims,
+            # Build frames from contexts (T005)
+            frames = build_claim_frames_from_contexts(
+                claim_contexts=claim_contexts,
                 document_text=document_text,
-                evidence_by_claim=evidence_by_claim,
-                execution_states=execution_states,
                 confirmation_lambda=confirmation_lambda,
                 corroboration_by_claim=corroboration_by_claim if isinstance(corroboration_by_claim, dict) else None,
             )
@@ -126,7 +143,7 @@ class SummarizeEvidenceStep(Step):
     
     Uses EvidenceSummarizerSkill to categorize evidence by stance.
     """
-    weight: float = 10.0
+    weight: float = 9.0  # ~9s actual
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
@@ -143,9 +160,15 @@ class SummarizeEvidenceStep(Step):
                 Trace.event("summarize_evidence.skip", {"reason": "no_frames"})
                 return ctx
 
+            # Pre-summarization cleaning (US3)
+            skill = EvidenceSummarizerSkill(self._llm)
+            cleaned_frames = [skill.clean_evidence_for_frame(f) for f in deep_ctx.claim_frames]
+            deep_ctx.claim_frames = cleaned_frames
+
             summaries = await summarize_evidence_for_claims(
                 claim_frames=deep_ctx.claim_frames,
                 llm_client=self._llm,
+                progress_callback=ctx.get_extra("progress_callback"),
             )
 
             deep_ctx.evidence_summaries = summaries
@@ -167,7 +190,7 @@ class JudgeClaimsStep(Step):
     Uses judge_claims_independently use case to generate RGBA scores and verdicts.
     Output is returned unchanged to the frontend.
     """
-    weight: float = 20.0
+    weight: float = 25.0  # ~25s actual (LLM judging per claim)
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
@@ -189,17 +212,13 @@ class JudgeClaimsStep(Step):
             ui_locale = ctx.lang or "en"
             analysis_mode = ctx.mode.api_analysis_mode
 
-            corr_by_claim = ctx.get_extra("corroboration_by_claim") or {}
-            est_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
-
             outputs, errors = await judge_claims_independently(
                 claim_frames=deep_ctx.claim_frames,
                 evidence_summaries=deep_ctx.evidence_summaries,
                 llm_client=self._llm,
                 ui_locale=ui_locale,
                 analysis_mode=analysis_mode,
-                evidence_stats_by_claim=est_by_claim,
-                corroboration_by_claim=corr_by_claim,
+                progress_callback=ctx.get_extra("progress_callback"),
             )
 
             deep_ctx.judge_outputs = outputs
@@ -320,27 +339,6 @@ class AssembleDeepResultStep(Step):
                 }
 
             def _confirmation_payload(frame: ClaimFrame) -> dict[str, Any]:
-                # Deep v2: use deterministic confirmation counts
-                # Use value from runtime config if available
-                from spectrue_core.runtime_config import DeepV2Config
-                from spectrue_core.use_cases.verification.scoring.confirmation_counts import compute_confirmation_counts
-                
-                runtime = getattr(self._config, "runtime", None)
-                deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
-                lam = deep_v2_cfg.confirmation_lambda
-                
-                corr_meta = ctx.get_extra("corroboration_by_claim") or {}
-                cid = frame.claim_id
-                
-                if isinstance(corr_meta, dict) and cid in corr_meta:
-                    vals = compute_confirmation_counts(corr_meta[cid], lam=lam)
-                    return {
-                        "C_precise": vals["C_precise"],
-                        "C_corr": vals["C_corr"],
-                        "C_total": vals["C_total"],
-                    }
-
-                # Fallback to frame counts (if already calculated)
                 counts = frame.confirmation_counts
                 return {
                     "C_precise": counts.C_precise,
@@ -376,16 +374,7 @@ class AssembleDeepResultStep(Step):
                     judge_output.rgba.a,
                 ]
 
-                if rgba and len(rgba) == 4 and isinstance(rgba[3], (int, float)) and rgba[3] < 0:
-                    stats_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
-                    st = stats_by_claim.get(frame.claim_id) if isinstance(stats_by_claim, dict) else None
-                    if isinstance(st, dict):
-                        a_det = st.get("A_deterministic")
-                        try:
-                            a_det_f = float(a_det)
-                        except Exception:
-                            a_det_f = 0.0
-                        rgba[3] = max(0.0, min(1.0, a_det_f))
+                # Deep mode uses LLM returned RGBA directly without deterministic A overrides.
 
                 # M133: Alpha capping removed — LLM A-score passes through unchanged
 
@@ -430,10 +419,7 @@ class AssembleDeepResultStep(Step):
                     "explanation": judge_output.explanation,
                     "sources_used": sources_list,  # Full objects, not just refs
                 }
-                # Deep v2: attach corroboration counters (debug/UX optional)
-                corr_meta = ctx.get_extra("corroboration_by_claim") or {}
-                if isinstance(corr_meta, dict) and frame.claim_id in corr_meta:
-                    claim_result["corroboration"] = corr_meta[frame.claim_id]
+                # Corroboration UX is driven by frame.confirmation_counts payload
 
                 if ctx.mode.api_analysis_mode == AnalysisMode.DEEP_V2:
                     claim_result["evidence_stats"] = _evidence_stats_payload(frame)

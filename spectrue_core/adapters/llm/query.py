@@ -102,6 +102,21 @@ def generate_followup_query_from_evidence(
         "query_type": query_type,
     }
 
+def _sanitize_query(query: str) -> str:
+    """Remove duplicate tokens from query while preserving order (T010)."""
+    if not query:
+        return query
+    words = query.split()
+    seen = set()
+    sanitized = []
+    for w in words:
+        wl = w.lower()
+        if wl not in seen:
+            seen.add(wl)
+            sanitized.append(w)
+    return " ".join(sanitized)
+
+
 class QuerySkill(BaseSkill):
     def __init__(self, config, llm_client):
         super().__init__(config, llm_client)
@@ -201,8 +216,8 @@ CONTEXT:
                  raise ValueError("Empty queries")
 
             # Validation (word count, etc.) can be added here
-
-            return raw_queries[:2]
+            sanitized_queries = [_sanitize_query(q) for q in raw_queries[:2]]
+            return sanitized_queries
 
         except Exception as e:
             logger.warning("[M48] Query generation failed: %s", e)

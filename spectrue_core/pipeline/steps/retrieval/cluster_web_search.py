@@ -32,6 +32,10 @@ from spectrue_core.domain.verification.search.search_policy import (
     resolve_profile_name,
 )
 from spectrue_core.use_cases.retrieval.clustering import assign_similarity_clusters
+from spectrue_core.use_cases.verification.orchestration.execution_state import (
+    ClaimExecutionState,
+    RetrievalHop,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +63,7 @@ class ClusterWebSearchStep:
     search_mgr: Any
     embedding_client: Any | None = None  # Injected dependency
     name: str = "cluster_web_search"
-    weight: float = 25.0
+    weight: float = 83.0  # ~83s actual
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
@@ -80,13 +84,18 @@ class ClusterWebSearchStep:
             url_variants: dict[str, set[str]] = {}
             cluster_url_map: dict[str, list[str]] = {}
             cluster_sufficiency: dict[str, float] = {}
+            execution_states: dict[str, ClaimExecutionState] = ctx.get_extra("execution_states", {}) or {}
 
             total_queries = 0
             for plan in cluster_plans:
                 cluster_id = str(plan.get("cluster_id") or "cluster")
                 queries = plan.get("search_queries") or []
+                query_origin = plan.get("query_origin") or "planned"
+                fallback_reason = plan.get("fallback_reason")
                 cluster_urls: list[str] = []
-                for query in queries:
+                claims_list = plan.get("claims") or []
+                
+                for hop_index, query in enumerate(queries):
                     if not query:
                         continue
                     total_queries += 1
@@ -124,10 +133,54 @@ class ClusterWebSearchStep:
                             # For simplicity, we just add them to the sources list
                             sources = (sources or []) + general_sources
 
+                    # Stage 3: Academic (Tier 3) search for SCIENTIFIC claims
+                    is_scientific = any(c.get("policy_mode") == "SCIENTIFIC" for c in claims_list)
+                    if is_scientific:
+                        # Re-evaluate sufficiency after general search
+                        interim_sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
+                        if interim_sufficiency.status != SufficiencyStatus.SUFFICIENT:
+                            Trace.event("retrieval.cluster_search.escalation", {
+                                "query": query,
+                                "reason": "bayesian_insufficient_scientific",
+                                "confidence": interim_sufficiency.reason,
+                            })
+                            _, academic_sources = await self.search_mgr.search_phase(
+                                query,
+                                max_results=max_results,
+                                depth="academic",  # Use academic depth/topic
+                                topic="academic",
+                            )
+                            if academic_sources:
+                                sources = (sources or []) + academic_sources
+
                     # Final Bayesian sufficiency after fallback
                     final_sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
                     current_p = cluster_sufficiency.get(cluster_id, 0.0)
                     cluster_sufficiency[cluster_id] = max(current_p, final_sufficiency.posterior_p)
+
+                    retrieval_eval = {"query_origin": query_origin}
+                    if fallback_reason:
+                        retrieval_eval["fallback_reason"] = fallback_reason
+
+                    hop = RetrievalHop(
+                        hop_index=hop_index + 1,
+                        query=query,
+                        decision=final_sufficiency.status,
+                        reason=final_sufficiency.reason,
+                        phase_id="deep_v2_cluster_search",
+                        query_type=search_depth,
+                        results_count=len(sources or []),
+                        retrieval_eval=retrieval_eval,
+                    )
+                    
+                    for claim in claims_list:
+                        cid = claim.get("id") or claim.get("claim_id")
+                        if not cid:
+                            continue
+                        if cid not in execution_states:
+                            execution_states[cid] = ClaimExecutionState(claim_id=cid)
+                        execution_states[cid].hops.append(hop)
+                        execution_states[cid].mark_completed("deep_v2_cluster_search")
 
                     for source in sources or []:
                         if not isinstance(source, dict):
@@ -246,6 +299,7 @@ class ClusterWebSearchStep:
                 .set_extra("evidence_docs", evidence_docs)
                 .set_extra("evidence_doc_meta", evidence_doc_meta)
                 .set_extra("cluster_sufficiency", cluster_sufficiency)
+                .set_extra("execution_states", execution_states)
                 .set_extra(
                     "retrieval_search_trace",
                     {

@@ -17,7 +17,10 @@ evidence items, and execution state.
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
 
 from spectrue_core.schema.claim_frame import (
     ClaimFrame,
@@ -25,6 +28,7 @@ from spectrue_core.schema.claim_frame import (
     ContextExcerpt,
     ContextMeta,
     EvidenceItemFrame,
+    EvidenceCleanlinessRecord,
 )
 from spectrue_core.domain.evidence.stats import (
     build_evidence_stats,
@@ -36,6 +40,7 @@ from spectrue_core.pipeline.retrieval.retrieval_trace import (
 )
 from spectrue_core.use_cases.verification.orchestration.execution_state import ClaimExecutionState
 from spectrue_core.utils.retrieval_urls import source_id_for_url
+from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.text_structure import TextStructure, extract_text_structure
 
 
@@ -115,6 +120,8 @@ def convert_evidence_items(
     Returns:
         Tuple of EvidenceItemFrame objects
     """
+    from spectrue_core.adapters.llm.article_cleaner import ArticleCleanerSkill
+
     items: list[EvidenceItemFrame] = []
 
     for idx, ev in enumerate(raw_evidence):
@@ -127,6 +134,50 @@ def convert_evidence_items(
         if not source_id:
             source_id = source_id_for_url(ev.get("url", "")) or evidence_id
 
+        cleanliness_dict = ev.get("cleanliness")
+        record = None
+        if cleanliness_dict:
+            record = EvidenceCleanlinessRecord(
+                is_boilerplate=cleanliness_dict.get("is_boilerplate", False),
+                original_length=cleanliness_dict.get("original_length", 0),
+                cleaned_length=cleanliness_dict.get("cleaned_length", 0),
+                retention_ratio=cleanliness_dict.get("retention_ratio", 1.0)
+            )
+
+        # Sanitize snippet and quote to remove HTML boilerplate (nav, footer, etc.)
+        raw_snippet = ev.get("snippet") or ev.get("content")
+        raw_quote = ev.get("quote")
+        clean_snippet = ArticleCleanerSkill.sanitize_evidence_html(raw_snippet) if raw_snippet else raw_snippet
+        clean_quote = ArticleCleanerSkill.sanitize_evidence_html(raw_quote) if raw_quote else raw_quote
+
+        # Production Guard (V3.1): Skip empty or low-signal snippets
+        snippet_len = len(clean_snippet.strip()) if clean_snippet else 0
+        quote_len = len(clean_quote.strip()) if clean_quote else 0
+
+        if snippet_len == 0 and quote_len == 0:
+            Trace.event("sanitizer.empty_snippet", {
+                "claim_id": claim_id,
+                "url": ev.get("url")[:120],
+                "source_id": source_id,
+            })
+            continue
+
+        # Signal check: preserve short items if they have explicit labels (stance/attribution)
+        has_signal = (
+            ev.get("stance") is not None or 
+            ev.get("attribution") == "precise" or
+            ev.get("tier") in ("A", "B")
+        )
+
+        if not has_signal and snippet_len < 60 and quote_len < 60:
+            Trace.event("sanitizer.low_signal", {
+                "claim_id": claim_id,
+                "url": ev.get("url")[:120],
+                "snippet_len": snippet_len,
+                "quote_len": quote_len,
+            })
+            continue
+
         item = EvidenceItemFrame(
             evidence_id=evidence_id,
             claim_id=claim_id,
@@ -136,13 +187,14 @@ def convert_evidence_items(
             source_tier=ev.get("tier") or ev.get("source_tier"),
             source_type=ev.get("source_type"),
             stance=ev.get("stance"),
-            quote=ev.get("quote"),
-            snippet=ev.get("snippet") or ev.get("content"),
+            quote=clean_quote,
+            snippet=clean_snippet,
             relevance=ev.get("relevance") or ev.get("score"),
             content_hash=ev.get("content_hash"),
             publisher_id=ev.get("publisher_id"),
             similar_cluster_id=ev.get("similar_cluster_id"),
             attribution=ev.get("attribution"),
+            cleanliness=record,
         )
         items.append(item)
 
@@ -220,6 +272,56 @@ def build_claim_frame(
         confirmation_counts=confirmation_counts,
         retrieval_trace=retrieval_trace,
     )
+
+
+def build_claim_frame_from_context(
+    context: ClaimExecutionContext,
+    document_text: str,
+    structure: TextStructure | None = None,
+    window_size: int = 1,
+    confirmation_lambda: float | None = None,
+    corroboration: dict[str, Any] | None = None,
+) -> ClaimFrame:
+    """Build a complete ClaimFrame from an isolated execution context."""
+    claim_text = context.claim.get("text") or context.claim.get("normalized_text") or ""
+    claim_lang = context.claim.get("language") or context.claim.get("claim_language") or "en"
+    
+    return build_claim_frame(
+        claim_id=context.claim_id,
+        claim_text=claim_text,
+        claim_language=claim_lang,
+        document_text=document_text,
+        raw_evidence=list(context.evidence_items),
+        execution_state=context.state,
+        structure=structure,
+        window_size=window_size,
+        confirmation_lambda=confirmation_lambda,
+        corroboration=corroboration,
+    )
+
+
+def build_claim_frames_from_contexts(
+    claim_contexts: dict[str, ClaimExecutionContext],
+    document_text: str,
+    confirmation_lambda: float | None = None,
+    corroboration_by_claim: dict[str, dict[str, Any]] | None = None,
+) -> list[ClaimFrame]:
+    """Build ClaimFrame objects from isolated ClaimExecutionContext mapping."""
+    structure = extract_text_structure(document_text)
+    frames: list[ClaimFrame] = []
+    
+    for claim_id, context in claim_contexts.items():
+        corr = corroboration_by_claim.get(claim_id) if corroboration_by_claim else None
+        frame = build_claim_frame_from_context(
+            context=context,
+            document_text=document_text,
+            structure=structure,
+            confirmation_lambda=confirmation_lambda,
+            corroboration=corr,
+        )
+        frames.append(frame)
+        
+    return frames
 
 
 def build_claim_frames_from_pipeline(

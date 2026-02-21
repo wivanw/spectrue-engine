@@ -24,6 +24,7 @@ from spectrue_core.domain.claims.frame import (
     RetrievalHop,
     RetrievalTrace,
     RGBAScore,
+    EvidenceCleanlinessRecord,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "RetrievalHop",
     "RetrievalTrace",
     "RGBAScore",
+    "EvidenceCleanlinessRecord",
 ]

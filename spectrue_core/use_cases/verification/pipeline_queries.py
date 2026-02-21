@@ -55,7 +55,17 @@ def normalize_and_sanitize(query: str) -> str | None:
     if not query:
         return None
     normalized = normalize_search_query(query)
-    return normalized or None
+    if not normalized:
+        return None
+
+    # Remove consecutive duplicate tokens (case-insensitive deduplication)
+    tokens = normalized.split()
+    deduped = []
+    for t in tokens:
+        if not deduped or deduped[-1].lower() != t.lower():
+            deduped.append(t)
+
+    return " ".join(deduped)
 
 
 def is_fuzzy_duplicate(

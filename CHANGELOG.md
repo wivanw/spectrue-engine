@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Deep v2 Orchestration Integrity Rework
+  - **Claim-Isolated Execution**: Introduced immutable `ClaimExecutionContext` isolated per claim preventing state bleed between parallel processing tasks.
+  - **Planned Intent Retrieval**: Nested locale fallbacks with `SearchLocalePlan` and escalated intent execution (trusted/academic). 
+  - **High-Signal Evidence**: Embedded a boilerplate stripping mechanism via `EvidenceCleanlinessRecord`, capping confident judgments when evidence relies solely on boilerplate text.
+  - **Adaptive Decision Layers**: Skipped ClaimGraph generation when budget suffices for all given claims. Added `FreshnessSignal` staleness penalties and integrated `prior_score` to adjust judgments heuristically based on missing evidence.
 - M131: Governance & Localization Documentation
   - Added Governance Principles to README
   - Refined documentation structure per reviewer guidelines

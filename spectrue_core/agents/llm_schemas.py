@@ -443,6 +443,7 @@ PREDICATE_TYPE_VALUES = [
     "existence",       # Entity/document exists with anchors
     "definition",      # Scientific or logical definition
     "property",        # Physical or chemical property
+    "fact",            # General factual assertion
     "other",           # Fallback for edge cases
 ]
 
@@ -726,7 +727,7 @@ EDGE_TYPING_SCHEMA: dict[str, Any] = {
 
 # Per-Claim Judging schemas (deep analysis mode)
 
-EVIDENCE_STANCE_VALUES = ["SUPPORT", "REFUTE", "CONTEXT", "IRRELEVANT"]
+EVIDENCE_STANCE_VALUES = ["SUPPORT", "REFUTE", "CONTEXT", "IRRELEVANT", "INDIRECT", "indirect"]
 
 
 EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
@@ -745,7 +746,7 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["evidence_id", "reason"],
+                "required": ["evidence_id"],
                 "properties": {
                     "evidence_id": {"type": "string"},
                     "reason": {"type": "string"},
@@ -757,7 +758,7 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["evidence_id", "reason"],
+                "required": ["evidence_id"],
                 "properties": {
                     "evidence_id": {"type": "string"},
                     "reason": {"type": "string"},
@@ -769,7 +770,7 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["evidence_id", "reason"],
+                "required": ["evidence_id"],
                 "properties": {
                     "evidence_id": {"type": "string"},
                     "reason": {"type": "string"},
@@ -907,7 +908,7 @@ EVIDENCE_AUDIT_SCHEMA: dict[str, Any] = {
         "claim_id": {"type": "string"},
         "evidence_id": {"type": "string"},
         "source_id": {"type": "string"},
-        "stance": {"type": "string", "enum": ["support", "refute", "unclear", "unrelated"]},
+        "stance": {"type": "string", "enum": ["support", "refute", "unclear", "unrelated", "indirect"]},
         "directness": {"type": "string", "enum": ["direct", "indirect", "tangential"]},
         "specificity": {"type": "string", "enum": ["high", "medium", "low"]},
         "quote_integrity": {"type": "string", "enum": ["ok", "partial", "out_of_context", "not_applicable"]},

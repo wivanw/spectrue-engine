@@ -34,7 +34,16 @@ async def test_deep_judge_error_returns_null_rgba():
     ctx = PipelineContext(mode=DEEP_MODE, claims=[{"id": "c1", "text": "Example claim"}])
     ctx = ctx.set_extra("deep_claim_ctx", deep_ctx)
 
-    result_ctx = await AssembleDeepResultStep().run(ctx)
+    from unittest.mock import patch
+    from spectrue_core.utils.trace import Trace
+
+    with patch.object(Trace, "event") as mock_trace:
+        result_ctx = await AssembleDeepResultStep().run(ctx)
+        
+        # Verify no decision_impact events were emitted for an errored claim
+        impact_calls = [c for c in mock_trace.call_args_list if c[0][0] == "decision_impact"]
+        assert len(impact_calls) == 0, "No decision_impact should be logged on judge error/fallback failure"
+
     final_result = result_ctx.get_extra("final_result")
     claim_result = final_result["deep_analysis"]["claim_results"][0]
 

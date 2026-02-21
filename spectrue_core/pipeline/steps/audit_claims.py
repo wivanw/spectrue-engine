@@ -32,7 +32,7 @@ class AuditClaimsStep:
 
     llm_client: LLMClient
     name: str = "audit_claims"
-    weight: float = 15.0
+    weight: float = 5.0  # ~5.2s actual (LLM audit annotations)
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

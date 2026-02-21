@@ -174,6 +174,8 @@ class ClaimJudgeSkill:
         # Extract sources_used and missing_evidence
         sources_used = tuple(str(s) for s in response.get("sources_used", []))
         missing_evidence = tuple(str(m) for m in response.get("missing_evidence", []))
+        prior_score = float(response.get("prior_score", -1.0))
+        prior_reason = str(response.get("prior_reason", "NEI"))
 
         return JudgeOutput(
             claim_id=frame.claim_id,
@@ -184,6 +186,8 @@ class ClaimJudgeSkill:
             simple_summary=simple_summary,
             sources_used=sources_used,
             missing_evidence=missing_evidence,
+            prior_score=prior_score,
+            prior_reason=prior_reason,
         )
 
     def _validate_sources_used(
@@ -222,6 +226,8 @@ class ClaimJudgeSkill:
                 simple_summary=output.simple_summary,
                 sources_used=valid_sources,
                 missing_evidence=output.missing_evidence,
+                prior_score=output.prior_score,
+                prior_reason=output.prior_reason,
             )
 
         return output

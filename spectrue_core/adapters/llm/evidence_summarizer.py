@@ -49,6 +49,40 @@ class EvidenceSummarizerSkill:
         """
         self.llm = llm_client
 
+    def clean_evidence_for_frame(self, frame: ClaimFrame) -> ClaimFrame:
+        """
+        Pre-summarization cleaner: strips boilerplate from evidence items
+        and adds cleanliness metadata before summarization.
+        """
+        from spectrue_core.adapters.llm.article_cleaner import ArticleCleanerSkill
+        from spectrue_core.domain.claims.frame import EvidenceCleanlinessRecord
+        import dataclasses
+        
+        cleaner = ArticleCleanerSkill(llm_client=self.llm)
+        new_items = []
+        for item in frame.evidence_items:
+            # Skip if already cleaned or no text
+            if getattr(item, 'cleanliness', None) is not None:
+                new_items.append(item)
+                continue
+                
+            text_to_clean = item.snippet or item.quote or ""
+            # HTML sanitization before regex cleaning
+            text_to_clean = ArticleCleanerSkill.sanitize_evidence_html(text_to_clean)
+            cleaned_text, meta = cleaner.clean_evidence_item(text_to_clean)
+            record = EvidenceCleanlinessRecord(**meta)
+            
+            # Create a new EvidenceItemFrame with cleaned text and metadata
+            new_item = dataclasses.replace(
+                item, 
+                snippet=cleaned_text,
+                quote=cleaned_text if item.quote else None,
+                cleanliness=record
+            )
+            new_items.append(new_item)
+            
+        return dataclasses.replace(frame, evidence_items=tuple(new_items))
+
     async def summarize(self, frame: ClaimFrame) -> EvidenceSummary:
         """
         Summarize evidence for a claim.

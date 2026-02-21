@@ -160,6 +160,36 @@ G_final = sigmoid(L_final)
 
 ---
 
+### Unverified Prior Drift Heuristic [B]
+
+**Status:** Engineering Heuristic
+
+In Deep Mode composition, if a claim returns with a "nei" or "unverified" verdict (missing direct external evidence), the composition engine shifts the default mid-point (0.5 confidence) towards the internal `prior_score` if the internal knowledge is extremely strong ($>0.8$ or $<0.2$).
+
+**Code location:** `spectrue_core/use_cases/claims/deep_judge.py`
+
+---
+
+### Freshness Staleness Penalty [C]
+
+**Status:** Constraint-Based Safeguard
+
+Applies a decaying confidence penalty to evidence composed of very old sources compared to the current year. Uses a sigmoid-decay scaled by maximum allowed age (e.g., 5 years). An LLM is not permitted to rate a claim with high confidence if the sources are detected as unacceptably stale without current context.
+
+**Code location:** `spectrue_core/use_cases/verification/scoring/freshness_signal.py`
+
+---
+
+### Incomplete Evidence Caps [C]
+
+**Status:** Constraint-Based Safeguard
+
+Limits maximum allowed statistical confidence to $50\%$ ($0.5$) if the LLM detects specific `missing_evidence` properties (e.g. references to un-accessed internal reports, or generic boilerplate instead of full articles).
+
+**Code location:** `spectrue_core/use_cases/claims/deep_judge.py`
+
+---
+
 ### RGBA Belief Dimensions [B]
 
 **Status:** Engineering Decision

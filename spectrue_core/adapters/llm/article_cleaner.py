@@ -296,3 +296,106 @@ class ArticleCleanerSkill:
             },
         )
         return merged, chunks
+
+    @staticmethod
+    def sanitize_evidence_html(raw_text: str) -> str:
+        """Refined text cleaner (v3.1) for evidence snippets.
+        
+        1. Strips HTML boilerplate tags (nav, footer, script, etc.)
+        2. Strips Wiki edit artifacts [ред. | ред. код]
+        3. Strips Markdown headers (noise from Tavily text export)
+        4. Removes navigation blocks (See also, References, etc.)
+        """
+        if not raw_text:
+            return raw_text
+        
+        text = raw_text
+        before_len = len(text)
+        
+        # 1. HTML tag removal
+        for tag in ("script", "style", "nav", "header", "footer", "aside"):
+            text = re.sub(
+                rf"<{tag}[^>]*>.*?</{tag}>", " ", text,
+                flags=re.DOTALL | re.IGNORECASE,
+            )
+        text = re.sub(r"<[^>]+>", " ", text)
+        
+        # 2. Wikipedia edit artifacts [ред. | ред. код]
+        text = re.sub(r"\[ред\.\s*\|\s*ред\.\s*код\]", "", text)
+        
+        # 3. Markdown headers (noise from scraping)
+        text = re.sub(r"^#{1,6}\s.*$", "", text, flags=re.MULTILINE)
+        
+        # 4. Navigation blocks (blacklist)
+        blacklist = [
+            "Див. також", "Примітки", "Посилання", "Література",
+            "See also", "References", "Further reading", "Notes", "External links"
+        ]
+        for header in blacklist:
+            # Match header at start of line and everything until next section or EOF
+            text = re.sub(
+                rf"^{header}.*?(?=\n#|\Z)", "", text,
+                flags=re.DOTALL | re.IGNORECASE | re.MULTILINE
+            )
+            
+        # 5. Markdown links [text](url) -> text
+        text = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", text)
+        
+        # 6. Whitespace collapse
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{2,}", "\n\n", text).strip()
+        
+        after_len = len(text)
+        if before_len > 0:
+            ratio = round(after_len / before_len, 2)
+            Trace.event("sanitizer.stats", {
+                "before": before_len,
+                "after": after_len,
+                "ratio": ratio
+            })
+            
+            # Production Guard (V3.1): Monitoring aggressiveness
+            if ratio < 0.2 and after_len > 0:
+                 Trace.event("sanitizer.heavy_prune", {
+                     "before": before_len,
+                     "after": after_len,
+                     "ratio": ratio,
+                     "head_orig": raw_text[:120].replace("\n", " "),
+                 })
+            
+        return text
+
+    def clean_evidence_item(self, text: str) -> tuple[str, dict]:
+        """
+        Cleans a small evidence snippet or quote by removing boilerplate regex patterns.
+        Returns the cleaned text and a dictionary with `is_boilerplate` and `retention_ratio`.
+        """
+        orig_len = len(text)
+        if orig_len == 0:
+            return text, {"is_boilerplate": False, "retention_ratio": 1.0}
+
+        cleaned = text
+        
+        # Remove navigation-style parts typically polluting snippets
+        nav_patterns = [
+            r'(?i)(Share this article!?|Subscribe to our newsletter\.?)',
+            r'(?i)(Click here to read more\.?|Read more at our website\.?|Subscribe below\.?)',
+            r'(?i)(cookie|cookies|gdpr|privacy policy|політика конфіденційності)',
+            r'(?i)(Читайте також|Read also|See also|Дивіться також)',
+        ]
+        
+        for pattern in nav_patterns:
+            cleaned = re.sub(pattern, '', cleaned).strip()
+            
+        # Clean extra spaces
+        cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+        
+        cleaned_len = len(cleaned)
+        retention_ratio = cleaned_len / orig_len if orig_len > 0 else 1.0
+        
+        is_boilerplate = retention_ratio < 0.5
+        
+        return cleaned, {
+            "is_boilerplate": is_boilerplate,
+            "retention_ratio": retention_ratio
+        }

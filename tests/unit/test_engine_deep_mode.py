@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from spectrue_core.engine import SpectrueEngine
 from spectrue_core.pipeline.mode import AnalysisMode
+from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
+from spectrue_core.use_cases.verification.orchestration.execution_state import ClaimExecutionState
 
 
 @pytest.mark.asyncio
@@ -82,3 +84,40 @@ async def test_deep_mode_single_pipeline_run_multi_claims(mock_config):
     assert result["judge_mode"] == "deep_v2"
     assert "deep_analysis" in result
     assert "verified_score" not in result
+
+
+def test_claim_execution_context_isolation():
+    """Foundational invariant (T008): state mutated for one claim does not bleed to another."""
+    shared_evidence = [{"id": "e1", "score": 0.5}]
+    
+    ctx1 = ClaimExecutionContext.create(
+        claim={"id": "c1"},
+        evidence_items=shared_evidence,
+        state=ClaimExecutionState(claim_id="c1", phases_completed={"extract"})
+    )
+    
+    ctx2 = ClaimExecutionContext.create(
+        claim={"id": "c2"},
+        evidence_items=shared_evidence,
+        state=ClaimExecutionState(claim_id="c2", phases_completed={"extract"})
+    )
+    
+    # Verify deep copy protected the original list and dicts
+    assert id(ctx1.evidence_items) != id(shared_evidence)
+    assert id(ctx1.evidence_items[0]) != id(shared_evidence[0])
+    
+    # Mutate ctx1's evidence via with_evidence
+    ctx1.with_evidence([{"id": "e1", "score": 0.9, "new_field": True}])
+    
+    # Assert ctx2 logic is untouched
+    assert len(ctx2.evidence_items) == 1
+    assert "new_field" not in ctx2.evidence_items[0]
+    assert ctx2.evidence_items[0]["score"] == 0.5
+    
+    # Assert shared_evidence source is untouched
+    assert "new_field" not in shared_evidence[0]
+    assert shared_evidence[0]["score"] == 0.5
+
+    # Verify state deep copy
+    ctx1.state.phases_completed.add("judge")
+    assert "judge" not in ctx2.state.phases_completed
