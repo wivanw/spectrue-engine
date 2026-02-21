@@ -36,15 +36,29 @@ def format_retrieval_hop(hop: ExecutionRetrievalHop) -> RetrievalHopFrame:
     Returns:
         RetrievalHopFrame for API response
     """
+    eval_dict: dict[str, Any] = {}
+    if getattr(hop, "cost_credits", 0):
+        eval_dict["cost_credits"] = hop.cost_credits
+        
+    if getattr(hop, "retrieval_eval", None):
+        if "query_origin" in hop.retrieval_eval:
+            eval_dict["query_origin"] = hop.retrieval_eval["query_origin"]
+        if "fallback_reason" in hop.retrieval_eval:
+            eval_dict["fallback_reason"] = hop.retrieval_eval["fallback_reason"]
+
+    reason = getattr(hop, "decision_reason", getattr(hop, "reason", ""))
+    phase_id = getattr(hop, "phase_id", None)
+    query_type = getattr(hop, "query_type", getattr(hop, "search_depth", None))
+
     return RetrievalHopFrame(
         hop_index=hop.hop_index,
         query=hop.query,
         decision=hop.decision,
-        reason=hop.decision_reason,
-        phase_id=None,  # Not tracked in internal hop
-        query_type=hop.search_depth,
+        reason=reason,
+        phase_id=phase_id,
+        query_type=query_type,
         results_count=hop.results_count,
-        retrieval_eval={"cost_credits": hop.cost_credits} if hop.cost_credits else None,
+        retrieval_eval=eval_dict if eval_dict else None,
     )
 
 

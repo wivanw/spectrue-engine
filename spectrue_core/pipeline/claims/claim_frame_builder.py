@@ -17,7 +17,10 @@ evidence items, and execution state.
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
 
 from spectrue_core.schema.claim_frame import (
     ClaimFrame,
@@ -220,6 +223,56 @@ def build_claim_frame(
         confirmation_counts=confirmation_counts,
         retrieval_trace=retrieval_trace,
     )
+
+
+def build_claim_frame_from_context(
+    context: ClaimExecutionContext,
+    document_text: str,
+    structure: TextStructure | None = None,
+    window_size: int = 1,
+    confirmation_lambda: float | None = None,
+    corroboration: dict[str, Any] | None = None,
+) -> ClaimFrame:
+    """Build a complete ClaimFrame from an isolated execution context."""
+    claim_text = context.claim.get("text") or context.claim.get("normalized_text") or ""
+    claim_lang = context.claim.get("language") or context.claim.get("claim_language") or "en"
+    
+    return build_claim_frame(
+        claim_id=context.claim_id,
+        claim_text=claim_text,
+        claim_language=claim_lang,
+        document_text=document_text,
+        raw_evidence=list(context.evidence_items),
+        execution_state=context.state,
+        structure=structure,
+        window_size=window_size,
+        confirmation_lambda=confirmation_lambda,
+        corroboration=corroboration,
+    )
+
+
+def build_claim_frames_from_contexts(
+    claim_contexts: dict[str, ClaimExecutionContext],
+    document_text: str,
+    confirmation_lambda: float | None = None,
+    corroboration_by_claim: dict[str, dict[str, Any]] | None = None,
+) -> list[ClaimFrame]:
+    """Build ClaimFrame objects from isolated ClaimExecutionContext mapping."""
+    structure = extract_text_structure(document_text)
+    frames: list[ClaimFrame] = []
+    
+    for claim_id, context in claim_contexts.items():
+        corr = corroboration_by_claim.get(claim_id) if corroboration_by_claim else None
+        frame = build_claim_frame_from_context(
+            context=context,
+            document_text=document_text,
+            structure=structure,
+            confirmation_lambda=confirmation_lambda,
+            corroboration=corr,
+        )
+        frames.append(frame)
+        
+    return frames
 
 
 def build_claim_frames_from_pipeline(

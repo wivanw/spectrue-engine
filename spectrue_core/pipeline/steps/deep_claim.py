@@ -43,7 +43,9 @@ from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
 from spectrue_core.pipeline.claims.claim_frame_builder import (
     build_claim_frames_from_pipeline,
+    build_claim_frames_from_contexts,
 )
+from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
 
 
 @dataclass
@@ -86,7 +88,24 @@ class BuildClaimFramesStep(Step):
             execution_states = ctx.extras.get("execution_states", {})
             corroboration_by_claim = ctx.get_extra("corroboration_by_claim")
 
-            if not claims:
+            # Lookup or create claim contexts
+            claim_contexts: dict[str, ClaimExecutionContext] = ctx.extras.get("claim_contexts", {})
+            
+            if not claim_contexts and claims:
+                for claim in claims:
+                    cid = claim.get("id") or claim.get("claim_id") or "unknown"
+                    if cid not in claim_contexts:
+                        st = execution_states.get(cid)
+                        evs = evidence_by_claim.get(cid, [])
+                        claim_contexts[cid] = ClaimExecutionContext.create(
+                            claim=claim,
+                            evidence_items=evs,
+                            state=st
+                        )
+                # Persist context backwards to pipeline
+                ctx = ctx.set_extra("claim_contexts", claim_contexts)
+
+            if not claim_contexts:
                 Trace.event("build_claim_frames.skip", {"reason": "no_claims"})
                 return ctx.set_extra("deep_claim_ctx", DeepClaimContext())
 
@@ -97,12 +116,10 @@ class BuildClaimFramesStep(Step):
                 deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
                 confirmation_lambda = deep_v2_cfg.confirmation_lambda
 
-            # Build frames
-            frames = build_claim_frames_from_pipeline(
-                claims=claims,
+            # Build frames from contexts (T005)
+            frames = build_claim_frames_from_contexts(
+                claim_contexts=claim_contexts,
                 document_text=document_text,
-                evidence_by_claim=evidence_by_claim,
-                execution_states=execution_states,
                 confirmation_lambda=confirmation_lambda,
                 corroboration_by_claim=corroboration_by_claim if isinstance(corroboration_by_claim, dict) else None,
             )
