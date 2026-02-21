@@ -97,25 +97,41 @@ class BuildClusterQueriesStep:
                 ]
                 max_queries = resolve_budgeted_max_queries(claims_for_plan, default_max=3)
 
-                try:
-                    cluster_queries = build_doc_query_plan(claims_for_plan, anchors)
-                    if not cluster_queries:
-                        Trace.event(
-                            "retrieval.cluster_plan.empty",
-                            {"cluster_id": cluster_id, "reason": "no_queries"},
-                        )
+                query_origin = "planned"
+                fallback_reason = None
+                
+                # Check for preplanned search queries on individual claims first
+                preplanned_queries = []
+                for claim in claims_for_plan:
+                    if isinstance(claim, dict) and claim.get("search_queries"):
+                        preplanned_queries.extend(claim["search_queries"])
+                        
+                if preplanned_queries:
+                    cluster_queries = preplanned_queries
+                else:
+                    try:
+                        cluster_queries = build_doc_query_plan(claims_for_plan, anchors)
+                        if not cluster_queries:
+                            Trace.event(
+                                "retrieval.cluster_plan.empty",
+                                {"cluster_id": cluster_id, "reason": "no_queries"},
+                            )
+                            cluster_queries = select_diverse_queries(
+                                claims_for_plan,
+                                max_queries=max_queries,
+                                fact_fallback=fact_fallback,
+                            )
+                            query_origin = "fallback"
+                            fallback_reason = "no_cegs_queries"
+                    except Exception as exc:
+                        logger.warning("Cluster query planning failed: %s", exc)
                         cluster_queries = select_diverse_queries(
                             claims_for_plan,
                             max_queries=max_queries,
                             fact_fallback=fact_fallback,
                         )
-                except Exception as exc:
-                    logger.warning("Cluster query planning failed: %s", exc)
-                    cluster_queries = select_diverse_queries(
-                        claims_for_plan,
-                        max_queries=max_queries,
-                        fact_fallback=fact_fallback,
-                    )
+                        query_origin = "fallback"
+                        fallback_reason = "cegs_exception"
 
                 deduped: list[str] = []
                 for query in cluster_queries:
@@ -135,11 +151,15 @@ class BuildClusterQueriesStep:
                             if isinstance(c, dict)
                         ],
                         "search_queries": deduped,
+                        "query_origin": query_origin,
+                        "fallback_reason": fallback_reason,
                         "trace": {
                             "profile": profile.name,
                             "search_depth": profile.search_depth,
                             "max_results": profile.max_results,
                             "max_queries": max_queries,
+                            "query_origin": query_origin,
+                            "fallback_reason": fallback_reason,
                         },
                     }
                 )
