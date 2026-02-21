@@ -201,11 +201,11 @@ class ClaimExtractionSkill(BaseSkill):
         self,
         text: str,
         *,
-        chunks: list[TextChunk] | None = None,
-        anchors: list[Any] | None = None,
         lang: str = "en",
-        max_claims: int = 5,
-    ) -> tuple[list[Claim], bool, ArticleIntent, str]:
+        max_claims: int = 20,
+        anchors: list | None = None,
+        skip_enrichment: bool = False,
+    ) -> tuple[list[dict], bool, str, str]:
         """
         Extract atomic verifiable claims from article text with chunked, deterministic coverage.
         
@@ -218,7 +218,7 @@ class ClaimExtractionSkill(BaseSkill):
             return [], False, "news", ""
 
         chunks_res, stitched_text = self._chunk_for_claims(text)
-        chunks = chunks or chunks_res
+        chunks = chunks_res
         if not chunks:
             return [], False, "news", stitched_text
 
@@ -299,8 +299,29 @@ class ClaimExtractionSkill(BaseSkill):
                     )
                 ], False, "news", stitched_text
 
+            if skip_enrichment:
+                # Return core claims immediately for extraction-only mode.
+                # Construct basic claim objects from core data.
+                core_claims_only = []
+                for idx, (core_data, _) in enumerate(valid_core_claims):
+                    cid = f"c{idx+1}"
+                    # Provide essential fields to prevent downstream crashes
+                    c = {
+                        "id": cid,
+                        "claim_id": cid,
+                        "text": core_data.get("text", ""),
+                        "normalized_text": core_data.get("normalized_text", core_data.get("text", "")),
+                        "importance": core_data.get("importance", 0.5),
+                        "verification_target": "reality", # Default
+                        "claim_role": "target", # Default
+                    }
+                    core_claims_only.append(c)
+                
+                Trace.event("claims.extraction.stage2.skipped", {"count": len(core_claims_only)})
+                return core_claims_only, False, str(overall_intent), stitched_text
+
             # --- Stage 2: Enrichment (with rate limiting) ---
-            MAX_CONCURRENT_ENRICHMENTS = 5
+            MAX_CONCURRENT_ENRICHMENTS = 20
             semaphore = asyncio.Semaphore(MAX_CONCURRENT_ENRICHMENTS)
             
             async def rate_limited_enrich(claim_id: str, core_data: dict, context_text: str, lang: str):
@@ -360,6 +381,47 @@ class ClaimExtractionSkill(BaseSkill):
         except Exception as e:
             logger.exception("Critical failure in split claim extraction: %s", e)
             raise
+
+    async def enrich_claims_for_planning(
+        self,
+        claims: list[dict],
+        *,
+        lang: str = "en",
+        context: str | None = None,
+    ) -> list[dict]:
+        """Enrich existing claims with planning metadata (Stage 2 reuse)."""
+        if not claims:
+            return []
+            
+        MAX_CONCURRENT_ENRICHMENTS = 20
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_ENRICHMENTS)
+        
+        async def rate_limited_enrich(claim_id: str, core_data: dict, context_text: str, lang: str):
+            async with semaphore:
+                # Use provided context if claim-specific context is missing
+                ctx_to_use = context_text or context or ""
+                return await self._enrich_claim(
+                    claim_id=claim_id,
+                    core_data=core_data,
+                    context_text=ctx_to_use,
+                    lang=lang
+                )
+        
+        enrich_tasks = []
+        for idx, c in enumerate(claims):
+            cid = c.get("id") or f"c{idx+1}"
+            context = c.get("context_text", "") # May exist if passed
+            enrich_tasks.append(rate_limited_enrich(cid, c, context, lang))
+            
+        enriched = await asyncio.gather(*enrich_tasks, return_exceptions=True)
+        final_claims = []
+        for i, res in enumerate(enriched):
+            if isinstance(res, Exception):
+                logger.error("[Claims] Enrichment failed for preloaded claim %d: %s", i, res)
+                final_claims.append(claims[i])
+            else:
+                final_claims.append(res)
+        return final_claims
 
     async def _extract_core_from_chunk(self, chunk: TextChunk) -> tuple[list[dict], ArticleIntent, ExtractionStats]:
         """

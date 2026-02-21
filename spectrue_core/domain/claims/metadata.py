@@ -163,7 +163,17 @@ def parse_claim_metadata_fields(
     time_sensitive_raw = rc.get("time_sensitive")
     if time_sensitive_raw is None:
         time_sensitive_raw = rc.get("is_time_sensitive")
-    time_sensitive = bool(time_sensitive_raw) or bool(time_signals)
+    
+    # Check for "timeless" anchor type (scientific/historical facts)
+    time_anchor = rc.get("time_anchor", {})
+    is_timeless = False
+    if isinstance(time_anchor, dict) and time_anchor.get("type") == "timeless":
+        is_timeless = True
+    
+    if is_timeless and time_sensitive_raw is None:
+        time_sensitive = False
+    else:
+        time_sensitive = bool(time_sensitive_raw) or bool(time_signals)
 
     # 4) retrieval_policy
     rp_raw = rc.get("retrieval_policy", {})

@@ -871,7 +871,7 @@ class PipelineFactory:
 
             # Claim extraction
             StepNode(
-                step=ExtractClaimsStep(agent=self.agent),
+                step=ExtractClaimsStep(agent=self.agent, skip_enrichment=True),
                 depends_on=["prepare_input"],
             ),
             

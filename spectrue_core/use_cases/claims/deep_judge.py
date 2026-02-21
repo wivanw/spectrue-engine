@@ -218,32 +218,42 @@ async def judge_claims_independently(
             new_verdict = original_verdict
             reason_codes = []
 
-            # 1. Use missing_evidence to cap confidence if high
+            # 1. Relaxed missing_evidence penalty (multiplicative or additive instead of hard cap)
             if getattr(output, "missing_evidence", None) and len(output.missing_evidence) > 0:
-                if new_conf > 0.5:
-                    new_conf = 0.5
-                    reason_codes.append("missing_evidence_penalty")
+                # If judgment is supported but missing some "extra" evidence, don't kill confidence
+                if original_verdict.lower() in ("supported", "verified"):
+                    new_conf = max(0.4, new_conf - 0.1)
+                else:
+                    # Still cap for NEI/Refuted if missing key evidence
+                    new_conf = min(new_conf, 0.5)
+                reason_codes.append("missing_evidence_penalty")
 
             # 2. Shift default "unverifiable" towards prior if prior is strong
             if output.verdict.lower() in ("unverified", "nei", "unverifiable") or output.rgba.g == -1.0:
-                if getattr(output, "prior_score", -1.0) >= 0.8:
-                    new_conf = max(0.4, min(new_conf + 0.3, 0.6))
+                # Lowered threshold further from 0.7 to 0.6 to be more helpful for common facts
+                if getattr(output, "prior_score", -1.0) >= 0.6:
+                    new_conf = max(0.4, min(new_conf + 0.3, 0.65))
                     new_verdict = "supported"
                     reason_codes.append("prior_score_supported_shift")
-                elif getattr(output, "prior_score", -1.0) >= 0.0 and getattr(output, "prior_score", -1.0) <= 0.2:
-                    new_conf = max(0.4, min(new_conf + 0.3, 0.6))
+                elif getattr(output, "prior_score", -1.0) >= 0.0 and getattr(output, "prior_score", -1.0) <= 0.25:
+                    new_conf = max(0.4, min(new_conf + 0.3, 0.65))
                     new_verdict = "refuted"
                     reason_codes.append("prior_score_refuted_shift")
 
-            # 3. Apply FreshnessSignal modifier
+            # 3. Apply FreshnessSignal modifier (aware of time sensitivity)
             try:
                 from spectrue_core.use_cases.verification.scoring.freshness_signal import calculate_freshness_adjustment
-                freshness_adj = calculate_freshness_adjustment(frame.claim_id, frame.evidence_items)
+                is_sensitive = getattr(frame.claim_metadata, "time_sensitive", True)
+                freshness_adj = calculate_freshness_adjustment(
+                    frame.claim_id, 
+                    frame.evidence_items,
+                    is_time_sensitive=is_sensitive
+                )
                 if freshness_adj < 0:
                     new_conf = max(0.0, new_conf + freshness_adj)
                     reason_codes.append("freshness_penalty")
-            except ImportError:
-                pass # freshness_signal module may not be available yet
+            except Exception as e:
+                logger.warning("Freshness signal failed: %s", e)
 
             import dataclasses
             output = dataclasses.replace(

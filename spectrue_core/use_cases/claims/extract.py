@@ -9,11 +9,12 @@ from spectrue_core.utils.coverage_anchors import extract_all_anchors
 from spectrue_core.domain.claims.dedup import dedup_claims_post_extraction_async
 
 
-async def extract_claims_from_text(*, agent: Any, fact: str, lang: str, anchors: list[str] | None):
+async def extract_claims_from_text(*, agent: Any, fact: str, lang: str, anchors: list[str] | None, skip_enrichment: bool = False):
     result_tuple = await agent.extract_claims(
         text=fact,
         lang=lang,
         anchors=anchors,
+        skip_enrichment=skip_enrichment,
     )
     claims, check_oracle, intent, fast_query = result_tuple
     if not claims:

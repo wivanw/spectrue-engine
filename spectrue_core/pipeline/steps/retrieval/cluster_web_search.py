@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -86,77 +87,118 @@ class ClusterWebSearchStep:
             cluster_sufficiency: dict[str, float] = {}
             execution_states: dict[str, ClaimExecutionState] = ctx.get_extra("execution_states", {}) or {}
 
-            total_queries = 0
+            # Stage 0: Aggregate and deduplicate unique queries across all clusters
+            all_queries_to_run = []
+            query_to_clusters: dict[str, list[str]] = {}
             for plan in cluster_plans:
                 cluster_id = str(plan.get("cluster_id") or "cluster")
                 queries = plan.get("search_queries") or []
-                query_origin = plan.get("query_origin") or "planned"
-                fallback_reason = plan.get("fallback_reason")
-                cluster_urls: list[str] = []
-                claims_list = plan.get("claims") or []
+                for q in queries:
+                    if q:
+                        all_queries_to_run.append(q)
+                        query_to_clusters.setdefault(q, []).append(cluster_id)
+            
+            # Unique queries across global scope
+            unique_queries = sorted(list(set(all_queries_to_run)))
+            query_results_cache: dict[str, list[dict]] = {}
+            query_lock = asyncio.Lock()
+
+            async def _execute_single_query_search(query: str, claims_for_query: list[dict]):
+                # Shared logic for a single query across potentially multiple clusters
+                # Stage 1: Trusted (Tier 1) search
+                trusted_domains = get_trusted_domains_by_lang(ctx.lang or "en")
+                _, sources = await self.search_mgr.search_phase(
+                    query,
+                    max_results=max_results,
+                    depth=search_depth,
+                    topic="general",
+                    include_domains=trusted_domains,
+                )
+
+                # Fallback logic: if trusted results are poor, try general search
+                rep_claim = claims_for_query[0] if claims_for_query else {"text": query}
+                sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
                 
-                for hop_index, query in enumerate(queries):
-                    if not query:
-                        continue
-                    total_queries += 1
-                    # Stage 1: Trusted (Tier 1) search
-                    trusted_domains = get_trusted_domains_by_lang(ctx.lang or "en")
-                    _, sources = await self.search_mgr.search_phase(
+                if sufficiency.status != SufficiencyStatus.SUFFICIENT:
+                    Trace.event("retrieval.cluster_search.fallback", {
+                        "query": query,
+                        "reason": "bayesian_insufficient",
+                        "confidence": sufficiency.reason,
+                    })
+                    _, general_sources = await self.search_mgr.search_phase(
                         query,
                         max_results=max_results,
                         depth=search_depth,
                         topic="general",
-                        include_domains=trusted_domains,
+                        exclude_domains=trusted_domains,
                     )
+                    if general_sources:
+                        sources = (sources or []) + general_sources
 
-                    # Fallback logic: if trusted results are poor (Bayesian assessment), try general search
-                    # For cluster search, we use the first claim of the cluster as a representative for sufficiency
-                    claims_list = plan.get("claims") or []
-                    rep_claim = claims_list[0] if claims_list else {"text": query}
-                    sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
-                    
-                    if sufficiency.status != SufficiencyStatus.SUFFICIENT:
-                        Trace.event("retrieval.cluster_search.fallback", {
+                # Stage 3: Academic search for SCIENTIFIC claims
+                is_scientific = any(
+                    c.get("policy_mode") == "SCIENTIFIC" 
+                    or c.get("search_method") == "academic"
+                    for c in claims_for_query
+                )
+                if is_scientific:
+                    interim_sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
+                    if interim_sufficiency.status != SufficiencyStatus.SUFFICIENT:
+                        Trace.event("retrieval.cluster_search.escalation", {
                             "query": query,
-                            "reason": "bayesian_insufficient",
-                            "confidence": sufficiency.reason,
+                            "reason": "bayesian_insufficient_scientific",
+                            "confidence": interim_sufficiency.reason,
                         })
-                        _, general_sources = await self.search_mgr.search_phase(
+                        _, academic_sources = await self.search_mgr.search_phase(
                             query,
                             max_results=max_results,
-                            depth=search_depth,
-                            topic="general",
-                            exclude_domains=trusted_domains,
+                            depth="academic",
+                            topic="academic",
                         )
-                        if general_sources:
-                            # Combine or prefer general results if they are better
-                            # For simplicity, we just add them to the sources list
-                            sources = (sources or []) + general_sources
+                        if academic_sources:
+                            sources = (sources or []) + academic_sources
+                
+                return query, sources or [], sufficiency
 
-                    # Stage 3: Academic (Tier 3) search for SCIENTIFIC claims
-                    is_scientific = any(c.get("policy_mode") == "SCIENTIFIC" for c in claims_list)
-                    if is_scientific:
-                        # Re-evaluate sufficiency after general search
-                        interim_sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
-                        if interim_sufficiency.status != SufficiencyStatus.SUFFICIENT:
-                            Trace.event("retrieval.cluster_search.escalation", {
-                                "query": query,
-                                "reason": "bayesian_insufficient_scientific",
-                                "confidence": interim_sufficiency.reason,
-                            })
-                            _, academic_sources = await self.search_mgr.search_phase(
-                                query,
-                                max_results=max_results,
-                                depth="academic",  # Use academic depth/topic
-                                topic="academic",
-                            )
-                            if academic_sources:
-                                sources = (sources or []) + academic_sources
+            # Step 1: Run all UNIQUE queries in parallel
+            # We need representative claims per query for sufficiency assessment
+            query_to_rep_claims: dict[str, list[dict]] = {}
+            for plan in cluster_plans:
+                queries = plan.get("search_queries") or []
+                claims = plan.get("claims") or []
+                for q in queries:
+                    if q:
+                        query_to_rep_claims.setdefault(q, []).extend(claims)
 
-                    # Final Bayesian sufficiency after fallback
-                    final_sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
+            search_results = await asyncio.gather(*[
+                _execute_single_query_search(q, query_to_rep_claims.get(q, [])) 
+                for q in unique_queries
+            ])
+            
+            # Map results back to queries
+            query_to_sources = {q: (s, suf) for q, s, suf in search_results}
+
+            # Step 2: Assemble results for each cluster
+            for plan in cluster_plans:
+                cluster_id = str(plan.get("cluster_id") or "cluster")
+                queries = plan.get("search_queries") or []
+                cluster_urls: list[str] = []
+                claims_list = plan.get("claims") or []
+                query_origin = plan.get("query_origin") or "planned"
+                fallback_reason = plan.get("fallback_reason")
+
+                for hop_index, query in enumerate(queries):
+                    if not query:
+                        continue
+                    
+                    sources, sufficiency = query_to_sources.get(query, ([], None))
+                    if sufficiency is None: # Should not happen
+                        rep_claim = claims_list[0] if claims_list else {"text": query}
+                        sufficiency = check_sufficiency_for_claim(rep_claim, sources)
+
+                    # Record sufficiency and hops
                     current_p = cluster_sufficiency.get(cluster_id, 0.0)
-                    cluster_sufficiency[cluster_id] = max(current_p, final_sufficiency.posterior_p)
+                    cluster_sufficiency[cluster_id] = max(current_p, sufficiency.posterior_p)
 
                     retrieval_eval = {"query_origin": query_origin}
                     if fallback_reason:
@@ -165,11 +207,11 @@ class ClusterWebSearchStep:
                     hop = RetrievalHop(
                         hop_index=hop_index + 1,
                         query=query,
-                        decision=final_sufficiency.status,
-                        reason=final_sufficiency.reason,
+                        decision=sufficiency.status,
+                        reason=sufficiency.reason,
                         phase_id="deep_v2_cluster_search",
                         query_type=search_depth,
-                        results_count=len(sources or []),
+                        results_count=len(sources),
                         retrieval_eval=retrieval_eval,
                     )
                     
@@ -182,7 +224,8 @@ class ClusterWebSearchStep:
                         execution_states[cid].hops.append(hop)
                         execution_states[cid].mark_completed("deep_v2_cluster_search")
 
-                    for source in sources or []:
+                    # Collect URLs
+                    for source in sources:
                         if not isinstance(source, dict):
                             continue
                         raw_url = source.get("url") or source.get("link")
@@ -208,7 +251,10 @@ class ClusterWebSearchStep:
                             }
                         if canonical not in cluster_urls:
                             cluster_urls.append(canonical)
+                
                 cluster_url_map[cluster_id] = cluster_urls
+
+            total_queries = len(unique_queries)
 
             unique_urls = sorted(url_metadata.keys())
             content_map = await self.search_mgr.fetch_urls_content_batch(unique_urls, stage=None)

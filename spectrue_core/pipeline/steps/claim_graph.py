@@ -59,7 +59,7 @@ class ClaimGraphStep:
             # If the claims fit within top_k, graph ranking adds zero value.
             cfg = getattr(self.runtime_config, "claim_graph", None)
             if cfg:
-                top_k = getattr(cfg, "top_k", 12)
+                top_k = getattr(cfg, "top_k", 7)
                 budget = getattr(cfg, "selection_budget", -1.0)
                 
                 should_skip = False

@@ -373,7 +373,7 @@ class ClaimGraphConfig:
     edge_pos_gamma: float = 0.6   # Position prior for edge weights (exp decay)
 
     # Output parameters
-    top_k: int = 12              # Key claims to select
+    top_k: int = 7               # Key claims to select (Low threshold per user request)
 
     # Priors / PageRank
     pos_prior_gamma: float = 0.12
@@ -627,7 +627,7 @@ class EngineRuntimeConfig:
                 os.getenv("CLAIM_GRAPH_MAX_PAIRWISE"), default=50, min_v=2, max_v=500
             ),
             edge_pos_gamma=_parse_float(os.getenv("CLAIM_GRAPH_EDGE_POS_GAMMA"), default=0.6, min_v=0.05, max_v=10.0),
-            top_k=_parse_int(os.getenv("CLAIM_GRAPH_TOP_K"), default=12, min_v=1, max_v=200),
+            top_k=_parse_int(os.getenv("CLAIM_GRAPH_TOP_K"), default=7, min_v=1, max_v=200),
             pos_prior_gamma=_parse_float(os.getenv("CLAIM_GRAPH_POS_GAMMA"), default=0.12, min_v=0.0, max_v=5.0),
             w_pos=_parse_float(os.getenv("CLAIM_GRAPH_W_POS"), default=0.35, min_v=0.0, max_v=5.0),
             w_supp=_parse_float(os.getenv("CLAIM_GRAPH_W_SUPP"), default=0.35, min_v=0.0, max_v=5.0),

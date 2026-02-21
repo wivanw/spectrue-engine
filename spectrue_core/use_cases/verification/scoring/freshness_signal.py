@@ -94,12 +94,18 @@ def parse_freshness_signal(claim_id: str, item: Any, current_year: int | None = 
 def calculate_freshness_adjustment(
     claim_id: str, 
     evidence_items: list[Any],
-    current_year: int | None = None
+    current_year: int | None = None,
+    is_time_sensitive: bool = True
 ) -> float:
     """
     Calculate an adjustment to confidence based on evidence freshness.
     If all evidence is old, apply a penalty.
+    
+    If the claim is not time-sensitive (scientific fact, etc.), skip penalty.
     """
+    if not is_time_sensitive:
+        return 0.0
+
     if not evidence_items:
         return 0.0
 

@@ -48,6 +48,7 @@ class ExtractClaimsStep:
 
     agent: Any  # FactCheckerAgent
     stage: str = "retrieval_planning"
+    skip_enrichment: bool = False
     name: str = "extract_claims"
     weight: float = 25.0  # ~36s in extraction pass; ~0s when preloaded in DAG
 
@@ -105,6 +106,13 @@ class ExtractClaimsStep:
                     "count": len(claims),
                     "claim_ids": [c.get("id") for c in claims[:10]],
                 })
+                if not self.skip_enrichment:
+                    needs_planning = any(not c.get("retrieval_seed_terms") for c in claims)
+                    if needs_planning:
+                        Trace.event("extract_claims.enriching_preloaded", {"count": len(claims)})
+                        fact = ctx.get_extra("prepared_fact") or ctx.get_extra("raw_fact", "")
+                        claims = await self.agent.enrich_claims_for_planning(claims, lang=ctx.lang, context=fact)
+                
                 # Still need to select anchor claim
                 anchor_claim = max(claims, key=lambda c: float(c.get("importance", 0.5)))
                 anchor_claim_id = str(anchor_claim.get("id", "c1"))
@@ -121,6 +129,7 @@ class ExtractClaimsStep:
                         "eligible_claims": len(claims),
                         "anchor_claim_id": anchor_claim_id,
                         "preloaded": True,
+                        "enriched_now": not self.skip_enrichment and needs_planning,
                     },
                 )
 
@@ -150,6 +159,7 @@ class ExtractClaimsStep:
                 fact=fact,
                 lang=ctx.lang,
                 anchors=anchors,
+                skip_enrichment=self.skip_enrichment,
             )
 
             # Semantic claim dedup right after extraction (pre-oracle/graph/search).
