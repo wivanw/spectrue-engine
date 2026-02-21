@@ -58,7 +58,7 @@ class EvidenceSummarizerSkill:
         from spectrue_core.domain.claims.frame import EvidenceCleanlinessRecord
         import dataclasses
         
-        cleaner = ArticleCleanerSkill(self.llm)
+        cleaner = ArticleCleanerSkill(llm_client=self.llm)
         new_items = []
         for item in frame.evidence_items:
             # Skip if already cleaned or no text
