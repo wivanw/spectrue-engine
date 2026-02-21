@@ -67,12 +67,7 @@ def _build_error_payload(
     return payload
 
 
-def build_judge_evidence_stats(
-    *,
-    claim_id: str,
-    corroboration_by_claim: dict[str, dict[str, Any]] | None,
-    evidence_stats_by_claim: dict[str, dict[str, Any]] | None,
-) -> dict[str, Any]:
+def build_judge_evidence_stats(frame: ClaimFrame) -> dict[str, Any]:
     """
     Build a compact, structured evidence_stats object for the judge.
     This is purely observational/diagnostic:
@@ -80,25 +75,20 @@ def build_judge_evidence_stats(
     - it helps the judge reason about redundancy vs independence and coverage
     """
     out: dict[str, Any] = {}
-
-    corr = (corroboration_by_claim or {}).get(claim_id) if isinstance(corroboration_by_claim, dict) else None
-    est = (evidence_stats_by_claim or {}).get(claim_id) if isinstance(evidence_stats_by_claim, dict) else None
-
-    if isinstance(est, dict):
-        out["sources_observed"] = est.get("sources_observed", 0)
-        out["unique_urls"] = est.get("unique_urls", 0)
-        out["unique_domains"] = est.get("unique_domains", 0)
-        out["direct_anchors"] = est.get("direct_anchors", 0)
-        out["covered_slots"] = est.get("covered_slots", 0)
-        out["transferred"] = est.get("transferred", 0)
-
-    if isinstance(corr, dict):
-        out["precision_publishers_support"] = corr.get("precision_publishers_support", 0)
-        out["precision_publishers_refute"] = corr.get("precision_publishers_refute", 0)
-        out["corroboration_clusters_support"] = corr.get("corroboration_clusters_support", 0)
-        out["corroboration_clusters_refute"] = corr.get("corroboration_clusters_refute", 0)
-        out["unique_publishers_total"] = corr.get("unique_publishers_total", 0)
-        out["exact_content_groups"] = corr.get("exact_content_groups", 0)
+    st = frame.evidence_stats
+    if st:
+        out["sources_observed"] = st.total_sources
+        out["unique_urls"] = st.total_sources
+        out["unique_domains"] = st.publishers_total
+        out["direct_anchors"] = st.direct_quotes
+        out["covered_slots"] = 0
+        out["transferred"] = 0
+        out["precision_publishers_support"] = st.support.precision_publishers
+        out["precision_publishers_refute"] = st.refute.precision_publishers
+        out["corroboration_clusters_support"] = st.support.corroboration_clusters
+        out["corroboration_clusters_refute"] = st.refute.corroboration_clusters
+        out["unique_publishers_total"] = st.publishers_total
+        out["exact_content_groups"] = st.exact_dupes_total
 
     return out
 
@@ -139,8 +129,6 @@ async def judge_claims_independently(
     llm_client: Any,
     ui_locale: str = "en",
     analysis_mode: Any = "general",
-    evidence_stats_by_claim: dict[str, Any] | None = None,
-    corroboration_by_claim: dict[str, Any] | None = None,
 ) -> tuple[dict[str, JudgeOutput], dict[str, dict[str, Any]]]:
     """Judge claims independently in parallel with repair logic."""
     if not claim_frames:
@@ -163,7 +151,7 @@ async def judge_claims_independently(
             "Your previous response was invalid or missing required fields. "
             "Return ONLY valid JSON matching the schema with keys: "
             "claim_id, rgba{R,G,B,A}, confidence, verdict, explanation, "
-            "sources_used, missing_evidence.\n\n"
+            "sources_used, missing_evidence, prior_score, prior_reason.\n\n"
             f"{base_prompt}"
         )
         repair_system = build_claim_judge_system_prompt(lang=ui_locale)
@@ -184,11 +172,7 @@ async def judge_claims_independently(
     async def judge_one(frame: ClaimFrame) -> tuple[str, JudgeOutput | None, dict[str, Any] | None]:
         summary = evidence_summaries.get(frame.claim_id)
         try:
-            evidence_stats = build_judge_evidence_stats(
-                claim_id=frame.claim_id,
-                corroboration_by_claim=corroboration_by_claim,
-                evidence_stats_by_claim=evidence_stats_by_claim,
-            )
+            evidence_stats = build_judge_evidence_stats(frame)
 
             output = await skill.judge(
                 frame,
@@ -197,6 +181,71 @@ async def judge_claims_independently(
                 analysis_mode=analysis_mode,
                 evidence_stats=evidence_stats,
             )
+            
+            # US3: Explicit confidence penalty for evidence-insufficient cleaned payloads
+            if frame.evidence_items:
+                total_ev = len(frame.evidence_items)
+                boilerplate_count = sum(1 for e in frame.evidence_items if e.cleanliness and e.cleanliness.is_boilerplate)
+                if boilerplate_count == total_ev and total_ev > 0:
+                    import dataclasses
+                    # If ALL evidence is boilerplate, penalize confidence heavily
+                    new_conf = max(0.0, output.confidence - 0.5)
+                    output = dataclasses.replace(output, confidence=new_conf)
+
+            # US4: Connect prior_score, missing_evidence, and freshness adjustments to deep confidence/verdict composition
+            original_conf = output.confidence
+            original_verdict = output.verdict
+            new_conf = original_conf
+            new_verdict = original_verdict
+            reason_codes = []
+
+            # 1. Use missing_evidence to cap confidence if high
+            if getattr(output, "missing_evidence", None) and len(output.missing_evidence) > 0:
+                if new_conf > 0.5:
+                    new_conf = 0.5
+                    reason_codes.append("missing_evidence_penalty")
+
+            # 2. Shift default "unverifiable" towards prior if prior is strong
+            if output.verdict.lower() in ("unverified", "nei", "unverifiable") or output.rgba.g == -1.0:
+                if getattr(output, "prior_score", -1.0) >= 0.8:
+                    new_conf = max(0.4, min(new_conf + 0.3, 0.6))
+                    new_verdict = "supported"
+                    reason_codes.append("prior_score_supported_shift")
+                elif getattr(output, "prior_score", -1.0) >= 0.0 and getattr(output, "prior_score", -1.0) <= 0.2:
+                    new_conf = max(0.4, min(new_conf + 0.3, 0.6))
+                    new_verdict = "refuted"
+                    reason_codes.append("prior_score_refuted_shift")
+
+            # 3. Apply FreshnessSignal modifier
+            try:
+                from spectrue_core.use_cases.verification.scoring.freshness_signal import calculate_freshness_adjustment
+                freshness_adj = calculate_freshness_adjustment(frame.claim_id, frame.evidence_items)
+                if freshness_adj < 0:
+                    new_conf = max(0.0, new_conf + freshness_adj)
+                    reason_codes.append("freshness_penalty")
+            except ImportError:
+                pass # freshness_signal module may not be available yet
+
+            import dataclasses
+            output = dataclasses.replace(
+                output, 
+                confidence=new_conf, 
+                verdict=new_verdict
+            )
+
+            # Emit decision-impact event
+            if reason_codes:
+                Trace.event("decision_impact", {
+                    "claim_id": frame.claim_id,
+                    "module_name": "deep_judge_composition",
+                    "did_change_retrieval": False,
+                    "did_change_confidence": new_conf != original_conf,
+                    "did_change_verdict": new_verdict != original_verdict,
+                    "reason_codes": reason_codes,
+                    "before_snapshot": {"confidence": original_conf, "verdict": original_verdict},
+                    "after_snapshot": {"confidence": new_conf, "verdict": new_verdict},
+                })
+
             return frame.claim_id, output, None
         except Exception as e:
             root = _root_cause(e)

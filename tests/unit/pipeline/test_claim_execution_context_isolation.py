@@ -1,4 +1,3 @@
-import pytest
 from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
 from spectrue_core.use_cases.verification.orchestration.execution_state import ClaimExecutionState
 
@@ -9,7 +8,7 @@ def test_claim_context_deep_copy_isolation():
     evidence = [{"url": "http://test.com", "score": 0.5}]
     
     state = ClaimExecutionState(claim_id="c1")
-    state.phases_completed.add("extract")
+    state.phases_completed.append("extract")
     
     ctx1 = ClaimExecutionContext.create(
         claim=claim_dict,
@@ -48,10 +47,10 @@ def test_with_evidence_immutability():
 
 def test_with_state_update_immutability():
     """Ensure with_state_update returns a new instance."""
-    state1 = ClaimExecutionState(claim_id="c1", phases_completed={"extract"})
+    state1 = ClaimExecutionState(claim_id="c1", phases_completed=["extract"])
     ctx1 = ClaimExecutionContext.create(claim={"id": "c1"}, state=state1)
     
-    new_state = ClaimExecutionState(claim_id="c1", phases_completed={"extract", "judge"})
+    new_state = ClaimExecutionState(claim_id="c1", phases_completed=["extract", "judge"])
     ctx2 = ctx1.with_state_update(new_state)
     
     assert ctx1 is not ctx2
@@ -67,7 +66,7 @@ def test_with_retrieval_plan_immutability():
     ctx2 = ctx1.with_retrieval_plan(plan)
     
     assert ctx1 is not ctx2
-    assert ctx1.retrieval_plan == {}
+    assert ctx1.retrieval_plan is None
     assert ctx2.retrieval_plan == plan
     
     plan["query"] = "mutated"

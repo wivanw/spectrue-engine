@@ -28,6 +28,7 @@ from spectrue_core.schema.claim_frame import (
     ContextExcerpt,
     ContextMeta,
     EvidenceItemFrame,
+    EvidenceCleanlinessRecord,
 )
 from spectrue_core.domain.evidence.stats import (
     build_evidence_stats,
@@ -130,6 +131,16 @@ def convert_evidence_items(
         if not source_id:
             source_id = source_id_for_url(ev.get("url", "")) or evidence_id
 
+        cleanliness_dict = ev.get("cleanliness")
+        record = None
+        if cleanliness_dict:
+            record = EvidenceCleanlinessRecord(
+                is_boilerplate=cleanliness_dict.get("is_boilerplate", False),
+                original_length=cleanliness_dict.get("original_length", 0),
+                cleaned_length=cleanliness_dict.get("cleaned_length", 0),
+                retention_ratio=cleanliness_dict.get("retention_ratio", 1.0)
+            )
+
         item = EvidenceItemFrame(
             evidence_id=evidence_id,
             claim_id=claim_id,
@@ -146,6 +157,7 @@ def convert_evidence_items(
             publisher_id=ev.get("publisher_id"),
             similar_cluster_id=ev.get("similar_cluster_id"),
             attribution=ev.get("attribution"),
+            cleanliness=record,
         )
         items.append(item)
 

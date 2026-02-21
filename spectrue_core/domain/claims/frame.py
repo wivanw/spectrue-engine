@@ -20,6 +20,15 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class EvidenceCleanlinessRecord:
+    """Tracks how much noise was removed from evidence."""
+    is_boilerplate: bool = False
+    original_length: int = 0
+    cleaned_length: int = 0
+    retention_ratio: float = 1.0
+
+
+@dataclass(frozen=True)
 class ContextExcerpt:
     """
     User-visible text snippet around a claim.
@@ -71,6 +80,7 @@ class EvidenceItemFrame:
     publisher_id: str | None = None
     similar_cluster_id: str | None = None
     attribution: str | None = None  # precision or corroboration
+    cleanliness: EvidenceCleanlinessRecord | None = None
 
 
 @dataclass(frozen=True)
@@ -214,6 +224,8 @@ class JudgeOutput:
     simple_summary: str = ""
     sources_used: tuple[str, ...] = ()  # subset of EvidenceItemFrame.url
     missing_evidence: tuple[str, ...] = ()
+    prior_score: float = -1.0
+    prior_reason: str = "NEI"
 
 
 @dataclass(frozen=True)

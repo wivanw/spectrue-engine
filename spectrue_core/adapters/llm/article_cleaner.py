@@ -296,3 +296,38 @@ class ArticleCleanerSkill:
             },
         )
         return merged, chunks
+
+    def clean_evidence_item(self, text: str) -> tuple[str, dict]:
+        """
+        Cleans a small evidence snippet or quote by removing boilerplate regex patterns.
+        Returns the cleaned text and a dictionary with `is_boilerplate` and `retention_ratio`.
+        """
+        orig_len = len(text)
+        if orig_len == 0:
+            return text, {"is_boilerplate": False, "retention_ratio": 1.0}
+
+        cleaned = text
+        
+        # Remove navigation-style parts typically polluting snippets
+        nav_patterns = [
+            r'(?i)(Share this article!?|Subscribe to our newsletter\.?)',
+            r'(?i)(Click here to read more\.?|Read more at our website\.?|Subscribe below\.?)',
+            r'(?i)(cookie|cookies|gdpr|privacy policy|політика конфіденційності)',
+            r'(?i)(Читайте також|Read also|See also|Дивіться також)',
+        ]
+        
+        for pattern in nav_patterns:
+            cleaned = re.sub(pattern, '', cleaned).strip()
+            
+        # Clean extra spaces
+        cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+        
+        cleaned_len = len(cleaned)
+        retention_ratio = cleaned_len / orig_len if orig_len > 0 else 1.0
+        
+        is_boilerplate = retention_ratio < 0.5
+        
+        return cleaned, {
+            "is_boilerplate": is_boilerplate,
+            "retention_ratio": retention_ratio
+        }

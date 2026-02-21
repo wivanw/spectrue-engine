@@ -15,6 +15,7 @@ API-facing RetrievalTrace structure for ClaimFrame.
 """
 
 from __future__ import annotations
+from typing import Any
 
 from spectrue_core.schema.claim_frame import (
     RetrievalHop as RetrievalHopFrame,

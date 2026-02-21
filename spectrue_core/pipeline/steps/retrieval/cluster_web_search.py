@@ -133,6 +133,26 @@ class ClusterWebSearchStep:
                             # For simplicity, we just add them to the sources list
                             sources = (sources or []) + general_sources
 
+                    # Stage 3: Academic (Tier 3) search for SCIENTIFIC claims
+                    is_scientific = any(c.get("policy_mode") == "SCIENTIFIC" for c in claims_list)
+                    if is_scientific:
+                        # Re-evaluate sufficiency after general search
+                        interim_sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
+                        if interim_sufficiency.status != SufficiencyStatus.SUFFICIENT:
+                            Trace.event("retrieval.cluster_search.escalation", {
+                                "query": query,
+                                "reason": "bayesian_insufficient_scientific",
+                                "confidence": interim_sufficiency.reason,
+                            })
+                            _, academic_sources = await self.search_mgr.search_phase(
+                                query,
+                                max_results=max_results,
+                                depth="academic",  # Use academic depth/topic
+                                topic="academic",
+                            )
+                            if academic_sources:
+                                sources = (sources or []) + academic_sources
+
                     # Final Bayesian sufficiency after fallback
                     final_sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
                     current_p = cluster_sufficiency.get(cluster_id, 0.0)

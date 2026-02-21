@@ -107,7 +107,7 @@ def test_claim_execution_context_isolation():
     assert id(ctx1.evidence_items[0]) != id(shared_evidence[0])
     
     # Mutate ctx1's evidence via with_evidence
-    new_ctx1 = ctx1.with_evidence([{"id": "e1", "score": 0.9, "new_field": True}])
+    ctx1.with_evidence([{"id": "e1", "score": 0.9, "new_field": True}])
     
     # Assert ctx2 logic is untouched
     assert len(ctx2.evidence_items) == 1

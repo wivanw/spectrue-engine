@@ -90,6 +90,40 @@ def process_single_claim_verdict(
     items = pack.get("items", []) if isinstance(pack, dict) else []
     n_support, n_refute, best_tier = count_stance_evidence(claim_id, items)
 
+    # ---------------------------------------------------------
+    # T032 (US4): Apply adjustments to verdict score
+    missing_evidence = cv.get("missing_evidence", [])
+    try:
+        prior_score = float(cv.get("prior_score", -1.0))
+    except (TypeError, ValueError):
+        prior_score = -1.0
+        
+    # Cap severity if evidence is missing
+    if missing_evidence and len(missing_evidence) > 0:
+        if llm_score > 0.8:
+            llm_score = 0.8
+        if llm_score < 0.2:
+            llm_score = 0.2
+
+    # Shift unverifiable towards prior
+    if n_support == 0 and n_refute == 0 and not has_direct_evidence:
+        if prior_score >= 0.8:
+            llm_score = max(0.4, min(llm_score + 0.3, 0.6))
+        elif 0.0 <= prior_score <= 0.2:
+            llm_score = max(0.4, llm_score - 0.1) # shift towards 0.4 (lean refute)
+            
+    try:
+        from spectrue_core.use_cases.verification.scoring.freshness_signal import calculate_freshness_adjustment
+        freshness_adj = calculate_freshness_adjustment(claim_id, items)
+        if freshness_adj < 0:
+            if llm_score > 0.5:
+                llm_score = max(0.5, llm_score + freshness_adj)
+            elif llm_score < 0.5:
+                llm_score = min(0.5, llm_score - freshness_adj)
+    except ImportError:
+        pass
+    # ---------------------------------------------------------
+
     # Use raw LLM score directly (no posterior boost)
     # Posterior was causing all scores to drift toward 0.98+
     cv["verdict_score"] = llm_score
