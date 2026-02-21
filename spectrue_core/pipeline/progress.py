@@ -83,7 +83,7 @@ class ProgressEstimator:
         status_key = f"loader.{step_name}"
         
         # 'verifying_claims' is a virtual step used in Deep Mode to group multiple DAG steps
-        is_virtual = step_name in {"verifying_claims", "extracting_claims"}
+        is_virtual = step_name in {"verifying_claims", "extracting_claims", "extract_claims"}
         
         if self.step_objects.get(step_name) is None and not is_virtual:
             logger.warning(f"[Progress] Unknown step_name '{step_name}' - no step object")
