@@ -10,6 +10,7 @@ async def test_adaptive_graph_skip():
     mock_builder = MagicMock()
     runtime_config = MagicMock()
     # Cost per claim is 1.0, budget is 10.0
+    runtime_config.claim_graph.top_k = 12
     runtime_config.claim_graph.selection_budget = 10.0
     runtime_config.claim_graph.default_claim_cost = 1.0
     
@@ -38,6 +39,7 @@ async def test_adaptive_graph_execute():
     
     runtime_config = MagicMock()
     # Cost per claim is 1.0, budget is 2.0
+    runtime_config.claim_graph.top_k = 3
     runtime_config.claim_graph.selection_budget = 2.0
     runtime_config.claim_graph.default_claim_cost = 1.0
     
