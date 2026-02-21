@@ -112,7 +112,7 @@ class EvidenceCollectStep:
     search_mgr: Any  # SearchManager
     include_global_pack: bool = True
     name: str = "evidence_collect"
-    weight: float = 15.0
+    weight: float = 1.0  # ~0s in deep_v2 (no global pack)
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

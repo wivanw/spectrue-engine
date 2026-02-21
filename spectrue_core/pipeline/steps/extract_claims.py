@@ -49,7 +49,7 @@ class ExtractClaimsStep:
     agent: Any  # FactCheckerAgent
     stage: str = "retrieval_planning"
     name: str = "extract_claims"
-    weight: float = 25.0
+    weight: float = 25.0  # ~36s in extraction pass; ~0s when preloaded in DAG
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Extract claims from fact."""

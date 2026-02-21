@@ -33,7 +33,7 @@ class AuditEvidenceStep:
 
     llm_client: LLMClient
     name: str = "audit_evidence"
-    weight: float = 15.0
+    weight: float = 17.0  # ~17s actual
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

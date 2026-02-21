@@ -28,7 +28,7 @@ class EvidenceSpilloverStep(Step):
 
     config: Any
     name: str = "evidence_spillover"
-    weight: float = 2.0
+    weight: float = 1.0  # ~0s actual
 
 
 

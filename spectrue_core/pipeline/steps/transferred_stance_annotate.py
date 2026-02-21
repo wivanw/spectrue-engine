@@ -78,7 +78,7 @@ class TransferredStanceAnnotateStep(Step):
 
     agent: Any
     config: Any
-    weight: float = 2.0
+    weight: float = 12.0  # ~12.5s actual
 
     name: str = "transferred_stance_annotate"
 

@@ -38,7 +38,7 @@ class ClusterEvidenceEnrichStep:
     config: Any
     search_mgr: Any
     name: str = "cluster_evidence_enrich"
-    weight: float = 5.0
+    weight: float = 3.0  # ~3s actual
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
