@@ -187,6 +187,8 @@ async def judge_claims_independently(
         return skill._validate_sources_used(repaired, frame)
 
     async def judge_one(frame: ClaimFrame) -> tuple[str, JudgeOutput | None, dict[str, Any] | None]:
+        nonlocal processed
+        
         summary = evidence_summaries.get(frame.claim_id)
         try:
             evidence_stats = build_judge_evidence_stats(frame)
