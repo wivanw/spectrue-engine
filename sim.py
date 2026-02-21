@@ -1,8 +1,10 @@
 import os
 import sys
 import asyncio
+import traceback
 
-sys.path.insert(0, os.path.abspath('..'))
+# Add to path
+sys.path.insert(0, os.path.abspath('.'))
 
 try:
     from spectrue_core.pipeline.factory import PipelineFactory
@@ -23,11 +25,12 @@ try:
             print(f"--- Simulating mode: {mode} ---")
             pipeline = factory.build(mode, config=config)
             
-            async def dummy_callback(event):
+            async def dummy_callback(_event):
                 pass
                 
             estimator = ProgressEstimator(dummy_callback)
-            estimator.on_dag_planned(pipeline.nodes)
+            # Use set_planned_nodes instead of on_dag_planned (outdated name probably)
+            estimator.set_planned_nodes(pipeline.nodes)
             
             for node in pipeline.nodes:
                 step = node.step
@@ -35,8 +38,8 @@ try:
                 # Simulate engine.py emitting node_started
                 await estimator.on_step_start(name)
 
-    asyncio.run(main())
+    if __name__ == "__main__":
+        asyncio.run(main())
 
-except Exception as e:
-    import traceback
+except Exception:
     traceback.print_exc()
