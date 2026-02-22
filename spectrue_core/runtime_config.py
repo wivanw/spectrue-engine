@@ -351,6 +351,7 @@ class DeepV2Config:
     representative_max_k: int = 3
     precision_top_k: int = 2
     corroboration_top_k: int = 3
+    max_unique_urls: int = 120
 
     # Re-stance for transferred evidence
     restace_transferred_top_k: int = 2
@@ -574,6 +575,9 @@ class EngineRuntimeConfig:
             corroboration_top_k=_parse_int(
                 os.getenv("DEEP_V2_CORROBORATION_TOP_K"), default=3, min_v=1, max_v=10
             ),
+            max_unique_urls=_parse_int(
+                os.getenv("DEEP_V2_MAX_UNIQUE_URLS"), default=120, min_v=0, max_v=500
+            ),
             restace_transferred_top_k=_parse_int(
                 os.getenv("DEEP_V2_RESTANCE_TRANSFERRED_TOP_K"), default=2, min_v=1, max_v=5
             ),
@@ -766,6 +770,7 @@ class EngineRuntimeConfig:
                 "representative_max_k": int(self.deep_v2.representative_max_k),
                 "precision_top_k": int(self.deep_v2.precision_top_k),
                 "corroboration_top_k": int(self.deep_v2.corroboration_top_k),
+                "max_unique_urls": int(self.deep_v2.max_unique_urls),
                 "restace_transferred_top_k": int(self.deep_v2.restace_transferred_top_k),
                 "tiered_search_enabled": bool(self.deep_v2.tiered_search_enabled),
                 "freshness_gating_enabled": bool(self.deep_v2.freshness_gating_enabled),

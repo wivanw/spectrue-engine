@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -47,6 +48,18 @@ def _coerce_score(value: Any) -> float:
     except Exception:
         return 0.0
     return score
+
+
+def _coerce_int(value: Any, *, default: int, min_v: int = 0, max_v: int | None = None) -> int:
+    try:
+        out = int(value)
+    except Exception:
+        out = default
+    if out < min_v:
+        out = min_v
+    if max_v is not None and out > max_v:
+        out = max_v
+    return out
 
 
 def _stable_cluster_id(urls: list[str]) -> str:
@@ -92,6 +105,7 @@ class ClusterWebSearchStep:
             max_search_concurrency = 4  # default
             if runtime_config and hasattr(runtime_config, "llm"):
                 max_search_concurrency = getattr(runtime_config.llm, "max_doc_concurrency", 4)
+            max_search_concurrency = _coerce_int(max_search_concurrency, default=4, min_v=1, max_v=16)
             search_sem = asyncio.Semaphore(max_search_concurrency)
 
             # Stage 0: Aggregate and deduplicate unique queries across all clusters
@@ -182,10 +196,27 @@ class ClusterWebSearchStep:
                     if q:
                         query_to_rep_claims.setdefault(q, []).extend(claims)
 
+            search_phase_started = time.perf_counter()
+            Trace.event(
+                "retrieval.cluster_search.phase.search.start",
+                {
+                    "queries": len(unique_queries),
+                    "search_depth": search_depth,
+                    "max_results": max_results,
+                    "max_parallel": max_search_concurrency,
+                },
+            )
             search_results = await asyncio.gather(*[
-                _execute_single_query_search(q, query_to_rep_claims.get(q, [])) 
+                _execute_single_query_search(q, query_to_rep_claims.get(q, []))
                 for q in unique_queries
             ])
+            Trace.event(
+                "retrieval.cluster_search.phase.search.complete",
+                {
+                    "queries": len(unique_queries),
+                    "duration_ms": int((time.perf_counter() - search_phase_started) * 1000),
+                },
+            )
             
             # Map results back to queries
             query_to_sources = {q: (s, suf) for q, s, suf in search_results}
@@ -269,7 +300,49 @@ class ClusterWebSearchStep:
             total_queries = len(unique_queries)
 
             unique_urls = sorted(url_metadata.keys())
+            urls_before_cap = len(unique_urls)
+            max_unique_urls = _coerce_int(
+                getattr(deep_v2_cfg, "max_unique_urls", 120),
+                default=120,
+                min_v=0,
+                max_v=500,
+            )
+            if max_unique_urls > 0 and len(unique_urls) > max_unique_urls:
+                unique_urls = sorted(
+                    unique_urls,
+                    key=lambda url: (
+                        -_coerce_score((url_metadata.get(url) or {}).get("score")),
+                        url,
+                    ),
+                )[:max_unique_urls]
+                Trace.event(
+                    "retrieval.cluster_search.url_cap.applied",
+                    {
+                        "urls_before": urls_before_cap,
+                        "urls_after": len(unique_urls),
+                        "urls_dropped": urls_before_cap - len(unique_urls),
+                        "max_unique_urls": max_unique_urls,
+                    },
+                )
+
+            extract_phase_started = time.perf_counter()
+            Trace.event(
+                "retrieval.cluster_search.phase.extract.start",
+                {
+                    "urls_before_cap": urls_before_cap,
+                    "urls_after_cap": len(unique_urls),
+                    "max_unique_urls": max_unique_urls,
+                },
+            )
             content_map = await self.search_mgr.fetch_urls_content_batch(unique_urls, stage=None)
+            Trace.event(
+                "retrieval.cluster_search.phase.extract.complete",
+                {
+                    "urls_after_cap": len(unique_urls),
+                    "fetched_urls": len(content_map),
+                    "duration_ms": int((time.perf_counter() - extract_phase_started) * 1000),
+                },
+            )
 
             evidence_docs: dict[str, dict[str, Any]] = {}
             ordered_texts: list[str] = []
@@ -292,7 +365,15 @@ class ClusterWebSearchStep:
                     s = str(t)
                     # Prefer early part; heavy pages often append nav/related content later.
                     ordered_embed_texts.append(s[:8000])
-                
+
+                embed_phase_started = time.perf_counter()
+                Trace.event(
+                    "retrieval.cluster_search.phase.embedding.start",
+                    {
+                        "documents": len(ordered_embed_texts),
+                        "max_chars_per_doc": 8000,
+                    },
+                )
                 embeddings = await self.embedding_client.embed_texts(ordered_embed_texts, purpose="document")
                 sim_matrix = self.embedding_client.build_similarity_matrix(embeddings)
                 
@@ -301,6 +382,18 @@ class ClusterWebSearchStep:
                     ordered_urls,
                     sim_matrix,
                     quantile=deep_v2_cfg.doc_cluster_quantile,
+                )
+                Trace.event(
+                    "retrieval.cluster_search.phase.embedding.complete",
+                    {
+                        "documents": len(ordered_embed_texts),
+                        "duration_ms": int((time.perf_counter() - embed_phase_started) * 1000),
+                    },
+                )
+            else:
+                Trace.event(
+                    "retrieval.cluster_search.phase.embedding.skipped",
+                    {"reason": "embedding_client_unavailable", "documents": len(ordered_urls)},
                 )
 
             for idx, url in enumerate(ordered_urls):
@@ -340,6 +433,8 @@ class ClusterWebSearchStep:
                     "plan_id": plan_id,
                     "clusters": len(cluster_evidence_docs),
                     "urls_total": len(evidence_docs),
+                    "urls_before_cap": urls_before_cap,
+                    "url_cap": max_unique_urls,
                 },
             )
 
@@ -365,6 +460,8 @@ class ClusterWebSearchStep:
                         "clusters": len(cluster_evidence_docs),
                         "queries": total_queries,
                         "urls_total": len(evidence_docs),
+                        "urls_before_cap": urls_before_cap,
+                        "url_cap": max_unique_urls,
                     },
                 )
             )

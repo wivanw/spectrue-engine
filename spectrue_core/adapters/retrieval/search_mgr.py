@@ -7,6 +7,10 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
+import asyncio
+import logging
+import time
+
 from spectrue_core.tools.web_search_tool import WebSearchTool
 from spectrue_core.tools.google_fact_check import GoogleFactCheckTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
@@ -27,7 +31,6 @@ from spectrue_core.domain.verification.search.search_policy import (
 )
 from spectrue_core.scoring.budget_allocation import GlobalBudgetTracker
 from spectrue_core.utils.trace import Trace
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +222,17 @@ class SearchManager:
             return True
         return current_cost <= max_cost
 
+    def _resolve_extract_batch_parallelism(self) -> int:
+        """Resolve bounded parallelism for Tavily extract batches."""
+        runtime = getattr(self.config, "runtime", None)
+        search_cfg = getattr(runtime, "search", None)
+        raw = getattr(search_cfg, "tavily_concurrency", 1)
+        try:
+            value = int(raw)
+        except Exception:
+            value = 1
+        return max(1, min(value, 16))
+
     async def fetch_url_content(self, url: str, *, stage: int | None = None) -> str | None:
         """Securely fetch content via Tavily Extract (single URL, for back-compat)."""
         results = await self.fetch_urls_content_batch([url], stage=stage)
@@ -247,6 +261,7 @@ class SearchManager:
         
         url_map: dict[str, str] = {}
         missing: list[str] = []
+        missing_seen: set[str] = set()
         
         # Check cache first
         for u in urls:
@@ -254,7 +269,9 @@ class SearchManager:
             if cached:
                 url_map[u] = cached
             else:
-                missing.append(u)
+                if u not in missing_seen:
+                    missing.append(u)
+                    missing_seen.add(u)
         
         Trace.event("search_mgr.batch_fetch.cache", {
             "hit": len(url_map),
@@ -264,38 +281,70 @@ class SearchManager:
         })
         
         if missing and self.web_tool.api_key:
-            # Batch extract with 5-URL chunks
+            # Batch extract with 5-URL chunks and bounded parallelism.
             BATCH_SIZE = 5
             batches = [missing[i:i + BATCH_SIZE] for i in range(0, len(missing), BATCH_SIZE)]
-            
-            for batch_idx, batch in enumerate(batches):
-                Trace.event("search_mgr.batch_fetch.call", {
-                    "batch_index": batch_idx,
-                    "urls_count": len(batch),
-                    "stage": stage,
-                })
-                try:
-                    data = await self.web_tool._tavily.extract_batch(urls=batch, format="markdown")
-                    results = data.get("results", [])
-                    
-                    for item in results:
-                        item_url = item.get("url")
-                        if not item_url:
-                            continue
-                        raw = item.get("raw_content") or item.get("content") or ""
-                        cleaned = self.web_tool._clean_extracted_text(raw)
-                        if cleaned:
-                            url_map[item_url] = cleaned
-                            self.web_tool._write_page_cache(item_url, cleaned)
-                            self.page_fetches += 1
-                except Exception as e:
-                    logger.warning("[SearchMgr] Batch extract failed: %s", e)
-                    Trace.event("search_mgr.batch_fetch.error", {
+            max_parallel = min(self._resolve_extract_batch_parallelism(), len(batches))
+            started = time.perf_counter()
+
+            Trace.event("search_mgr.batch_fetch.phase.start", {
+                "stage": stage,
+                "urls_total": len(missing),
+                "batches": len(batches),
+                "batch_size": BATCH_SIZE,
+                "max_parallel": max_parallel,
+            })
+
+            sem = asyncio.Semaphore(max_parallel)
+
+            async def _run_batch(batch_idx: int, batch: list[str]) -> tuple[int, list[dict]]:
+                async with sem:
+                    Trace.event("search_mgr.batch_fetch.call", {
                         "batch_index": batch_idx,
                         "urls_count": len(batch),
-                        "error": str(e)[:200],
                         "stage": stage,
                     })
+                    try:
+                        data = await self.web_tool._tavily.extract_batch(urls=batch, format="markdown")
+                        return batch_idx, list(data.get("results", []) or [])
+                    except Exception as e:
+                        logger.warning("[SearchMgr] Batch extract failed: %s", e)
+                        Trace.event("search_mgr.batch_fetch.error", {
+                            "batch_index": batch_idx,
+                            "urls_count": len(batch),
+                            "error": str(e)[:200],
+                            "stage": stage,
+                        })
+                        return batch_idx, []
+
+            batch_results = await asyncio.gather(
+                *[_run_batch(batch_idx, batch) for batch_idx, batch in enumerate(batches)],
+                return_exceptions=False,
+            )
+
+            batch_results.sort(key=lambda pair: pair[0])
+            extracted_items = 0
+            for _, results in batch_results:
+                for item in results:
+                    item_url = item.get("url")
+                    if not item_url:
+                        continue
+                    raw = item.get("raw_content") or item.get("content") or ""
+                    cleaned = self.web_tool._clean_extracted_text(raw)
+                    if cleaned:
+                        url_map[item_url] = cleaned
+                        self.web_tool._write_page_cache(item_url, cleaned)
+                        self.page_fetches += 1
+                        extracted_items += 1
+
+            Trace.event("search_mgr.batch_fetch.phase.complete", {
+                "stage": stage,
+                "urls_total": len(missing),
+                "batches": len(batches),
+                "max_parallel": max_parallel,
+                "extracted_items": extracted_items,
+                "duration_ms": int((time.perf_counter() - started) * 1000),
+            })
         
         return url_map
 

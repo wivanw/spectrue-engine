@@ -24,7 +24,6 @@ from spectrue_core.domain.claims.extraction import (
 )
 from spectrue_core.llm.fallback import call_with_fallback
 import re
-from typing import Any
 from spectrue_core.agents.llm_schemas import (
     CLAIM_RETRIEVAL_SCHEMA,
     VERIFIABLE_CORE_CLAIM_SCHEMA,
