@@ -52,6 +52,9 @@ class ProgressEstimator:
         self.last_percent: int = 0
         self.step_objects: dict[str, Any] = {} # Map name -> Step object
         self.current_step: Optional[str] = None
+        # Parallel-awareness: track active steps to defer progress until last finishes
+        self._active_steps: set[str] = set()
+        self._pending_weight: float = 0.0  # Weight accumulated but not yet emitted
 
     def set_planned_nodes(self, nodes: list[Any]):
         """Sets the list of nodes (StepNode) that are expected to run."""
@@ -75,8 +78,9 @@ class ProgressEstimator:
     async def on_step_start(self, step_name: str):
         """Called when a step starts."""
         self.current_step = step_name
+        self._active_steps.add(step_name)
         try:
-            logger.debug(f"ProgressEstimator.on_step_start: step={step_name}, completed_weight={self.completed_weight}")
+            logger.debug(f"ProgressEstimator.on_step_start: step={step_name}, completed_weight={self.completed_weight}, active={self._active_steps}")
         except Exception:
             pass
         # Use 100% scale for progress, clamp to 95% until finalized
@@ -150,20 +154,35 @@ class ProgressEstimator:
             pass
 
     async def on_step_end(self, step_name: str):
-        """Called when a step finishes successfully."""
+        """Called when a step finishes successfully.
+        
+        When parallel steps are active, weight is accumulated but the progress
+        event is deferred until ALL active steps finish. This prevents the
+        status from jumping ahead while sibling steps are still running.
+        """
         try:
-            logger.debug(f"ProgressEstimator.on_step_end: step={step_name}, before_completed_weight={self.completed_weight}")
+            logger.debug(f"ProgressEstimator.on_step_end: step={step_name}, before_completed_weight={self.completed_weight}, active={self._active_steps}")
         except Exception:
             pass
         if step_name in self.executed_steps:
             return
         
         self.executed_steps.add(step_name)
+        self._active_steps.discard(step_name)
         
         # Get weight from step object with fallback
         step_obj = self.step_objects.get(step_name)
         weight = getattr(step_obj, "weight", 1.0 if step_obj else 0.0)
-        self.completed_weight += weight
+        self._pending_weight += weight
+        
+        # Only emit progress event when ALL parallel steps have finished
+        if self._active_steps:
+            logger.debug(f"ProgressEstimator.on_step_end: deferring emit for '{step_name}', still active: {self._active_steps}")
+            return
+        
+        # Flush all pending weight at once
+        self.completed_weight += self._pending_weight
+        self._pending_weight = 0.0
         
         # Calculate new percentage
         divisor = max(1.0, self.total_weight)
@@ -172,7 +191,7 @@ class ProgressEstimator:
         percent = max(5, percent)
         
         try:
-            logger.debug(f"ProgressEstimator.on_step_end: step={step_name}, added_weight={weight}, new_completed_weight={self.completed_weight}, percent={percent}")
+            logger.debug(f"ProgressEstimator.on_step_end: flushing, step={step_name}, new_completed_weight={self.completed_weight}, percent={percent}")
         except Exception:
             pass
         
@@ -192,6 +211,3 @@ class ProgressEstimator:
         except Exception:
             # Swallow to keep pipeline robust
             pass
-        
-        # We don't emit an event here usually, the next step start will update the UI
-        # unless it's the very last step.
