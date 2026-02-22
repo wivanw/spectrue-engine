@@ -98,12 +98,15 @@ async def summarize_evidence_for_claims(
     claim_frames: list[ClaimFrame],
     llm_client: Any,
     progress_callback: Any | None = None,
+    max_concurrency: int = 4,
+    model: str | Any | None = None,
 ) -> dict[str, EvidenceSummary]:
     """Summarize evidence for each claim in parallel."""
     if not claim_frames:
         return {}
 
     skill = EvidenceSummarizerSkill(llm_client)
+    semaphore = asyncio.Semaphore(max_concurrency)
 
     processed = 0
     total = len(claim_frames)
@@ -111,7 +114,8 @@ async def summarize_evidence_for_claims(
     async def summarize_one(frame: ClaimFrame) -> tuple[str, EvidenceSummary]:
         nonlocal processed
         
-        summary = await skill.summarize(frame)
+        async with semaphore:
+            summary = await skill.summarize(frame, model=model)
         
         processed += 1
         if progress_callback:
@@ -143,10 +147,13 @@ async def judge_claims_independently(
     ui_locale: str = "en",
     analysis_mode: Any = "general",
     progress_callback: Any | None = None,
+    max_concurrency: int = 4,
 ) -> tuple[dict[str, JudgeOutput], dict[str, dict[str, Any]]]:
     """Judge claims independently in parallel with repair logic."""
     if not claim_frames:
         return {}, {}
+
+    semaphore = asyncio.Semaphore(max_concurrency)
 
     processed = 0
     total = len(claim_frames)
@@ -191,15 +198,16 @@ async def judge_claims_independently(
         
         summary = evidence_summaries.get(frame.claim_id)
         try:
-            evidence_stats = build_judge_evidence_stats(frame)
+            async with semaphore:
+                evidence_stats = build_judge_evidence_stats(frame)
 
-            output = await skill.judge(
-                frame,
-                summary,
-                ui_locale=ui_locale,
-                analysis_mode=analysis_mode,
-                evidence_stats=evidence_stats,
-            )
+                output = await skill.judge(
+                    frame,
+                    summary,
+                    ui_locale=ui_locale,
+                    analysis_mode=analysis_mode,
+                    evidence_stats=evidence_stats,
+                )
             
             # US3: Explicit confidence penalty for evidence-insufficient cleaned payloads
             if frame.evidence_items:
@@ -243,7 +251,8 @@ async def judge_claims_independently(
             # 3. Apply FreshnessSignal modifier (aware of time sensitivity)
             try:
                 from spectrue_core.use_cases.verification.scoring.freshness_signal import calculate_freshness_adjustment
-                is_sensitive = getattr(frame.claim_metadata, "time_sensitive", True)
+                claim_metadata = getattr(frame, "claim_metadata", None)
+                is_sensitive = getattr(claim_metadata, "time_sensitive", True)
                 freshness_adj = calculate_freshness_adjustment(
                     frame.claim_id, 
                     frame.evidence_items,

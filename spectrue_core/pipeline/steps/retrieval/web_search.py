@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -219,6 +220,13 @@ class WebSearchStep:
                 Trace.event("retrieval.search.skipped", {"reason": "no_claims", "plan_id": plan.plan_id})
                 return ctx
 
+            # Read concurrency limit from runtime_config
+            runtime_config = ctx.get_extra("runtime_config")
+            max_search_concurrency = 4  # default
+            if runtime_config and hasattr(runtime_config, "llm"):
+                max_search_concurrency = getattr(runtime_config.llm, "max_doc_concurrency", 4)
+            search_sem = asyncio.Semaphore(max_search_concurrency)
+
             claim_id_map: dict[str, dict[str, Any]] = {}
             for idx, claim in enumerate(safe_claims):
                 claim_id_map[_claim_id_for(claim, idx)] = claim
@@ -246,17 +254,30 @@ class WebSearchStep:
                 return url in audited_urls_by_claim.get(str(claim_id), set())
 
             async def _run_search_queries(queries: list[str]) -> list[str]:
+                valid_queries = [q for q in queries if q]
+                if not valid_queries:
+                    return []
+
+                async def _search_one(query: str) -> list[str]:
+                    async with search_sem:
+                        _, sources = await self.search_mgr.search_phase(
+                            query,
+                            max_results=5,
+                            depth="basic",
+                            topic="general",
+                        )
+                        return _record_sources(sources, url_metadata)
+
+                results = await asyncio.gather(
+                    *[_search_one(q) for q in valid_queries],
+                    return_exceptions=True,
+                )
                 urls: list[str] = []
-                for query in queries:
-                    if not query:
-                        continue
-                    _, sources = await self.search_mgr.search_phase(
-                        query,
-                        max_results=5,
-                        depth="basic",
-                        topic="general",
-                    )
-                    urls.extend(_record_sources(sources, url_metadata))
+                for r in results:
+                    if isinstance(r, list):
+                        urls.extend(r)
+                    elif isinstance(r, Exception):
+                        logger.warning("[WebSearchStep] Query failed: %s", r)
                 return urls
 
             def _refresh_audit_matches() -> None:
@@ -282,36 +303,65 @@ class WebSearchStep:
                 _refresh_audit_matches()
                 bind_after_extract()
 
-                # Stage 1: Graph priority
+                # Stage 1: Graph priority (parallel per key claim)
                 pipeline_ctx.set_stage(1)
                 key_claim_ids = ctx.get_extra("key_claim_ids", []) or []
-                for claim_id in key_claim_ids:
-                    claim = claim_id_map.get(str(claim_id))
+
+                async def _stage1_one(cid: str) -> tuple[str, list[str]]:
+                    claim = claim_id_map.get(str(cid))
                     if not claim:
-                        continue
-                    query = _first_query_for_claim(plan, str(claim_id), claim)
+                        return str(cid), []
+                    query = _first_query_for_claim(plan, str(cid), claim)
                     if not query:
+                        return str(cid), []
+                    urls = await _run_search_queries([query])
+                    return str(cid), urls
+
+                stage1_results = await asyncio.gather(
+                    *[_stage1_one(cid) for cid in key_claim_ids],
+                    return_exceptions=True,
+                )
+                for r in stage1_results:
+                    if isinstance(r, Exception):
+                        logger.warning("[WebSearchStep] Stage 1 query failed: %s", r)
                         continue
-                    stage1_urls = await _run_search_queries([query])
-                    register_urls(stage=1, claim_ids={str(claim_id)}, urls=stage1_urls)
+                    cid, urls = r
+                    if urls:
+                        register_urls(stage=1, claim_ids={cid}, urls=urls)
                 await extract_all_batches()
                 _apply_metadata(state.extractor_queue.extracted, url_metadata)
                 _refresh_audit_matches()
                 bind_after_extract()
 
-                # Stage 2: Sufficiency-driven escalation
+                # Stage 2: Sufficiency-driven escalation (parallel)
                 pipeline_ctx.set_stage(2)
-                for idx, claim in enumerate(safe_claims):
-                    claim_id = _claim_id_for(claim, idx)
+
+                async def _stage2_one(cid: str, claim: dict) -> tuple[str, list[str]]:
                     metadata = _metadata_dict(claim.get("metadata")) or _metadata_dict(claim)
                     s_value = compute_sufficiency(metadata)
                     s_min = float(metadata.get("S_min", SUFFICIENCY_P_THRESHOLD))
-                    if s_value < s_min:
-                        query = _first_query_for_claim(plan, claim_id, claim)
-                        if not query:
-                            continue
-                        stage2_urls = await _run_search_queries([query])
-                        register_urls(stage=2, claim_ids={claim_id}, urls=stage2_urls)
+                    if s_value >= s_min:
+                        return cid, []
+                    query = _first_query_for_claim(plan, cid, claim)
+                    if not query:
+                        return cid, []
+                    urls = await _run_search_queries([query])
+                    return cid, urls
+
+                stage2_results = await asyncio.gather(
+                    *[
+                        _stage2_one(_claim_id_for(c, i), c)
+                        for i, c in enumerate(safe_claims)
+                    ],
+                    return_exceptions=True,
+                )
+                for r in stage2_results:
+                    if isinstance(r, Exception):
+                        logger.warning("[WebSearchStep] Stage 2 query failed: %s", r)
+                        continue
+                    cid, urls = r
+                    if urls:
+                        register_urls(stage=2, claim_ids={cid}, urls=urls)
                 await extract_all_batches()
                 _apply_metadata(state.extractor_queue.extracted, url_metadata)
                 _refresh_audit_matches()

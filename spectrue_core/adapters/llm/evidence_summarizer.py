@@ -16,6 +16,7 @@ and identifies evidence gaps.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from spectrue_core.llm.llm_client import LLMClient
@@ -29,6 +30,7 @@ from spectrue_core.domain.claims.frame import (
     EvidenceReference,
     EvidenceSummary,
 )
+from spectrue_core.llm.model_registry import ModelID
 from spectrue_core.utils.trace import Trace
 
 
@@ -49,7 +51,11 @@ class EvidenceSummarizerSkill:
         """
         self.llm = llm_client
 
-    def clean_evidence_for_frame(self, frame: ClaimFrame) -> ClaimFrame:
+    async def clean_evidence_for_frame(
+        self, 
+        frame: ClaimFrame,
+        max_concurrency: int = 4
+    ) -> ClaimFrame:
         """
         Pre-summarization cleaner: strips boilerplate from evidence items
         and adds cleanliness metadata before summarization.
@@ -59,40 +65,49 @@ class EvidenceSummarizerSkill:
         import dataclasses
         
         cleaner = ArticleCleanerSkill(llm_client=self.llm)
-        new_items = []
-        for item in frame.evidence_items:
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def _clean_one(item):
             # Skip if already cleaned or no text
             if getattr(item, 'cleanliness', None) is not None:
-                new_items.append(item)
-                continue
+                return item
                 
-            text_to_clean = item.snippet or item.quote or ""
-            # HTML sanitization before regex cleaning
-            text_to_clean = ArticleCleanerSkill.sanitize_evidence_html(text_to_clean)
-            cleaned_text, meta = cleaner.clean_evidence_item(text_to_clean)
-            record = EvidenceCleanlinessRecord(**meta)
-            
-            # Create a new EvidenceItemFrame with cleaned text and metadata
-            new_item = dataclasses.replace(
-                item, 
-                snippet=cleaned_text,
-                quote=cleaned_text if item.quote else None,
-                cleanliness=record
-            )
-            new_items.append(new_item)
+            async with semaphore:
+                text_to_clean = item.snippet or item.quote or ""
+                # HTML sanitization before regex cleaning
+                text_to_clean = ArticleCleanerSkill.sanitize_evidence_html(text_to_clean)
+                cleaned_text, meta = cleaner.clean_evidence_item(text_to_clean)
+                record = EvidenceCleanlinessRecord(**meta)
+                
+                # Create a new EvidenceItemFrame with cleaned text and metadata
+                return dataclasses.replace(
+                    item, 
+                    snippet=cleaned_text,
+                    quote=cleaned_text if item.quote else None,
+                    cleanliness=record
+                )
+
+        tasks = [_clean_one(item) for item in frame.evidence_items]
+        new_items = await asyncio.gather(*tasks)
             
         return dataclasses.replace(frame, evidence_items=tuple(new_items))
 
-    async def summarize(self, frame: ClaimFrame) -> EvidenceSummary:
+    async def summarize(
+        self, 
+        frame: ClaimFrame,
+        model: str | ModelID | None = None
+    ) -> EvidenceSummary:
         """
         Summarize evidence for a claim.
         
         Args:
             frame: ClaimFrame with evidence to analyze
+            model: Optional model ID to use for summarization
         
         Returns:
             EvidenceSummary with categorized evidence
         """
+        effective_model = model or ModelID.PRO # Default to PRO for quality
         # Skip if no evidence
         if not frame.evidence_items:
             Trace.event("evidence_summarizer.skip", {
@@ -120,6 +135,7 @@ class EvidenceSummarizerSkill:
                 system_prompt=system_prompt,
                 schema=EVIDENCE_SUMMARIZER_SCHEMA,
                 schema_name="evidence_summarizer",
+                model=effective_model,
             )
 
             # Parse response
