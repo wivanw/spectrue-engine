@@ -251,7 +251,8 @@ async def judge_claims_independently(
             # 3. Apply FreshnessSignal modifier (aware of time sensitivity)
             try:
                 from spectrue_core.use_cases.verification.scoring.freshness_signal import calculate_freshness_adjustment
-                is_sensitive = getattr(frame.claim_metadata, "time_sensitive", True)
+                claim_metadata = getattr(frame, "claim_metadata", None)
+                is_sensitive = getattr(claim_metadata, "time_sensitive", True)
                 freshness_adj = calculate_freshness_adjustment(
                     frame.claim_id, 
                     frame.evidence_items,

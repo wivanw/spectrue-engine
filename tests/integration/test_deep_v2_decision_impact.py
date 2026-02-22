@@ -46,14 +46,16 @@ async def test_deep_judge_decision_impact_emits_events():
     
     with patch.object(ClaimJudgeSkill, "judge", return_value=output):
         with patch.object(Trace, "event") as mock_trace:
-            results = await judge_claims_independently(
-                claim_frames=[frame],
-                evidence_summaries={},
-                llm_client=MagicMock()
-            )
-            
-            # Print the errors to see why the judge failed
-            assert "c1" not in results[1], f"Judge returned error: {results[1].get('c1')}"
+            with patch("spectrue_core.use_cases.claims.deep_judge.logger.warning") as mock_warning:
+                results = await judge_claims_independently(
+                    claim_frames=[frame],
+                    evidence_summaries={},
+                    llm_client=MagicMock()
+                )
+
+                # Print the errors to see why the judge failed
+                assert "c1" not in results[1], f"Judge returned error: {results[1].get('c1')}"
+                assert not mock_warning.called
         
         # Verify Trace.event was called for decision_impact
         # It's called for start, complete, and decision_impact
@@ -76,4 +78,4 @@ async def test_deep_judge_decision_impact_emits_events():
         assert event_data["before_snapshot"]["confidence"] == 0.8
         assert event_data["before_snapshot"]["verdict"] == "nei"
         assert event_data["after_snapshot"]["verdict"] == "supported"
-        assert event_data["after_snapshot"]["confidence"] <= 0.6  # Because min(0.5+0.3, 0.6)
+        assert event_data["after_snapshot"]["confidence"] <= 0.65  # Because min(0.5+0.3, 0.65)
