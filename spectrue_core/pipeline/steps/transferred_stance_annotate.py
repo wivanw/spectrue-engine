@@ -217,4 +217,8 @@ class TransferredStanceAnnotateStep(Step):
             {"pairs": total_pairs, "updated": updated, "top_k": top_k},
         )
 
-        return ctx.with_update(sources=merged_sources).set_extra("transferred_stance_updated", updated)
+        return (
+            ctx.with_update(sources=merged_sources)
+            .set_extra("evidence_by_claim", _group_by_claim(merged_sources))
+            .set_extra("transferred_stance_updated", updated)
+        )

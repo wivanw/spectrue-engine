@@ -440,10 +440,10 @@ class ClaimExtractionSkill(BaseSkill):
         # We inject system instructions separately to ensure they are never empty.
         instructions = DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS
         
-        # Trace guard: log if we're using fallback (this should always be the case now)
+        # Trace guard: log that instructions were injected as part of the normal flow.
         Trace.event("claim_extraction.guard.instructions_injected", {
             "instructions_len": len(instructions),
-            "fallback_used": True,  # We always inject now as a safety measure
+            "is_proactive_injection": True, 
         })
         
         # Define primary and fallback calls

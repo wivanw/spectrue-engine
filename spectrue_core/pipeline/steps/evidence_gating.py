@@ -92,16 +92,30 @@ class EvidenceGatingStep:
                 cluster_weights=DEFAULT_CLUSTER_WEIGHTS,
             )
 
+            stance_enabled = stance_gate_payload.enabled
+            cluster_enabled = cluster_gate_payload.enabled
+            stance_reasons = stance_gate_payload.reasons
+            cluster_reasons = cluster_gate_payload.reasons
+
+            # --- FORCE POLICY (Deep Mode Resilience) ---
+            # If in Deep mode, we prioritize completeness over budget cost
+            # to avoid the fatal "INSUFFICIENT_EVIDENCE" due to missing stance.
+            if ctx.mode.name in ("deep", "deep_v2"):
+                stance_enabled = True
+                cluster_enabled = True
+                stance_reasons = (*stance_reasons, "forced_by_deep_mode")
+                cluster_reasons = (*cluster_reasons, "forced_by_deep_mode")
+
             stance_gate = GateDecision(
-                enabled=stance_gate_payload.enabled,
+                enabled=stance_enabled,
                 p_need=stance_gate_payload.p_need,
                 expected_gain=stance_gate_payload.expected_gain,
                 expected_cost=stance_gate_payload.expected_cost,
                 threshold=stance_gate_payload.threshold,
-                reasons=stance_gate_payload.reasons,
+                reasons=stance_reasons,
             )
             cluster_gate = GateDecision(
-                enabled=cluster_gate_payload.enabled,
+                enabled=cluster_enabled,
                 p_need=cluster_gate_payload.p_need,
                 expected_gain=cluster_gate_payload.expected_gain,
                 expected_cost=cluster_gate_payload.expected_cost,

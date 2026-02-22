@@ -164,53 +164,60 @@ class ClusteringSkill(BaseSkill):
             return clustered_results
 
         try:
+            results = []
             if (stance_pass_mode or "").lower() == "two_pass":
                 # Note: two_pass is legacy/slow, but we support it with batching internally too
                 support_results = await run_pass(STANCE_PASS_SUPPORT_ONLY, "support")
                 refute_results = await run_pass(STANCE_PASS_REFUTE_ONLY, "refute")
-                return merge_stance_passes(
+                results = merge_stance_passes(
                     support_results=support_results,
                     refute_results=refute_results,
                     original_sources=search_results,
                 )
+            else:
+                results = await run_pass(STANCE_PASS_SINGLE, "single")
 
-            single_results = await run_pass(STANCE_PASS_SINGLE, "single")
+            # Apply stance restoration (M115/M140 fix)
+            # If Clustering LLM degraded pre-verified stances to CONTEXT, force restore them.
+            if results and len(results) == len(search_results):
+                results = self._apply_stance_restoration(results, search_results)
 
-            # FIX: Restore pre-verified stances (e.g. from PhaseRunner shortcuts)
-            # If Clustering LLM degraded them to CONTEXT, force restore them.
-            if single_results and len(single_results) == len(search_results):
-                count_restored = 0
-                # Assuming index alignment is preserved
-                for i, res in enumerate(single_results):
-                     original = search_results[i]
-                     pre_stance = (original.get("stance") or "").upper()
-                     curr_stance = (res.get("stance") or "").upper()
-
-                     # Only restore if it was explicit SUPPORT/REFUTE and Clustering dropped it
-                     if pre_stance in ("SUPPORT", "REFUTE") and curr_stance not in ("SUPPORT", "REFUTE"):
-                         final_stance = pre_stance.lower()
-                         res["stance"] = final_stance
-                         # Boost relevance if needed
-                         res["relevance_score"] = max(res.get("relevance_score", 0), 0.85)
-                         # If no quote found by LLM, use snippet as backup quote
-                         if not res.get("quote") and not res.get("quote_span"):
-                              res["quote"] = (original.get("snippet") or "")[:500]
-                              match final_stance:
-                                  case "support":
-                                      res["quote_span"] = res["quote"]
-                                  case "refute":
-                                      res["contradiction_span"] = res["quote"]
-                         count_restored += 1
-
-                     # FIX: Always propagate is_primary flag if present (even if stance wasn't restored)
-                     # The Scoring layer needs this to trigger the "[PRIMARY SOURCE]" prompt injection.
-                     if original.get("is_primary"):
-                         res["is_primary"] = True
-                         res["source_type"] = "primary"
-
-                if count_restored > 0:
-                     logger.info("[Clustering] Restored %d pre-verified stances (overwrote LLM context)", count_restored)
-
-            return single_results
+            return results
         except Exception as e:
             return exception_fallback_all_context(search_results=search_results, error=e)
+
+    def _apply_stance_restoration(
+        self, 
+        results: list[SearchResult], 
+        original_sources: list[dict]
+    ) -> list[SearchResult]:
+        """Restore pre-verified stances if LLM clustering dropped them."""
+        count_restored = 0
+        for i, res in enumerate(results):
+            original = original_sources[i]
+            pre_stance = (original.get("stance") or "").upper()
+            curr_stance = (res.get("stance") or "").upper()
+
+            # Only restore if it was explicit SUPPORT/REFUTE and Clustering dropped it
+            if pre_stance in ("SUPPORT", "REFUTE") and curr_stance not in ("SUPPORT", "REFUTE"):
+                final_stance = pre_stance.lower()
+                res["stance"] = final_stance
+                # Boost relevance if needed
+                res["relevance_score"] = max(res.get("relevance_score", 0), 0.85)
+                # If no quote found by LLM, use snippet as backup quote
+                if not res.get("quote") and not res.get("quote_span"):
+                    res["quote"] = (original.get("snippet") or "")[:500]
+                    if final_stance == "support":
+                        res["quote_span"] = res["quote"]
+                    elif final_stance == "refute":
+                        res["contradiction_span"] = res["quote"]
+                count_restored += 1
+
+            # Always propagate is_primary flag if present
+            if original.get("is_primary"):
+                res["is_primary"] = True
+                res["source_type"] = "primary"
+
+        if count_restored > 0:
+            logger.info("[Clustering] Restored %d pre-verified stances", count_restored)
+        return results
