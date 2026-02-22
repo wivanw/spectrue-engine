@@ -87,6 +87,13 @@ class ClusterWebSearchStep:
             cluster_sufficiency: dict[str, float] = {}
             execution_states: dict[str, ClaimExecutionState] = ctx.get_extra("execution_states", {}) or {}
 
+            # Semaphore to bound concurrent Tavily API calls (rate limit safety)
+            runtime_config = ctx.get_extra("runtime_config")
+            max_search_concurrency = 4  # default
+            if runtime_config and hasattr(runtime_config, "llm"):
+                max_search_concurrency = getattr(runtime_config.llm, "max_doc_concurrency", 4)
+            search_sem = asyncio.Semaphore(max_search_concurrency)
+
             # Stage 0: Aggregate and deduplicate unique queries across all clusters
             all_queries_to_run = []
             query_to_clusters: dict[str, list[str]] = {}
@@ -100,68 +107,73 @@ class ClusterWebSearchStep:
             
             # Unique queries across global scope
             unique_queries = sorted(list(set(all_queries_to_run)))
-            query_results_cache: dict[str, list[dict]] = {}
-            query_lock = asyncio.Lock()
+
+            async def _search_with_sem(query: str, **kwargs) -> tuple[Any, list]:
+                """Run a single search_phase call bounded by semaphore."""
+                async with search_sem:
+                    return await self.search_mgr.search_phase(query, **kwargs)
 
             async def _execute_single_query_search(query: str, claims_for_query: list[dict]):
-                # Shared logic for a single query across potentially multiple clusters
-                # Stage 1: Trusted (Tier 1) search
+                # Run trusted + general search in PARALLEL (instead of serial fallback)
                 trusted_domains = get_trusted_domains_by_lang(ctx.lang or "en")
-                _, sources = await self.search_mgr.search_phase(
+
+                trusted_task = _search_with_sem(
                     query,
                     max_results=max_results,
                     depth=search_depth,
                     topic="general",
                     include_domains=trusted_domains,
                 )
+                general_task = _search_with_sem(
+                    query,
+                    max_results=max_results,
+                    depth=search_depth,
+                    topic="general",
+                    exclude_domains=trusted_domains,
+                )
 
-                # Fallback logic: if trusted results are poor, try general search
+                (_, trusted_sources), (_, general_sources) = await asyncio.gather(
+                    trusted_task, general_task
+                )
+
+                # Merge: trusted first, then general
+                sources = (trusted_sources or []) + (general_sources or [])
+
                 rep_claim = claims_for_query[0] if claims_for_query else {"text": query}
-                sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
-                
-                if sufficiency.status != SufficiencyStatus.SUFFICIENT:
-                    Trace.event("retrieval.cluster_search.fallback", {
-                        "query": query,
-                        "reason": "bayesian_insufficient",
-                        "confidence": sufficiency.reason,
-                    })
-                    _, general_sources = await self.search_mgr.search_phase(
-                        query,
-                        max_results=max_results,
-                        depth=search_depth,
-                        topic="general",
-                        exclude_domains=trusted_domains,
-                    )
-                    if general_sources:
-                        sources = (sources or []) + general_sources
+                sufficiency = check_sufficiency_for_claim(rep_claim, sources)
 
-                # Stage 3: Academic search for SCIENTIFIC claims
+                Trace.event("retrieval.cluster_search.parallel_search", {
+                    "query": query,
+                    "trusted_count": len(trusted_sources or []),
+                    "general_count": len(general_sources or []),
+                })
+
+                # Academic search only for SCIENTIFIC claims + insufficient evidence
                 is_scientific = any(
                     c.get("policy_mode") == "SCIENTIFIC" 
                     or c.get("search_method") == "academic"
                     for c in claims_for_query
                 )
-                if is_scientific:
-                    interim_sufficiency = check_sufficiency_for_claim(rep_claim, sources or [])
-                    if interim_sufficiency.status != SufficiencyStatus.SUFFICIENT:
-                        Trace.event("retrieval.cluster_search.escalation", {
-                            "query": query,
-                            "reason": "bayesian_insufficient_scientific",
-                            "confidence": interim_sufficiency.reason,
-                        })
-                        _, academic_sources = await self.search_mgr.search_phase(
-                            query,
-                            max_results=max_results,
-                            depth="academic",
-                            topic="academic",
-                        )
-                        if academic_sources:
-                            sources = (sources or []) + academic_sources
+                if is_scientific and sufficiency.status != SufficiencyStatus.SUFFICIENT:
+                    Trace.event("retrieval.cluster_search.escalation", {
+                        "query": query,
+                        "reason": "bayesian_insufficient_scientific",
+                        "confidence": sufficiency.reason,
+                    })
+                    _, academic_sources = await _search_with_sem(
+                        query,
+                        max_results=max_results,
+                        depth="academic",
+                        topic="academic",
+                    )
+                    if academic_sources:
+                        sources = sources + academic_sources
+                        # Re-check sufficiency with academic results
+                        sufficiency = check_sufficiency_for_claim(rep_claim, sources)
                 
-                return query, sources or [], sufficiency
+                return query, sources, sufficiency
 
             # Step 1: Run all UNIQUE queries in parallel
-            # We need representative claims per query for sufficiency assessment
             query_to_rep_claims: dict[str, list[dict]] = {}
             for plan in cluster_plans:
                 queries = plan.get("search_queries") or []
