@@ -16,6 +16,7 @@ evaluated independently with its own ClaimFrame and JudgeOutput.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -162,13 +163,29 @@ class SummarizeEvidenceStep(Step):
 
             # Pre-summarization cleaning (US3)
             skill = EvidenceSummarizerSkill(self._llm)
-            cleaned_frames = [skill.clean_evidence_for_frame(f) for f in deep_ctx.claim_frames]
+            
+            # Use max_doc_concurrency for parallel cleaning
+            max_doc_conc = 4
+            max_claim_conc = 4
+            
+            runtime = ctx.get_extra("runtime_config")
+            if runtime and hasattr(runtime, "llm"):
+                max_doc_conc = getattr(runtime.llm, "max_doc_concurrency", 4)
+                max_claim_conc = getattr(runtime.llm, "max_claim_concurrency", 4)
+
+            # Parallel cleaning of evidence documents (US2.2)
+            cleaned_tasks = [skill.clean_evidence_for_frame(f, max_concurrency=max_doc_conc) for f in deep_ctx.claim_frames]
+            cleaned_frames = await asyncio.gather(*cleaned_tasks)
             deep_ctx.claim_frames = cleaned_frames
+
+            from spectrue_core.llm.model_registry import ModelID
 
             summaries = await summarize_evidence_for_claims(
                 claim_frames=deep_ctx.claim_frames,
                 llm_client=self._llm,
                 progress_callback=ctx.get_extra("progress_callback"),
+                max_concurrency=max_claim_conc,
+                model=ModelID.NANO,
             )
 
             deep_ctx.evidence_summaries = summaries
@@ -212,6 +229,12 @@ class JudgeClaimsStep(Step):
             ui_locale = ctx.lang or "en"
             analysis_mode = ctx.mode.api_analysis_mode
 
+            # Use max_claim_concurrency for independent judging
+            max_claim_conc = 4
+            runtime = ctx.get_extra("runtime_config")
+            if runtime and hasattr(runtime, "llm"):
+                max_claim_conc = getattr(runtime.llm, "max_claim_concurrency", 4)
+
             outputs, errors = await judge_claims_independently(
                 claim_frames=deep_ctx.claim_frames,
                 evidence_summaries=deep_ctx.evidence_summaries,
@@ -219,6 +242,7 @@ class JudgeClaimsStep(Step):
                 ui_locale=ui_locale,
                 analysis_mode=analysis_mode,
                 progress_callback=ctx.get_extra("progress_callback"),
+                max_concurrency=max_claim_conc,
             )
 
             deep_ctx.judge_outputs = outputs

@@ -130,6 +130,10 @@ class EngineLLMConfig:
     timeout_sec: float = 90.0
     concurrency: int = 6
     nano_timeout_sec: float = 90.0
+    # Concurrency configuration for parallel processing
+    max_claim_concurrency: int = 4
+    max_doc_concurrency: int = 4
+
     # Responses API configuration
     cluster_timeout_sec: float = 120.0
 
@@ -597,6 +601,9 @@ class EngineRuntimeConfig:
         deepseek_base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip()
         deepseek_api_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
 
+        max_claim_conc = _parse_int(os.getenv("SPECTRUE_MAX_CLAIM_CONCURRENCY"), default=4, min_v=1, max_v=16)
+        max_doc_conc = _parse_int(os.getenv("SPECTRUE_MAX_DOC_CONCURRENCY"), default=4, min_v=1, max_v=16)
+
         deepseek_models_env = os.getenv("DEEPSEEK_MODEL_NAMES")
         if deepseek_models_env is None:
             deepseek_model_names = (ModelID.MID, "deepseek-reasoner")
@@ -617,6 +624,8 @@ class EngineRuntimeConfig:
             model_clustering_stance=model_clustering_stance,
             model_claim_extraction_fallback=os.getenv("MODEL_CLAIM_EXTRACTION_FALLBACK", ModelID.PRO),
             enable_inline_source_verification=enable_inline_source_verification,
+            max_claim_concurrency=max_claim_conc,
+            max_doc_concurrency=max_doc_conc,
         )
 
         # ClaimGraph configuration (always enabled, no feature flag)
@@ -719,6 +728,8 @@ class EngineRuntimeConfig:
                 "model_claim_extraction_fallback": self.llm.model_claim_extraction_fallback,
                 "model_inline_source_verification": self.llm.model_inline_source_verification,
                 "model_clustering_stance": self.llm.model_clustering_stance,
+                "max_claim_concurrency": int(self.llm.max_claim_concurrency),
+                "max_doc_concurrency": int(self.llm.max_doc_concurrency),
                 "enable_inline_source_verification": bool(self.llm.enable_inline_source_verification),
             },
             "search": {
