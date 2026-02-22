@@ -191,9 +191,6 @@ class SpectrueEngine:
 
 
             if analysis_mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
-                if progress_estimator:
-                    await progress_estimator.on_step_start("extract_claims")
-
                 # Deep analysis: if input is a URL, first extract the article content
                 working_text = text
                 if text.strip().startswith("http://") or text.strip().startswith(
@@ -252,8 +249,10 @@ class SpectrueEngine:
                     or 0.0
                 )
 
+                # Deep mode runs two DAG passes with overlapping step names.
+                # Reset executed-step tracking so the verification pass can advance progress.
                 if progress_estimator:
-                    await progress_estimator.on_step_start("verifying_claims")
+                    progress_estimator.executed_steps.clear()
 
                 # Step 2: Single pipeline run with all claims (avoids N+1 pipeline runs)
                 # This replaces the per-claim loop that caused N+1 pipeline runs

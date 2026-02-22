@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from spectrue_core.engine import SpectrueEngine
 from spectrue_core.pipeline.mode import AnalysisMode
+from spectrue_core.pipeline.progress import ProgressEvent
+from spectrue_core.pipeline.dag import StepNode
 from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
 from spectrue_core.use_cases.verification.orchestration.execution_state import ClaimExecutionState
 
@@ -121,3 +123,92 @@ def test_claim_execution_context_isolation():
     # Verify state deep copy
     ctx1.state.phases_completed.add("judge")
     assert "judge" not in ctx2.state.phases_completed
+
+
+@pytest.mark.asyncio
+async def test_deep_mode_progress_advances_without_virtual_verifying_step(mock_config):
+    mock_config.openai_model = "gpt-5-nano"
+    mock_config.runtime.tunables = MagicMock()
+    mock_config.runtime.tunables.langdetect_min_prob = 0.0
+    mock_config.runtime.features.trace_enabled = False
+    mock_config.runtime.features.log_redaction = False
+    mock_config.runtime.features.trace_safe_payloads = True
+    mock_config.runtime.debug = MagicMock()
+    mock_config.runtime.debug.trace_max_head_chars = 120
+    mock_config.runtime.debug.trace_max_inline_chars = 600
+
+    claims = [
+        {"id": "c1", "text": "Claim 1"},
+        {"id": "c2", "text": "Claim 2"},
+    ]
+
+    class _MockStep:
+        def __init__(self, name: str, weight: float):
+            self.name = name
+            self.weight = weight
+
+    async def _emit_fake_dag(progress_callback, nodes: list[StepNode]) -> None:
+        if not progress_callback:
+            return
+        await progress_callback("init", None, nodes)
+        for node in nodes:
+            await progress_callback("step_start", node.name)
+            await progress_callback("step_end", node.name)
+
+    async def _verify_fact_side_effect(**kwargs):
+        progress_callback = kwargs.get("progress_callback")
+        if kwargs.get("extract_claims_only"):
+            extraction_nodes = [
+                StepNode(step=_MockStep("metering_setup", 1.0)),
+                StepNode(step=_MockStep("prepare_input", 1.0)),
+                StepNode(step=_MockStep("extract_claims", 25.0)),
+            ]
+            await _emit_fake_dag(progress_callback, extraction_nodes)
+            return {
+                "_extracted_claims": claims,
+                "cost_summary": {"total_credits": 1.0},
+            }
+
+        verification_nodes = [
+            StepNode(step=_MockStep("metering_setup", 1.0)),
+            StepNode(step=_MockStep("prepare_input", 1.0)),
+            StepNode(step=_MockStep("extract_claims", 25.0)),
+            StepNode(step=_MockStep("claim_graph", 20.0)),
+            StepNode(step=_MockStep("judge_claims", 120.0)),
+            StepNode(step=_MockStep("assemble_deep_result", 1.0)),
+            StepNode(step=_MockStep("cost_summary", 1.0)),
+        ]
+        await _emit_fake_dag(progress_callback, verification_nodes)
+        return {
+            "deep_analysis": {"claim_results": []},
+            "cost_summary": {"total_credits": 2.0},
+        }
+
+    mock_verifier = MagicMock()
+    mock_verifier.verify_fact = AsyncMock(side_effect=_verify_fact_side_effect)
+    mock_verifier.fetch_url_content = AsyncMock(return_value=None)
+    mock_verifier.pipeline = MagicMock()
+    mock_verifier.pipeline.search_mgr = MagicMock()
+    mock_verifier.pipeline.search_mgr.web_tool = MagicMock()
+    mock_verifier.pipeline.search_mgr.web_tool._tavily = MagicMock()
+    mock_verifier.pipeline.search_mgr.web_tool._tavily._meter = MagicMock()
+
+    progress_events: list[ProgressEvent] = []
+
+    async def _progress_callback(event: ProgressEvent):
+        progress_events.append(event)
+
+    with patch("spectrue_core.engine.FactVerifier", return_value=mock_verifier), \
+        patch("spectrue_core.engine.detect_content_language", return_value=("en", 1.0)), \
+        patch("spectrue_core.engine.load_pricing_policy", return_value=MagicMock()):
+        engine = SpectrueEngine(mock_config)
+        await engine.analyze_text(
+            "Claim 1. Claim 2.",
+            lang="en",
+            analysis_mode=AnalysisMode.DEEP,
+            progress_callback=_progress_callback,
+        )
+
+    assert progress_events
+    assert all(evt.status_key != "loader.verifying_claims" for evt in progress_events)
+    assert max(evt.percent for evt in progress_events) >= 50

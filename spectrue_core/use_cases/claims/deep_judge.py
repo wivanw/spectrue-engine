@@ -21,6 +21,23 @@ from spectrue_core.utils.trace import Trace
 logger = logging.getLogger(__name__)
 
 
+_VERDICT_ALIASES: dict[str, str] = {
+    "SUPPORT": "SUPPORTED",
+    "SUPPORTED": "SUPPORTED",
+    "VERIFIED": "SUPPORTED",
+    "REFUTE": "REFUTED",
+    "REFUTED": "REFUTED",
+    "NEI": "NEI",
+    "UNVERIFIED": "NEI",
+    "UNVERIFIABLE": "NEI",
+}
+
+
+def _normalize_verdict_label(verdict: str | None) -> str:
+    key = (verdict or "").strip().upper()
+    return _VERDICT_ALIASES.get(key, key)
+
+
 def _root_cause(exc: Exception) -> Exception:
     seen: set[int] = set()
     current: Exception = exc
@@ -222,6 +239,7 @@ async def judge_claims_independently(
             # US4: Connect prior_score, missing_evidence, and freshness adjustments to deep confidence/verdict composition
             original_conf = output.confidence
             original_verdict = output.verdict
+            original_verdict_norm = _normalize_verdict_label(original_verdict)
             new_conf = original_conf
             new_verdict = original_verdict
             reason_codes = []
@@ -229,7 +247,7 @@ async def judge_claims_independently(
             # 1. Relaxed missing_evidence penalty (multiplicative or additive instead of hard cap)
             if getattr(output, "missing_evidence", None) and len(output.missing_evidence) > 0:
                 # If judgment is supported but missing some "extra" evidence, don't kill confidence
-                if original_verdict.lower() in ("supported", "verified"):
+                if original_verdict_norm == "SUPPORTED":
                     new_conf = max(0.4, new_conf - 0.1)
                 else:
                     # Still cap for NEI/Refuted if missing key evidence
@@ -237,12 +255,17 @@ async def judge_claims_independently(
                 reason_codes.append("missing_evidence_penalty")
 
             # 2. Shift default "unverifiable" towards prior if prior is strong
-            if output.verdict.lower() in ("unverified", "nei", "unverifiable") or output.rgba.g == -1.0:
+            g_score = float(getattr(output.rgba, "g", -1.0))
+            is_hard_negative = g_score <= 0.0 or original_verdict_norm in {"NEI", "REFUTED"}
+            if original_verdict_norm in {"NEI"} or g_score == -1.0:
                 # Lowered threshold further from 0.7 to 0.6 to be more helpful for common facts
                 if getattr(output, "prior_score", -1.0) >= 0.6:
-                    new_conf = max(0.4, min(new_conf + 0.3, 0.65))
-                    new_verdict = "supported"
-                    reason_codes.append("prior_score_supported_shift")
+                    if is_hard_negative:
+                        reason_codes.append("prior_score_supported_blocked")
+                    else:
+                        new_conf = max(0.4, min(new_conf + 0.3, 0.65))
+                        new_verdict = "supported"
+                        reason_codes.append("prior_score_supported_shift")
                 elif getattr(output, "prior_score", -1.0) >= 0.0 and getattr(output, "prior_score", -1.0) <= 0.25:
                     new_conf = max(0.4, min(new_conf + 0.3, 0.65))
                     new_verdict = "refuted"
