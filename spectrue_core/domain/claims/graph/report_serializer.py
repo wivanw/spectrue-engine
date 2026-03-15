@@ -27,6 +27,10 @@ RELATION_TO_CODE: dict[EdgeRelation, int] = {r: i for i, r in enumerate(RELATION
 CLAIM_TYPE_ORDER: list[str] = ["core", "numeric", "timeline", "attribution", "sidefact"]
 CLAIM_TYPE_TO_CODE: dict[str, int] = {t: i for i, t in enumerate(CLAIM_TYPE_ORDER)}
 
+# Report storage: cap per-edge text so Firestore docs stay bounded (~4–8 KiB per edge pair).
+DEFAULT_MAX_RATIONALE_CHARS = 1500
+DEFAULT_MAX_EVIDENCE_CHARS = 1500
+
 
 def _relation_to_code(relation: EdgeRelation) -> int:
     return RELATION_TO_CODE.get(relation, 4)  # 4 = UNRELATED
@@ -45,8 +49,8 @@ def serialize_graph_for_report(
     claim_id_to_rgba: dict[str, list[float]] | None = None,
     claim_id_to_type: dict[str, str] | None = None,
     *,
-    max_rationale_chars: int = 200,
-    max_evidence_chars: int = 200,
+    max_rationale_chars: int = DEFAULT_MAX_RATIONALE_CHARS,
+    max_evidence_chars: int = DEFAULT_MAX_EVIDENCE_CHARS,
 ) -> dict[str, Any]:
     """
     Build a JSON-serializable claim_graph payload for deep_analysis.
@@ -135,3 +139,36 @@ def serialize_graph_for_report(
         })
 
     return {"nodes": nodes, "edges": edges}
+
+
+def fallback_edges_for_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    When ClaimGraphStep is skipped, build a star of synthetic edges from the first
+    key claim (or first node) so 3D tree has structure. relation=3 (elaborates).
+    """
+    if len(nodes) < 2:
+        return []
+    key_idx = next(
+        (i for i, n in enumerate(nodes) if n.get("is_key_claim") == 1),
+        0,
+    )
+    hub_id = nodes[key_idx].get("claim_id")
+    if not hub_id:
+        return []
+    edges: list[dict[str, Any]] = []
+    for n in nodes:
+        cid = n.get("claim_id")
+        if not cid or cid == hub_id:
+            continue
+        edges.append({
+            "src_id": hub_id,
+            "dst_id": cid,
+            "relation": RELATION_TO_CODE[EdgeRelation.ELABORATES],
+            "score": 0.5,
+            "rationale_short": None,
+            "evidence_spans": None,
+            "cross_topic": 0,
+            "same_section": 1,
+            "synthetic": 1,
+        })
+    return edges

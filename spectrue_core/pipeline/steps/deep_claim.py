@@ -519,6 +519,7 @@ class AssembleDeepResultStep(Step):
                     # so the 3D tree button and shared report tree still work
                     from spectrue_core.domain.claims.graph.report_serializer import (
                         _claim_type_to_code,
+                        fallback_edges_for_nodes,
                     )
                     nodes = []
                     for i, r in enumerate(claim_results):
@@ -539,7 +540,10 @@ class AssembleDeepResultStep(Step):
                         if rgba is not None and len(rgba) >= 4:
                             node["rgba"] = [round(float(x), 4) for x in rgba[:4]]
                         nodes.append(node)
-                    deep_analysis_payload["claim_graph"] = {"nodes": nodes, "edges": []}
+                    deep_analysis_payload["claim_graph"] = {
+                        "nodes": nodes,
+                        "edges": fallback_edges_for_nodes(nodes),
+                    }
 
             final_result = {
                 "analysis_mode": analysis_mode,
