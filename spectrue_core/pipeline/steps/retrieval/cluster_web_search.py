@@ -174,11 +174,12 @@ class ClusterWebSearchStep:
                         "reason": "bayesian_insufficient_scientific",
                         "confidence": sufficiency.reason,
                     })
+                    # Tavily accepts only topic: general | news | finance
                     _, academic_sources = await _search_with_sem(
                         query,
                         max_results=max_results,
-                        depth="academic",
-                        topic="academic",
+                        depth="advanced",
+                        topic="general",
                     )
                     if academic_sources:
                         sources = sources + academic_sources

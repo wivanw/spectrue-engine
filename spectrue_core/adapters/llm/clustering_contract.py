@@ -59,13 +59,11 @@ Your task is to map each Search Source to its BEST matching Claim AND Assertion.
 
 
 def build_evidence_matrix_prompt(*, claims_lite: list[dict], sources_lite: list[dict]) -> str:
-    return f"""Build the Evidence Matrix for these sources.
+    """Static prefix then --- DATA --- (cache-friendly)."""
+    static = """Build the Evidence Matrix for these sources. Return the result in JSON format with key "matrix".
 
-CLAIMS:
-{json.dumps(claims_lite, indent=2)}
+--- DATA ---
 
-SOURCES:
-{json.dumps(sources_lite, indent=2)}
-
-Return the result in JSON format with key "matrix".
 """
+    data = json.dumps({"claims": claims_lite, "sources": sources_lite}, indent=2)
+    return static + data

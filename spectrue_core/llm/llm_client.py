@@ -204,10 +204,11 @@ class LLMClient:
         max_retries: int = 1,
         cache_retention: CacheRetention = "in_memory", # Fix default
         meter: LLMMeter | None = None,
+        max_concurrent_requests: int = 8,
     ):
         """
         Initialize LLM client.
-        
+
         Args:
             openai_api_key: OpenAI API key (uses OPENAI_API_KEY env var if not provided)
             base_url: Optional base URL for OpenAI-compatible endpoints (vLLM, TGI).
@@ -215,6 +216,8 @@ class LLMClient:
             default_timeout: Default timeout for API calls in seconds
             max_retries: Maximum retry attempts on failure
             cache_retention: Prompt cache retention ("in_memory" or "24h")
+            max_concurrent_requests: Global concurrency limit for this client (default 8).
+                                    Can be wired from config.runtime.llm.concurrency.
         """
         # Disable internal retries so we control them explicitly
         client_kwargs: dict[str, Any] = {"max_retries": 0}
@@ -232,7 +235,7 @@ class LLMClient:
         self.default_timeout = default_timeout
         self.max_retries = max_retries
         self.cache_retention = cache_retention
-        self._sem = asyncio.Semaphore(8)  # Concurrency limit
+        self._sem = asyncio.Semaphore(max(1, min(max_concurrent_requests, 64)))
         self._meter = meter
 
     @property

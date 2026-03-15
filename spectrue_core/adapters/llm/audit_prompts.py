@@ -40,10 +40,11 @@ def build_claim_audit_system_prompt() -> str:
 
 
 def build_claim_audit_prompt(frame: ClaimFrame) -> str:
+    """Static prefix then --- DATA --- (cache-friendly)."""
     excerpt = frame.context_excerpt.text.strip()
     stats = frame.evidence_stats
-    return (
-        "Audit the claim. Provide structured audit fields only.\n\n"
+    static = "Audit the claim. Provide structured audit fields only.\n\n--- DATA ---\n\n"
+    dynamic = (
         f"Claim ID: {frame.claim_id}\n"
         f"Claim Text: {frame.claim_text}\n"
         f"Language: {frame.claim_language}\n"
@@ -54,6 +55,7 @@ def build_claim_audit_prompt(frame: ClaimFrame) -> str:
         f"  refute_sources={stats.refute_sources}\n"
         f"  context_sources={stats.context_sources}\n"
     )
+    return static + dynamic
 
 
 def build_evidence_audit_system_prompt() -> str:
@@ -86,8 +88,9 @@ def build_evidence_audit_system_prompt() -> str:
 
 
 def build_evidence_audit_prompt(frame: ClaimFrame, evidence: EvidenceItemFrame) -> str:
-    return (
-        "Audit the evidence item against the claim. Provide structured audit fields only.\n\n"
+    """Static prefix then --- DATA --- (cache-friendly)."""
+    static = "Audit the evidence item against the claim. Provide structured audit fields only.\n\n--- DATA ---\n\n"
+    dynamic = (
         f"Claim ID: {frame.claim_id}\n"
         f"Claim Text: {frame.claim_text}\n"
         f"Evidence ID: {evidence.evidence_id}\n"
@@ -98,3 +101,4 @@ def build_evidence_audit_prompt(frame: ClaimFrame, evidence: EvidenceItemFrame) 
         f"Quote: {evidence.quote or ''}\n"
         f"Trust Tier: {evidence.source_tier or ''}\n"
     )
+    return static + dynamic

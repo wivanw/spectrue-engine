@@ -59,12 +59,22 @@ class TypedEdge:
     rationale_short: str    # 10-25 words, logs only
     evidence_spans: str     # Key text supporting classification, ≤25 words
     cross_topic: bool = False  # Preserved from CandidateEdge
+    same_section: bool = False  # Preserved from CandidateEdge (trace/explainability)
 
     def to_trace_dict(self) -> dict:
-        """Convert to dict for tracing."""
-        return {
+        """Convert to dict for tracing and explainability."""
+        out: dict = {
             "src": self.src_id,
             "dst": self.dst_id,
             "rel": self.relation.value,
             "score": round(self.score, 2),
         }
+        if self.rationale_short:
+            out["rationale_short"] = self.rationale_short[:80]
+        if self.evidence_spans:
+            out["evidence_spans"] = self.evidence_spans[:80]
+        if self.cross_topic:
+            out["cross_topic"] = True
+        if self.same_section:
+            out["same_section"] = True
+        return out

@@ -1,38 +1,16 @@
 en:
   prompts:
 
-
-
-
     claim_judge: |
-      You are a fact-checking judge. Evaluate the following claim based on the provided evidence and produce a verdict.
+      You are a fact-checking judge. Evaluate the claim based on the evidence provided in the DATA section below and produce a verdict.
 
-      ## CLAIM TO JUDGE
-
-      Claim ID: {claim_id}
-      Claim Text: "{claim_text}"
-      Claim Language: {claim_language}
-
-      You will receive:
-      - claim
-      - evidence (snippets/quotes/excerpts)
-      - evidence_stats (structured counters)
-
-      ## ORIGINAL CONTEXT
-
-      {context_text}
-
-      ## EVIDENCE ITEMS
-
-      {evidence_section}
-
-      ## EVIDENCE SUMMARY (Pre-analyzed)
-
-      {summary_section}
-
-      ## EVIDENCE STATISTICS
-
-      {stats_section}
+      You will receive in the DATA section:
+      - claim (id, text, language)
+      - original context
+      - evidence items (snippets/quotes/excerpts)
+      - evidence summary (pre-analyzed)
+      - evidence statistics
+      - list of source URLs
 
       ## JUDGMENT METHODOLOGY
 
@@ -82,18 +60,17 @@ en:
 
       **Confidence**: 0.0-1.0 (lower if sources weak/conflicting)
 
-      **Explanation**: STRUCTURED format in {claim_language}:
+      **Explanation**: STRUCTURED format in the claim language:
         - Line 1: "Evidence:" - cite sources
         - Line 2: "Gaps:" - what is missing
         - Line 3: "Verdict:" - conclusion
         - Line 4: "Style:" - ONLY if B < 0.7
 
-      **sources_used**: URLs from this list used in reasoning:
-      {urls_list}
+      **sources_used**: URLs from the list in the DATA section below (use only those URLs).
 
       ## OUTPUT FORMAT (JSON)
       {{
-        "claim_id": "{claim_id}",
+        "claim_id": "<from data>",
         "rgba": {{ "R": 0.0, "G": 0.0, "B": 0.0, "A": 0.0 }},
         "confidence": 0.5,
         "verdict": "Supported|Refuted|NEI|Mixed",

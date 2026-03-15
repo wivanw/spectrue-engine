@@ -33,7 +33,8 @@ from spectrue_core.domain.claims.graph.types import EdgeRelation
 
 
 CLAIM_CATEGORY_VALUES = ["FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"]
-SEARCH_METHOD_VALUES = ["news", "general_search", "academic"]
+# Tavily API accepts only topic: general | news | finance. Use general_search for academic/scientific.
+SEARCH_METHOD_VALUES = ["news", "general_search"]
 EVIDENCE_NEED_VALUES = [
     "empirical_study",
     "guideline",
@@ -746,7 +747,6 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["evidence_id"],
                 "properties": {
                     "evidence_id": {"type": "string"},
                     "reason": {"type": "string"},
@@ -758,7 +758,6 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["evidence_id"],
                 "properties": {
                     "evidence_id": {"type": "string"},
                     "reason": {"type": "string"},
@@ -770,7 +769,6 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["evidence_id"],
                 "properties": {
                     "evidence_id": {"type": "string"},
                     "reason": {"type": "string"},

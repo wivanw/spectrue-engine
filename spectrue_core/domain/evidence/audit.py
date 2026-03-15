@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
-import asyncio
 
 
 AuditCallable = Callable[[Any, Any], Awaitable[Any]]
@@ -28,6 +28,7 @@ async def run_evidence_audit(
     claim_frames: list[Any],
     audit_fn: AuditCallable,
     error_status: Any,
+    max_concurrency: int | None = None,
 ) -> EvidenceAuditResult:
     tasks = _collect_tasks(claim_frames)
     if not tasks:
@@ -35,8 +36,16 @@ async def run_evidence_audit(
 
     audits: list[Any] = []
     errors: dict[str, dict[str, Any]] = {}
+    sem = asyncio.Semaphore(max_concurrency) if max_concurrency is not None and max_concurrency > 0 else None
 
-    async def audit_one(frame, evidence):
+    async def audit_one(frame: Any, evidence: Any) -> tuple[str, Any, Any]:
+        if sem is not None:
+            async with sem:
+                try:
+                    audit = await audit_fn(frame, evidence)
+                    return ("ok", evidence, audit)
+                except Exception as exc:
+                    return ("error", evidence, exc)
         try:
             audit = await audit_fn(frame, evidence)
             return ("ok", evidence, audit)

@@ -47,11 +47,14 @@ class FactCheckerAgent:
         self.runtime = (config.runtime if config else None) or EngineRuntimeConfig.load_from_env()
         api_key = config.openai_api_key if config else None
 
+        llm_concurrency = max(1, min(getattr(self.runtime.llm, "concurrency", 8), 64))
+
         # Create OpenAI client (Responses API)
         openai_client = LLMClient(
             openai_api_key=api_key,
             default_timeout=float(self.runtime.llm.nano_timeout_sec),
             max_retries=1,
+            max_concurrent_requests=llm_concurrency,
         )
 
         # Create DeepSeek client (Native API compatible with Chat Completions)
@@ -62,6 +65,7 @@ class FactCheckerAgent:
                 base_url=self.runtime.llm.deepseek_base_url,
                 default_timeout=float(self.runtime.llm.cluster_timeout_sec),
                 max_retries=1,
+                max_concurrent_requests=llm_concurrency,
             )
 
         # Create router that directs models to appropriate clients

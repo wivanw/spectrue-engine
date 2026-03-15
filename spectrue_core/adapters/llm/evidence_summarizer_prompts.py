@@ -51,39 +51,19 @@ def _format_evidence_item(item: EvidenceItemFrame, index: int) -> str:
 
 def build_evidence_summarizer_prompt(frame: ClaimFrame) -> str:
     """
-    Build prompt for evidence summarization.
-    
-    Args:
-        frame: ClaimFrame containing claim and evidence
-    
-    Returns:
-        Formatted prompt string
+    Build prompt for evidence summarization. Static prefix (cache-friendly) then --- INPUT --- with claim and evidence.
     """
     evidence_section = ""
     if frame.evidence_items:
         items = [
-            _format_evidence_item(item, i) 
+            _format_evidence_item(item, i)
             for i, item in enumerate(frame.evidence_items)
         ]
         evidence_section = "\n\n".join(items)
     else:
         evidence_section = "No evidence items available."
 
-    prompt = f"""You are an evidence analyst. Your task is to categorize the provided evidence for a specific claim.
-
-## CLAIM TO ANALYZE
-
-Claim ID: {frame.claim_id}
-Claim Text: "{frame.claim_text}"
-Claim Language: {frame.claim_language}
-
-## CONTEXT EXCERPT
-
-{frame.context_excerpt.text}
-
-## EVIDENCE ITEMS
-
-{evidence_section}
+    static = """You are an evidence analyst. Your task is to categorize the provided evidence for a specific claim.
 
 ## YOUR TASK
 
@@ -104,23 +84,41 @@ Also identify:
 ## OUTPUT FORMAT
 
 Respond with valid JSON matching this structure:
-{{
+{
   "supporting_evidence": [
-    {{"evidence_id": "...", "reason": "..."}}
+    {"evidence_id": "...", "reason": "..."}
   ],
   "refuting_evidence": [
-    {{"evidence_id": "...", "reason": "..."}}
+    {"evidence_id": "...", "reason": "..."}
   ],
   "contextual_evidence": [
-    {{"evidence_id": "...", "reason": "..."}}
+    {"evidence_id": "...", "reason": "..."}
   ],
   "evidence_gaps": ["...", "..."],
   "conflicts_present": true/false
-}}
+}
 
-Analyze carefully and categorize each evidence item."""
+- If a category has no items, return an empty array [] (e.g. refuting_evidence: []). Do not include objects without evidence_id.
+- Use exact evidence_id values from the brackets in the input (e.g. [a410a3e96299] → "a410a3e96299").
 
-    return prompt
+--- INPUT ---
+
+"""
+    dynamic = f"""## CLAIM TO ANALYZE
+
+Claim ID: {frame.claim_id}
+Claim Text: "{frame.claim_text}"
+Claim Language: {frame.claim_language}
+
+## CONTEXT EXCERPT
+
+{frame.context_excerpt.text}
+
+## EVIDENCE ITEMS
+
+{evidence_section}
+"""
+    return static + dynamic
 
 
 def build_evidence_summarizer_system_prompt() -> str:
@@ -128,10 +126,7 @@ def build_evidence_summarizer_system_prompt() -> str:
     return """You are a precise evidence analyst. You categorize evidence by its relationship to claims.
 
 Rules:
-- Use exact evidence_id values from the input
-- Be objective in categorization
-- SUPPORT means the evidence directly backs the claim
-- REFUTE means the evidence directly contradicts the claim
-- CONTEXT means the evidence provides background without taking a stance
-- Identify missing evidence types that would strengthen analysis
-- Flag conflicts when sources disagree"""
+- Use exact evidence_id values from the input (from brackets like [abc123])
+- Empty category → return [] (e.g. refuting_evidence: []). Never return [{}] or objects without evidence_id
+- SUPPORT = evidence directly backs the claim; REFUTE = directly contradicts; CONTEXT = background only
+- Identify evidence_gaps; set conflicts_present true only when sources disagree"""

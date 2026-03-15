@@ -177,7 +177,9 @@ class TavilyClient:
         if merged_exclude:
             payload["exclude_domains"] = merged_exclude
 
-        payload["topic"] = topic
+        # API accepts only "general", "news", "finance" (400 on e.g. "academic")
+        _allowed = ("general", "news", "finance")
+        payload["topic"] = topic if (topic and topic.lower() in _allowed) else "general"
         payload["include_raw_content"] = include_raw_content  # Pass through from caller
 
         url = "https://api.tavily.com/search"
@@ -243,6 +245,10 @@ class TavilyClient:
                     out[k] = v[:30] + [f"...(+{len(v) - 30} more)"]
             return out
 
+        # Retry with valid topic (API allows only general/news/finance)
+        _allowed = ("general", "news", "finance")
+        safe_topic = topic if (topic and topic.lower() in _allowed) else "general"
+
         try:
             logger.error("[Tavily] 400 Error Payload: %s", _safe_payload_for_log(original_payload))
             logger.error("[Tavily] 400 Response: %s", (original_error.response.text or "")[:800])
@@ -264,7 +270,7 @@ class TavilyClient:
         retry_exclude = self._merge_excludes(include_domains=include_domains, exclude_domains=None)
         if retry_exclude:
             minimal["exclude_domains"] = retry_exclude
-        minimal["topic"] = topic
+        minimal["topic"] = safe_topic
         minimal["include_raw_content"] = False
 
         try:

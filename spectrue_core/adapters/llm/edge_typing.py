@@ -230,14 +230,13 @@ IMPORTANT: "unrelated" should be used for 40-60% of pairs in typical articles.
                 f"    Claim B ({dst.claim_id}): {dst_text}"
             )
 
-        return f"""Classify the relationship between each claim pair.
+        static = """Classify the relationship between each claim pair. Return JSON object with "classifications" array for each pair. Remember: "unrelated" is the correct answer for many pairs.
+
+--- DATA ---
 
 CLAIM PAIRS:
-{chr(10).join(pairs_text)}
-
-Return JSON object with "classifications" array for each pair.
-Remember: "unrelated" is the correct answer for many pairs.
 """
+        return static + chr(10).join(pairs_text)
 
     def _validate_batch(
         self,
@@ -325,6 +324,8 @@ Remember: "unrelated" is the correct answer for many pairs.
                     score=score,
                     rationale_short=str(item.get("rationale_short", ""))[:100],
                     evidence_spans=str(item.get("evidence_spans", ""))[:100],
+                    cross_topic=getattr(edge, "cross_topic", False),
+                    same_section=getattr(edge, "same_section", False),
                 )
 
             except Exception as e:

@@ -56,8 +56,8 @@ async def test_deep_v2_escalates_to_academic_for_scientific_claims():
     assert "include_domains" in call_kwargs_list[0]
     # Pass 2: Open
     assert "exclude_domains" in call_kwargs_list[1]
-    # Pass 3: Academic
-    assert call_kwargs_list[2].get("topic") == "academic" or "include_domains" in call_kwargs_list[2]
+    # Pass 3: Scientific escalation (Tavily topic must be general|news|finance)
+    assert call_kwargs_list[2].get("topic") == "general" or "include_domains" in call_kwargs_list[2]
 
 @pytest.mark.asyncio
 async def test_deep_v2_does_not_escalate_to_academic_for_general_claims():

@@ -122,6 +122,12 @@ def _expected_value_of_information(
     else:
         conf_factor = 1.0
 
+    # Graph uncertainty (from pre_meta) boosts EVOI when present
+    gu = claim.get("graph_uncertainty")
+    if gu is not None:
+        gu_val = max(0.0, min(1.0, float(gu)))
+        conf_factor = max(conf_factor, 0.5 + 0.5 * gu_val)
+
     evoi = value_uncertainty * entropy * worthiness * harm * conf_factor
     return max(0.0, evoi)
 
@@ -425,7 +431,11 @@ def select_verification_targets(
         c = claim_by_id.get(claim_id, {})
         worthiness = float(c.get("check_worthiness", c.get("importance", 0.5)) or 0.5)
         harm = float(c.get("harm_potential", 1) or 1) / 5.0
-        uncertainty = 1.0 - _conf_score(c.get("metadata_confidence"))
+        gu = c.get("graph_uncertainty")
+        if gu is not None:
+            uncertainty = max(0.0, min(1.0, float(gu)))
+        else:
+            uncertainty = 1.0 - _conf_score(c.get("metadata_confidence"))
         centrality = centrality_map.get(claim_id, float(c.get("centrality") or 0.0))
         thesis = (
             1.0

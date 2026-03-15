@@ -90,6 +90,42 @@ def _format_evidence_summary(summary: EvidenceSummary | None) -> str:
     return "\n".join(lines) if lines else "Summary is empty."
 
 
+def _build_claim_judge_data_block(
+    frame: ClaimFrame,
+    evidence_section: str,
+    summary_section: str,
+    stats_section: str,
+    urls_list: str,
+) -> str:
+    """Build the dynamic data block for claim judge (cache-friendly: appended after --- DATA ---)."""
+    return f"""## CLAIM TO JUDGE
+
+Claim ID: {frame.claim_id}
+Claim Text: "{frame.claim_text}"
+Claim Language: {frame.claim_language}
+
+## ORIGINAL CONTEXT
+
+{frame.context_excerpt.text}
+
+## EVIDENCE ITEMS
+
+{evidence_section}
+
+## EVIDENCE SUMMARY (Pre-analyzed)
+
+{summary_section}
+
+## EVIDENCE STATISTICS
+
+{stats_section}
+
+## SOURCE URLS (use only these in sources_used)
+
+{urls_list}
+"""
+
+
 def _format_stats_section(
     frame: ClaimFrame, *, include_v2: bool = False, evidence_stats: dict[str, Any] | None = None
 ) -> str:
@@ -173,62 +209,30 @@ def build_claim_judge_prompt(
     urls_list = "\n".join(f"  - {url}" for url in available_urls) if available_urls else "  (none)"
 
     # Use UI locale for prompt language (not claim language)
-    # This ensures explanations are in the user's interface language
     lang = ui_locale.lower()[:2]
     from spectrue_core.agents.prompts import get_prompt
-    
-    # Try to get specific locale prompt, fallback to English if missing
-    prompt_template = get_prompt(lang, "prompts.claim_judge")
-    if not prompt_template or "Prompt key" in prompt_template:
-        prompt_template = get_prompt("en", "prompts.claim_judge")
 
-    # If even English is missing (should not happen if files are correct), use fallback code
-    if not prompt_template or "Prompt key" in prompt_template:
+    # Prompt caching: static prefix from YAML, then --- DATA --- then dynamic block
+    static_prefix = get_prompt(lang, "prompts.claim_judge")
+    if not static_prefix or "Prompt key" in static_prefix:
+        static_prefix = get_prompt("en", "prompts.claim_judge")
+    if not static_prefix or "Prompt key" in static_prefix:
         return _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list, ui_locale)
 
-    # Fill template variables
-    # We must ensure keys match what's in the YAML files
-    try:
-        prompt = prompt_template.format(
-            claim_id=frame.claim_id,
-            claim_text=frame.claim_text,
-            claim_language=frame.claim_language,
-            ui_locale=ui_locale,  # Add UI locale for explicit instruction
-            context_text=frame.context_excerpt.text,
-            evidence_section=evidence_section,
-            summary_section=summary_section,
-            stats_section=stats_section,
-            urls_list=urls_list
-        )
-    except KeyError:
-        # Fallback if template has broken keys
-        return _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list, ui_locale)
-
-    return prompt
+    dynamic_block = _build_claim_judge_data_block(
+        frame, evidence_section, summary_section, stats_section, urls_list
+    )
+    return static_prefix.rstrip() + "\n\n--- DATA ---\n\n" + dynamic_block
 
 
 def _fallback_english_prompt(frame, evidence_section, summary_section, stats_section, urls_list, ui_locale: str = "en"):
-    """Hardcoded English fallback just in case."""
-    return f"""You are a fact-checking judge. Evaluate the following claim based on the provided evidence.
-
-## CLAIM
-ID: {frame.claim_id}
-Text: "{frame.claim_text}"
-Claim Language: {frame.claim_language}
-
-## EVIDENCE
-{evidence_section}
-
-## SUMMARY
-{summary_section}
-
-## EVIDENCE STATS
-{stats_section}
+    """Hardcoded English fallback. Uses same DATA block structure for cache consistency."""
+    static = f"""You are a fact-checking judge. Evaluate the claim based on the evidence in the DATA section below.
 
 ## OUTPUT FORMAT
-Return JSON with: 
+Return JSON with:
 - claim_id
-- rgba: {{R, G, B, A}}
+- rgba: [R, G, B, A]
 - confidence: 0.0-1.0
 - verdict: "Supported|Refuted|Mixed|NEI"
 - simple_summary: 1-3 bullet points for non-experts
@@ -236,9 +240,14 @@ Return JSON with:
 - missing_evidence: [text]
 
 All textual explanations MUST be in {ui_locale} (user's interface language).
+
+--- DATA ---
+
 """
-
-
+    dynamic_block = _build_claim_judge_data_block(
+        frame, evidence_section, summary_section, stats_section, urls_list
+    )
+    return static + dynamic_block
 
 
 def build_claim_judge_system_prompt(*, lang: str = "en") -> str:

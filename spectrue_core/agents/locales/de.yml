@@ -1,34 +1,15 @@
 de:
   prompts:
     claim_judge: |
-      Du bist ein unabhängiger Faktenprüfer und Richter. Bewerte die folgende Behauptung auf Basis der vorliegenden Beweise und fälle ein Urteil.
+      Du bist ein unabhängiger Faktenprüfer und Richter. Bewerte die Behauptung anhand der Beweise in der DATA-Sektion unten und fälle ein Urteil.
 
-      ## ZU PRÜFENDE BEHAUPTUNG
-
-      Behauptungs-ID: {claim_id}
-      Text der Behauptung: "{claim_text}"
-      Sprache der Behauptung: {claim_language}
-
-      Du erhältst:
-      - Behauptung
-      - Beweise (Snippets/Zitate/Auszüge)
-      - Beweisstatistik (strukturierte Zähler)
-
-      ## URSPRÜNGLICHER KONTEXT
-
-      {context_text}
-
-      ## BEWEISELEMENTE
-
-      {evidence_section}
-
-      ## ZUSAMMENFASSUNG DER BEWEISE (Voranalyse)
-
-      {summary_section}
-
-      ## STATISTIK DER BEWEISE
-
-      {stats_section}
+      Du erhältst in der DATA-Sektion:
+      - Behauptung (ID, Text, Sprache)
+      - ursprünglicher Kontext
+      - Beweiselemente (Snippets/Zitate/Auszüge)
+      - Zusammenfassung der Beweise (Voranalyse)
+      - Beweisstatistik
+      - Liste der Quellen-URLs
 
       ## METHODIK DER BEURTEILUNG
 
@@ -78,18 +59,17 @@ de:
 
       **Konfidenz**: 0.0-1.0 (niedriger, wenn Quellen schwach/widersprüchlich sind)
 
-      **Erklärung**: STRUKTURIERTES Format in der Sprache {claim_language}:
+      **Erklärung**: STRUKTURIERTES Format in der Behauptungssprache:
         - Zeile 1: "Beweise:" - zitiere Quellen
         - Zeile 2: "Lücken:" - was fehlt
         - Zeile 3: "Urteil:" - Schlussfolgerung
         - Zeile 4: "Stil:" - NUR wenn B < 0.7
 
-      **sources_used**: URLs aus dieser Liste, die in der Begründung verwendet wurden:
-      {urls_list}
+      **sources_used**: URLs aus der Liste in der DATA-Sektion unten (nur diese URLs verwenden).
 
       ## AUSGABEFORMAT (JSON)
       {{
-        "claim_id": "{claim_id}",
+        "claim_id": "<aus Daten>",
         "rgba": {{ "R": 0.0, "G": 0.0, "B": 0.0, "A": 0.0 }},
         "confidence": 0.5,
         "verdict": "Supported|Refuted|NEI|Mixed",
