@@ -46,7 +46,11 @@ def _has_anchor_position(claim: dict) -> bool:
 
 def ui_bucket(role: str | None) -> int:
     """Lower bucket = higher priority."""
-    mapping = {"core": 0, "thesis": 0, "support": 1, "counter": 1, "background": 2}
+    mapping = {
+        "core": 0, "thesis": 0, "counterclaim": 0,
+        "support": 1, "attribution": 1, "aggregated": 1, "subclaim": 1, "example": 1,
+        "hedge": 2, "definition": 2, "forecast": 2, "context": 2, "meta": 2, "background": 2,
+    }
     if not role:
         return 2
     try:

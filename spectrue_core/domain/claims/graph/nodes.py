@@ -82,6 +82,7 @@ _ROLE_TO_TYPE: dict[str, str] = {
     "core": "core",
     "thesis": "core",
     "target": "core",
+    "counterclaim": "core",
     "attribution": "attribution",
     "aggregated": "attribution",
     "support": "sidefact",
@@ -91,14 +92,16 @@ _ROLE_TO_TYPE: dict[str, str] = {
     "background": "sidefact",
     "meta": "sidefact",
     "hedge": "sidefact",
+    "definition": "sidefact",
+    "forecast": "sidefact",
 }
 
 
 def _infer_claim_type(claim: dict) -> str:
-    """Infer claim_type from claim_role + heuristics when 'type' is not set by LLM."""
+    """Infer claim_type from claim_role, with content heuristics only for 'core' base type."""
     import re
 
-    # 1. Derive from claim_role if available (check multiple locations)
+    # 1. Derive from claim_role (authoritative source)
     role = str(
         claim.get("claim_role")
         or claim.get("role")
@@ -107,17 +110,20 @@ def _infer_claim_type(claim: dict) -> str:
     ).lower().strip()
     base_type = _ROLE_TO_TYPE.get(role, "core")
 
-    # 2. Override with content heuristics
+    # 2. Content heuristics ONLY refine "core" base type into subtypes.
+    #    Non-core roles (sidefact, attribution) are NOT overridden by heuristics.
+    if base_type != "core":
+        return base_type
+
     text = str(claim.get("normalized_text") or claim.get("text") or "")
 
-    # Very short text = likely noise/garbage, not a real claim
     if len(text) < 30:
         return "sidefact"
 
     # Timeline: has time_anchor or temporal keywords
     if claim.get("time_anchor"):
         return "timeline"
-    if re.search(r"\b\d{4}\b", text):  # year like 2024
+    if re.search(r"\b\d{4}\b", text):
         return "timeline"
 
     # Numeric: has numbers with units or percentages

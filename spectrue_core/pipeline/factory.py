@@ -144,6 +144,8 @@ class PipelineFactory:
             AssertStandardResultKeysStep,
             AssertRetrievalTraceStep,
             EvidenceSpilloverStep,
+            EvidenceDedupStep,
+            EvidenceValidationStep,
         )
 
         # All steps now always included (no feature flags)
@@ -264,10 +266,20 @@ class PipelineFactory:
                 depends_on=["enrich_claims_post_evidence"],
             ),
 
-            # EVOI gating decision (after spillover!)
+            # Dedup + validation (remove duplicates and invalid evidence)
+            StepNode(
+                step=EvidenceDedupStep(),
+                depends_on=["evidence_spillover"],
+            ),
+            StepNode(
+                step=EvidenceValidationStep(),
+                depends_on=["evidence_dedup"],
+            ),
+
+            # EVOI gating decision (after dedup + validation!)
             StepNode(
                 step=EvidenceGatingStep(),
-                depends_on=["evidence_spillover"],
+                depends_on=["evidence_validation"],
             ),
 
             # Stance annotation (controlled by EVOI gate)
@@ -333,6 +345,8 @@ class PipelineFactory:
             CostSummaryStep,
             AssertRetrievalTraceStep,
             AssertDeepJudgingStep,
+            EvidenceDedupStep,
+            EvidenceValidationStep,
         )
         from spectrue_core.pipeline.steps.invariants import AssertMaxClaimsStep
         from spectrue_core.pipeline.steps.deep_claim import (
@@ -449,10 +463,20 @@ class PipelineFactory:
                 optional=True,
             ),
 
-            # EVOI gating decision (same as normal mode for cost control)
+            # Dedup + validation (remove duplicates and invalid evidence)
+            StepNode(
+                step=EvidenceDedupStep(),
+                depends_on=["enrich_claims_post_evidence"],
+            ),
+            StepNode(
+                step=EvidenceValidationStep(),
+                depends_on=["evidence_dedup"],
+            ),
+
+            # EVOI gating decision (after dedup + validation!)
             StepNode(
                 step=EvidenceGatingStep(),
-                depends_on=["enrich_claims_post_evidence"],
+                depends_on=["evidence_validation"],
             ),
 
             # Stance annotation (controlled by EVOI gate)
@@ -588,6 +612,7 @@ class PipelineFactory:
             AssertNonEmptyClaimsStep,
             EvidenceStatsStep,
             EvidenceDedupStep,
+            EvidenceValidationStep,
             EvidenceCorroborationStep,
         )
         from spectrue_core.pipeline.steps.invariants import AssertMaxClaimsStep
@@ -743,15 +768,19 @@ class PipelineFactory:
                 depends_on=["evidence_spillover"],
             ),
             
-            # Deterministic per-claim evidence stats (for explainability A fallback)
+            # Dedup + validation (remove duplicates and invalid evidence)
             StepNode(
                 step=EvidenceDedupStep(),
                 depends_on=["transferred_stance_annotate"],
             ),
+            StepNode(
+                step=EvidenceValidationStep(),
+                depends_on=["evidence_dedup"],
+            ),
 
             StepNode(
                 step=EvidenceCorroborationStep(),
-                depends_on=["evidence_dedup"],
+                depends_on=["evidence_validation"],
             ),
 
             StepNode(

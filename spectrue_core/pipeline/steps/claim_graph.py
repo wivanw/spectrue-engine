@@ -23,6 +23,36 @@ from spectrue_core.utils.trace import Trace
 logger = logging.getLogger(__name__)
 
 
+def _build_cluster_map_from_graph(
+    graph_result: Any,
+    claims: list[dict],
+) -> dict[str, str]:
+    """Build a cluster_map from graph connected components.
+
+    Returns {claim_id: cluster_id} for use by EvidenceSpilloverStep.
+    Only creates clusters with 2+ members (singletons are omitted).
+    """
+    if not graph_result or not hasattr(graph_result, "connected_components"):
+        return {}
+
+    components = graph_result.connected_components()
+    cluster_map: dict[str, str] = {}
+    for i, component in enumerate(components):
+        if len(component) < 2:
+            continue
+        cluster_id = f"graph_clu_{i}"
+        for cid in component:
+            cluster_map[cid] = cluster_id
+
+    if cluster_map:
+        Trace.event("claim_graph.cluster_map_built", {
+            "clusters": len({v for v in cluster_map.values()}),
+            "claims_in_clusters": len(cluster_map),
+        })
+
+    return cluster_map
+
+
 @dataclass
 class ClaimGraphStep:
     """
@@ -115,9 +145,29 @@ class ClaimGraphStep:
                 },
             )
 
-            return ctx.set_extra("graph_result", result.graph_result).set_extra(
+            ctx = ctx.set_extra("graph_result", result.graph_result).set_extra(
                 "key_claim_ids", result.key_claim_ids
             )
+
+            # Annotate claims with graph metrics for downstream budget allocation
+            graph_result = result.graph_result
+            if graph_result and hasattr(graph_result, "all_ranked") and graph_result.all_ranked:
+                ranked_by_id = {r.claim_id: r for r in graph_result.all_ranked}
+                for claim in eligible_claims:
+                    cid = claim.get("id")
+                    if cid and cid in ranked_by_id:
+                        ranked = ranked_by_id[cid]
+                        claim["_centrality"] = float(ranked.centrality_score)
+                        claim["_is_key_claim"] = bool(ranked.is_key_claim)
+
+            # Build cluster_map from graph edges for spillover support
+            # (DEEP_V2 builds its own via ClaimClustersStep; this covers GENERAL/DEEP)
+            if not ctx.get_extra("cluster_map") and graph_result:
+                cluster_map = _build_cluster_map_from_graph(graph_result, eligible_claims)
+                if cluster_map:
+                    ctx = ctx.set_extra("cluster_map", cluster_map)
+
+            return ctx
 
         except Exception as e:
             logger.warning("[ClaimGraphStep] Non-fatal failure: %s", e)

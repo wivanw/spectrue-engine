@@ -438,17 +438,16 @@ class GlobalBudgetTracker:
 def estimate_claim_complexity(claim: dict) -> float:
     """
     Estimate complexity of a claim for query budget allocation.
-    
-    Uses same pattern as check_worthiness computation:
-    - Text length
-    - Verification target type
-    - Claim role
+
+    Combines structural signals (text, verification target, role) with
+    claim-centric metadata (check_worthiness, harm_potential, centrality)
+    when available.
     """
     text = claim.get("text", "") or claim.get("normalized_text", "")
-    
+
     # Length factor (log scale, saturates at ~300 chars)
     length_score = min(1.0, math.log1p(len(text)) / math.log1p(300))
-    
+
     # Verification target factor
     target = claim.get("verification_target", "reality")
     target_scores = {
@@ -458,21 +457,42 @@ def estimate_claim_complexity(claim: dict) -> float:
         "none": 0.1,         # No verification needed
     }
     target_score = target_scores.get(target, 0.5)
-    
+
     # Claim role factor
     role = claim.get("claim_role", "support")
     role_scores = {
         "thesis": 0.8,       # Main claim, needs thorough check
-        "support": 0.5,      # Supporting evidence
-        "background": 0.3,   # Context only
-        "hedge": 0.4,        # Qualified statement
+        "core": 0.7,         # Central verifiable fact
         "counterclaim": 0.7, # Opposing view
+        "support": 0.5,      # Supporting evidence
+        "attribution": 0.5,  # Quote verification
+        "hedge": 0.4,        # Qualified statement
+        "example": 0.3,      # Illustrative
+        "forecast": 0.3,     # Limited verifiability
+        "definition": 0.2,   # Explain-only
+        "background": 0.2,   # Context only
+        "context": 0.1,      # Not verifiable
+        "meta": 0.1,         # Article metadata
     }
     role_score = role_scores.get(role, 0.5)
-    
-    # Combine factors (weighted sum, can be calibrated)
-    complexity = 0.3 * length_score + 0.4 * target_score + 0.3 * role_score
-    
+
+    # Claim metadata factors (from LLM extraction + graph)
+    check_worthiness = float(claim.get("check_worthiness", 0.5))
+    harm_potential = int(claim.get("harm_potential", 1))
+    harm_score = min(1.0, (harm_potential - 1) / 4.0)  # Normalize 1-5 → 0-1
+    centrality = float(claim.get("_centrality", 0.0))  # From graph, 0 if absent
+
+    # Combine: structural (40%) + metadata (60%)
+    structural = 0.3 * length_score + 0.4 * target_score + 0.3 * role_score
+    metadata = 0.4 * check_worthiness + 0.35 * harm_score + 0.25 * centrality
+
+    # If no metadata available, fall back to structural only
+    has_metadata = claim.get("check_worthiness") is not None
+    if has_metadata:
+        complexity = 0.4 * structural + 0.6 * metadata
+    else:
+        complexity = structural
+
     return complexity
 
 

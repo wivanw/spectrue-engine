@@ -48,6 +48,8 @@ def serialize_graph_for_report(
     claim_id_to_text: dict[str, str],
     claim_id_to_rgba: dict[str, list[float]] | None = None,
     claim_id_to_type: dict[str, str] | None = None,
+    claim_id_to_role: dict[str, str] | None = None,
+    claim_id_to_extra: dict[str, dict[str, Any]] | None = None,
     *,
     max_rationale_chars: int = DEFAULT_MAX_RATIONALE_CHARS,
     max_evidence_chars: int = DEFAULT_MAX_EVIDENCE_CHARS,
@@ -63,6 +65,8 @@ def serialize_graph_for_report(
 
     claim_id_to_rgba = claim_id_to_rgba or {}
     claim_id_to_type = claim_id_to_type or {}
+    claim_id_to_role = claim_id_to_role or {}
+    claim_id_to_extra = claim_id_to_extra or {}
 
     # Node IDs: from pre_meta (authoritative for graph membership)
     node_ids = list(graph_result.pre_meta.keys()) if graph_result.pre_meta else []
@@ -119,6 +123,10 @@ def serialize_graph_for_report(
                 node["rgba"] = [round(float(x), 4) for x in rgba[:4]]
         if cid in claim_id_to_type:
             node["claim_type"] = _claim_type_to_code(claim_id_to_type[cid])
+        if cid in claim_id_to_role:
+            node["claim_role"] = claim_id_to_role[cid]
+        if cid in claim_id_to_extra:
+            node["extra"] = claim_id_to_extra[cid]
         nodes.append(node)
 
     edges: list[dict[str, Any]] = []
@@ -145,7 +153,120 @@ def serialize_graph_for_report(
             out_edge["sim_score"] = round(float(sim_score), 4)
         edges.append(out_edge)
 
+    # Compute derived classifier tags from numerical metadata distributions.
+    # Uses μ ± σ statistical thresholds (outlier detection on each signal).
+    _classify_nodes(nodes)
+
     return {"nodes": nodes, "edges": edges}
+
+
+def _classify_nodes(nodes: list[dict[str, Any]]) -> None:
+    """
+    Derive categorical tags from numerical metadata using statistical thresholds.
+
+    Each tag is assigned when a claim's signal exceeds mean + 1 standard deviation
+    (or falls below mean - 1σ for low signals). This is standard outlier detection
+    on the PageRank / pre-graph / post-graph distributions.
+
+    Tags:
+      - load_bearing: high pagerank AND high structural support (hub)
+      - disputed: both support_mass and contradict_weight are significant
+      - critical_gap: high harm × uncertainty (Bayesian expected loss)
+      - redundant: novelty significantly below average
+      - orphan: isolated node (low pagerank + low structural weight)
+      - blind_spot: high uncertainty + no evidence
+    """
+    if len(nodes) < 2:
+        return
+
+    import math
+
+    def _stats(values: list[float]) -> tuple[float, float]:
+        n = len(values)
+        if n == 0:
+            return 0.0, 0.0
+        mu = sum(values) / n
+        var = sum((v - mu) ** 2 for v in values) / n
+        return mu, var ** 0.5
+
+    def _get(node: dict, *keys: str) -> float:
+        for k in keys:
+            v = node.get(k)
+            if v is not None:
+                return float(v)
+            pre = node.get("pre_meta") or {}
+            if k in pre:
+                return float(pre[k])
+            post = node.get("post_meta") or {}
+            if k in post:
+                return float(post[k])
+        return 0.0
+
+    # Gather signal vectors
+    pageranks = [_get(n, "centrality", "pagerank") for n in nodes]
+    structs = [_get(n, "in_structural_weight") for n in nodes]
+    contras = [_get(n, "in_contradict_weight") for n in nodes]
+    supports = [_get(n, "support_mass") for n in nodes]
+    novelties = [_get(n, "novelty") for n in nodes]
+    uncertainties = [_get(n, "uncertainty_proxy") for n in nodes]
+    harms = [_get(n, "harm_prior") for n in nodes]
+    ev_counts = [float((_get_extra(n) or {}).get("evidence_count", 0)) for n in nodes]
+
+    # Compute per-signal μ ± σ
+    pr_mu, pr_s = _stats(pageranks)
+    st_mu, st_s = _stats(structs)
+    co_mu, co_s = _stats(contras)
+    su_mu, su_s = _stats(supports)
+    nv_mu, nv_s = _stats(novelties)
+    un_mu, un_s = _stats(uncertainties)
+    ha_mu, ha_s = _stats(harms)
+
+    # Bayesian expected loss: risk = harm × uncertainty
+    risks = [h * u for h, u in zip(harms, uncertainties)]
+    ri_mu, ri_s = _stats(risks)
+
+    for i, n in enumerate(nodes):
+        tags: list[str] = []
+
+        pr = pageranks[i]
+        st = structs[i]
+        co = contras[i]
+        su = supports[i]
+        nv = novelties[i]
+        un = uncertainties[i]
+        risk = risks[i]
+        ev = ev_counts[i]
+
+        # Load-bearing: high centrality AND high structural weight
+        if pr > pr_mu + pr_s and st > st_mu + st_s:
+            tags.append("load_bearing")
+
+        # Disputed: both support AND contradiction are above average
+        if su > su_mu and co > co_mu + co_s:
+            tags.append("disputed")
+
+        # Critical gap: Bayesian expected loss (harm × uncertainty) is outlier
+        if risk > ri_mu + ri_s:
+            tags.append("critical_gap")
+
+        # Redundant: novelty significantly below average
+        if nv_s > 0 and nv < nv_mu - nv_s:
+            tags.append("redundant")
+
+        # Orphan: both centrality and structural weight below average
+        if pr < pr_mu - pr_s and st < st_mu - st_s:
+            tags.append("orphan")
+
+        # Blind spot: high uncertainty + zero evidence
+        if un > un_mu + un_s and ev == 0:
+            tags.append("blind_spot")
+
+        if tags:
+            n["tags"] = tags
+
+
+def _get_extra(node: dict) -> dict | None:
+    return node.get("extra")
 
 
 def fallback_edges_for_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:

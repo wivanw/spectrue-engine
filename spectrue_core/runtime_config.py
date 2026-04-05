@@ -205,9 +205,18 @@ class CalibrationPolicyConfig:
         default_factory=lambda: {
             "core": 1.0,
             "thesis": 1.0,
-            "support": 0.7,
-            "counter": 0.6,
+            "support": 0.8,
+            "attribution": 0.7,
+            "counterclaim": 0.7,
+            "aggregated": 0.6,
+            "subclaim": 0.5,
+            "example": 0.5,
+            "definition": 0.3,
+            "forecast": 0.3,
+            "hedge": 0.2,
             "background": 0.2,
+            "context": 0.0,
+            "meta": 0.0,
         }
     )
     claim_utility_lede_window: int = 8000

@@ -44,6 +44,7 @@ from .evidence_spillover import EvidenceSpilloverStep
 from .transferred_stance_annotate import TransferredStanceAnnotateStep
 from .evidence_stats import EvidenceStatsStep
 from .evidence_dedup import EvidenceDedupStep
+from .evidence_validation import EvidenceValidationStep
 from .evidence_corroboration import EvidenceCorroborationStep
 from .audit_claims import AuditClaimsStep
 from .audit_evidence import AuditEvidenceStep
@@ -91,6 +92,7 @@ __all__ = [
     "TransferredStanceAnnotateStep",
     "EvidenceStatsStep",
     "EvidenceDedupStep",
+    "EvidenceValidationStep",
     "EvidenceCorroborationStep",
     "AuditClaimsStep",
     "AuditEvidenceStep",

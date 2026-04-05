@@ -59,21 +59,30 @@ def get_role_weight(metadata: ClaimMetadata) -> float:
 def should_skip_search(metadata: ClaimMetadata) -> bool:
     """
     Check if search should be skipped for this claim.
+
+    Skips when:
+    - verification_target is NONE (predictions, opinions), OR
+    - claim is explain-only (background, context, meta, definition)
+    Fail-open: LOW metadata confidence always allows search.
     """
-    return (
-        metadata.verification_target == VerificationTarget.NONE and
-        metadata.metadata_confidence != MetadataConfidence.LOW  # Fail-open overrides
-    )
+    if metadata.metadata_confidence == MetadataConfidence.LOW:
+        return False  # Fail-open overrides
+    if metadata.verification_target == VerificationTarget.NONE:
+        return True
+    if is_explain_only(metadata):
+        return True
+    return False
 
 
 def is_explain_only(metadata: ClaimMetadata) -> bool:
     """
-    Check if claim is explain-only (doesn't affect RGBA).
+    Check if claim is explain-only (doesn't affect RGBA, no search needed).
     """
     return metadata.claim_role in {
-        ClaimRole.CONTEXT, 
-        ClaimRole.META, 
-        ClaimRole.BACKGROUND
+        ClaimRole.CONTEXT,
+        ClaimRole.META,
+        ClaimRole.BACKGROUND,
+        ClaimRole.DEFINITION,
     }
 
 

@@ -82,21 +82,25 @@ For each claim, provide orchestration metadata:
 
 2. **claim_role** (STRICT LIMITS — read carefully!):
    - **"thesis"**: Main thesis or conclusion of the article. MAX 1-2 per article!
-   - **"support"**: Supporting evidence or detail for a thesis claim. MOST claims should be this.
-   - **"background"**: Background context, definitions, general knowledge (explain-only, NO search needed).
+   - **"core"**: A central fact that is independently verifiable AND critical to the article's argument. MAX 2-4 per article. Ask yourself: "Would the article's conclusion collapse without this fact?" If YES → "core". If NO → "support".
+   - **"support"**: A supporting detail, evidence, or secondary fact. MOST verifiable claims should be this. If a claim provides evidence FOR a core/thesis claim but is not itself central, it is "support".
+   - **"background"**: Background context, general knowledge, well-known facts (explain-only, NO search needed).
    - **"context"**: Surrounding information that is NOT a verifiable claim (explain-only, NO search needed).
    - **"attribution"**: Direct quote or paraphrase attributed to a person/source.
    - **"example"**: Illustrative example for another claim.
    - **"hedge"**: Qualified/uncertain statement ("may", "might", "possibly").
    - **"counterclaim"**: Opposing or rebuttal claim.
    - **"definition"**: Definition or explanation of a term (explain-only, NO search needed).
+   - **"forecast"**: Prediction or forecast about future events (limited verifiability).
 
    ⚠️ CRITICAL ROLE DISTRIBUTION RULES:
-   - NEVER use "core" — use "thesis" or "support" instead.
-   - An article with 10+ claims should have: 1-2 "thesis", 4-6 "support", 1-3 "background"/"context"/"definition".
-   - If more than 30% of claims are "thesis", you are doing it WRONG!
-   - Background facts, general knowledge, and definitions → "background" or "definition" (saves search budget).
-   - Specific verifiable facts → "support" (gets searched and verified).
+   - MOST claims should be "support", NOT "core". "core" is reserved for the 1-2 MOST important facts.
+   - If more than 30% of claims are "core", you are doing it WRONG — demote to "support".
+   - An article with 5 claims should have: 1 "core", 2-3 "support", 1 other (attribution/background/context).
+   - Background facts and general statistics → "support" or "background" (NOT "core").
+   - Company responses, market data, secondary details → "support" (NOT "core").
+   - If someone SAID something ("заявив", "сказав", "said", "told") → ALWAYS "attribution", never "core".
+   - Specific verifiable facts → "support" by default. Promote to "core" ONLY for the single most central fact.
 
 3. **search_locale_plan**:
    - primary: Main search language ("en" for science, article language for local news)
@@ -411,10 +415,27 @@ You MUST respond in valid JSON.
 def build_claim_strategist_prompt(text_excerpt: str) -> str:
     return f"""Tasks:
 1. Analyze the article text below.
-2. Extract ALL distinct, atomic, check-worthy factual assertions (claims).
-   - Do NOT limit the number of claims. Extract everything that matters.
-   - Ignore trivial details or filler text.
-   - Separate compound sentences into individual atomic claims.
+2. Extract ONLY genuinely important, verifiable factual assertions (claims).
+
+   EXTRACTION RULES (read carefully — every claim costs real money to verify):
+   - QUALITY over QUANTITY. Every claim you extract triggers a search + LLM judge call.
+     A strong article analysis with 3 precise claims is better than a noisy one with 10.
+   - Extract ONLY claims that a reader would actually want fact-checked.
+   - A claim MUST be a concrete factual assertion that can be verified against external evidence.
+
+   DO NOT extract:
+   - Page metadata (dates, author names, version numbers, headers, footers, temperatures, weather)
+   - Definitions or explanations of terms (mark as claim_role="definition" ONLY if they contain a verifiable factual claim)
+   - Background knowledge that any educated person knows
+   - Restatements or paraphrases of another claim you already extracted
+   - Trivial or obvious facts that no one would dispute
+   - Sub-parts of a claim you already extracted — unless each sub-part requires DIFFERENT evidence to verify
+
+   DO extract:
+   - Specific factual assertions about events, people, organizations, numbers
+   - Claims that could be true or false — where verification adds real value
+   - Attribution claims ("X said Y") when the attribution itself matters
+
 3. For each claim, provide the full metadata as defined in the system instructions.
 
 --- ARTICLE ---
@@ -698,7 +719,7 @@ You are planning retrieval metadata for ONE specific claim that was already extr
 - claim_category: "FACTUAL" | "OPINION" | "SATIRE" | "HYPERBOLIC"
 - harm_potential: 1-5 (1=low, 5=critical)
 - verification_target: "reality" | "attribution" | "existence" | "none"
-- claim_role: "thesis" | "support" | "background" | "context" | "attribution" | "example" | "hedge" | "counterclaim" | "definition" | "forecast" (NEVER use "core" — use "thesis" or "support" instead)
+- claim_role: "thesis" | "core" | "support" | "background" | "context" | "attribution" | "example" | "hedge" | "counterclaim" | "definition" | "forecast"
 - satire_likelihood: 0.0-1.0
 - importance: 0.0-1.0
 - check_worthiness: 0.0-1.0

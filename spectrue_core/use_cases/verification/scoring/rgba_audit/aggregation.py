@@ -108,22 +108,40 @@ def _source_reliability(source: dict[str, Any] | None, config: RGBAAuditConfig) 
 
 
 def _coerce_claim_audits(raw: list[Any]) -> list[ClaimAudit]:
+    import dataclasses as _dc
     audits: list[ClaimAudit] = []
     for entry in raw:
         if isinstance(entry, ClaimAudit):
             audits.append(entry)
         elif isinstance(entry, dict):
-            audits.append(ClaimAudit(**entry))
+            try:
+                audits.append(ClaimAudit(**entry))
+            except (TypeError, ValueError):
+                continue
+        elif _dc.is_dataclass(entry) and not isinstance(entry, type):
+            try:
+                audits.append(ClaimAudit(**_dc.asdict(entry)))
+            except (TypeError, ValueError):
+                continue
     return audits
 
 
 def _coerce_evidence_audits(raw: list[Any]) -> list[EvidenceAudit]:
+    import dataclasses as _dc
     audits: list[EvidenceAudit] = []
     for entry in raw:
         if isinstance(entry, EvidenceAudit):
             audits.append(entry)
         elif isinstance(entry, dict):
-            audits.append(EvidenceAudit(**entry))
+            try:
+                audits.append(EvidenceAudit(**entry))
+            except (TypeError, ValueError):
+                continue
+        elif _dc.is_dataclass(entry) and not isinstance(entry, type):
+            try:
+                audits.append(EvidenceAudit(**_dc.asdict(entry)))
+            except (TypeError, ValueError):
+                continue
     return audits
 
 
@@ -179,10 +197,26 @@ def aggregate_rgba_audit(
     trace_context: dict[str, Any] | None = None,
     audit_errors: dict[str, Any] | None = None,
     config: RGBAAuditConfig | None = None,
+    claims: list[dict[str, Any]] | None = None,
 ) -> RGBAResult:
     config = config or default_rgba_audit_config()
     sources = sources or []
     trace_context = trace_context or {}
+
+    # Build claim_id → role_weight mapping for weighted aggregation
+    claim_role_weights: dict[str, float] = {}
+    if claims:
+        from spectrue_core.domain.claims.policy import get_role_weight
+        from spectrue_core.domain.claims.model import ClaimMetadata
+        for c in claims:
+            cid = c.get("id") or c.get("claim_id")
+            if not cid:
+                continue
+            metadata = c.get("metadata")
+            if metadata and hasattr(metadata, "claim_role"):
+                claim_role_weights[cid] = get_role_weight(metadata)
+            else:
+                claim_role_weights[cid] = 1.0
 
     claim_audits_list = _coerce_claim_audits(list(claim_audits))
     evidence_audits_list = _coerce_evidence_audits(list(evidence_audits))
@@ -248,11 +282,16 @@ def aggregate_rgba_audit(
         claim_id = audit.claim_id
         per_claim.setdefault(claim_id, {"support": 0.0, "refute": 0.0})
 
+        # Apply role weight: background/context/meta claims (weight=0.0) don't
+        # affect the aggregate RGBA score — they are explain-only.
+        role_w = claim_role_weights.get(claim_id, 1.0)
+        weighted_strength = strength * role_w
+
         if audit.stance == "support":
-            support_mass += strength
-            per_claim[claim_id]["support"] += strength
+            support_mass += weighted_strength
+            per_claim[claim_id]["support"] += strength  # per-claim keeps unweighted
         elif audit.stance == "refute":
-            refute_mass += strength
+            refute_mass += weighted_strength
             per_claim[claim_id]["refute"] += strength
 
     for claim_id, totals in per_claim.items():
