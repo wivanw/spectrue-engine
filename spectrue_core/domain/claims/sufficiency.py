@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 BASE_PRIOR_P = 0.5  # Neutral prior
 SUFFICIENCY_P_THRESHOLD = 0.82  # Threshold for "enough" evidence (posterior P)
 
+# Per-claim-type sufficiency thresholds (overrides SUFFICIENCY_P_THRESHOLD).
+_SUFFICIENCY_BY_TYPE: dict[str, float] = {
+    "core": 0.82,
+    "numeric": 0.85,        # needs authoritative data source
+    "timeline": 0.80,       # events well-covered by news
+    "attribution": 0.78,    # finding the original source is often enough
+    "sidefact": 0.70,       # low-value claims, don't waste searches
+}
+
 # Probability that a single independent source of a given tier 
 # would support the claim if it were true.
 TIER_SUPPORT_PROBABILITIES = {
@@ -97,6 +106,7 @@ def evidence_sufficiency(
     verification_target: VerificationTarget = VerificationTarget.REALITY,
     claim_text: str = "",
     use_policy_by_channel: dict[str, Any] | None = None,
+    claim_type: str = "core",
 ) -> SufficiencyResult:
     """
     Bayesian Sufficiency Judge (Domain).
@@ -117,15 +127,16 @@ def evidence_sufficiency(
 
     domain_best_tier: dict[str, EvidenceChannel] = {}
     domain_has_quote: dict[str, bool] = {}
-    
+    domain_best_stance: dict[str, str] = {}
+
     for src in sources:
         url = src.get("url") or src.get("link") if isinstance(src, dict) else str(src)
         if not url:
             continue
-        
+
         domain = _extract_domain(url)
         tier = get_domain_tier(domain)
-        
+
         if domain not in domain_best_tier:
             domain_best_tier[domain] = tier
         else:
@@ -133,44 +144,57 @@ def evidence_sufficiency(
             best_rank = {"A": 4, "B": 3, "C": 2, "D": 1}.get(domain_best_tier[domain].value[0], 0)
             if current_rank > best_rank:
                 domain_best_tier[domain] = tier
-        
+
         if isinstance(src, dict) and src.get("quote"):
             domain_has_quote[domain] = True
             result.has_quotes = True
 
+        # Track best stance per domain (support > refute > other)
+        if isinstance(src, dict):
+            stance = str(src.get("stance") or "").lower()
+            prev = domain_best_stance.get(domain, "")
+            if stance == "support" or (stance == "refute" and prev != "support"):
+                domain_best_stance[domain] = stance
+
     total_log_odds = prob_to_log_odds(BASE_PRIOR_P)
-    
-    # SPECIAL RULE: Rule 2: Multiple reputable sources (independent domains)
-    # The test expectations suggest that 2 reputable sources are SUFFICIENT, 
-    # but 1 is INSUFFICIENT.
-    # We tune the probabilities to match this.
-    
+    n_domains = len(domain_best_tier)
+
     for domain, tier in domain_best_tier.items():
         p_support = TIER_SUPPORT_PROBABILITIES.get(tier, 0.5)
-        
+
         # If no quote, reduce signal significantly (Spec Kit principle)
         if not domain_has_quote.get(domain):
             p_support = 0.5 + (p_support - 0.5) * 0.3
-            
+
+        # Stance-aware adjustment — only when multiple independent domains
+        # contribute (a single source confirming itself is not informative).
+        if n_domains >= 2:
+            stance = domain_best_stance.get(domain, "")
+            if stance == "support":
+                p_support = min(0.99, p_support * 1.1)
+            elif stance == "refute":
+                p_support = max(0.5, p_support * 0.7)
+
         logv = prob_to_log_odds(p_support)
         total_log_odds += logv
-        
+
         if tier == EvidenceChannel.AUTHORITATIVE:
             result.authoritative_count += 1
         if tier == EvidenceChannel.REPUTABLE_NEWS:
             result.reputable_count += 1
-        
-    result.independent_domains = len(domain_best_tier)
+
+    result.independent_domains = n_domains
     posterior_p = log_odds_to_prob(total_log_odds)
-    
+
+    threshold = _SUFFICIENCY_BY_TYPE.get(claim_type, SUFFICIENCY_P_THRESHOLD)
     result.posterior_p = posterior_p
-    if posterior_p >= SUFFICIENCY_P_THRESHOLD:
+    if posterior_p >= threshold:
         result.status = SufficiencyStatus.SUFFICIENT
         result.rule_matched = "BayesianConsensus"
-        result.reason = f"Combined confidence {posterior_p:.1%} >= {SUFFICIENCY_P_THRESHOLD:.1%} (domains: {len(domain_best_tier)})"
+        result.reason = f"Combined confidence {posterior_p:.1%} >= {threshold:.1%} (type={claim_type}, domains: {len(domain_best_tier)})"
     else:
         result.status = SufficiencyStatus.INSUFFICIENT
-        result.reason = f"Confidence {posterior_p:.1%} < {SUFFICIENCY_P_THRESHOLD:.1%}"
+        result.reason = f"Confidence {posterior_p:.1%} < {threshold:.1%} (type={claim_type})"
 
     return result
 
@@ -281,10 +305,13 @@ def check_sufficiency_for_claim(
         verification_target = VerificationTarget.REALITY
         use_policy_by_channel = {}
 
+    claim_type = claim.get("type") or claim.get("claim_type") or "core"
+
     return evidence_sufficiency(
         claim_id=claim_id,
         sources=sources,
         verification_target=verification_target,
         claim_text=claim_text,
         use_policy_by_channel=use_policy_by_channel,
+        claim_type=str(claim_type),
     )

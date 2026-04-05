@@ -106,11 +106,11 @@ class TestM62ClaimExtraction:
     @pytest.mark.asyncio
     async def test_check_worthiness_fallback(self, skill, mock_llm_client):
         """If check_worthiness missing, derive from importance."""
-        
+
         core_response = {
             "claims": [{
-                "text": "Test", 
-                "normalized_text": "Test claim normalized",
+                "text": "Scientists discovered a new state of water under extreme pressure",
+                "normalized_text": "Scientists discovered a new state of water under extreme pressure",
                 "subject_entities": ["Test Entity"],
                 "retrieval_seed_terms": ["test", "claim", "normalized"],
                 "falsifiability": {"is_falsifiable": True},

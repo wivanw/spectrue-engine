@@ -133,7 +133,6 @@ class EvidenceItem(SchemaModel):
             stance=EvidenceStance.SUPPORT,
             excerpt="The fight will take place in Miami...",
             quote="confirmed for Miami Gardens venue",
-            is_trusted=True
         )
     """
 
@@ -175,19 +174,6 @@ class EvidenceItem(SchemaModel):
     """Timeliness relative to the claim's time window."""
 
     # Quality signals
-    is_primary: bool = False
-    """Is this the primary/original source?"""
-
-    is_trusted: bool = False
-    """From trusted sources registry."""
-
-    retrieval_confidence: float = Field(default=-1.0, ge=-1.0, le=1.0)
-    """
-    How confident are we in the retrieval?
-    -1.0 = sentinel (not computed yet)
-    0.0-1.0 = actual confidence
-    """
-
     relevance_score: float = Field(default=-1.0, ge=-1.0, le=1.0)
     """
     How relevant is this to the assertion?
@@ -207,9 +193,6 @@ class EvidenceItem(SchemaModel):
     
     This fixes the OFAC/treasury.gov empty snippet bug.
     """
-
-    unavailable_reason: str | None = None
-    """Why content isn't available (for debugging)."""
 
     # Source classification
     source_type: str = "unknown"
@@ -248,9 +231,17 @@ class EvidenceItem(SchemaModel):
     """Original claim_id if this evidence was transferred."""
 
     # --- Dedup / corroboration metadata ---
-    publisher_id: str = ""          # normalized domain/publisher id
-    content_hash: str = ""          # sha256 of normalized text payload (exact dup group)
     similar_cluster_id: str = ""    # simhash bucket id (near-dup cluster)
+
+    # --- Freshness & corroboration ---
+    freshness_hours: float | None = None
+    """Age of source in hours since publication. More granular than timeliness_status."""
+
+    assertion_coverage: list[str] = Field(default_factory=list)
+    """Which specific assertion keys this evidence covers (explicit link to ClaimUnit.assertions)."""
+
+    corroboration_group: str | None = None
+    """ID grouping independent sources confirming the same fact. For '2+ independent sources' counting."""
 
     def is_actionable(self) -> bool:
         """Check if this evidence can be used for verdict."""

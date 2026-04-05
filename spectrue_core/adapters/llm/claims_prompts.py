@@ -80,17 +80,23 @@ For each claim, provide orchestration metadata:
    "в інтерв'ю", "said", "told", "announced", "according to", "recalled"
    → DEFAULT to verification_target="attribution", NOT "reality"!
 
-2. **claim_role** (STRICT LIMITS):
-   - **"thesis"**: Main thesis or conclusion. (Use sparingly for the central points).
-   - **"support"**: Evidence supporting a thesis claim.
-   - **"background"**: Background context (explain-only).
+2. **claim_role** (STRICT LIMITS — read carefully!):
+   - **"thesis"**: Main thesis or conclusion of the article. MAX 1-2 per article!
+   - **"support"**: Supporting evidence or detail for a thesis claim. MOST claims should be this.
+   - **"background"**: Background context, definitions, general knowledge (explain-only, NO search needed).
+   - **"context"**: Surrounding information that is NOT a verifiable claim (explain-only, NO search needed).
+   - **"attribution"**: Direct quote or paraphrase attributed to a person/source.
    - **"example"**: Illustrative example for another claim.
-   - **"hedge"**: Qualified/uncertain statement ("may", "might").
+   - **"hedge"**: Qualified/uncertain statement ("may", "might", "possibly").
    - **"counterclaim"**: Opposing or rebuttal claim.
-   
-   ⚠️ ROLE DISTRIBUTION:
-   Prioritize "thesis" for the central arguments. Use "support" for the specific evidence backing them.
-   If EVERYTHING is a "thesis", you are doing it WRONG!
+   - **"definition"**: Definition or explanation of a term (explain-only, NO search needed).
+
+   ⚠️ CRITICAL ROLE DISTRIBUTION RULES:
+   - NEVER use "core" — use "thesis" or "support" instead.
+   - An article with 10+ claims should have: 1-2 "thesis", 4-6 "support", 1-3 "background"/"context"/"definition".
+   - If more than 30% of claims are "thesis", you are doing it WRONG!
+   - Background facts, general knowledge, and definitions → "background" or "definition" (saves search budget).
+   - Specific verifiable facts → "support" (gets searched and verified).
 
 3. **search_locale_plan**:
    - primary: Main search language ("en" for science, article language for local news)
@@ -471,19 +477,16 @@ Time zone references are NOT location claims!
         {{
           "key": "event.time",
           "value": "03:00",
-          "value_raw": "03:00 (за Києвом)",
           "dimension": "FACT"
         }},
         {{
           "key": "event.time_reference",
           "value": "Kyiv time",
-          "value_raw": "(за Києвом)",
           "dimension": "CONTEXT"
         }},
         {{
           "key": "event.location.city",
           "value": "Miami",
-          "value_raw": "in Miami",
           "dimension": "FACT"
         }}
       ],
@@ -534,9 +537,7 @@ Time zone references are NOT location claims!
 ## RULES
 
 1. **Extract only explicit claims** - don't infer unstated facts
-2. **Mark inferred fields** - if you infer something, set `is_inferred: true`
-3. **Preserve raw text** - store original excerpt in `value_raw`
-4. **Simple facts are valid** - single FACT assertion is fine for simple claims
+2. **Simple facts are valid** - single FACT assertion is fine for simple claims
 5. **Language**: Generate in {lang_name} for text/normalized_text, English for queries
 
 You MUST respond in valid JSON.
@@ -697,7 +698,7 @@ You are planning retrieval metadata for ONE specific claim that was already extr
 - claim_category: "FACTUAL" | "OPINION" | "SATIRE" | "HYPERBOLIC"
 - harm_potential: 1-5 (1=low, 5=critical)
 - verification_target: "reality" | "attribution" | "existence" | "none"
-- claim_role: "core" | "thesis" | "support" | "background" | "context" | "meta" | "attribution" | "aggregated" | "subclaim" | "example" | "hedge" | "counterclaim" | "definition" | "forecast"
+- claim_role: "thesis" | "support" | "background" | "context" | "attribution" | "example" | "hedge" | "counterclaim" | "definition" | "forecast" (NEVER use "core" — use "thesis" or "support" instead)
 - satire_likelihood: 0.0-1.0
 - importance: 0.0-1.0
 - check_worthiness: 0.0-1.0

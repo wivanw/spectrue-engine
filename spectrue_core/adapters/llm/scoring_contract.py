@@ -327,7 +327,7 @@ Your task is to map each Search Source to its BEST matching Claim AND Assertion.
 
 ## Relevance Scoring
 - Assign `relevance` (0.0-1.0).
-- If relevance < 0.4, you MUST mark stance as `IRRELEVANT` or `CONTEXT`.
+- If relevance < 0.25, you MUST mark stance as `IRRELEVANT` or `CONTEXT`.
 - If content is [UNAVAILABLE], judge relevance based on title/snippet.
 
 ## Quote Requirements

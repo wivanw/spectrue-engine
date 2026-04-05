@@ -90,11 +90,27 @@ class BuildClusterQueriesStep:
             cluster_plans: list[dict[str, Any]] = []
             all_queries: list[str] = []
 
+            # Roles that should be skipped from search (explain-only, no verification value)
+            SKIP_ROLES = {"context", "meta", "background", "definition"}
+
             for cluster_id, rep_claims in clusters.items():
                 rep_claims_list = [c for c in (rep_claims or []) if isinstance(c, dict)]
                 claims_for_plan = rep_claims_list or [
                     c for c in (cluster_claims.get(cluster_id, []) or []) if isinstance(c, dict)
                 ]
+
+                # Skip clusters where ALL claims are explain-only
+                if claims_for_plan and all(
+                    str(c.get("claim_role") or c.get("role") or "").lower() in SKIP_ROLES
+                    for c in claims_for_plan
+                ):
+                    Trace.event("retrieval.cluster_plan.skipped_explain_only", {
+                        "cluster_id": cluster_id,
+                        "claim_count": len(claims_for_plan),
+                        "roles": [c.get("claim_role") or c.get("role") for c in claims_for_plan],
+                    })
+                    continue
+
                 max_queries = resolve_budgeted_max_queries(claims_for_plan, default_max=3)
 
                 query_origin = "planned"

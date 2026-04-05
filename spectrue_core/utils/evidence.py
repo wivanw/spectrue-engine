@@ -702,13 +702,29 @@ def build_evidence_pack(
             v_target = str(claim_obj.get("verification_target", "") or "").lower()
             c_structure = str((claim_obj.get("structure") or {}).get("type", "") or "").lower()
             is_attribution = v_target == "attribution" or "attribution" in c_structure
-            
-            if is_attribution:
-                # Rule: Official source for attribution claim
-                if r.get("source_type") in ("primary", "official"):
+            predicate = str(claim_obj.get("predicate_type") or "").lower()
+            source_type = str(r.get("source_type") or "").lower()
+
+            if is_attribution or predicate == "quote":
+                if source_type in ("primary", "official"):
                     has_authority_anchor = True
                     authority_anchor_reason = "Official source for attribution-type claim"
                     r_contextual = 0.90
+            elif predicate in ("measurement", "ranking"):
+                if source_type in ("primary", "official"):
+                    has_authority_anchor = True
+                    authority_anchor_reason = "Primary/official source for numeric claim"
+                    r_contextual = 0.92
+            elif predicate == "policy":
+                if source_type in ("primary", "official"):
+                    has_authority_anchor = True
+                    authority_anchor_reason = "Official source for policy claim"
+                    r_contextual = 0.92
+            elif predicate == "event":
+                if source_type == "independent_media":
+                    has_authority_anchor = True
+                    authority_anchor_reason = "Independent media for event claim"
+                    r_contextual = 0.85
         
         r_eff = max(r_domain, r_contextual) if (has_authority_anchor and r_contextual is not None) else r_domain
         

@@ -103,6 +103,8 @@ def validate_core_claim(claim: dict[str, Any]) -> tuple[bool, list[str]]:
 
     if not claim_text:
         reason_codes.append("empty_claim_text")
+    elif len(claim_text) < 20:
+        reason_codes.append("claim_text_too_short")
     elif len(claim_text) > 500:
         reason_codes.append("claim_text_too_long")
 

@@ -48,6 +48,28 @@ from spectrue_core.pipeline.claims.claim_frame_builder import (
 from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
 from spectrue_core.adapters.llm.evidence_summarizer import EvidenceSummarizerSkill
 
+# Report claim_type must be one of: core, numeric, timeline, attribution, sidefact
+_PREDICATE_TO_CLAIM_TYPE: dict[str, str] = {
+    "event": "timeline",
+    "policy": "timeline",
+    "fact": "core",
+    "definition": "core",
+    "existence": "core",
+    "property": "core",
+    "causal": "core",
+    "measurement": "numeric",
+    "ranking": "numeric",
+    "quote": "attribution",
+    "other": "sidefact",
+}
+
+
+def _claim_type_from_predicate(predicate_type: Any) -> str:
+    """Derive report claim_type from extraction predicate_type."""
+    if not predicate_type or not isinstance(predicate_type, str):
+        return "core"
+    return _PREDICATE_TO_CLAIM_TYPE.get(str(predicate_type).lower().strip(), "core")
+
 
 @dataclass
 class DeepClaimContext:
@@ -501,9 +523,30 @@ class AssembleDeepResultStep(Step):
                     if r.get("rgba") is not None
                 }
                 claim_id_to_type: dict[str, str] = {}
+                def _audit_field(audit: Any, field: str) -> Any:
+                    """Extract field from audit (dict or dataclass)."""
+                    if isinstance(audit, dict):
+                        return audit.get(field)
+                    return getattr(audit, field, None)
+
+                audit_by_id: dict[str, Any] = {}
+                for a in ctx.get_extra("claim_audits") or []:
+                    aid = _audit_field(a, "claim_id")
+                    if aid:
+                        audit_by_id[str(aid)] = a
+
                 for i, c in enumerate(ctx.claims or []):
                     cid = c.get("id") or c.get("claim_id") or f"c{i + 1}"
-                    claim_id_to_type[cid] = c.get("type", "core")
+                    explicit_type = c.get("type") or c.get("claim_type")
+                    if explicit_type and str(explicit_type).strip():
+                        claim_id_to_type[cid] = str(explicit_type).lower().strip()
+                    else:
+                        pred = None
+                        if cid in audit_by_id:
+                            pred = _audit_field(audit_by_id[cid], "predicate_type")
+                        if pred is None:
+                            pred = c.get("predicate_type")
+                        claim_id_to_type[cid] = _claim_type_from_predicate(pred)
                 if graph_result is not None and not getattr(graph_result, "disabled", True):
                     from spectrue_core.domain.claims.graph.report_serializer import (
                         serialize_graph_for_report,

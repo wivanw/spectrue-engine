@@ -349,9 +349,16 @@ def build_claim_frames_from_pipeline(
 
     frames: list[ClaimFrame] = []
 
-    for claim in claims:
-        claim_id = claim.get("claim_id") or claim.get("id") or str(len(frames))
-        claim_text = claim.get("text") or claim.get("normalized_text") or ""
+    for i, claim in enumerate(claims):
+        # Use same id scheme as graph (ClaimNode) and build_claims_contract: c1, c2, ...
+        claim_id = claim.get("claim_id") or claim.get("id") or f"c{i + 1}"
+        # LLM extraction may output claim_text or normalized_text; prefer text for consistency
+        claim_text = (
+            claim.get("text")
+            or claim.get("normalized_text")
+            or claim.get("claim_text")
+            or ""
+        )
         claim_lang = claim.get("language") or claim.get("claim_language") or "en"
 
         raw_evidence = evidence_by_claim.get(claim_id, [])

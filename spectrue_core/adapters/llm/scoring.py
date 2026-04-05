@@ -1181,7 +1181,7 @@ Return valid JSON now."""
                     "value": str(a.value) if a.value else "",
                     "dimension": a.dimension.value,  # FACT / CONTEXT / INTERPRETATION
                     "importance": a.importance,
-                    "is_inferred": a.is_inferred,
+
                 })
 
             claims_data.append({

@@ -7,8 +7,8 @@ from .enums import (
 )
 from .metadata import SearchLocalePlan, RetrievalPolicy, ClaimMetadata
 from .structure import (
-    ClaimStructure, EvidenceRequirementSpec, SourceSpan, Assertion,
-    LocationQualifier, EventRules, BroadcastInfo, EventQualifiers
+    ClaimStructure, EvidenceRequirementSpec, Assertion,
+    LocationQualifier, BroadcastInfo, EventQualifiers
 )
 from .unit import ClaimUnit
 
@@ -28,10 +28,8 @@ __all__ = [
     "ClaimMetadata",
     "ClaimStructure",
     "EvidenceRequirementSpec",
-    "SourceSpan",
     "Assertion",
     "LocationQualifier",
-    "EventRules",
     "BroadcastInfo",
     "EventQualifiers",
     "ClaimUnit",

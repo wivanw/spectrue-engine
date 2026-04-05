@@ -114,7 +114,6 @@ class TestTimeReferenceDistinction:
                 Assertion(
                     key="event.time_reference",
                     value="Kyiv time",
-                    value_raw="(за Києвом)",
                     dimension=Dimension.CONTEXT,  # CRITICAL: This is CONTEXT!
                 ),
                 # Location is FACT (separate from time_reference)

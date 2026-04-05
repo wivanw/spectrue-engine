@@ -7,6 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
+import asyncio
 import logging
 from typing import Union
 
@@ -93,17 +94,18 @@ class ClusteringSkill(BaseSkill):
         cluster_timeout = float(getattr(self.runtime.llm, "cluster_timeout_sec", 35.0) or 35.0)
         cluster_timeout = max(35.0, cluster_timeout)
 
-        async def run_pass(pass_type: str, trace_suffix: str) -> list[SearchResult]:
-            all_matrix_rows = []
+        MAX_CONCURRENT_STANCE = 3
 
-            # Process in batches
-            for i in range(0, num_sources, STANCE_BATCH_SIZE):
+        async def run_pass(pass_type: str, trace_suffix: str) -> list[SearchResult]:
+            sem = asyncio.Semaphore(MAX_CONCURRENT_STANCE)
+
+            async def process_batch(i: int) -> list[dict]:
                 raw_batch = sources_lite[i : i + STANCE_BATCH_SIZE]
                 batch_sources = [
                     {**src, "index": local_idx}
                     for local_idx, src in enumerate(raw_batch)
                 ]
-                batch_suffix = f"{trace_suffix}_b{i // STANCE_BATCH_SIZE}"
+                batch_suffix_local = f"{trace_suffix}_b{i // STANCE_BATCH_SIZE}"
 
                 prompt = build_stance_matrix_prompt(claims_lite=claims_lite, sources_lite=batch_sources)
                 batch_cache_key = build_ev_mat_cache_key(claims_lite=claims_lite, sources_lite=batch_sources)
@@ -113,27 +115,39 @@ class ClusteringSkill(BaseSkill):
                     pass_type=pass_type,
                 )
 
-                try:
-                    result = await self.llm_client.call_json(
-                        model=self.runtime.llm.model_clustering_stance,
-                        input=prompt,
-                        instructions=instructions,
-                        reasoning_effort="low",
-                        cache_key=f"{batch_cache_key}_{batch_suffix}",
-                        timeout=cluster_timeout,
-                        trace_kind="stance_clustering",
-                        temperature=0,  # Deterministic JSON output
-                    )
-                    batch_matrix = result.get("matrix", [])
-                    # Add to total matrix
-                    if batch_matrix:
-                        for row in batch_matrix:
-                            if isinstance(row, dict) and isinstance(row.get("source_index"), int):
-                                row["source_index"] = row["source_index"] + i
-                        all_matrix_rows.extend(batch_matrix)
-                except Exception as e:
-                    logger.warning("[Clustering] Batch %d failed: %s", i, e)
-                    # Proceed with partial results
+                async with sem:
+                    try:
+                        result = await self.llm_client.call_json(
+                            model=self.runtime.llm.model_clustering_stance,
+                            input=prompt,
+                            instructions=instructions,
+                            reasoning_effort="low",
+                            cache_key=f"{batch_cache_key}_{batch_suffix_local}",
+                            timeout=cluster_timeout,
+                            trace_kind="stance_clustering",
+                            temperature=0,  # Deterministic JSON output
+                        )
+                        batch_matrix = result.get("matrix", [])
+                        if batch_matrix:
+                            for row in batch_matrix:
+                                if isinstance(row, dict) and isinstance(row.get("source_index"), int):
+                                    row["source_index"] = row["source_index"] + i
+                        return batch_matrix
+                    except Exception as e:
+                        logger.warning("[Clustering] Batch %d failed: %s", i, e)
+                        return []
+
+            batch_results = await asyncio.gather(
+                *(process_batch(i) for i in range(0, num_sources, STANCE_BATCH_SIZE)),
+                return_exceptions=True,
+            )
+
+            all_matrix_rows = []
+            for br in batch_results:
+                if isinstance(br, list):
+                    all_matrix_rows.extend(br)
+                elif isinstance(br, Exception):
+                    logger.warning("[Clustering] Batch gather exception: %s", br)
 
             # Log LLM output for debugging claim assignment
             Trace.event("stance_clustering.matrix_output", {
@@ -166,9 +180,10 @@ class ClusteringSkill(BaseSkill):
         try:
             results = []
             if (stance_pass_mode or "").lower() == "two_pass":
-                # Note: two_pass is legacy/slow, but we support it with batching internally too
-                support_results = await run_pass(STANCE_PASS_SUPPORT_ONLY, "support")
-                refute_results = await run_pass(STANCE_PASS_REFUTE_ONLY, "refute")
+                support_results, refute_results = await asyncio.gather(
+                    run_pass(STANCE_PASS_SUPPORT_ONLY, "support"),
+                    run_pass(STANCE_PASS_REFUTE_ONLY, "refute"),
+                )
                 results = merge_stance_passes(
                     support_results=support_results,
                     refute_results=refute_results,

@@ -59,7 +59,9 @@ class TypedEdge:
     rationale_short: str    # 10-25 words, logs only
     evidence_spans: str     # Key text supporting classification, ≤25 words
     cross_topic: bool = False  # Preserved from CandidateEdge
-    same_section: bool = False  # Preserved from CandidateEdge (trace/explainability)
+    same_section: bool = False  # Preserved from CandidateEdge (layout proximity + explainability)
+    reason: str = "sim"    # "sim" | "adjacent" | "keyword" — for line style (dashed/wavy)
+    sim_score: float | None = None  # 0.0-1.0 from CandidateEdge, for report panel
 
     def to_trace_dict(self) -> dict:
         """Convert to dict for tracing and explainability."""
@@ -77,4 +79,8 @@ class TypedEdge:
             out["cross_topic"] = True
         if self.same_section:
             out["same_section"] = True
+        if self.reason and self.reason != "sim":
+            out["reason"] = self.reason
+        if self.sim_score is not None:
+            out["sim_score"] = round(self.sim_score, 4)
         return out

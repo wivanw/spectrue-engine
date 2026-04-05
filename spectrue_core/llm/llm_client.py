@@ -809,9 +809,10 @@ class LLMClient:
         # Prompt caching
         if cache_key:
             params["prompt_cache_key"] = cache_key
-            # Fix retention literal (in_memory vs in-memory)
-            # CAUTION: gpt-5-nano throws 400 "invalid_parameter" for this.
-            # params["prompt_cache_retention"] = self.cache_retention
+            # gpt-5-nano throws 400 "invalid_parameter" for prompt_cache_retention,
+            # so only enable for models that support it.
+            if "nano" not in model:
+                params["prompt_cache_retention"] = self.cache_retention
 
         # Calculate payload hash for debug correlation
         # Hash includes input + instructions to match exactly what went into the prompt

@@ -127,7 +127,7 @@ def serialize_graph_for_report(
             continue
         rationale = (edge.rationale_short or "")[:max_rationale_chars]
         evidence = (edge.evidence_spans or "")[:max_evidence_chars]
-        edges.append({
+        out_edge = {
             "src_id": edge.src_id,
             "dst_id": edge.dst_id,
             "relation": _relation_to_code(edge.relation),
@@ -136,7 +136,14 @@ def serialize_graph_for_report(
             "evidence_spans": evidence if evidence else None,
             "cross_topic": 1 if getattr(edge, "cross_topic", False) else 0,
             "same_section": 1 if getattr(edge, "same_section", False) else 0,
-        })
+        }
+        reason = getattr(edge, "reason", None) or "sim"
+        if reason:
+            out_edge["reason"] = reason
+        sim_score = getattr(edge, "sim_score", None)
+        if sim_score is not None:
+            out_edge["sim_score"] = round(float(sim_score), 4)
+        edges.append(out_edge)
 
     return {"nodes": nodes, "edges": edges}
 

@@ -8,8 +8,8 @@ from .models import (
     ClaimEventSignature, EvidenceEventSignature, SignatureCompatible
 )
 from .criteria import (
-    claim_assertion_keys, is_transfer_candidate, compatible_for_claim,
-    covers_ok_for_claim, event_ok_for_claim
+    claim_assertion_keys, is_transfer_candidate, claim_type_compatible,
+    compatible_for_claim, covers_ok_for_claim, event_ok_for_claim,
 )
 from .ranking import score_for_transfer, topic_overlap_boost, stable_key
 
@@ -55,6 +55,7 @@ def compute_spillover(
 
     rejections = {
         "not_candidate": 0,
+        "claim_type": 0,
         "compat_assertion": 0,
         "required_slots": 0,
         "event_signature": 0,
@@ -93,6 +94,10 @@ def compute_spillover(
                 if not is_transfer_candidate(src):
                     rejections["not_candidate"] += 1
                     continue
+                origin_claim = claim_lookup.get(peer_id)
+                if origin_claim and not claim_type_compatible(origin_claim, target_claim):
+                    rejections["claim_type"] += 1
+                    continue
                 if not compatible_for_claim(src, fact_keys, context_keys):
                     # Relaxed check: if target claim has no defined assertions, don't reject by key
                     if fact_keys or context_keys:
@@ -121,7 +126,6 @@ def compute_spillover(
                     rejections["dedup"] += 1
                     continue
 
-                origin_claim = claim_lookup.get(peer_id)
                 base = score_for_transfer(src)
                 boost = topic_overlap_boost(origin_claim, target_claim) if origin_claim else 0.0
                 if boost > 0:

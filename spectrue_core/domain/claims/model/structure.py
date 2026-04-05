@@ -26,24 +26,14 @@ class EvidenceRequirementSpec:
 
 
 @dataclass
-class SourceSpan:
-    """Location of text in original article."""
-    start: int
-    end: int
-    text: str
-
-
-@dataclass
 class Assertion:
     """A single field-level fact within a ClaimUnit."""
     key: str
     value: Any
-    value_raw: str | None = None
     dimension: Dimension = Dimension.FACT
     evidence_requirement: EvidenceRequirementSpec = field(default_factory=EvidenceRequirementSpec)
     verification_scope: VerificationScope = VerificationScope.STRICT
     importance: float = 1.0
-    is_inferred: bool = False
 
 
 @dataclass
@@ -57,20 +47,9 @@ class LocationQualifier:
 
 
 @dataclass
-class EventRules:
-    """Rules for sports/competition events."""
-    max_rounds: int | None = None
-    glove_oz: float | None = None
-    ring_size_ft: str | None = None
-    weight_class: str | None = None
-
-
-@dataclass
 class BroadcastInfo:
     """Broadcast/streaming information."""
     platform: str | None = None
-    start_time_local: str | None = None
-    region_restrictions: str | None = None
 
 
 @dataclass
@@ -83,5 +62,4 @@ class EventQualifiers:
     time_reference: str | None = None
     location: LocationQualifier | None = None
     participants: list[str] = field(default_factory=list)
-    rules: EventRules | None = None
     broadcast: BroadcastInfo | None = None

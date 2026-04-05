@@ -24,7 +24,7 @@ from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
-from spectrue_core.tools.trusted_sources import get_trusted_domains_by_lang
+from spectrue_core.tools.trusted_sources import get_trusted_domains_by_lang, get_domains_by_topics
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.url_utils import get_registrable_domain
 from spectrue_core.use_cases.claims.sufficiency import check_sufficiency_for_claim, SufficiencyStatus
@@ -128,38 +128,71 @@ class ClusterWebSearchStep:
                     return await self.search_mgr.search_phase(query, **kwargs)
 
             async def _execute_single_query_search(query: str, claims_for_query: list[dict]):
-                # Run trusted + general search in PARALLEL (instead of serial fallback)
-                trusted_domains = get_trusted_domains_by_lang(ctx.lang or "en")
+                # Sequential search: trusted domains first, then general only if insufficient.
+                # Topic-aware domain filtering: narrow domains for specialized claims
+                claim_topics = []
+                for c in claims_for_query:
+                    claim_topics.extend(c.get("topics") or [])
+                topic_domains = get_domains_by_topics(claim_topics) if claim_topics else []
 
-                trusted_task = _search_with_sem(
+                trusted_domains = get_trusted_domains_by_lang(ctx.lang or "en")
+                if topic_domains:
+                    # Merge: topic-specific domains first, then general trusted
+                    seen = set(topic_domains)
+                    merged = list(topic_domains)
+                    for d in trusted_domains:
+                        if d not in seen:
+                            seen.add(d)
+                            merged.append(d)
+                    trusted_domains = merged
+
+                _, trusted_sources = await _search_with_sem(
                     query,
                     max_results=max_results,
                     depth=search_depth,
                     topic="general",
                     include_domains=trusted_domains,
                 )
-                general_task = _search_with_sem(
-                    query,
-                    max_results=max_results,
-                    depth=search_depth,
-                    topic="general",
-                    exclude_domains=trusted_domains,
-                )
-
-                (_, trusted_sources), (_, general_sources) = await asyncio.gather(
-                    trusted_task, general_task
-                )
-
-                # Merge: trusted first, then general
-                sources = (trusted_sources or []) + (general_sources or [])
 
                 rep_claim = claims_for_query[0] if claims_for_query else {"text": query}
-                sufficiency = check_sufficiency_for_claim(rep_claim, sources)
+                sufficiency = check_sufficiency_for_claim(rep_claim, trusted_sources or [])
 
-                Trace.event("retrieval.cluster_search.parallel_search", {
+                general_sources: list[dict] = []
+                if sufficiency.status != SufficiencyStatus.SUFFICIENT:
+                    _, general_sources = await _search_with_sem(
+                        query,
+                        max_results=max_results,
+                        depth=search_depth,
+                        topic="general",
+                        exclude_domains=trusted_domains,
+                    )
+
+                sources = (trusted_sources or []) + (general_sources or [])
+                if general_sources:
+                    sufficiency = check_sufficiency_for_claim(rep_claim, sources)
+
+                # Fallback: if non-English query returned 0 results, retry without domain filter
+                if not sources and (ctx.lang or "en") != "en":
+                    Trace.event("retrieval.cluster_search.lang_fallback", {
+                        "query": query,
+                        "original_lang": ctx.lang,
+                        "reason": "zero_results_non_english",
+                    })
+                    _, fallback_sources = await _search_with_sem(
+                        query,
+                        max_results=max_results,
+                        depth=search_depth,
+                        topic="general",
+                    )
+                    if fallback_sources:
+                        sources = fallback_sources
+                        sufficiency = check_sufficiency_for_claim(rep_claim, sources)
+
+                Trace.event("retrieval.cluster_search.sequential_search", {
                     "query": query,
                     "trusted_count": len(trusted_sources or []),
-                    "general_count": len(general_sources or []),
+                    "general_count": len(general_sources),
+                    "general_skipped": not general_sources,
                 })
 
                 # Academic search only for SCIENTIFIC claims + insufficient evidence
@@ -302,12 +335,18 @@ class ClusterWebSearchStep:
 
             unique_urls = sorted(url_metadata.keys())
             urls_before_cap = len(unique_urls)
-            max_unique_urls = _coerce_int(
+
+            # Dynamic URL cap: scale with article complexity (claim count)
+            configured_max = _coerce_int(
                 getattr(deep_v2_cfg, "max_unique_urls", 120),
                 default=120,
                 min_v=0,
                 max_v=500,
             )
+            claim_count = len(ctx.claims) if ctx.claims else len(cluster_plans)
+            # ~8 URLs per claim, min 20, max configured
+            dynamic_cap = max(20, min(claim_count * 8, configured_max))
+            max_unique_urls = dynamic_cap
             if max_unique_urls > 0 and len(unique_urls) > max_unique_urls:
                 unique_urls = sorted(
                     unique_urls,
@@ -325,6 +364,42 @@ class ClusterWebSearchStep:
                         "max_unique_urls": max_unique_urls,
                     },
                 )
+
+            # Pre-extract dedup: skip URLs with identical snippets (same content, different URLs)
+            seen_snippets: set[str] = set()
+            deduped_urls: list[str] = []
+            snippet_dupes = 0
+            for u in unique_urls:
+                snippet = ((url_metadata.get(u) or {}).get("snippet") or "").strip()[:200]
+                if snippet and snippet in seen_snippets:
+                    snippet_dupes += 1
+                    continue
+                if snippet:
+                    seen_snippets.add(snippet)
+                deduped_urls.append(u)
+            if snippet_dupes > 0:
+                Trace.event("retrieval.cluster_search.pre_extract_dedup", {
+                    "before": len(unique_urls),
+                    "after": len(deduped_urls),
+                    "snippet_dupes": snippet_dupes,
+                })
+            unique_urls = deduped_urls
+
+            # Pre-extract filter: drop URLs with very low relevance score
+            MIN_EXTRACT_SCORE = 0.15
+            pre_filter_count = len(unique_urls)
+            unique_urls = [
+                u for u in unique_urls
+                if _coerce_score((url_metadata.get(u) or {}).get("score")) >= MIN_EXTRACT_SCORE
+            ]
+            urls_filtered_low_score = pre_filter_count - len(unique_urls)
+            if urls_filtered_low_score > 0:
+                Trace.event("retrieval.cluster_search.pre_extract_filter", {
+                    "before": pre_filter_count,
+                    "after": len(unique_urls),
+                    "filtered_low_score": urls_filtered_low_score,
+                    "min_score": MIN_EXTRACT_SCORE,
+                })
 
             extract_phase_started = time.perf_counter()
             Trace.event(
@@ -448,12 +523,31 @@ class ClusterWebSearchStep:
                     "canonical_url": doc.get("canonical_url") or url,
                 }
 
+            # Build audit_sources for RGBA aggregator (mirrors WebSearchStep)
+            audit_sources = [
+                {
+                    "source_id": doc.get("source_id") or source_id_for_url(url),
+                    "url": url,
+                    "title": doc.get("title") or "",
+                    "domain": get_registrable_domain(url) or "",
+                }
+                for url, doc in evidence_docs.items()
+            ]
+
+            audit_trace_context = {
+                "plan_id": plan_id,
+                "events": [{"type": "cluster_search", "urls": len(evidence_docs)}],
+                "claims_total": len(ctx.claims) if ctx.claims else 0,
+            }
+
             return (
                 ctx.set_extra("cluster_evidence_docs", cluster_evidence_docs)
                 .set_extra("evidence_docs", evidence_docs)
                 .set_extra("evidence_doc_meta", evidence_doc_meta)
                 .set_extra("cluster_sufficiency", cluster_sufficiency)
                 .set_extra("execution_states", execution_states)
+                .set_extra("audit_sources", audit_sources)
+                .set_extra("audit_trace_context", audit_trace_context)
                 .set_extra(
                     "retrieval_search_trace",
                     {

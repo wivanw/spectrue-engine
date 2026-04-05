@@ -303,7 +303,7 @@ class DAGPipeline:
             nodes_to_run = []
             for node in layer:
                 if node.skip_if and node.skip_if(current_ctx):
-                    Trace.event("dag_step_skipped", {"step": node.name, "reason": "skip_if"})
+                    Trace.event("dag_step_skipped", {"step": node.name, "reason": "skip_if", "stage": f"layer_{layer_idx}"})
                     step_state = dag_state.ensure_step(
                         node.name,
                         depends_on=node.depends_on,
@@ -333,7 +333,7 @@ class DAGPipeline:
                         )
                         step_state.mark_running(timestamp=time.time())
                         if trace:
-                            Trace.event("dag_step_start", {"step": node.name})
+                            Trace.event("dag_step_start", {"step": node.name, "stage": f"layer_{layer_idx}"})
                         
                         if current_ctx.progress_callback:
                             await current_ctx.progress_callback("step_start", node.name)
@@ -346,7 +346,7 @@ class DAGPipeline:
 
                         step_state.mark_succeeded(timestamp=time.time())
                         if trace:
-                            Trace.event("dag_step_end", {"step": node.name})
+                            Trace.event("dag_step_end", {"step": node.name, "stage": f"layer_{layer_idx}"})
                         return node.name, result
                     except Exception as e:
                         step_state = dag_state.ensure_step(

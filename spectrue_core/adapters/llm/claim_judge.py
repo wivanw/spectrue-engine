@@ -98,6 +98,7 @@ class ClaimJudgeSkill:
                 schema_name="claim_judge",
                 model=ModelID.PRO,
                 temperature=0,
+                fail_on_schema_error=False,
             )
 
             # Parse response into JudgeOutput (no modifications)
@@ -166,7 +167,11 @@ class ClaimJudgeSkill:
         # Normalize verdict to canonical enum (SUPPORT/REFUTE/MIXED/NEI)
         verdict = normalize_verdict_enum(response.get("verdict"))
         # Extract summary fields
-        simple_summary = str(response.get("simple_summary", ""))
+        raw_summary = response.get("simple_summary", "")
+        if isinstance(raw_summary, list):
+            simple_summary = "\n".join(str(b) for b in raw_summary)
+        else:
+            simple_summary = str(raw_summary)
         
         # Extract explanation: prefer response field, fallback to simple_summary
         explanation = str(response.get("explanation", simple_summary))

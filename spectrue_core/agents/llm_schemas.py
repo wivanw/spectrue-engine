@@ -849,6 +849,11 @@ CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
             "items": {"type": "string"},
             "description": "Types of evidence that would strengthen the verdict",
         },
+        "simple_summary": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "1-3 concise bullet points for a general audience. No jargon.",
+        },
     },
 }
 

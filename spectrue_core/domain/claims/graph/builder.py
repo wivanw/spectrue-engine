@@ -128,14 +128,12 @@ class ClaimGraphBuilder:
                 similarity_matrix=sim_matrix,
                 max_nodes_for_full_pairwise=self.config.max_nodes_for_full_pairwise,
             )
-            # Apply positional decay only for weighting (not for MST connectivity)
-            pos_adj_edges: list[tuple[str, str, float]] = []
-            for u, v, sim in knn_edges:
-                pos_u = position_map.get(u, 1)
-                pos_v = position_map.get(v, 1)
-                decay = math.exp(-abs(pos_u - pos_v) / max(self.config.edge_pos_gamma, 1e-6))
-                pos_adj_edges.append((u, v, sim * decay))
-            edge_set = {tuple(sorted((u, v))): (u, v, w) for u, v, w in pos_adj_edges}
+            # Build candidate set from kNN + MST using RAW cosine similarity.
+            # Positional decay is applied AFTER edge typing for PageRank weighting
+            # so the LLM sees the true semantic similarity when classifying.
+            edge_set: dict[tuple[str, str], tuple[str, str, float]] = {
+                tuple(sorted((u, v))): (u, v, w) for u, v, w in knn_edges
+            }
             for u, v, w in mst_edges:
                 edge_set.setdefault(tuple(sorted((u, v))), (u, v, w))
             sim_edges = list(edge_set.values())
@@ -160,8 +158,15 @@ class ClaimGraphBuilder:
                 edge_typing_skill=self.edge_typing_skill,
                 sim_edges=sim_edges,
                 nodes=nodes,
-                min_edge_score=0.6,
+                min_edge_score=0.65,
             )
+
+            # Apply positional decay to kept edge scores for downstream PageRank
+            for edge in kept_edges:
+                pos_u = position_map.get(edge.src_id, 1)
+                pos_v = position_map.get(edge.dst_id, 1)
+                decay = math.exp(-abs(pos_u - pos_v) / max(self.config.edge_pos_gamma, 1e-6))
+                edge.score = float(edge.score) * decay
 
             result.typed_edges = kept_edges
             result.typed_edges_kept_count = len(kept_edges)

@@ -373,7 +373,7 @@ class ClaimGraphConfig:
     # NOTE: enabled flag is REMOVED - ClaimGraph is always enabled
 
     # B-Stage parameters
-    k_sim: int = 10              # Top-K by embedding similarity
+    k_sim: int = 5               # Top-K by embedding similarity (was 10, reduced to limit edge count)
     max_nodes_for_full_pairwise: int = 50  # When to allow full pairwise MST
     edge_pos_gamma: float = 0.6   # Position prior for edge weights (exp decay)
 

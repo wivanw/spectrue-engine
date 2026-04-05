@@ -104,12 +104,16 @@ class ExtractClaimsStep:
                 claims = preloaded_claims
                 Trace.event("extract_claims.using_preloaded", {
                     "count": len(claims),
-                    "claim_ids": [c.get("id") for c in claims[:10]],
+                    "claim_ids": [c.get("id") for c in claims],
                 })
                 if not self.skip_enrichment:
                     needs_planning = any(not c.get("retrieval_seed_terms") for c in claims)
-                    if needs_planning:
-                        Trace.event("extract_claims.enriching_preloaded", {"count": len(claims)})
+                    needs_roles = any(not c.get("claim_role") or c.get("claim_role") == "core" for c in claims)
+                    if needs_planning or needs_roles:
+                        Trace.event("extract_claims.enriching_preloaded", {
+                            "count": len(claims),
+                            "reason": "needs_planning" if needs_planning else "needs_roles",
+                        })
                         fact = ctx.get_extra("prepared_fact") or ctx.get_extra("raw_fact", "")
                         claims = await self.agent.enrich_claims_for_planning(claims, lang=ctx.lang, context=fact)
                 

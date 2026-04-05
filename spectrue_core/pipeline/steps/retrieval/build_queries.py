@@ -69,12 +69,23 @@ def _append_query(
     queries.append(normalized)
 
 
+_PREDICATE_QUERY_SUFFIX: dict[str, str] = {
+    "quote": "original interview transcript statement",
+    "measurement": "official statistics data report",
+    "ranking": "ranking index comparison data",
+    "policy": "official regulation law gazette announcement",
+    "event": "news report confirmed",
+}
+
+
 def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
     """
     Build search queries from claim data.
-    
+
     Prioritizes retrieval_seed_terms over search_queries and query_candidates.
     Seed terms are joined into a keyword query (not full sentences).
+    After seed terms, injects a predicate-type-specialized query to target
+    the right evidence type (e.g. transcripts for quotes, datasets for measurements).
     """
     queries: list[str] = []
     has_llm_queries = bool(claim.get("retrieval_seed_terms")) or bool(claim.get("search_queries"))
@@ -91,11 +102,22 @@ def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
                 if t_lower not in seen_lower:
                     seen_lower.add(t_lower)
                     valid_terms.append(t.strip())
-                    
+
         if len(valid_terms) >= 3:
             # Join first 6 seed terms into a keyword query
             keyword_query = " ".join(valid_terms[:6])
             _append_query(queries, keyword_query)
+            if len(queries) >= max_queries:
+                return queries
+
+    # Priority 1.5 - predicate-type-specialized query
+    predicate_type = str(claim.get("predicate_type") or "").lower()
+    suffix = _PREDICATE_QUERY_SUFFIX.get(predicate_type)
+    if suffix and len(queries) < max_queries:
+        entities = claim.get("subject_entities") or []
+        if entities:
+            specialized = " ".join(str(e) for e in entities[:3]) + " " + suffix
+            _append_query(queries, specialized)
             if len(queries) >= max_queries:
                 return queries
 

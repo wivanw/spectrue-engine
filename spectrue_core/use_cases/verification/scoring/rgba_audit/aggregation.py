@@ -13,8 +13,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from spectrue_core.schema.rgba_audit import (
     ClaimAudit,
@@ -356,6 +359,11 @@ def aggregate_rgba_audit(
             reasons=["missing_trace"],
             trace=a_trace,
         )
+        Trace.event("rgba_audit.pipeline_error", {
+            "channel": "A",
+            "reason": "missing_trace",
+        })
+        logger.warning("[RGBA] A-channel PIPELINE_ERROR: missing trace_context and audit_trace")
     else:
         # Calculate event count from whichever context is available
         event_count = 0
@@ -405,6 +413,15 @@ def aggregate_rgba_audit(
     if audit_errors:
         summary_trace["audit_errors"] = _sanitize_payload(audit_errors)
 
+    pipeline_errors: list[str] = []
+    for channel_name, metric in [("R", r_metric), ("G", g_metric), ("B", b_metric), ("A", a_metric)]:
+        if metric.status == RGBAStatus.PIPELINE_ERROR:
+            pipeline_errors.append(f"{channel_name}: {', '.join(metric.reasons)}")
+
+    if pipeline_errors:
+        summary_trace["pipeline_errors"] = pipeline_errors
+        logger.warning("[RGBA] Pipeline errors in channels: %s", pipeline_errors)
+
     Trace.event(
         "rgba_audit.run_summary",
         {
@@ -416,6 +433,7 @@ def aggregate_rgba_audit(
             },
             "claim_count": len(claim_audits_list),
             "evidence_count": len(evidence_audits_list),
+            "pipeline_errors": pipeline_errors,
         },
     )
 

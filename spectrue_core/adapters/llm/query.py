@@ -213,6 +213,11 @@ CONTEXT:
             if not raw_queries:
                  raise ValueError("Empty queries")
 
+            # Preserve topics from LLM for downstream domain filtering
+            self.last_query_meta = {
+                "topics": result.get("topics", []),
+            }
+
             # Validation (word count, etc.) can be added here
             sanitized_queries = [_sanitize_query(q) for q in raw_queries[:2]]
             return sanitized_queries

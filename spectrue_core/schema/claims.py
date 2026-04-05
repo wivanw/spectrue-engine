@@ -32,7 +32,6 @@ from spectrue_core.domain.claims.model import (
     ClaimStructureType,
     ClaimStructure as DomainClaimStructure,
     EvidenceRequirementSpec as DomainEvidenceRequirementSpec,
-    SourceSpan as DomainSourceSpan,
     Assertion as DomainAssertion,
 )
 
@@ -45,10 +44,8 @@ __all__ = [
     "ClaimStructureType",
     "ClaimStructure",
     "EvidenceRequirementSpec",
-    "SourceSpan",
     "Assertion",
     "LocationQualifier",
-    "EventRules",
     "BroadcastInfo",
     "EventQualifiers",
     "ClaimUnit",
@@ -73,27 +70,18 @@ class EvidenceRequirementSpec(SchemaModel, DomainEvidenceRequirementSpec):
     needs_2_independent: bool = False
 
 
-class SourceSpan(SchemaModel, DomainSourceSpan):
-    """Location of text in original article."""
-    start: int
-    end: int
-    text: str
-
-
 class Assertion(SchemaModel, DomainAssertion):
     """
     A single field-level fact within a ClaimUnit.
     """
     key: str
     value: Any
-    value_raw: str | None = None
     dimension: Dimension = Dimension.FACT
     evidence_requirement: EvidenceRequirementSpec = Field(
         default_factory=EvidenceRequirementSpec
     )
     verification_scope: VerificationScope = VerificationScope.STRICT
     importance: float = Field(default=1.0, ge=0.0, le=1.0)
-    is_inferred: bool = False
 
 
 class LocationQualifier(SchemaModel):
@@ -107,19 +95,9 @@ class LocationQualifier(SchemaModel):
     is_inferred: bool = False
 
 
-class EventRules(SchemaModel):
-    """Rules for sports/competition events."""
-    max_rounds: int | None = None
-    glove_oz: float | None = None
-    ring_size_ft: str | None = None
-    weight_class: str | None = None
-
-
 class BroadcastInfo(SchemaModel):
     """Broadcast/streaming information."""
     platform: str | None = None
-    start_time_local: str | None = None
-    region_restrictions: str | None = None
 
 
 class EventQualifiers(SchemaModel):
@@ -133,7 +111,6 @@ class EventQualifiers(SchemaModel):
     time_reference: str | None = None
     location: LocationQualifier | None = None
     participants: list[str] = Field(default_factory=list)
-    rules: EventRules | None = None
     broadcast: BroadcastInfo | None = None
 
 
@@ -154,7 +131,6 @@ class ClaimUnit(SchemaModel):
     importance: float = Field(default=1.0, ge=0.0, le=1.0)
     check_worthiness: float = Field(default=0.5, ge=0.0, le=1.0)
     extraction_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
-    source_span: SourceSpan | None = None
     language: str = "en"
     text: str = ""
     normalized_text: str = ""

@@ -26,10 +26,8 @@ from spectrue_core.schema.claims import (
     ClaimStructureType,
     ClaimStructure,
     Assertion,
-    SourceSpan,
     EvidenceRequirementSpec,
     LocationQualifier,
-    EventRules,
     BroadcastInfo,
     EventQualifiers,
     ClaimUnit,
@@ -128,8 +126,8 @@ __all__ = [
     # Claims
     "Dimension", "VerificationScope", "ClaimDomain", "ClaimType",
     "ClaimStructureType", "ClaimStructure",
-    "Assertion", "SourceSpan", "EvidenceRequirementSpec",
-    "LocationQualifier", "EventRules", "BroadcastInfo", "EventQualifiers",
+    "Assertion", "EvidenceRequirementSpec",
+    "LocationQualifier", "BroadcastInfo", "EventQualifiers",
     "ClaimUnit",
     # Evidence
     "EvidenceStance", "ContentStatus", "EvidenceItem",

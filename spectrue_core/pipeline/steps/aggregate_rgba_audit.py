@@ -39,6 +39,15 @@ class AggregateRGBAAuditStep:
             trace_context = ctx.get_extra("audit_trace_context") or ctx.get_extra("trace_context") or {}
             audit_errors = ctx.get_extra("audit_errors") or {}
 
+            Trace.event("rgba_audit.input_check", {
+                "claim_audits_count": len(claim_audits),
+                "evidence_audits_count": len(evidence_audits),
+                "audit_sources_count": len(audit_sources),
+                "has_trace_context": bool(trace_context),
+                "audit_errors_keys": list(audit_errors.keys()) if audit_errors else [],
+                "extras_keys": list(ctx.extras.keys()) if ctx.extras else [],
+            })
+
             rgba_result = aggregate_rgba_audit(
                 claim_audits=claim_audits,
                 evidence_audits=evidence_audits,
