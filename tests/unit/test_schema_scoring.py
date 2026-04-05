@@ -27,7 +27,7 @@ from spectrue_core.schema import (
     StructuredVerdict,
     VerdictStatus,
 )
-from spectrue_core.agents.skills.scoring import ScoringSkill
+from spectrue_core.adapters.llm.scoring import ScoringSkill
 
 
 class TestStructuredScoringParsing:

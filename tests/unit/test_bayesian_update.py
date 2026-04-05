@@ -16,8 +16,8 @@ Tests the Bayesian belief update logic extracted in M119.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from spectrue_core.schema.scoring import BeliefState
-from spectrue_core.verification.evidence.bayesian_update import (
+from spectrue_core.domain.verification.verdict.model import BeliefState
+from spectrue_core.use_cases.verification.verdict import (
     MockEvidence,
     apply_bayesian_update,
 )
@@ -62,7 +62,7 @@ class TestApplyBayesianUpdate:
     @pytest.fixture
     def mock_trace(self):
         """Mock Trace to avoid side effects."""
-        with patch("spectrue_core.verification.evidence.bayesian_update.Trace") as mock:
+        with patch("spectrue_core.use_cases.verification.verdict.Trace") as mock:
             mock.event = MagicMock()
             mock.event_full = MagicMock()
             yield mock
@@ -301,21 +301,21 @@ class TestBeliefStateIntegration:
         """Positive log_odds should yield probability > 0.5."""
         belief = BeliefState(log_odds=2.0)
         # log_odds_to_prob(2.0) ≈ 0.88
-        from spectrue_core.scoring.belief import log_odds_to_prob
+        from spectrue_core.domain.verification.verdict.belief import log_odds_to_prob
         prob = log_odds_to_prob(belief.log_odds)
         assert prob > 0.5
 
     def test_negative_log_odds_yields_low_probability(self):
         """Negative log_odds should yield probability < 0.5."""
         belief = BeliefState(log_odds=-2.0)
-        from spectrue_core.scoring.belief import log_odds_to_prob
+        from spectrue_core.domain.verification.verdict.belief import log_odds_to_prob
         prob = log_odds_to_prob(belief.log_odds)
         assert prob < 0.5
 
     def test_zero_log_odds_yields_half_probability(self):
         """Zero log_odds should yield probability = 0.5."""
         belief = BeliefState(log_odds=0.0)
-        from spectrue_core.scoring.belief import log_odds_to_prob
+        from spectrue_core.domain.verification.verdict.belief import log_odds_to_prob
         prob = log_odds_to_prob(belief.log_odds)
         assert abs(prob - 0.5) < 0.001
 

@@ -21,7 +21,7 @@ from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
 from spectrue_core.utils.trust_utils import enrich_sources_with_trust
-from spectrue_core.verification.pipeline.pipeline_evidence import (
+from spectrue_core.pipeline.evidence_flow import (
     EvidenceFlowInput,
     score_evidence_collection,
 )
@@ -36,7 +36,7 @@ class JudgeStandardStep:
     agent: Any  # FactCheckerAgent
     search_mgr: Any  # SearchManager
     name: str = "judge_standard"
-    weight: float = 7.0
+    weight: float = 20.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -71,7 +71,7 @@ def _timestamp_to_datetime(value: Any) -> datetime:
         return value
     if hasattr(value, "to_datetime"):
         return value.to_datetime()
-    return datetime.utcnow()
+    return datetime.now(tz=timezone.utc)
 
 
 class FirestoreBillingStore(BillingStore):

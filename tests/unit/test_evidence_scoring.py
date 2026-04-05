@@ -14,7 +14,7 @@ Tests the evidence scoring utilities extracted in M119.
 """
 
 
-from spectrue_core.verification.evidence.evidence_scoring import (
+from spectrue_core.use_cases.verification.scoring.evidence_verdict_processing import (
     norm_id,
     is_prob,
     logit,

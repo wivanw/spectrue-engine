@@ -27,6 +27,50 @@ We explicitly model uncertainty. If evidence is insufficient, contradictory, or 
 
 ---
 
+## 1.1 Layer Boundaries (Domain Architecture)
+
+The engine enforces a strict dependency direction using `import-linter`. The goal is to keep domain logic centralized and keep orchestration layers thin.
+
+**Layers and allowed dependencies:**
+- **domain**: Pure business logic. May not import from use_cases, pipeline, adapters, schema, agents, verification, or graph.
+- **adapters**: External service boundaries (LLM, retrieval, graph, persistence). May depend on domain only.
+- **use_cases**: Orchestration for domain + adapters. May depend on domain and adapters only.
+- **pipeline**: Step orchestration. May depend on use_cases and schema only.
+- **schema**: Data contracts/types. May depend on domain types only.
+
+---
+
+## 1.2 DAG Pipeline Architecture
+
+The engine executes verification as a **Directed Acyclic Graph (DAG)** of thin, focused steps. This allows for parallel execution and clear separation of concerns.
+
+### Standard Mode DAG (Single-Claim)
+
+```
+MeteringSetup → PrepareInput → ExtractClaims → AssertNonEmptyClaims
+             → (VerifyInlineSources + EvaluateSemanticGating + ClaimGraph + ClaimCluster + OracleFlow)
+             → TargetSelection → BuildQueries → WebSearch → Rerank → (FetchChunks) → AssembleRetrievalItems
+             → EvidenceCollect → EvidenceSpillover → EvidenceGating → (StanceAnnotate) → (ClusterEvidence)
+             → JudgeStandard → AssembleStandardResult → CostSummary
+```
+
+### Deep Mode DAG (Multi-Claim)
+
+```
+MeteringSetup → PrepareInput → ExtractClaims → AssertNonEmptyClaims → AssertMaxClaims
+             → VerifyInlineSources → (ClaimGraph)* → TargetSelection (process_all_claims)
+             → BuildQueries → WebSearch → Rerank → (FetchChunks) → AssembleRetrievalItems
+             → EvidenceClean → EvidenceCollect → EvidenceGating → (StanceAnnotate) → (ClusterEvidence)
+             → BuildClaimFrames → (AuditClaims/AuditEvidence) → AggregateRGBAAudit → (SummarizeEvidence)
+             → JudgeClaims → AssembleDeepResult → CostSummary
+
+*ClaimGraph is adaptively skipped if there are few claims and sufficient budget.
+```
+
+**Note**: Pipeline steps are "thin" wrappers (typically <= 50 lines) that delegate all domain logic to the **Use Case** layer. In Deep v2, each claim guarantees an isolated, immutable `ClaimExecutionContext` that prevents state bleed between parallel processing tasks.
+
+---
+
 ## 2. Claims Model
 
 ### Atomic Claims
@@ -48,6 +92,7 @@ Each claim has a `ClaimRole`:
 The **Claim Graph** structures claims by semantic dependency.
 - **Purpose**: To identify "Load-Bearing Claims" (if this falls, the argument falls).
 - **Capabilities**: PageRank-style centrality, redundancy clustering.
+- **Adaptive Bypass**: Skip construction if the budget covers all input claims (saving LLM/Graph costs).
 - **Non-Goal**: It does not infer truth propagation (False premise $\nRightarrow$ False conclusion).
 
 ---
@@ -58,12 +103,18 @@ The **Claim Graph** structures claims by semantic dependency.
 - **Decisive**: A high-trust source directly affirming/negating the claim.
 - **Corroborative**: Secondary sources, repetition, or indirect validation.
 
+### Evidence Cleanliness
+Before evidence is scored, it passes through **Evidence Scrubbing**:
+- **Boilerplate Stripping**: Removes generic nav/footer text to prevent hallucinated correlations.
+- **Cleanliness Vectors**: Metadata tracks what was stripped to penalize over-reliance on fuzzy matching (e.g. capping confidence if evidence is purely boilerplate).
+
 ### Evidence Metadata
 Every `EvidenceItem` carries structured signals:
 - `stance`: `support`, `refute`, `context`, `irrelevant`.
 - `relevance`: 0.0 to 1.0 (semantic distance).
 - `provider`: Where it came from (Tavily, Google, etc.).
 - `checks`: List of passing/failing sanity checks (date match, entity match).
+- `freshness`: Parsed recency signals that penalize stale evidence in scoring.
 
 ### Insufficient Evidence
 If no decisive evidence is found after the **Evidence Acquisition Ladder (EAL)** is exhausted, the RGBA audit status may be `INSUFFICIENT_EVIDENCE`.
@@ -96,10 +147,8 @@ To prevent "illusion of consensus" (10 papers citing the same AP wire), we enfor
 
 ### Claim-Level vs. Cluster-Level
 - **Standard Mode**: Global retrieval context. Claims share a pool of evidence.
-- **Deep Mode (v5)**: **Cluster-Level Retrieval**. Claims are grouped by semantic similarity. Queries are generated for the *cluster* to save budget, but evidence is attributed back to individual claims.
-
-### Compatibility Checks
-Evidence is **never** blindly reused. Even within a cluster, an evidence item must pass the `EvidenceCompatibility` check (verified against the specific claim's entities and predicates) before being attached.
+- **Deep Mode (v5)**: **Cluster-Level Retrieval**. Claims are grouped by semantic similarity. Queries are generated for the *cluster* to save budget, but evidence is attributed back to individual claims. 
+- **Intent Planning**: Query generation is localized based on *intent* (trusted paths, academic search queries). Retrieval honors target languages using a `SearchLocalePlan` to fetch localized results and English fallbacks.
 
 ---
 

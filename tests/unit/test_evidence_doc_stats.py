@@ -4,12 +4,10 @@
 #
 # This file is licensed under the GNU Affero General Public License.
 
-from spectrue_core.pipeline.steps.retrieval.cluster_web_search import _assign_similarity_clusters
-from spectrue_core.schema.claim_frame import EvidenceItemFrame
-from spectrue_core.verification.evidence.evidence_stats import (
-    build_evidence_stats,
-)
-from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
+from spectrue_core.use_cases.retrieval.clustering import assign_similarity_clusters as _assign_similarity_clusters
+from spectrue_core.domain.claims.frame import EvidenceItemFrame
+from spectrue_core.domain.evidence.stats import build_evidence_stats
+from spectrue_core.use_cases.verification.scoring.confirmation_counts import compute_confirmation_counts
 
 
 def test_exact_dupe_counts():

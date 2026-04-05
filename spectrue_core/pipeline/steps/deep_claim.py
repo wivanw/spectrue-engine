@@ -17,19 +17,15 @@ evaluated independently with its own ClaimFrame and JudgeOutput.
 from __future__ import annotations
 
 import asyncio
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient, is_schema_failure
-from spectrue_core.agents.llm_schemas import CLAIM_JUDGE_SCHEMA
-from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
-from spectrue_core.agents.skills.claim_judge_prompts import (
-    build_claim_judge_prompt,
-    build_claim_judge_system_prompt,
+from spectrue_core.llm.llm_client import LLMClient
+from spectrue_core.use_cases.claims.deep_judge import (
+    summarize_evidence_for_claims,
+    judge_claims_independently,
+    _build_error_payload,
 )
-from spectrue_core.verification.scoring.judge_evidence_stats import build_judge_evidence_stats
-from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
 from spectrue_core.pipeline.mode import ScoringMode
 from spectrue_core.pipeline.contracts import (
     JUDGMENTS_KEY,
@@ -46,10 +42,33 @@ from spectrue_core.schema.claim_frame import (
 )
 from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.claims.claim_frame_builder import (
-    build_claim_frames_from_pipeline,
+from spectrue_core.pipeline.claims.claim_frame_builder import (
+    build_claim_frames_from_contexts,
 )
-from spectrue_core.llm.model_registry import ModelID
+from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
+from spectrue_core.adapters.llm.evidence_summarizer import EvidenceSummarizerSkill
+
+# Report claim_type must be one of: core, numeric, timeline, attribution, sidefact
+_PREDICATE_TO_CLAIM_TYPE: dict[str, str] = {
+    "event": "timeline",
+    "policy": "timeline",
+    "fact": "core",
+    "definition": "core",
+    "existence": "core",
+    "property": "core",
+    "causal": "core",
+    "measurement": "numeric",
+    "ranking": "numeric",
+    "quote": "attribution",
+    "other": "sidefact",
+}
+
+
+def _claim_type_from_predicate(predicate_type: Any) -> str:
+    """Derive report claim_type from extraction predicate_type."""
+    if not predicate_type or not isinstance(predicate_type, str):
+        return "core"
+    return _PREDICATE_TO_CLAIM_TYPE.get(str(predicate_type).lower().strip(), "core")
 
 
 @dataclass
@@ -64,51 +83,6 @@ class DeepClaimContext:
     judge_outputs: dict[str, JudgeOutput] = field(default_factory=dict)
     claim_results: list[dict[str, Any]] = field(default_factory=list)
     errors: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-_SCHEMA_MISSING_RE = re.compile(r"\$\.(?P<field>[A-Za-z0-9_\\[\\].]+): missing required field")
-
-
-def _root_cause(exc: Exception) -> Exception:
-    seen: set[int] = set()
-    current: Exception = exc
-    while True:
-        next_exc = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
-        if not isinstance(next_exc, Exception):
-            return current
-        next_id = id(next_exc)
-        if next_id in seen:
-            return current
-        seen.add(next_id)
-        current = next_exc
-
-
-def _is_format_error(exc: Exception) -> bool:
-    if is_schema_failure(exc):
-        return True
-    msg = str(exc).lower()
-    return "json parse" in msg or "invalid json" in msg
-
-
-def _extract_missing_fields(message: str) -> list[str]:
-    if not message:
-        return []
-    return list({match.group("field") for match in _SCHEMA_MISSING_RE.finditer(message)})
-
-
-def _build_error_payload(
-    *,
-    error_type: str,
-    message: str,
-    missing_fields: list[str] | None = None,
-    repair_attempted: bool = False,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {"error_type": error_type, "message": message}
-    if missing_fields:
-        payload["missing_fields"] = missing_fields
-    if repair_attempted:
-        payload["repair_attempted"] = True
-    return payload
 
 
 class BuildClaimFramesStep(Step):
@@ -137,7 +111,24 @@ class BuildClaimFramesStep(Step):
             execution_states = ctx.extras.get("execution_states", {})
             corroboration_by_claim = ctx.get_extra("corroboration_by_claim")
 
-            if not claims:
+            # Lookup or create claim contexts
+            claim_contexts: dict[str, ClaimExecutionContext] = ctx.extras.get("claim_contexts", {})
+            
+            if not claim_contexts and claims:
+                for claim in claims:
+                    cid = claim.get("id") or claim.get("claim_id") or "unknown"
+                    if cid not in claim_contexts:
+                        st = execution_states.get(cid)
+                        evs = evidence_by_claim.get(cid, [])
+                        claim_contexts[cid] = ClaimExecutionContext.create(
+                            claim=claim,
+                            evidence_items=evs,
+                            state=st
+                        )
+                # Persist context backwards to pipeline
+                ctx = ctx.set_extra("claim_contexts", claim_contexts)
+
+            if not claim_contexts:
                 Trace.event("build_claim_frames.skip", {"reason": "no_claims"})
                 return ctx.set_extra("deep_claim_ctx", DeepClaimContext())
 
@@ -148,12 +139,10 @@ class BuildClaimFramesStep(Step):
                 deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
                 confirmation_lambda = deep_v2_cfg.confirmation_lambda
 
-            # Build frames
-            frames = build_claim_frames_from_pipeline(
-                claims=claims,
+            # Build frames from contexts (T005)
+            frames = build_claim_frames_from_contexts(
+                claim_contexts=claim_contexts,
                 document_text=document_text,
-                evidence_by_claim=evidence_by_claim,
-                execution_states=execution_states,
                 confirmation_lambda=confirmation_lambda,
                 corroboration_by_claim=corroboration_by_claim if isinstance(corroboration_by_claim, dict) else None,
             )
@@ -177,7 +166,7 @@ class SummarizeEvidenceStep(Step):
     
     Uses EvidenceSummarizerSkill to categorize evidence by stance.
     """
-    weight: float = 5.0
+    weight: float = 9.0  # ~9s actual
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
@@ -194,23 +183,32 @@ class SummarizeEvidenceStep(Step):
                 Trace.event("summarize_evidence.skip", {"reason": "no_frames"})
                 return ctx
 
+            # Pre-summarization cleaning (US3)
             skill = EvidenceSummarizerSkill(self._llm)
+            
+            # Use max_doc_concurrency for parallel cleaning
+            max_doc_conc = 4
+            max_claim_conc = 4
+            
+            runtime = ctx.get_extra("runtime_config")
+            if runtime and hasattr(runtime, "llm"):
+                max_doc_conc = getattr(runtime.llm, "max_doc_concurrency", 4)
+                max_claim_conc = getattr(runtime.llm, "max_claim_concurrency", 4)
 
-            # Process all claims in parallel
-            async def summarize_one(frame: ClaimFrame) -> tuple[str, EvidenceSummary]:
-                summary = await skill.summarize(frame)
-                return frame.claim_id, summary
+            # Parallel cleaning of evidence documents (US2.2)
+            cleaned_tasks = [skill.clean_evidence_for_frame(f, max_concurrency=max_doc_conc) for f in deep_ctx.claim_frames]
+            cleaned_frames = await asyncio.gather(*cleaned_tasks)
+            deep_ctx.claim_frames = cleaned_frames
 
-            tasks = [summarize_one(frame) for frame in deep_ctx.claim_frames]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            from spectrue_core.llm.model_registry import ModelID
 
-            summaries: dict[str, EvidenceSummary] = {}
-            for result in results:
-                if isinstance(result, Exception):
-                    Trace.event("summarize_evidence.task_error", {"error": str(result)})
-                    continue
-                claim_id, summary = result
-                summaries[claim_id] = summary
+            summaries = await summarize_evidence_for_claims(
+                claim_frames=deep_ctx.claim_frames,
+                llm_client=self._llm,
+                progress_callback=ctx.get_extra("progress_callback"),
+                max_concurrency=max_claim_conc,
+                model=ModelID.NANO,
+            )
 
             deep_ctx.evidence_summaries = summaries
 
@@ -228,10 +226,10 @@ class JudgeClaimsStep(Step):
     """
     Step that produces verdicts for each claim.
     
-    Uses ClaimJudgeSkill to generate RGBA scores and verdicts.
+    Uses judge_claims_independently use case to generate RGBA scores and verdicts.
     Output is returned unchanged to the frontend.
     """
-    weight: float = 20.0
+    weight: float = 25.0  # ~25s actual (LLM judging per claim)
 
     def __init__(self, llm_client: LLMClient):
         self._llm = llm_client
@@ -248,136 +246,26 @@ class JudgeClaimsStep(Step):
                 Trace.event("judge_claims.skip", {"reason": "no_frames"})
                 return ctx
 
-            skill = ClaimJudgeSkill(self._llm)
-            
             # Get UI locale from pipeline context
             # This is the user's interface language from the API request
             ui_locale = ctx.lang or "en"
             analysis_mode = ctx.mode.api_analysis_mode
 
-            corr_by_claim = ctx.get_extra("corroboration_by_claim") or {}
-            est_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
+            # Use max_claim_concurrency for independent judging
+            max_claim_conc = 4
+            runtime = ctx.get_extra("runtime_config")
+            if runtime and hasattr(runtime, "llm"):
+                max_claim_conc = getattr(runtime.llm, "max_claim_concurrency", 4)
 
-            async def _repair_claim_output(
-                frame: ClaimFrame,
-                summary: EvidenceSummary | None,
-            ) -> JudgeOutput:
-                base_prompt = build_claim_judge_prompt(
-                    frame,
-                    summary,
-                    ui_locale=ui_locale,
-                    analysis_mode=analysis_mode,
-                )
-                repair_prompt = (
-                    "Your previous response was invalid or missing required fields. "
-                    "Return ONLY valid JSON matching the schema with keys: "
-                    "claim_id, rgba{R,G,B,A}, confidence, verdict, explanation, "
-                    "sources_used, missing_evidence.\n\n"
-                    f"{base_prompt}"
-                )
-                repair_system = build_claim_judge_system_prompt(lang=ui_locale)
-                repair_system = f"{repair_system}\nReturn only JSON; no markdown or extra text."
-
-                response = await self._llm.call_json(
-                    model=self._llm.model or ModelID.NANO,
-                    input=repair_prompt,
-                    instructions=repair_system,
-                    response_schema=CLAIM_JUDGE_SCHEMA,
-                    reasoning_effort="low",
-                    trace_kind="claim_judge.repair",
-                )
-
-                repaired = skill._parse_response(response, frame)
-                return skill._validate_sources_used(repaired, frame)
-
-            # Process all claims in parallel
-            async def judge_one(frame: ClaimFrame) -> tuple[str, JudgeOutput | None, dict[str, Any] | None]:
-                summary = deep_ctx.evidence_summaries.get(frame.claim_id)
-                try:
-                    Trace.event(
-                        "judge_claims.invoked",
-                        {
-                            "claim_id": frame.claim_id,
-                            "has_summary": summary is not None,
-                            "ui_locale": ui_locale,
-                        },
-                    )
-                    # Pass ui_locale to generate explanation in user's language
-                    evidence_stats = build_judge_evidence_stats(
-                        claim_id=frame.claim_id,
-                        corroboration_by_claim=corr_by_claim if isinstance(corr_by_claim, dict) else None,
-                        evidence_stats_by_claim=est_by_claim if isinstance(est_by_claim, dict) else None,
-                    )
-
-                    output = await skill.judge(
-                        frame,
-                        summary,
-                        ui_locale=ui_locale,
-                        analysis_mode=analysis_mode,
-                        evidence_stats=evidence_stats,
-                    )
-                    return frame.claim_id, output, None
-                except Exception as e:
-                    root = _root_cause(e)
-                    message = str(root)
-                    missing_fields = _extract_missing_fields(message)
-
-                    if _is_format_error(root):
-                        Trace.event(
-                            "judge_claims.schema_mismatch",
-                            {
-                                "claim_id": frame.claim_id,
-                                "missing_fields": missing_fields,
-                                "error": message[:300],
-                            },
-                        )
-                        try:
-                            Trace.event(
-                                "judge_claims.repair_needed",
-                                {"claim_id": frame.claim_id, "missing_fields": missing_fields},
-                            )
-                            repaired = await _repair_claim_output(frame, summary)
-                            Trace.event(
-                                "judge_claims.repair_succeeded",
-                                {"claim_id": frame.claim_id},
-                            )
-                            return frame.claim_id, repaired, None
-                        except Exception as repair_error:
-                            repair_root = _root_cause(repair_error)
-                            repair_message = str(repair_root)
-                            repair_missing = _extract_missing_fields(repair_message) or missing_fields
-                            Trace.event(
-                                "judge_claims.repair_failed",
-                                {
-                                    "claim_id": frame.claim_id,
-                                    "error": repair_message[:300],
-                                },
-                            )
-                            return frame.claim_id, None, _build_error_payload(
-                                error_type="llm_failed",
-                                message=repair_message,
-                                missing_fields=repair_missing,
-                                repair_attempted=True,
-                            )
-
-                    return frame.claim_id, None, _build_error_payload(
-                        error_type="llm_failed",
-                        message=message,
-                        missing_fields=missing_fields,
-                    )
-
-            tasks = [judge_one(frame) for frame in deep_ctx.claim_frames]
-            results = await asyncio.gather(*tasks)
-
-            outputs: dict[str, JudgeOutput] = {}
-            errors: dict[str, dict[str, Any]] = {}
-            for claim_id, output, error in results:
-                if error:
-                    Trace.event("judge_claims.task_error", {"claim_id": claim_id, "error": error.get("message")})
-                    errors[claim_id] = error
-                    continue
-                if output:
-                    outputs[claim_id] = output
+            outputs, errors = await judge_claims_independently(
+                claim_frames=deep_ctx.claim_frames,
+                evidence_summaries=deep_ctx.evidence_summaries,
+                llm_client=self._llm,
+                ui_locale=ui_locale,
+                analysis_mode=analysis_mode,
+                progress_callback=ctx.get_extra("progress_callback"),
+                max_concurrency=max_claim_conc,
+            )
 
             deep_ctx.judge_outputs = outputs
             deep_ctx.errors = errors
@@ -497,27 +385,6 @@ class AssembleDeepResultStep(Step):
                 }
 
             def _confirmation_payload(frame: ClaimFrame) -> dict[str, Any]:
-                # Deep v2: use deterministic confirmation counts
-                # Use value from runtime config if available
-                from spectrue_core.runtime_config import DeepV2Config
-                from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
-                
-                runtime = getattr(self._config, "runtime", None)
-                deep_v2_cfg = getattr(runtime, AnalysisMode.DEEP_V2.value, DeepV2Config())
-                lam = deep_v2_cfg.confirmation_lambda
-                
-                corr_meta = ctx.get_extra("corroboration_by_claim") or {}
-                cid = frame.claim_id
-                
-                if isinstance(corr_meta, dict) and cid in corr_meta:
-                    vals = compute_confirmation_counts(corr_meta[cid], lam=lam)
-                    return {
-                        "C_precise": vals["C_precise"],
-                        "C_corr": vals["C_corr"],
-                        "C_total": vals["C_total"],
-                    }
-
-                # Fallback to frame counts (if already calculated)
                 counts = frame.confirmation_counts
                 return {
                     "C_precise": counts.C_precise,
@@ -553,16 +420,7 @@ class AssembleDeepResultStep(Step):
                     judge_output.rgba.a,
                 ]
 
-                if rgba and len(rgba) == 4 and isinstance(rgba[3], (int, float)) and rgba[3] < 0:
-                    stats_by_claim = ctx.get_extra("evidence_stats_by_claim") or {}
-                    st = stats_by_claim.get(frame.claim_id) if isinstance(stats_by_claim, dict) else None
-                    if isinstance(st, dict):
-                        a_det = st.get("A_deterministic")
-                        try:
-                            a_det_f = float(a_det)
-                        except Exception:
-                            a_det_f = 0.0
-                        rgba[3] = max(0.0, min(1.0, a_det_f))
+                # Deep mode uses LLM returned RGBA directly without deterministic A overrides.
 
                 # M133: Alpha capping removed — LLM A-score passes through unchanged
 
@@ -607,10 +465,7 @@ class AssembleDeepResultStep(Step):
                     "explanation": judge_output.explanation,
                     "sources_used": sources_list,  # Full objects, not just refs
                 }
-                # Deep v2: attach corroboration counters (debug/UX optional)
-                corr_meta = ctx.get_extra("corroboration_by_claim") or {}
-                if isinstance(corr_meta, dict) and frame.claim_id in corr_meta:
-                    claim_result["corroboration"] = corr_meta[frame.claim_id]
+                # Corroboration UX is driven by frame.confirmation_counts payload
 
                 if ctx.mode.api_analysis_mode == AnalysisMode.DEEP_V2:
                     claim_result["evidence_stats"] = _evidence_stats_payload(frame)
@@ -656,6 +511,82 @@ class AssembleDeepResultStep(Step):
                 clusters_summary = ctx.get_extra("clusters_summary")
                 if isinstance(clusters_summary, list):
                     deep_analysis_payload["clusters_summary"] = clusters_summary
+                # Serialize claim graph for report (compact: numeric enum codes)
+                graph_result = ctx.get_extra("graph_result")
+                claim_id_to_text = {
+                    r["claim_id"]: r.get("claim_text") or r.get("text") or ""
+                    for r in claim_results
+                }
+                claim_id_to_rgba = {
+                    r["claim_id"]: r["rgba"]
+                    for r in claim_results
+                    if r.get("rgba") is not None
+                }
+                claim_id_to_type: dict[str, str] = {}
+                def _audit_field(audit: Any, field: str) -> Any:
+                    """Extract field from audit (dict or dataclass)."""
+                    if isinstance(audit, dict):
+                        return audit.get(field)
+                    return getattr(audit, field, None)
+
+                audit_by_id: dict[str, Any] = {}
+                for a in ctx.get_extra("claim_audits") or []:
+                    aid = _audit_field(a, "claim_id")
+                    if aid:
+                        audit_by_id[str(aid)] = a
+
+                for i, c in enumerate(ctx.claims or []):
+                    cid = c.get("id") or c.get("claim_id") or f"c{i + 1}"
+                    explicit_type = c.get("type") or c.get("claim_type")
+                    if explicit_type and str(explicit_type).strip():
+                        claim_id_to_type[cid] = str(explicit_type).lower().strip()
+                    else:
+                        pred = None
+                        if cid in audit_by_id:
+                            pred = _audit_field(audit_by_id[cid], "predicate_type")
+                        if pred is None:
+                            pred = c.get("predicate_type")
+                        claim_id_to_type[cid] = _claim_type_from_predicate(pred)
+                if graph_result is not None and not getattr(graph_result, "disabled", True):
+                    from spectrue_core.domain.claims.graph.report_serializer import (
+                        serialize_graph_for_report,
+                    )
+                    deep_analysis_payload["claim_graph"] = serialize_graph_for_report(
+                        graph_result,
+                        claim_id_to_text,
+                        claim_id_to_rgba=claim_id_to_rgba,
+                        claim_id_to_type=claim_id_to_type,
+                    )
+                elif claim_results:
+                    # Fallback: minimal graph (nodes only) when ClaimGraphStep was skipped
+                    # so the 3D tree button and shared report tree still work
+                    from spectrue_core.domain.claims.graph.report_serializer import (
+                        _claim_type_to_code,
+                        fallback_edges_for_nodes,
+                    )
+                    nodes = []
+                    for i, r in enumerate(claim_results):
+                        cid = r.get("claim_id") or f"c{i + 1}"
+                        ct = claim_id_to_type.get(cid, "core")
+                        rgba = claim_id_to_rgba.get(cid)
+                        node: dict = {
+                            "claim_id": cid,
+                            "text": claim_id_to_text.get(cid, ""),
+                            "pre_meta": {},
+                            "post_meta": {},
+                            "centrality": 0.0,
+                            "is_key_claim": 1 if i == 0 else 0,
+                            "in_structural_weight": 0.0,
+                            "in_contradict_weight": 0.0,
+                            "claim_type": _claim_type_to_code(ct),
+                        }
+                        if rgba is not None and len(rgba) >= 4:
+                            node["rgba"] = [round(float(x), 4) for x in rgba[:4]]
+                        nodes.append(node)
+                    deep_analysis_payload["claim_graph"] = {
+                        "nodes": nodes,
+                        "edges": fallback_edges_for_nodes(nodes),
+                    }
 
             final_result = {
                 "analysis_mode": analysis_mode,

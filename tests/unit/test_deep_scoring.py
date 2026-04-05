@@ -10,7 +10,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from spectrue_core.verification.pipeline import ValidationPipeline
+from spectrue_core.pipeline.orchestration.validation_pipeline import ValidationPipeline
 
 @pytest.mark.unit
 class TestDeepScoringPipeline:
@@ -51,7 +51,7 @@ class TestDeepScoringPipeline:
     @pytest.fixture
     def pipeline(self, mock_config, mock_agent, mock_search_mgr):
         # Mock CalibrationRegistry to avoid reading from real config
-        with patch("spectrue_core.verification.calibration.calibration_registry.CalibrationRegistry") as MockRegistry:
+        with patch("spectrue_core.domain.verification.calibration.calibration_registry.CalibrationRegistry") as MockRegistry:
             mock_registry_instance = MagicMock()
             
             # Setup mock model with valid score return
@@ -66,7 +66,7 @@ class TestDeepScoringPipeline:
             
             MockRegistry.from_runtime.return_value = mock_registry_instance
             
-            with patch("spectrue_core.verification.search.search_mgr.SearchManager") as MockSearchManagerCls:
+            with patch("spectrue_core.adapters.retrieval.search_mgr.SearchManager") as MockSearchManagerCls:
                 MockSearchManagerCls.return_value = mock_search_mgr
                 
                 # Mock EmbedService to avoid OpenAI calls

@@ -9,8 +9,8 @@
 
 
 import pytest
-from spectrue_core.verification.evidence.evidence import build_evidence_pack
-from spectrue_core.verification.evidence.evidence_pack import Claim
+from spectrue_core.utils.evidence import build_evidence_pack
+from spectrue_core.utils.evidence_pack import Claim
 
 @pytest.mark.unit
 class TestEvidenceBuilder:

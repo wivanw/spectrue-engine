@@ -128,8 +128,12 @@ class EngineDebugFlags:
 @dataclass(frozen=True)
 class EngineLLMConfig:
     timeout_sec: float = 90.0
-    concurrency: int = 6
+    concurrency: int = 8
     nano_timeout_sec: float = 90.0
+    # Concurrency configuration for parallel processing
+    max_claim_concurrency: int = 6
+    max_doc_concurrency: int = 6
+
     # Responses API configuration
     cluster_timeout_sec: float = 120.0
 
@@ -347,9 +351,14 @@ class DeepV2Config:
     representative_max_k: int = 3
     precision_top_k: int = 2
     corroboration_top_k: int = 3
+    max_unique_urls: int = 120
 
     # Re-stance for transferred evidence
     restace_transferred_top_k: int = 2
+
+    tiered_search_enabled: bool = True
+    freshness_gating_enabled: bool = True
+    decision_impact_logging_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -364,12 +373,12 @@ class ClaimGraphConfig:
     # NOTE: enabled flag is REMOVED - ClaimGraph is always enabled
 
     # B-Stage parameters
-    k_sim: int = 10              # Top-K by embedding similarity
+    k_sim: int = 5               # Top-K by embedding similarity (was 10, reduced to limit edge count)
     max_nodes_for_full_pairwise: int = 50  # When to allow full pairwise MST
     edge_pos_gamma: float = 0.6   # Position prior for edge weights (exp decay)
 
     # Output parameters
-    top_k: int = 12              # Key claims to select
+    top_k: int = 7               # Key claims to select (Low threshold per user request)
 
     # Priors / PageRank
     pos_prior_gamma: float = 0.12
@@ -426,7 +435,7 @@ class EngineRuntimeConfig:
     @staticmethod
     def load_from_env() -> "EngineRuntimeConfig":
         llm_timeout = _parse_float(os.getenv("OPENAI_TIMEOUT"), default=60.0, min_v=5.0, max_v=300.0)
-        llm_conc = _parse_int(os.getenv("OPENAI_CONCURRENCY"), default=6, min_v=1, max_v=16)
+        llm_conc = _parse_int(os.getenv("OPENAI_CONCURRENCY"), default=8, min_v=1, max_v=16)
 
         # Query generation (nano) should be tighter than general analysis.
         nano_timeout = _parse_float(os.getenv("SPECTRUE_NANO_TIMEOUT"), default=60.0, min_v=5.0, max_v=120.0)
@@ -566,8 +575,20 @@ class EngineRuntimeConfig:
             corroboration_top_k=_parse_int(
                 os.getenv("DEEP_V2_CORROBORATION_TOP_K"), default=3, min_v=1, max_v=10
             ),
+            max_unique_urls=_parse_int(
+                os.getenv("DEEP_V2_MAX_UNIQUE_URLS"), default=120, min_v=0, max_v=500
+            ),
             restace_transferred_top_k=_parse_int(
                 os.getenv("DEEP_V2_RESTANCE_TRANSFERRED_TOP_K"), default=2, min_v=1, max_v=5
+            ),
+            tiered_search_enabled=_parse_bool(
+                os.getenv("DEEP_V2_TIERED_SEARCH"), default=True
+            ),
+            freshness_gating_enabled=_parse_bool(
+                os.getenv("DEEP_V2_FRESHNESS_GATING"), default=True
+            ),
+            decision_impact_logging_enabled=_parse_bool(
+                os.getenv("DEEP_V2_DECISION_IMPACT_LOGGING"), default=True
             ),
         )
 
@@ -583,6 +604,9 @@ class EngineRuntimeConfig:
         # DeepSeek configuration
         deepseek_base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip()
         deepseek_api_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
+
+        max_claim_conc = _parse_int(os.getenv("SPECTRUE_MAX_CLAIM_CONCURRENCY"), default=6, min_v=1, max_v=16)
+        max_doc_conc = _parse_int(os.getenv("SPECTRUE_MAX_DOC_CONCURRENCY"), default=6, min_v=1, max_v=16)
 
         deepseek_models_env = os.getenv("DEEPSEEK_MODEL_NAMES")
         if deepseek_models_env is None:
@@ -604,6 +628,8 @@ class EngineRuntimeConfig:
             model_clustering_stance=model_clustering_stance,
             model_claim_extraction_fallback=os.getenv("MODEL_CLAIM_EXTRACTION_FALLBACK", ModelID.PRO),
             enable_inline_source_verification=enable_inline_source_verification,
+            max_claim_concurrency=max_claim_conc,
+            max_doc_concurrency=max_doc_conc,
         )
 
         # ClaimGraph configuration (always enabled, no feature flag)
@@ -614,7 +640,7 @@ class EngineRuntimeConfig:
                 os.getenv("CLAIM_GRAPH_MAX_PAIRWISE"), default=50, min_v=2, max_v=500
             ),
             edge_pos_gamma=_parse_float(os.getenv("CLAIM_GRAPH_EDGE_POS_GAMMA"), default=0.6, min_v=0.05, max_v=10.0),
-            top_k=_parse_int(os.getenv("CLAIM_GRAPH_TOP_K"), default=12, min_v=1, max_v=200),
+            top_k=_parse_int(os.getenv("CLAIM_GRAPH_TOP_K"), default=7, min_v=1, max_v=200),
             pos_prior_gamma=_parse_float(os.getenv("CLAIM_GRAPH_POS_GAMMA"), default=0.12, min_v=0.0, max_v=5.0),
             w_pos=_parse_float(os.getenv("CLAIM_GRAPH_W_POS"), default=0.35, min_v=0.0, max_v=5.0),
             w_supp=_parse_float(os.getenv("CLAIM_GRAPH_W_SUPP"), default=0.35, min_v=0.0, max_v=5.0),
@@ -706,6 +732,8 @@ class EngineRuntimeConfig:
                 "model_claim_extraction_fallback": self.llm.model_claim_extraction_fallback,
                 "model_inline_source_verification": self.llm.model_inline_source_verification,
                 "model_clustering_stance": self.llm.model_clustering_stance,
+                "max_claim_concurrency": int(self.llm.max_claim_concurrency),
+                "max_doc_concurrency": int(self.llm.max_doc_concurrency),
                 "enable_inline_source_verification": bool(self.llm.enable_inline_source_verification),
             },
             "search": {
@@ -742,6 +770,11 @@ class EngineRuntimeConfig:
                 "representative_max_k": int(self.deep_v2.representative_max_k),
                 "precision_top_k": int(self.deep_v2.precision_top_k),
                 "corroboration_top_k": int(self.deep_v2.corroboration_top_k),
+                "max_unique_urls": int(self.deep_v2.max_unique_urls),
+                "restace_transferred_top_k": int(self.deep_v2.restace_transferred_top_k),
+                "tiered_search_enabled": bool(self.deep_v2.tiered_search_enabled),
+                "freshness_gating_enabled": bool(self.deep_v2.freshness_gating_enabled),
+                "decision_impact_logging_enabled": bool(self.deep_v2.decision_impact_logging_enabled),
             },
             "claim_graph": {
                 # enabled flag removed - ClaimGraph always on

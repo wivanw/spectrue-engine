@@ -140,7 +140,7 @@ class TestLLMClientChatCompletions:
 
     def test_client_with_base_url_uses_chat_completions_mode(self):
         """When base_url is set, client should use Chat Completions API."""
-        from spectrue_core.agents.llm_client import LLMClient
+        from spectrue_core.llm.llm_client import LLMClient
 
         client = LLMClient(
             openai_api_key="test-key",
@@ -152,7 +152,7 @@ class TestLLMClientChatCompletions:
 
     def test_client_without_base_url_uses_responses_api(self):
         """When base_url is not set, client should use Responses API."""
-        from spectrue_core.agents.llm_client import LLMClient
+        from spectrue_core.llm.llm_client import LLMClient
 
         client = LLMClient(
             openai_api_key="test-key",

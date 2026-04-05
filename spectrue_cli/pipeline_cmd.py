@@ -24,7 +24,9 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -149,7 +151,7 @@ def cmd_graph(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """Build and (optionally) execute a plan using a pipeline profile."""
+    """Build and execute a verification pipeline using a profile."""
     from spectrue_core.pipeline_builder import (
         PipelineBuilder,
         load_profile,
@@ -203,7 +205,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     builder = PipelineBuilder(profile, overrides=overrides or None)
     plan = builder.build_plan(claims)
 
-    # Output
+    # Output plan
     if args.output_json:
         out_path = Path(args.output_json)
         out_path.write_text(json.dumps(plan.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -212,15 +214,69 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(plan.summary())
 
     if args.dry_run:
-        print("\n(dry-run) Plan built successfully. Execution is not implemented in CLI yet.")
+        print("\n(dry-run) Plan built successfully. Execution skipped.")
         return 0
 
-    print(
-        "\nExecution is not implemented in this CLI command yet. "
-        "Use the main Spectrue engine / API to execute checks.",
-        file=sys.stderr,
-    )
-    return 2
+    # --- V3.2: Actual async execution ---
+    # Inject concurrency overrides into env so runtime_config picks them up
+    if args.max_claim_concurrency is not None:
+        os.environ["SPECTRUE_MAX_CLAIM_CONCURRENCY"] = str(args.max_claim_concurrency)
+    if args.max_doc_concurrency is not None:
+        os.environ["SPECTRUE_MAX_DOC_CONCURRENCY"] = str(args.max_doc_concurrency)
+
+    return asyncio.run(_execute_run(args, claims))
+
+
+async def _execute_run(args: argparse.Namespace, claims: list) -> int:
+    """Async execution of the pipeline."""
+    from spectrue_core.config import SpectrueConfig
+    from spectrue_core.engine import SpectrueEngine
+
+    try:
+        config = SpectrueConfig.from_env()
+        engine = SpectrueEngine(config)
+
+        # Determine input text
+        input_text = " ".join(
+            c.get("text", c.get("claim_text", str(c)))
+            if isinstance(c, dict) else str(c)
+            for c in claims
+        )
+
+        mode = getattr(args, "mode", None) or "deep"
+        lang = getattr(args, "lang", None) or "en"
+
+        print(f"\n⚡ Running pipeline (mode={mode}, lang={lang})...")
+        print(f"   max_claim_concurrency={os.environ.get('SPECTRUE_MAX_CLAIM_CONCURRENCY', '6')}")
+        print(f"   max_doc_concurrency={os.environ.get('SPECTRUE_MAX_DOC_CONCURRENCY', '6')}")
+        print(f"   OPENAI_CONCURRENCY (LLM)={os.environ.get('OPENAI_CONCURRENCY', '8')}")
+
+        result = await engine.analyze_text(
+            text=input_text,
+            lang=lang,
+            analysis_mode=mode,
+        )
+
+        # Output result
+        if args.output_json:
+            out_path = Path(args.output_json)
+            out_path.write_text(
+                json.dumps(result, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            print(f"\n✓ Result written to {out_path}")
+        else:
+            print("\n✓ Pipeline completed.")
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+
+        return 0
+
+    except KeyboardInterrupt:
+        print("\nInterrupted", file=sys.stderr)
+        return 130
+    except Exception as e:
+        print(f"\n✗ Pipeline execution failed: {e}", file=sys.stderr)
+        return 1
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -318,6 +374,29 @@ def create_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--profiles-dir",
         help="Path to profiles directory",
+    )
+    run_parser.add_argument(
+        "--max-claim-concurrency",
+        type=int,
+        default=None,
+        help="Max parallel claim pipelines (default: 6, from SPECTRUE_MAX_CLAIM_CONCURRENCY)",
+    )
+    run_parser.add_argument(
+        "--max-doc-concurrency",
+        type=int,
+        default=None,
+        help="Max parallel document summarizations (default: 6, from SPECTRUE_MAX_DOC_CONCURRENCY). Also: OPENAI_CONCURRENCY (LLM global), TAVILY_CONCURRENCY (fetch).",
+    )
+    run_parser.add_argument(
+        "--mode",
+        default="deep",
+        choices=["standard", "deep", "deep_v2"],
+        help="Analysis mode (default: deep)",
+    )
+    run_parser.add_argument(
+        "--lang",
+        default="en",
+        help="UI locale (default: en)",
     )
     run_parser.set_defaults(func=cmd_run)
 

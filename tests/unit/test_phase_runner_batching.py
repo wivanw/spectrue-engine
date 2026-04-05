@@ -35,7 +35,7 @@ class TestPhaseRunnerBatchEnrichment:
     @pytest.mark.asyncio
     async def test_batch_enriches_all_claim_sources_at_once(self):
         """All URLs from all claims should be fetched in one batch call."""
-        from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+        from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
 
         search_mgr = make_mock_search_mgr()
         runner = PhaseRunner(search_mgr)
@@ -69,7 +69,7 @@ class TestPhaseRunnerBatchEnrichment:
     @pytest.mark.asyncio
     async def test_batch_includes_inline_sources(self):
         """Inline sources should be included in the batch fetch."""
-        from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+        from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
 
         search_mgr = make_mock_search_mgr()
         inline_sources = [
@@ -97,7 +97,7 @@ class TestPhaseRunnerBatchEnrichment:
     @pytest.mark.asyncio
     async def test_deduplicates_urls_across_claims(self):
         """Same URL in multiple claims should only be fetched once."""
-        from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+        from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
 
         search_mgr = make_mock_search_mgr()
         runner = PhaseRunner(search_mgr)
@@ -123,7 +123,7 @@ class TestPhaseRunnerBatchEnrichment:
     @pytest.mark.asyncio
     async def test_skips_already_enriched_sources(self):
         """Sources with fulltext=True should not be re-enriched."""
-        from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+        from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
 
         search_mgr = make_mock_search_mgr()
         runner = PhaseRunner(search_mgr)
@@ -143,7 +143,7 @@ class TestPhaseRunnerBatchEnrichment:
     @pytest.mark.asyncio
     async def test_handles_empty_evidence(self):
         """Empty evidence dict should not cause errors."""
-        from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
+        from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
 
         search_mgr = make_mock_search_mgr()
         runner = PhaseRunner(search_mgr)

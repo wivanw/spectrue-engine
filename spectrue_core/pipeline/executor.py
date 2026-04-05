@@ -99,6 +99,11 @@ async def execute_pipeline(
     # Set extras for steps that need them
     ctx = ctx.set_extra("max_cost", max_cost)
     ctx = ctx.set_extra("inline_sources", inline_sources or [])
+    
+    # Inject runtime_config for concurrency and model routing
+    # search_mgr usually has access to config
+    if hasattr(search_mgr, "config") and hasattr(search_mgr.config, "runtime"):
+        ctx = ctx.set_extra("runtime_config", search_mgr.config.runtime)
 
     # Build pipeline for this mode
     factory = PipelineFactory(search_mgr=search_mgr, agent=agent)

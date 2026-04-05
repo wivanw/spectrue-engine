@@ -1,0 +1,156 @@
+
+╔══╗─────────▶╔╗ ╔╗      ╔╗◀───┐
+╚╣╠╝◀─────┐  ╔╝╚╗║║────▶╔╝╚╗  │
+ ║║   ╔══╦══╦╩╗╔╝║║  ╔╦═╩╗╔╝╔═╦══╗
+ ║║╔══╣╔╗║╔╗║╔╣║ ║║ ╔╬╣╔╗║║ ║│║╔═╝
+╔╣╠╣║║║╚╝║╚╝║║║╚╗║╚═╝║║║║║╚╗║═╣║
+╚══╩╩╩╣╔═╩══╩╝╚═╝╚═══╩╩╝╚╩═╩╩═╩╝
+  └──▶║║                    ▲ 
+      ╚╝────────────────────┘
+
+
+---------
+Contracts
+---------
+
+Analyzed 261 files, 548 
+dependencies.
+------------------------------
+-------
+
+Domain is pure (no upward 
+dependencies) KEPT
+Use cases depend only on 
+domain + adapters BROKEN
+Adapters depend only on domainBROKEN
+Schema depends only on domain 
+types KEPT
+Pipeline depends only on use 
+cases + schema KEPT
+
+Contracts: 3 kept, 2 broken.
+
+
+----------------
+Broken contracts
+----------------
+
+Use cases depend only on 
+domain + adapters
+------------------------------
+------------
+
+spectrue_core.use_cases is not
+allowed to import 
+spectrue_core.graph:
+
+-   
+spectrue_core.use_cases.verifi
+cation.pipeline -> 
+spectrue_core.graph (l.20)
+
+
+spectrue_core.use_cases is not
+allowed to import 
+spectrue_core.pipeline:
+
+-   
+spectrue_core.use_cases.verifi
+cation.pipeline -> 
+spectrue_core.pipeline.dag 
+(l.22)
+
+-   
+spectrue_core.use_cases.verifi
+cation.pipeline -> 
+spectrue_core.pipeline.factory
+(l.115)
+
+-   
+spectrue_core.use_cases.verifi
+cation.pipeline -> 
+spectrue_core.pipeline.mode 
+(l.114)
+
+
+spectrue_core.use_cases is not
+allowed to import 
+spectrue_core.schema:
+
+-   
+spectrue_core.use_cases.verifi
+cation.pipeline -> 
+spectrue_core.adapters.retriev
+al.search_mgr (l.45)
+    spectrue_core.adapters.retriev
+al.search_mgr -> 
+spectrue_core.schema.verificat
+ion_types (l.20)
+
+-   
+spectrue_core.use_cases.verifi
+cation.pipeline -> 
+spectrue_core.pipeline.dag 
+(l.22)
+    spectrue_core.pipeline.dag -> 
+spectrue_core.pipeline.mode 
+(l.52)
+    spectrue_core.pipeline.mode ->
+spectrue_core.schema.verdict 
+(l.36)
+
+-   
+spectrue_core.use_cases.verifi
+cation.pipeline -> 
+spectrue_core.pipeline.factory
+(l.115)
+    spectrue_core.pipeline.factory
+-> 
+spectrue_core.pipeline.steps.d
+eep_claim (l.337, l.605)
+    spectrue_core.pipeline.steps.d
+eep_claim -> 
+spectrue_core.schema.claim_fra
+me (l.42)
+
+-   
+spectrue_core.use_cases.verifi
+cation.pipeline -> 
+spectrue_core.pipeline.mode 
+(l.114)
+    spectrue_core.pipeline.mode ->
+spectrue_core.schema.verificat
+ion_types (l.37)
+
+
+Adapters depend only on domain
+------------------------------
+
+spectrue_core.adapters is not 
+allowed to import 
+spectrue_core.graph:
+
+-   
+spectrue_core.adapters.graph.c
+laim_graph -> 
+spectrue_core.graph.builder 
+(l.3)
+
+
+spectrue_core.adapters is not 
+allowed to import 
+spectrue_core.schema:
+
+-   
+spectrue_core.adapters.llm.sco
+ring_parsing -> 
+spectrue_core.schema.verdict 
+(l.11)
+
+-   
+spectrue_core.adapters.retriev
+al.search_mgr -> 
+spectrue_core.schema.verificat
+ion_types (l.20)
+
+

@@ -2,10 +2,8 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from spectrue_core.verification.pipeline.pipeline_evidence import (
-    annotate_evidence_stance,
-    EvidenceFlowInput
-)
+from spectrue_core.use_cases.evidence.flow_logic import annotate_evidence_stance
+from spectrue_core.domain.verification.verdict.model import EvidenceFlowInput
 from spectrue_core.pipeline.mode import AnalysisMode
 
 @pytest.mark.asyncio

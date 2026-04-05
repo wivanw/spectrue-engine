@@ -1,5 +1,5 @@
 import math
-from spectrue_core.verification.evidence.evidence_alpha import weight_func, compute_A_det, sigmoid
+from spectrue_core.utils.evidence_alpha import weight_func, compute_A_det, sigmoid
 
 def test_weight_func_basic():
     # r <= 0.5 should have 0 weight

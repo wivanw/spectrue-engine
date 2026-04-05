@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import MagicMock
-from spectrue_core.verification.search.search_mgr import SearchManager
+from spectrue_core.adapters.retrieval.search_mgr import SearchManager
 from spectrue_core.runtime_config import EngineRuntimeConfig
 
 from spectrue_core.config import SpectrueConfig

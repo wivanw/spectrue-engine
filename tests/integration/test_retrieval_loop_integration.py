@@ -25,9 +25,9 @@ from spectrue_core.schema.claim_metadata import (
     RetrievalPolicy,
     EvidenceChannel,
 )
-from spectrue_core.verification.orchestration.execution_plan import ExecutionPlan, phase_a, phase_b
-from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-from spectrue_core.verification.search.search_policy import SearchDepth, SearchPolicyProfile, SearchProfileName
+from spectrue_core.domain.verification.plan import ExecutionPlan, phase_a, phase_b
+from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
+from spectrue_core.domain.verification.search.search_policy import SearchDepth, SearchPolicyProfile, SearchProfileName
 
 
 @pytest.mark.asyncio
@@ -62,7 +62,7 @@ async def test_two_hop_loop_reaches_sufficiency():
     search_mgr.apply_evidence_acquisition_ladder = AsyncMock(side_effect=lambda x, **kwargs: x)
     search_mgr.estimate_hop_cost = MagicMock(return_value=0.0)
 
-    from spectrue_core.verification.search.search_policy import QualityThresholds
+    from spectrue_core.domain.verification.search.search_policy import QualityThresholds
 
     profile = SearchPolicyProfile(
         name=SearchProfileName.DEEP.value,

@@ -1,6 +1,6 @@
 import pytest
 from decimal import Decimal
-from spectrue_core.verification.pipeline.pipeline_metering import create_metering_context, attach_cost_summary
+from spectrue_core.use_cases.verification.pipeline_metering import create_metering_context, attach_cost_summary
 from spectrue_core.billing.cost_event import CostEvent
 
 @pytest.mark.asyncio

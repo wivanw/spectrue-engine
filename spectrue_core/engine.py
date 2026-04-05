@@ -16,7 +16,7 @@ from uuid import uuid4
 from datetime import datetime
 
 from spectrue_core.config import SpectrueConfig
-from spectrue_core.verification.verifier import FactVerifier
+from spectrue_core.pipeline.orchestration.verifier import FactVerifier
 from spectrue_core.utils.trace import Trace
 from spectrue_core.billing.cost_ledger import CostLedger
 from spectrue_core.billing.metering import TavilyMeter
@@ -127,7 +127,7 @@ class SpectrueEngine:
             Trace.event(
                 "engine.analyze_text.start",
                 {
-                    "analysis_mode": str(analysis_mode),
+                    "analysis_mode": analysis_mode.value,
                     "text_len": len(text),
                 },
             )
@@ -148,23 +148,49 @@ class SpectrueEngine:
             dag_progress_callback = None
 
             if progress_callback:
-                progress_estimator = ProgressEstimator(progress_callback)
+                # Pre-estimate total weight based on analysis_mode to prevent jumping backwards
+                # GENERAL: ~65, DEEP/DEEP_V2: ~214 (based on typical step weights)
+                expected = 65.0 if analysis_mode == AnalysisMode.GENERAL else 214.0
+                progress_estimator = ProgressEstimator(progress_callback, expected_total_weight=expected)
                 
-                async def _on_dag_event(event_type: str, step_name: str | None = None, *args):
+                async def _on_dag_event(event_type: str, *args, **kwargs):
                     if event_type == "init" and args:
-                        progress_estimator.set_planned_nodes(args[0])
-                    elif event_type == "step_start" and step_name:
-                        await progress_estimator.on_step_start(step_name)
-                    elif event_type == "step_end" and step_name:
-                        await progress_estimator.on_step_end(step_name)
+                        # DAG calls: progress_callback("init", None, self.nodes)
+                        # args = (None, nodes_list) — skip the None placeholder
+                        nodes = next((a for a in args if a is not None), None)
+                        if nodes is not None:
+                            progress_estimator.set_planned_nodes(nodes)
+                    elif event_type == "step_start" and args:
+                        await progress_estimator.on_step_start(args[0])
+                    elif event_type == "step_end" and args:
+                        await progress_estimator.on_step_end(args[0])
+                    elif event_type == "analyzing_sentences":
+                        # Extract processed/total from positional or keyword args
+                        processed = kwargs.get("processed")
+                        total = kwargs.get("total")
+                        if processed is None and len(args) >= 1:
+                            processed = args[0]
+                        if total is None and len(args) >= 2:
+                            total = args[1]
+                        
+                        if processed is not None and total is not None:
+                            # Use tracked current_step from estimator
+                            await progress_estimator.on_step_progress(
+                                progress_estimator.current_step or "analyzing_sentences",
+                                processed=processed,
+                                total=total
+                            )
+                    else:
+                        # Forward fine-grained internal events directly to the UI
+                        try:
+                            await progress_callback(event_type, *args, **kwargs)
+                        except Exception:
+                            pass
                 
                 dag_progress_callback = _on_dag_event
 
 
             if analysis_mode in (AnalysisMode.DEEP, AnalysisMode.DEEP_V2):
-                if progress_estimator:
-                    await progress_estimator.on_step_start("extract_claims")
-
                 # Deep analysis: if input is a URL, first extract the article content
                 working_text = text
                 if text.strip().startswith("http://") or text.strip().startswith(
@@ -223,8 +249,10 @@ class SpectrueEngine:
                     or 0.0
                 )
 
+                # Deep mode runs two DAG passes with overlapping step names.
+                # Reset executed-step tracking so the verification pass can advance progress.
                 if progress_estimator:
-                    await progress_estimator.on_step_start("verifying_claims")
+                    progress_estimator.executed_steps.clear()
 
                 # Step 2: Single pipeline run with all claims (avoids N+1 pipeline runs)
                 # This replaces the per-claim loop that caused N+1 pipeline runs
@@ -261,7 +289,7 @@ class SpectrueEngine:
                     "detected_lang": detected_lang,
                     "detected_lang_prob": detected_prob,
                     "search_lang": content_lang,
-                    "analysis_mode": str(analysis_mode),
+                    "analysis_mode": analysis_mode.value,
                 }
                 if max_credits is not None:
                     final["budget"] = {

@@ -17,7 +17,7 @@ Tests:
 - Coverage validation
 """
 
-from spectrue_core.agents.skills.coverage_skeleton import (
+from spectrue_core.adapters.llm.coverage_skeleton import (
     SkeletonEvent,
     SkeletonMeasurement,
     SkeletonQuote,

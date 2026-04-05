@@ -20,7 +20,7 @@ Tests the metadata extraction and orchestration logic:
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from spectrue_core.agents.skills.claims import ClaimExtractionSkill
+from spectrue_core.adapters.llm.claims import ClaimExtractionSkill
 from spectrue_core.schema.claim_metadata import VerificationTarget, ClaimRole
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -239,7 +239,8 @@ async def test_horoscope_claims_skip_search(claim_skill, mock_llm_client):
         metadata = claim.get("metadata")
         assert metadata is not None
         # should_skip_search is a computed property that checks if target is NONE
-        assert metadata.should_skip_search is True, \
+        from spectrue_core.domain.claims.policy import should_skip_search
+        assert should_skip_search(metadata) is True, \
             f"Horoscope claim should skip search. Target: {metadata.verification_target}"
 
 
@@ -464,8 +465,8 @@ async def test_progressive_widening_early_exit():
     When the first search phase returns authoritative sources,
     the PhaseRunner should stop early and not execute subsequent phases.
     """
-    from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-    from spectrue_core.verification.orchestration.execution_plan import (
+    from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
+    from spectrue_core.domain.verification.plan import (
         phase_a, phase_b, phase_c, phase_d
     )
     from spectrue_core.schema.claim_metadata import (
@@ -540,8 +541,8 @@ async def test_progressive_widening_continues_if_insufficient():
     """
     T22: If Phase A is insufficient, continue to Phase B.
     """
-    from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-    from spectrue_core.verification.orchestration.execution_plan import phase_a, phase_b
+    from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
+    from spectrue_core.domain.verification.plan import phase_a, phase_b
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
         SearchLocalePlan, RetrievalPolicy, EvidenceChannel
@@ -617,8 +618,8 @@ async def test_progressive_widening_skip_search_for_none_target():
     """
     T22: Claims with verification_target=none should skip search entirely.
     """
-    from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
-    from spectrue_core.verification.orchestration.execution_plan import BudgetClass
+    from spectrue_core.use_cases.verification.orchestration.orchestrator import ClaimOrchestrator
+    from spectrue_core.domain.verification.plan import BudgetClass
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
         SearchLocalePlan, RetrievalPolicy
@@ -666,9 +667,9 @@ async def test_parallel_execution_within_phase():
     
     Verifies that the PhaseRunner uses asyncio.gather for parallel execution.
     """
-    from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-    from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
-    from spectrue_core.verification.orchestration.execution_plan import BudgetClass
+    from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
+    from spectrue_core.use_cases.verification.orchestration.orchestrator import ClaimOrchestrator
+    from spectrue_core.domain.verification.plan import BudgetClass
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
         SearchLocalePlan, RetrievalPolicy, EvidenceChannel
@@ -749,9 +750,9 @@ async def test_waterfall_phase_ordering():
     """
     T26: Phase B only runs after Phase A completes for all claims.
     """
-    from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-    from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
-    from spectrue_core.verification.orchestration.execution_plan import BudgetClass
+    from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
+    from spectrue_core.use_cases.verification.orchestration.orchestrator import ClaimOrchestrator
+    from spectrue_core.domain.verification.plan import BudgetClass
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
         SearchLocalePlan, RetrievalPolicy, EvidenceChannel
@@ -830,9 +831,9 @@ async def test_semaphore_respects_limit():
     """
     T26: Semaphore should limit concurrent searches.
     """
-    from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-    from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
-    from spectrue_core.verification.orchestration.execution_plan import BudgetClass
+    from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
+    from spectrue_core.use_cases.verification.orchestration.orchestrator import ClaimOrchestrator
+    from spectrue_core.domain.verification.plan import BudgetClass
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
         SearchLocalePlan, RetrievalPolicy, EvidenceChannel
@@ -897,8 +898,8 @@ async def test_fail_soft_on_search_exception():
     """
     T29: Search exception should not crash pipeline, returns empty sources.
     """
-    from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-    from spectrue_core.verification.orchestration.execution_plan import phase_a
+    from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
+    from spectrue_core.domain.verification.plan import phase_a
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
         SearchLocalePlan, RetrievalPolicy, EvidenceChannel
@@ -950,8 +951,8 @@ async def test_fail_soft_continues_to_next_phase():
     """
     T29: If Phase A fails, Phase B should still execute (fail-soft continue).
     """
-    from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-    from spectrue_core.verification.orchestration.execution_plan import phase_a, phase_b
+    from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
+    from spectrue_core.domain.verification.plan import phase_a, phase_b
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
         SearchLocalePlan, RetrievalPolicy, EvidenceChannel
@@ -1015,9 +1016,9 @@ async def test_fail_soft_returns_partial_results():
     """
     T29: Partial failures should still return successful results.
     """
-    from spectrue_core.verification.orchestration.phase_runner import PhaseRunner
-    from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
-    from spectrue_core.verification.orchestration.execution_plan import BudgetClass
+    from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
+    from spectrue_core.use_cases.verification.orchestration.orchestrator import ClaimOrchestrator
+    from spectrue_core.domain.verification.plan import BudgetClass
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
         SearchLocalePlan, RetrievalPolicy, EvidenceChannel
@@ -1081,7 +1082,7 @@ def test_rgba_aggregation_excludes_context_claims():
     """
     T32: Context claims (weight=0) should not dilute aggregate scores.
     """
-    from spectrue_core.verification.scoring.rgba_aggregation import (
+    from spectrue_core.use_cases.verification.scoring.rgba_aggregation import (
         aggregate_weighted, ClaimScore
     )
     
@@ -1142,7 +1143,7 @@ def test_rgba_aggregation_all_context_returns_none():
     """
     T32: If all claims are context (weight=0), return None scores (not 0.5).
     """
-    from spectrue_core.verification.scoring.rgba_aggregation import (
+    from spectrue_core.use_cases.verification.scoring.rgba_aggregation import (
         aggregate_weighted, ClaimScore
     )
     
@@ -1185,7 +1186,7 @@ def test_rgba_aggregation_weights_by_check_worthiness():
     """
     T32: Claims with higher check_worthiness should have more impact.
     """
-    from spectrue_core.verification.scoring.rgba_aggregation import (
+    from spectrue_core.use_cases.verification.scoring.rgba_aggregation import (
         aggregate_weighted, ClaimScore
     )
     
@@ -1228,7 +1229,7 @@ def test_claim_to_score_extracts_metadata():
     """
     T31: claim_to_score should extract role_weight from metadata.
     """
-    from spectrue_core.verification.scoring.rgba_aggregation import claim_to_score
+    from spectrue_core.use_cases.verification.scoring.rgba_aggregation import claim_to_score
     from spectrue_core.schema.claim_metadata import (
         ClaimMetadata, VerificationTarget, ClaimRole, MetadataConfidence,
         SearchLocalePlan, RetrievalPolicy
@@ -1266,7 +1267,7 @@ def test_claim_to_score_defaults_for_missing_metadata():
     """
     T31: Claims without metadata should get default full weight.
     """
-    from spectrue_core.verification.scoring.rgba_aggregation import claim_to_score
+    from spectrue_core.use_cases.verification.scoring.rgba_aggregation import claim_to_score
     
     # Claim without metadata (backward compat)
     claim = {

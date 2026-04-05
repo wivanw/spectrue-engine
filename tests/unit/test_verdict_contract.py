@@ -33,6 +33,7 @@ from spectrue_core.schema.signals import (
 
 from spectrue_core.schema.verdict_contract import (
     VerdictStatus,
+    VerdictSummary,
     Verdict,
 )
 
@@ -384,6 +385,32 @@ class TestModelSerialization:
         
         assert restored.veracity_score == original.veracity_score
         assert restored.confidence_score == original.confidence_score
+
+    def test_structured_summary_roundtrip(self):
+        original = Verdict(
+            summary=VerdictSummary(
+                simple="- We checked multiple sources.",
+                expert="Technical analysis with evidence weighting.",
+            )
+        )
+
+        restored = Verdict.model_validate_json(original.model_dump_json())
+        assert isinstance(restored.summary, VerdictSummary)
+        assert restored.summary.simple.startswith("- ")
+        assert "Technical analysis" in restored.summary.expert
+
+    def test_to_summary_dict_with_structured_summary(self):
+        verdict = Verdict(
+            summary=VerdictSummary(
+                simple="- Simple point one.",
+                expert="Detailed expert explanation.",
+            )
+        )
+
+        payload = verdict.to_summary_dict()
+        assert isinstance(payload["summary"], dict)
+        assert payload["summary"]["simple"] == "- Simple point one."
+        assert payload["summary"]["expert"] == "Detailed expert explanation."
     
     def test_status_not_serialized(self):
         verdict = Verdict()

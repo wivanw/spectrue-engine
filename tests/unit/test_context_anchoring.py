@@ -14,15 +14,15 @@
 Unit tests for M129 context anchoring and retrieval sanity gate.
 """
 
-from spectrue_core.verification.search.search_escalation import (
+from spectrue_core.use_cases.verification.search.search_escalation import (
     build_query_variants,
     _extract_context_entities,
 )
-from spectrue_core.verification.search.sanity_gate import (
+from spectrue_core.adapters.retrieval.sanity_gate import (
     normalize_anchor_terms,
     check_sanity_gate,
 )
-from spectrue_core.agents.skills.coverage_skeleton import (
+from spectrue_core.adapters.llm.coverage_skeleton import (
     compute_document_context_pool,
     _select_context_entities,
     CoverageSkeleton,

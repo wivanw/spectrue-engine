@@ -20,12 +20,10 @@ from spectrue_core.pipeline.contracts import GATES_KEY, Gates
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.pipeline.pipeline_evidence import (
-    EvidenceFlowInput,
-    annotate_evidence_stance,
-)
-from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
-from spectrue_core.verification.evidence.evidence_stats import EvidenceStats
+from spectrue_core.pipeline.evidence_flow import EvidenceFlowInput
+from spectrue_core.use_cases.evidence.stance import annotate_stance
+from spectrue_core.utils.retrieval_urls import normalize_url
+from spectrue_core.domain.evidence.stats import EvidenceStats
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +49,7 @@ class StanceAnnotateStep:
 
     agent: Any  # FactCheckerAgent
     name: str = "stance_annotate"
-    weight: float = 2.0
+    weight: float = 1.0  # ~0s in deep_v2
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
@@ -82,7 +80,7 @@ class StanceAnnotateStep:
                 progress_callback=ctx.get_extra("progress_callback"),
             )
 
-            annotated = await annotate_evidence_stance(
+            annotated = await annotate_stance(
                 agent=self.agent,
                 inp=inp,
                 claims=ctx.claims,

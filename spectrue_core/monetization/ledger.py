@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, Optional
 import hashlib
@@ -42,7 +42,7 @@ class LedgerEntry:
     entry_type: LedgerEntryType
     amount_sc: MoneySC
     status: LedgerEntryStatus
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     
     # Optional context
     event_id: str | None = None
@@ -86,7 +86,7 @@ class LedgerEntry:
             entry_type=LedgerEntryType(data.get("entry_type", LedgerEntryType.RESERVE.value)),
             amount_sc=MoneySC(data.get("amount_sc", "0")),
             status=LedgerEntryStatus(data.get("status", LedgerEntryStatus.PENDING.value)),
-            created_at=created or datetime.utcnow(),
+            created_at=created or datetime.now(tz=timezone.utc),
             event_id=data.get("event_id"),
             user_id=data.get("user_id"),
             run_id=data.get("run_id"),

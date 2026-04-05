@@ -6,7 +6,7 @@ from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.schema.claim_frame import ClaimFrame, JudgeOutput
 
 @pytest.mark.asyncio
-async def test_assemble_deep_result_fallback_A():
+async def test_assemble_deep_result_no_fallback_A():
     # Setup context
     mode = MagicMock()
     mode.api_analysis_mode = AnalysisMode.DEEP_V2
@@ -34,19 +34,13 @@ async def test_assemble_deep_result_fallback_A():
     deep_ctx.claim_frames = [frame]
     deep_ctx.judge_outputs = {"c1": judge_output}
     
-    # Evidence stats with deterministic A = 0.75
-    evidence_stats_by_claim = {
-        "c1": {"A_deterministic": 0.75}
-    }
-    
     ctx = PipelineContext(mode=mode)
     ctx = ctx.set_extra("deep_claim_ctx", deep_ctx)
-    ctx = ctx.set_extra("evidence_stats_by_claim", evidence_stats_by_claim)
     
     step = AssembleDeepResultStep()
     result_ctx = await step.run(ctx)
     
-    # Verify fallback happened
+    # Verify no fallback happened (A stays -1.0)
     final_result = result_ctx.get_extra("final_result")
     claim_res = final_result["deep_analysis"]["claim_results"][0]
-    assert claim_res["rgba"][3] == 0.75
+    assert claim_res["rgba"][3] == -1.0

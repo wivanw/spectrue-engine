@@ -10,8 +10,8 @@ from spectrue_core.llm.model_registry import ModelID
 
 import pytest
 
-from spectrue_core.verification.pipeline.pipeline_evidence import run_evidence_flow, EvidenceFlowInput
-from spectrue_core.pipeline.mode import AnalysisMode
+from spectrue_core.pipeline.evidence_flow import run_evidence_flow
+from spectrue_core.domain.verification.verdict.model import EvidenceFlowInput, AnalysisMode
 
 
 class _DummyAgent:

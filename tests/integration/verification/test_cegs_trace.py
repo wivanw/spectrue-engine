@@ -6,6 +6,35 @@ from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.mode import DEEP_MODE
 from spectrue_core.utils.trace import Trace
 
+def assert_query_origin_in_trace(trace_spy: MagicMock, expected_origin: str) -> None:
+    """
+    Scans the trace_spy for retrieval.query_origin events and asserts the expected origin exists.
+    """
+    found = False
+    for call in trace_spy.call_args_list:
+        event_name = call[0][0]
+        if event_name == "retrieval.query_origin":
+            payload = call[0][1] if len(call[0]) > 1 else {}
+            if payload.get("origin") == expected_origin:
+                found = True
+                break
+    assert found, f"Expected query origin '{expected_origin}' not found in trace events."
+
+def assert_decision_impact_in_trace(trace_spy: MagicMock, module: str, min_impact_score: float = 0.0) -> None:
+    """
+    Scans the trace_spy for decision.impact events from a specific module and asserts it exists
+    with an impact score >= min_impact_score.
+    """
+    found = False
+    for call in trace_spy.call_args_list:
+        event_name = call[0][0]
+        if event_name == "decision.impact":
+            payload = call[0][1] if len(call[0]) > 1 else {}
+            if payload.get("module") == module and payload.get("impact_score", 0.0) >= min_impact_score:
+                found = True
+                break
+    assert found, f"Expected decision impact from module '{module}' with min score {min_impact_score} not found."
+
 @pytest.mark.asyncio
 async def test_cegs_trace_flow():
     # Setup Context

@@ -37,12 +37,10 @@ Usage:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from dataclasses import dataclass
 
-from spectrue_core.pipeline.mode import PipelineMode
+from spectrue_core.use_cases.verification.pipeline_types import PipelineMode, PipelineContext, Step
 from spectrue_core.pipeline.errors import PipelineExecutionError, PipelineViolation
-from spectrue_core.utils.trace import Trace
 
 
 logger = logging.getLogger(__name__)
@@ -53,93 +51,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@dataclass
-class PipelineContext:
-    """
-    Immutable context passed through pipeline steps.
 
-    Each step receives context, does work, and returns new context.
-    Context is never mutated in place.
-
-    Attributes:
-        mode: Pipeline mode configuration
-        claims: List of claims to process
-        lang: Primary language code
-        trace: Trace logger for observability
-        sources: Accumulated sources from retrieval
-        evidence: Evidence pack after processing
-        verdict: Final verdict after scoring
-        extras: Arbitrary additional data
-    """
-
-    mode: PipelineMode
-    claims: list[dict[str, Any]] = field(default_factory=list)
-    lang: str = "en"
-    trace: Trace | None = None
-    sources: list[dict[str, Any]] = field(default_factory=list)
-    evidence: dict[str, Any] | None = None
-    verdict: dict[str, Any] | None = None
-    extras: dict[str, Any] = field(default_factory=dict)
-    progress_callback: Any | None = None  # Callable[[str, ...], Awaitable[None]]
-
-    def with_update(self, **kwargs: Any) -> PipelineContext:
-        """
-        Create a new context with updated fields.
-
-        This preserves immutability — the original context is unchanged.
-
-        Example:
-            new_ctx = ctx.with_update(sources=new_sources)
-        """
-        current = {
-            "mode": self.mode,
-            "claims": self.claims,
-            "lang": self.lang,
-            "trace": self.trace,
-            "sources": self.sources,
-            "evidence": self.evidence,
-            "verdict": self.verdict,
-            "extras": self.extras,
-            "progress_callback": self.progress_callback,
-        }
-        current.update(kwargs)
-        return PipelineContext(**current)
-
-    def set_extra(self, key: str, value: Any) -> PipelineContext:
-        """Set an extra field (returns new context)."""
-        new_extras = {**self.extras, key: value}
-        return self.with_update(extras=new_extras)
-
-    def get_extra(self, key: str, default: Any = None) -> Any:
-        """Get an extra field."""
-        return self.extras.get(key, default)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Step Protocol
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@runtime_checkable
-class Step(Protocol):
-    """
-    Protocol for pipeline steps.
-
-    Steps are the atomic units of work in a pipeline. Each step:
-    - Has a unique name for logging/tracing
-    - Receives context, does work, returns updated context
-    - Should be stateless (all state in context)
-    - May be sync or async
-    - May provide weight for progress estimation (default: 1)
-    - May provide status_key for localization (default: status.processing)
-    """
-
-    name: str
-    weight: float = 1.0
-
-    async def run(self, ctx: PipelineContext) -> PipelineContext:
-        """Execute this step and return updated context."""
-        ...
 
 
 # ─────────────────────────────────────────────────────────────────────────────

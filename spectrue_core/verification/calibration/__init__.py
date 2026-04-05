@@ -1,8 +1,3 @@
-"""Calibration modules."""
+from spectrue_core.domain.verification.calibration.calibration_registry import CalibrationRegistry
 
-from .calibration_registry import CalibrationRegistry
-
-__all__ = [
-    "CalibrationRegistry",
-]
-
+__all__ = ["CalibrationRegistry"]

@@ -10,7 +10,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 
-from spectrue_core.verification.targeting.target_selection import (
+from spectrue_core.pipeline.targeting.target_selection import (
     select_verification_targets,
     compute_optimal_target_count,
     TargetBudgetParams,
@@ -48,7 +48,7 @@ def test_max_targets_limit_respected():
 
 
 def test_graph_order_used_for_targets():
-    from spectrue_core.graph.types import GraphResult, RankedClaim
+    from spectrue_core.domain.claims.graph.types import GraphResult, RankedClaim
 
     claims = [
         {"id": "c1", "text": "Claim 1", "check_worthiness": 0.5},
@@ -116,7 +116,7 @@ def test_reasons_recorded_for_all_claims():
 
 def test_anchor_claim_forced_into_targets():
     """Anchor claim MUST be in targets for normal pipeline, even if not top-K by EV."""
-    from spectrue_core.graph.types import GraphResult, RankedClaim
+    from spectrue_core.domain.claims.graph.types import GraphResult, RankedClaim
 
     claims = [
         {"id": "c1", "text": "Claim 1", "check_worthiness": 0.9, "harm_potential": 4},

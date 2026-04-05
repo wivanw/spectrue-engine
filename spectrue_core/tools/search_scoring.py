@@ -21,8 +21,8 @@ from urllib.parse import urlparse
 
 from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.calibration.calibration_models import logistic_score
-from spectrue_core.verification.calibration.calibration_registry import CalibrationRegistry
+from spectrue_core.domain.verification.calibration.calibration_models import logistic_score
+from spectrue_core.domain.verification.calibration.calibration_registry import CalibrationRegistry
 from spectrue_core.tools.trusted_sources import ALL_TRUSTED_DOMAINS as TRUSTED_DOMAINS
 
 logger = logging.getLogger(__name__)
@@ -139,13 +139,25 @@ def _extract_recent_year(text: str) -> int | None:
     return max(candidates)
 
 
-def _year_freshness(url: str, title: str) -> float:
-    year = _extract_recent_year(f"{url} {title}")
+def _year_freshness(url: str, title: str, published_date: str | None = None) -> float:
+    year = None
+    # Priority 1: structured published_date from API metadata
+    if published_date:
+        year = _extract_recent_year(published_date)
+    # Priority 2: URL + title text
+    if not year:
+        year = _extract_recent_year(f"{url} {title}")
     if not year:
         return 0.0
     now_year = datetime.datetime.now().year
     delta = max(0, now_year - year)
-    return max(0.0, min(1.0, 1.0 - (delta / 10.0)))
+    score = max(0.0, min(1.0, 1.0 - (delta / 10.0)))
+    Trace.event("freshness.parsed", {
+        "url": url[:120],
+        "year": year,
+        "score": score,
+    })
+    return score
 
 
 def relevance_score(
@@ -155,6 +167,7 @@ def relevance_score(
     url: str,
     *,
     tavily_score: float | None = None,
+    published_date: str | None = None,
     runtime_config: EngineRuntimeConfig | None = None,
     trace: bool = False,
 ) -> float | tuple[float, dict]:
@@ -216,7 +229,7 @@ def relevance_score(
             provider_score = max(0.0, min(1.0, float(tavily_score)))
         except (TypeError, ValueError):
             provider_score = 0.0
-    url_year_freshness = _year_freshness(url, title)
+    url_year_freshness = _year_freshness(url, title, published_date=published_date)
 
     features = {
         "lexical_score": lexical_score,
@@ -321,6 +334,7 @@ def rank_and_filter(
             content,
             url,
             tavily_score=obj.get("score"),
+            published_date=obj.get("published_date"),
             runtime_config=runtime_config,
             trace=True,
         )
@@ -335,6 +349,13 @@ def rank_and_filter(
         scored.append(item)
 
     scored.sort(key=lambda x: x.get("relevance_score", 0.0), reverse=True)
+
+    # Decision-impact: freshness effect
+    freshness_effective = any(
+        r.get("relevance_trace", {}).get("features", {}).get("url_year_freshness", 0) > 0
+        for r in scored
+    )
+    Trace.event("freshness.effect", {"effective": freshness_effective})
 
     # Log input stats for debugging
     if scored:

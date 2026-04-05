@@ -4,7 +4,7 @@
 
 import pytest
 from unittest.mock import MagicMock
-from spectrue_core.agents.skills.scoring import ScoringSkill
+from spectrue_core.adapters.llm.scoring import ScoringSkill
 from spectrue_core.llm.model_registry import ModelID
 
 @pytest.mark.unit

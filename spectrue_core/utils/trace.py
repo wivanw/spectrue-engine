@@ -82,19 +82,20 @@ def _redact_text(s: str) -> str:
 # We preserve sha256 + safe_head for debugging while removing doses/instructions.
 _MEDICAL_PATTERNS = [
     # Dosing with units (Ukrainian + English)
-    r"\d+[\s,]*(?:мг|мл|г|грам|mg|ml|g|gram|mcg|мкг|iu|од|одиниц)(?:\s*/\s*(?:кг|kg|день|day|добу))?\b",
+    # (?<![.\d]) prevents matching decimals like "0.7" as "7 g"
+    r"(?<![.\d])\d+[\s,]*(?:мг|мл|г|грам|mg|ml|g|gram|mcg|мкг|iu|од|одиниц)(?:\s*/\s*(?:кг|kg|день|day|добу))?\b",
     # Intake instructions (Ukrainian)
     r"(?:приймати|пити|вживати|вводити|застосовувати|наносити|полоскати)\s+(?:по\s+)?\d+",
     # Intake instructions (English)
     r"(?:take|consume|administer|apply|inject|drink)\s+\d+",
     # Frequency patterns (Ukrainian)
-    r"\d+\s*(?:раз|рази|разів)\s*(?:на|в|per)\s*(?:день|добу|тиждень|годину)",
+    r"(?<![.\d])\d+\s*(?:раз|рази|разів)\s*(?:на|в|per)\s*(?:день|добу|тиждень|годину)",
     # Frequency patterns (English)
-    r"\d+\s*(?:times?)\s*(?:per|a|daily|weekly)\s*(?:day|hour|week)?",
+    r"(?<![.\d])\d+\s*(?:times?)\s*(?:per|a|daily|weekly)\s*(?:day|hour|week)?",
     # Procedural steps with numbers
     r"(?:крок|етап|step)\s*\d+\s*[:\.]\s*[^\n]{10,50}",
     # Concentration patterns
-    r"\d+[\s,]*%\s*(?:розчин|solution|концентрація|concentration)",
+    r"(?<![.\d])\d+[\s,]*%\s*(?:розчин|solution|концентрація|concentration)",
     # Duration patterns
     r"(?:протягом|впродовж|for|during)\s+\d+\s*(?:днів|дні|хвилин|годин|days|hours|minutes|weeks)",
 ]

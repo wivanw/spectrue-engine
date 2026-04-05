@@ -22,14 +22,14 @@ from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
-from spectrue_core.verification.pipeline.pipeline_queries import (
+from spectrue_core.utils.coverage_anchors import extract_all_anchors
+from spectrue_core.use_cases.verification.pipeline_queries import (
     normalize_and_sanitize,
     resolve_budgeted_max_queries,
     select_diverse_queries,
 )
-from spectrue_core.verification.retrieval.cegs_mvp import build_doc_query_plan
-from spectrue_core.verification.search.search_policy import (
+from spectrue_core.pipeline.retrieval.cegs_mvp import build_doc_query_plan
+from spectrue_core.domain.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )
@@ -61,7 +61,7 @@ class BuildClusterQueriesStep:
     """Build clustered retrieval query plans for deep_v2."""
 
     name: str = "build_cluster_queries"
-    weight: float = 3.0
+    weight: float = 1.0  # ~0s actual
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         try:
@@ -90,32 +90,64 @@ class BuildClusterQueriesStep:
             cluster_plans: list[dict[str, Any]] = []
             all_queries: list[str] = []
 
+            # Roles that should be skipped from search (explain-only, no verification value)
+            SKIP_ROLES = {"context", "meta", "background", "definition"}
+
             for cluster_id, rep_claims in clusters.items():
                 rep_claims_list = [c for c in (rep_claims or []) if isinstance(c, dict)]
                 claims_for_plan = rep_claims_list or [
                     c for c in (cluster_claims.get(cluster_id, []) or []) if isinstance(c, dict)
                 ]
+
+                # Skip clusters where ALL claims are explain-only
+                if claims_for_plan and all(
+                    str(c.get("claim_role") or c.get("role") or "").lower() in SKIP_ROLES
+                    for c in claims_for_plan
+                ):
+                    Trace.event("retrieval.cluster_plan.skipped_explain_only", {
+                        "cluster_id": cluster_id,
+                        "claim_count": len(claims_for_plan),
+                        "roles": [c.get("claim_role") or c.get("role") for c in claims_for_plan],
+                    })
+                    continue
+
                 max_queries = resolve_budgeted_max_queries(claims_for_plan, default_max=3)
 
-                try:
-                    cluster_queries = build_doc_query_plan(claims_for_plan, anchors)
-                    if not cluster_queries:
-                        Trace.event(
-                            "retrieval.cluster_plan.empty",
-                            {"cluster_id": cluster_id, "reason": "no_queries"},
-                        )
+                query_origin = "planned"
+                fallback_reason = None
+                
+                # Check for preplanned search queries on individual claims first
+                preplanned_queries = []
+                for claim in claims_for_plan:
+                    if isinstance(claim, dict) and claim.get("search_queries"):
+                        preplanned_queries.extend(claim["search_queries"])
+                        
+                if preplanned_queries:
+                    cluster_queries = preplanned_queries
+                else:
+                    try:
+                        cluster_queries = build_doc_query_plan(claims_for_plan, anchors)
+                        if not cluster_queries:
+                            Trace.event(
+                                "retrieval.cluster_plan.empty",
+                                {"cluster_id": cluster_id, "reason": "no_queries"},
+                            )
+                            cluster_queries = select_diverse_queries(
+                                claims_for_plan,
+                                max_queries=max_queries,
+                                fact_fallback=fact_fallback,
+                            )
+                            query_origin = "fallback"
+                            fallback_reason = "no_cegs_queries"
+                    except Exception as exc:
+                        logger.warning("Cluster query planning failed: %s", exc)
                         cluster_queries = select_diverse_queries(
                             claims_for_plan,
                             max_queries=max_queries,
                             fact_fallback=fact_fallback,
                         )
-                except Exception as exc:
-                    logger.warning("Cluster query planning failed: %s", exc)
-                    cluster_queries = select_diverse_queries(
-                        claims_for_plan,
-                        max_queries=max_queries,
-                        fact_fallback=fact_fallback,
-                    )
+                        query_origin = "fallback"
+                        fallback_reason = "cegs_exception"
 
                 deduped: list[str] = []
                 for query in cluster_queries:
@@ -135,11 +167,15 @@ class BuildClusterQueriesStep:
                             if isinstance(c, dict)
                         ],
                         "search_queries": deduped,
+                        "query_origin": query_origin,
+                        "fallback_reason": fallback_reason,
                         "trace": {
                             "profile": profile.name,
                             "search_depth": profile.search_depth,
                             "max_results": profile.max_results,
                             "max_queries": max_queries,
+                            "query_origin": query_origin,
+                            "fallback_reason": fallback_reason,
                         },
                     }
                 )

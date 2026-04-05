@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from spectrue_core.monetization.types import MoneySC, PoolBalance, quantize_sc
@@ -26,7 +26,7 @@ def deposit(
 ) -> PoolBalance:
     if amount_sc <= 0:
         return pool
-    now = now or datetime.utcnow()
+    now = now or datetime.now(tz=timezone.utc)
     locked_amount = quantize_sc(amount_sc * lock_ratio)
     available_amount = quantize_sc(amount_sc - locked_amount)
 

@@ -20,19 +20,19 @@ from typing import Any
 from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.claims.coverage_anchors import extract_all_anchors
-from spectrue_core.verification.pipeline.pipeline_queries import (
+from spectrue_core.utils.coverage_anchors import extract_all_anchors
+from spectrue_core.use_cases.verification.pipeline_queries import (
     is_fuzzy_duplicate,
     normalize_and_sanitize,
     resolve_budgeted_max_queries,
     select_diverse_queries,
 )
-from spectrue_core.verification.retrieval.cegs_mvp import build_doc_query_plan
-from spectrue_core.verification.search.search_policy import (
+from spectrue_core.pipeline.retrieval.cegs_mvp import build_doc_query_plan
+from spectrue_core.domain.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )
-from spectrue_core.verification.search.search_escalation import (
+from spectrue_core.use_cases.verification.search.search_escalation import (
     build_query_variants,
     trace_query_variants,
 )
@@ -69,23 +69,55 @@ def _append_query(
     queries.append(normalized)
 
 
+_PREDICATE_QUERY_SUFFIX: dict[str, str] = {
+    "quote": "original interview transcript statement",
+    "measurement": "official statistics data report",
+    "ranking": "ranking index comparison data",
+    "policy": "official regulation law gazette announcement",
+    "event": "news report confirmed",
+}
+
+
 def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
     """
     Build search queries from claim data.
-    
+
     Prioritizes retrieval_seed_terms over search_queries and query_candidates.
     Seed terms are joined into a keyword query (not full sentences).
+    After seed terms, injects a predicate-type-specialized query to target
+    the right evidence type (e.g. transcripts for quotes, datasets for measurements).
     """
     queries: list[str] = []
+    has_llm_queries = bool(claim.get("retrieval_seed_terms")) or bool(claim.get("search_queries"))
 
     # Priority 1 - retrieval_seed_terms (joined as keyword query)
     seed_terms = claim.get("retrieval_seed_terms")
     if seed_terms and isinstance(seed_terms, list):
-        valid_terms = [t for t in seed_terms if isinstance(t, str) and len(t) >= 2]
+        valid_terms = []
+        seen_lower = set()
+        for t in seed_terms:
+            if isinstance(t, str) and len(t) >= 2:
+                t_lower = t.strip().lower()
+                # Deduplicate tokens case-insensitively to prevent generated queries like "apple apple"
+                if t_lower not in seen_lower:
+                    seen_lower.add(t_lower)
+                    valid_terms.append(t.strip())
+
         if len(valid_terms) >= 3:
             # Join first 6 seed terms into a keyword query
             keyword_query = " ".join(valid_terms[:6])
             _append_query(queries, keyword_query)
+            if len(queries) >= max_queries:
+                return queries
+
+    # Priority 1.5 - predicate-type-specialized query
+    predicate_type = str(claim.get("predicate_type") or "").lower()
+    suffix = _PREDICATE_QUERY_SUFFIX.get(predicate_type)
+    if suffix and len(queries) < max_queries:
+        entities = claim.get("subject_entities") or []
+        if entities:
+            specialized = " ".join(str(e) for e in entities[:3]) + " " + suffix
+            _append_query(queries, specialized)
             if len(queries) >= max_queries:
                 return queries
 
@@ -107,6 +139,14 @@ def _build_claim_queries(claim: dict[str, Any], max_queries: int) -> list[str]:
     fallback = claim.get("normalized_text") or claim.get("text")
     if fallback:
         _append_query(queries, fallback)
+
+    # Log when no LLM-generated queries were available
+    if not has_llm_queries and queries:
+        Trace.event("retrieval.fallback_entity_query", {
+            "claim_id": claim.get("id") or claim.get("claim_id") or "unknown",
+            "reason": "no_llm_search_queries",
+            "fallback_query_count": len(queries),
+        })
 
     return queries[:max_queries]
 

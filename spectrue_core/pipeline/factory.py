@@ -61,6 +61,7 @@ class PipelineFactory:
     search_mgr: Any  # SearchManager
     agent: Any  # FactCheckerAgent
     claim_graph: Any | None = None  # ClaimGraphBuilder (optional)
+    embedding_client: Any | None = None  # EmbeddingClient (optional)
 
     def build(
         self,
@@ -251,6 +252,7 @@ class PipelineFactory:
                     agent=self.agent,
                     stage="post_evidence",
                     name="enrich_claims_post_evidence",
+                    weight=1.0,  # ~0s (enrichment only, no extraction)
                 ),
                 depends_on=["evidence_collect"],
                 optional=True,
@@ -441,6 +443,7 @@ class PipelineFactory:
                     agent=self.agent,
                     stage="post_evidence",
                     name="enrich_claims_post_evidence",
+                    weight=1.0,  # ~0s (enrichment only, no extraction)
                 ),
                 depends_on=["evidence_collect"],
                 optional=True,
@@ -668,7 +671,11 @@ class PipelineFactory:
                 depends_on=["claim_clusters", "verify_inline_sources"],
             ),
             StepNode(
-                step=ClusterWebSearchStep(config=config, search_mgr=self.search_mgr),
+                step=ClusterWebSearchStep(
+                    config=config, 
+                    search_mgr=self.search_mgr,
+                    embedding_client=self.embedding_client,
+                ),
                 depends_on=["build_cluster_queries"],
             ),
             StepNode(
@@ -698,6 +705,7 @@ class PipelineFactory:
                     agent=self.agent,
                     stage="post_evidence",
                     name="enrich_claims_post_evidence",
+                    weight=1.0,  # ~0s (enrichment only, no extraction)
                 ),
                 depends_on=["evidence_collect"],
                 optional=True,
@@ -863,7 +871,7 @@ class PipelineFactory:
 
             # Claim extraction
             StepNode(
-                step=ExtractClaimsStep(agent=self.agent),
+                step=ExtractClaimsStep(agent=self.agent, skip_enrichment=True),
                 depends_on=["prepare_input"],
             ),
             

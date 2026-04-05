@@ -201,3 +201,37 @@ def test_accepts_exactly_one_probe_when_missing_fields(monkeypatch):
     assert "nasa" in res[0].lower()
     assert "new moon earth" in res[0].lower()
     assert res[0].lower().count("official statement") == 1
+
+
+def test_query_duplicate_token_sanitation():
+    from spectrue_core.adapters.llm.query import _sanitize_query
+    assert _sanitize_query("NASA NASA moon") == "NASA moon"
+    assert _sanitize_query("The the quick brown fox") == "The quick brown fox"
+    assert _sanitize_query("moon MOON Earth earth") == "moon Earth"
+    assert _sanitize_query("") == ""
+    assert _sanitize_query("   ") == ""
+
+
+def test_generate_queries_sanitizes_duplicates(monkeypatch):
+    cfg = SpectrueConfig(openai_api_key="test")
+    agent = FactCheckerAgent(cfg)
+
+    # Mock llm_client.call_json
+    async def _fake_call_json(*, model, input, **kwargs):  # noqa: A002
+        return {
+            "claim": {
+                "subject": "NASA",
+                "action": "",
+                "object": "new moon Earth",
+                "where": None,
+                "when": None,
+                "by_whom": None,
+            },
+            "queries": ["NASA NASA new moon moon", "official official statement statement"],
+        }
+
+    monkeypatch.setattr(agent.llm_client, "call_json", _fake_call_json)
+
+    res = asyncio.run(agent.generate_search_queries("NASA reported a new moon.", lang="en", content_lang="en"))
+    assert res[0] == "NASA new moon"
+    assert res[1] == "official statement"

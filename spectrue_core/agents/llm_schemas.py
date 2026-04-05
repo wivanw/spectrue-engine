@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from spectrue_core.agents.skills.claims_parsing import ARTICLE_INTENTS
+from spectrue_core.adapters.llm.claims_parsing import ARTICLE_INTENTS
 from spectrue_core.schema.claim_metadata import (
     ClaimRole,
     EvidenceChannel,
@@ -29,11 +29,12 @@ from spectrue_core.schema.claim_metadata import (
 )
 from spectrue_core.schema.claims import ClaimStructureType
 from spectrue_core.tools.trusted_sources import AVAILABLE_TOPICS
-from spectrue_core.graph.types import EdgeRelation
+from spectrue_core.domain.claims.graph.types import EdgeRelation
 
 
 CLAIM_CATEGORY_VALUES = ["FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"]
-SEARCH_METHOD_VALUES = ["news", "general_search", "academic"]
+# Tavily API accepts only topic: general | news | finance. Use general_search for academic/scientific.
+SEARCH_METHOD_VALUES = ["news", "general_search"]
 EVIDENCE_NEED_VALUES = [
     "empirical_study",
     "guideline",
@@ -41,6 +42,7 @@ EVIDENCE_NEED_VALUES = [
     "expert_opinion",
     "anecdotal",
     "news_report",
+    "definition",
     "unknown",
 ]
 
@@ -66,6 +68,8 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
         "explainability_score",
         "danger_score",
         "style_score",
+        "simple_summary",
+        "expert_summary",
         "rationale",
     ],
     "properties": {
@@ -121,6 +125,14 @@ SCORING_RESPONSE_SCHEMA: dict[str, Any] = {
         "explainability_score": {"type": "number", "minimum": 0, "maximum": 1},
         "danger_score": {"type": "number", "minimum": 0, "maximum": 1},
         "style_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "simple_summary": {
+            "type": "string",
+            "description": "Simplified summary for non-expert users (max 5 bullet points, no jargon).",
+        },
+        "expert_summary": {
+            "type": "string",
+            "description": "Detailed technical summary for expert mode.",
+        },
         "rationale": {"type": "string"},
     },
 }
@@ -267,8 +279,8 @@ QUERY_GENERATION_SCHEMA: dict[str, Any] = {
     "properties": {
         "queries": {
             "type": "array",
-            "minItems": 1,
-            "maxItems": 5,
+            "minItems": 2,
+            "maxItems": 2,
             "items": {"type": "string", "minLength": 4, "maxLength": 220},
         },
         "topics": {
@@ -432,6 +444,7 @@ PREDICATE_TYPE_VALUES = [
     "existence",       # Entity/document exists with anchors
     "definition",      # Scientific or logical definition
     "property",        # Physical or chemical property
+    "fact",            # General factual assertion
     "other",           # Fallback for edge cases
 ]
 
@@ -504,7 +517,7 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string", "minLength": 1},
                         "minItems": 1,
-                        "maxItems": 12,
+                        "maxItems": 5,
                         "description": "Canonical entity names (person, org, place) - required for search",
                     },
                     # Predicate classification
@@ -572,7 +585,7 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string", "minLength": 2, "maxLength": 40},
                         "minItems": 3,
-                        "maxItems": 15,
+                        "maxItems": 10,
                         "description": "Keywords for search, derived from entities + key noun phrases",
                     },
                     # Importance score (kept but not sole gate)
@@ -665,7 +678,7 @@ CLAIM_RETRIEVAL_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string", "maxLength": 80},
             "minItems": 1,
-            "maxItems": 10,
+            "maxItems": 5,
         },
         "evidence_req": {
             "type": "object",
@@ -715,7 +728,7 @@ EDGE_TYPING_SCHEMA: dict[str, Any] = {
 
 # Per-Claim Judging schemas (deep analysis mode)
 
-EVIDENCE_STANCE_VALUES = ["SUPPORT", "REFUTE", "CONTEXT", "IRRELEVANT"]
+EVIDENCE_STANCE_VALUES = ["SUPPORT", "REFUTE", "CONTEXT", "IRRELEVANT", "INDIRECT", "indirect"]
 
 
 EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
@@ -734,7 +747,6 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["evidence_id", "reason"],
                 "properties": {
                     "evidence_id": {"type": "string"},
                     "reason": {"type": "string"},
@@ -746,7 +758,6 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["evidence_id", "reason"],
                 "properties": {
                     "evidence_id": {"type": "string"},
                     "reason": {"type": "string"},
@@ -758,7 +769,6 @@ EVIDENCE_SUMMARIZER_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["evidence_id", "reason"],
                 "properties": {
                     "evidence_id": {"type": "string"},
                     "reason": {"type": "string"},
@@ -839,6 +849,11 @@ CLAIM_JUDGE_SCHEMA: dict[str, Any] = {
             "items": {"type": "string"},
             "description": "Types of evidence that would strengthen the verdict",
         },
+        "simple_summary": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "1-3 concise bullet points for a general audience. No jargon.",
+        },
     },
 }
 
@@ -896,7 +911,7 @@ EVIDENCE_AUDIT_SCHEMA: dict[str, Any] = {
         "claim_id": {"type": "string"},
         "evidence_id": {"type": "string"},
         "source_id": {"type": "string"},
-        "stance": {"type": "string", "enum": ["support", "refute", "unclear", "unrelated"]},
+        "stance": {"type": "string", "enum": ["support", "refute", "unclear", "unrelated", "indirect"]},
         "directness": {"type": "string", "enum": ["direct", "indirect", "tangential"]},
         "specificity": {"type": "string", "enum": ["high", "medium", "low"]},
         "quote_integrity": {"type": "string", "enum": ["ok", "partial", "out_of_context", "not_applicable"]},

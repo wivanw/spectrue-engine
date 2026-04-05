@@ -26,7 +26,7 @@ from spectrue_core.pipeline.contracts import (
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.search.search_policy import (
+from spectrue_core.domain.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
 )

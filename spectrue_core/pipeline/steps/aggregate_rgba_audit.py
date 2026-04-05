@@ -19,7 +19,7 @@ from spectrue_core.pipeline.contracts import RGBA_AUDIT_KEY
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.scoring.rgba_audit.aggregation import aggregate_rgba_audit
+from spectrue_core.use_cases.verification.scoring.rgba_audit.aggregation import aggregate_rgba_audit
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,15 @@ class AggregateRGBAAuditStep:
             audit_sources = ctx.get_extra("audit_sources") or []
             trace_context = ctx.get_extra("audit_trace_context") or ctx.get_extra("trace_context") or {}
             audit_errors = ctx.get_extra("audit_errors") or {}
+
+            Trace.event("rgba_audit.input_check", {
+                "claim_audits_count": len(claim_audits),
+                "evidence_audits_count": len(evidence_audits),
+                "audit_sources_count": len(audit_sources),
+                "has_trace_context": bool(trace_context),
+                "audit_errors_keys": list(audit_errors.keys()) if audit_errors else [],
+                "extras_keys": list(ctx.extras.keys()) if ctx.extras else [],
+            })
 
             rgba_result = aggregate_rgba_audit(
                 claim_audits=claim_audits,

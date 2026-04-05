@@ -17,6 +17,7 @@ import math
 from decimal import Decimal
 from dataclasses import dataclass
 from typing import Any
+import re
 
 from spectrue_core.pipeline.contracts import (
     CLAIMS_KEY,
@@ -30,7 +31,7 @@ from spectrue_core.pipeline.core import (
     PipelineContext,
     Step,
 )
-from spectrue_core.verification.scoring.confirmation_counts import compute_confirmation_counts
+from spectrue_core.use_cases.verification.scoring.confirmation_counts import compute_confirmation_counts
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.schema.rgba_audit import RGBAResult
 from spectrue_core.utils.trace import Trace
@@ -132,6 +133,63 @@ def _coerce_unit_score(value: object, fallback: float) -> float:
     return max(0.0, min(1.0, v))
 
 
+def _coerce_text(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_simple_summary(value: object, *, fallback: str = "") -> str:
+    text = _coerce_text(value) or _coerce_text(fallback)
+    if not text:
+        return ""
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+
+    bullets: list[str] = []
+    numbered_re = re.compile(r"^\d+[\.\)]\s+")
+    for line in lines:
+        body = line
+        if body.startswith("- "):
+            body = body[2:].strip()
+        elif body.startswith("* "):
+            body = body[2:].strip()
+        elif body.startswith("• "):
+            body = body[2:].strip()
+        else:
+            body = numbered_re.sub("", body).strip()
+        if body:
+            bullets.append(f"- {body}")
+        if len(bullets) >= 5:
+            break
+
+    return "\n".join(bullets)
+
+
+def _build_dual_summary(verdict: dict[str, Any]) -> dict[str, str]:
+    legacy_summary = verdict.get("summary")
+    rationale = _coerce_text(verdict.get("rationale"))
+    simple = _coerce_text(verdict.get("simple_summary"))
+    expert = _coerce_text(verdict.get("expert_summary"))
+
+    if isinstance(legacy_summary, dict):
+        simple = simple or _coerce_text(legacy_summary.get("simple"))
+        expert = expert or _coerce_text(legacy_summary.get("expert"))
+    elif isinstance(legacy_summary, str):
+        legacy_text = legacy_summary.strip()
+        if legacy_text:
+            expert = expert or legacy_text
+            simple = simple or legacy_text
+
+    expert = expert or rationale
+    simple = _normalize_simple_summary(simple, fallback=expert)
+    return {"simple": simple, "expert": expert}
+
+
 def _build_rgba(verdict: dict, ctx: PipelineContext) -> list[float]:
     rgba = verdict.get("rgba") or ctx.get_extra("rgba")
     if (
@@ -228,6 +286,7 @@ class AssembleStandardResultStep(Step):
                 "judge_mode": verdict.get("judge_mode", ScoringMode.STANDARD.value),
                 "rgba": rgba,
                 "sources": sources,
+                "summary": _build_dual_summary(verdict),
                 "rationale": verdict.get("rationale"),
                 "analysis": verdict.get("analysis") or verdict.get("rationale"),
                 "verified_score": (_coerce_score(verdict.get("verified_score"), 0.0) + 1.0) / 2.0,  # Normalize [-1, 1] -> [0, 1]

@@ -10,16 +10,16 @@
 
 
 from spectrue_core.schema.claim_metadata import ClaimMetadata, EvidenceChannel, RetrievalPolicy
-from spectrue_core.verification.orchestration.execution_plan import BudgetClass, ExecutionPlan, Phase
-from spectrue_core.verification.orchestration.orchestrator import ClaimOrchestrator
-from spectrue_core.verification.search.search_policy import (
+from spectrue_core.domain.verification.plan import BudgetClass, ExecutionPlan, Phase
+from spectrue_core.use_cases.verification.orchestration.orchestrator import ClaimOrchestrator
+from spectrue_core.domain.verification.search.search_policy import (
     SearchDepth,
     SearchProfileName,
     default_search_policy,
     resolve_profile_name,
     SearchPolicyProfile,
 )
-from spectrue_core.verification.search.search_policy_adapter import (
+from spectrue_core.adapters.retrieval.search_policy_adapter import (
     apply_claim_retrieval_policy,
     apply_search_policy_to_plan,
     budget_class_for_profile,

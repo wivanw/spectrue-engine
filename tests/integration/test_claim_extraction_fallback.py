@@ -6,7 +6,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from spectrue_core.agents.skills.claims import ClaimExtractionSkill
+from spectrue_core.adapters.llm.claims import ClaimExtractionSkill
 from spectrue_core.llm.model_registry import ModelID
 
 

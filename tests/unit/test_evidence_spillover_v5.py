@@ -6,7 +6,7 @@ from spectrue_core.utils.trace import Trace
 from spectrue_core.pipeline.steps.evidence_spillover import (
     EvidenceSpilloverStep,
 )
-from spectrue_core.verification.evidence.event_signature import (
+from spectrue_core.domain.evidence.event_signature import (
     claim_event_signature,
     signature_compatible,
     EventSignature

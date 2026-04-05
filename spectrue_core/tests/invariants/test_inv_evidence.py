@@ -1,5 +1,5 @@
 import pytest
-from spectrue_core.verification.claims.claim_frame_builder import build_claim_frame
+from spectrue_core.pipeline.claims.claim_frame_builder import build_claim_frame
 
 @pytest.fixture
 def basic_claim_text():

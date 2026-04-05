@@ -15,7 +15,7 @@ We take the security of Spectrue Engine seriously. If you have found a security 
 
 Instead, please email us directly at:
 
-**wivanw@gmail.com**
+**admin@spectrue.net**
 
 Please include:
 - A description of the vulnerability.

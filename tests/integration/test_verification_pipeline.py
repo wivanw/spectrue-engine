@@ -10,7 +10,7 @@ from spectrue_core.llm.model_registry import ModelID
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from spectrue_core.verification.verifier import FactVerifier
+from spectrue_core.pipeline.orchestration.verifier import FactVerifier
 
 @pytest.fixture
 def mock_config():

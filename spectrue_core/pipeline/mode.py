@@ -30,89 +30,12 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
-from typing import Literal
+from spectrue_core.use_cases.types import PipelineMode, SearchDepth
+from spectrue_core.domain.verification.verdict.model import (
+    AnalysisMode as AnalysisMode,
+    ScoringMode as ScoringMode,
+)
 
-from spectrue_core.verification.types import SearchDepth
-
-
-class AnalysisMode(str, Enum):
-    """API-facing analysis mode names.
-    
-    This is the single source of truth for analysis_mode values
-    in API responses. Maps internal pipeline mode names to
-    frontend-compatible names.
-    
-    Mapping:
-        - internal "general" → API "general"
-        - internal "deep" → API "deep"
-        - internal "deep_v2" → API "deep_v2"
-    """
-    GENERAL = "general"  # Standard single-claim analysis
-    DEEP = "deep"        # Multi-claim per-claim RGBA
-    DEEP_V2 = "deep_v2"  # Clustered retrieval + evidence stats
-
-    def __str__(self) -> str:
-        return self.value
-
-
-class ScoringMode(str, Enum):
-    """Scoring validation modes."""
-    STANDARD = "standard"  # Full validation and clamping
-    DEEP = "deep"          # Per-claim judging, minimal validation
-
-
-@dataclass(frozen=True)
-class PipelineMode:
-    """
-    Frozen configuration for a pipeline mode.
-
-    This is the single source of truth for mode invariants.
-    All mode-specific logic should consult these flags instead
-    of checking string mode names.
-
-    Attributes:
-        name: Mode name ("general", "deep", or "deep_v2")
-        allow_batch: Whether batch claim processing is allowed
-        allow_clustering: Whether stance clustering is enabled
-        require_single_language: Whether input must be single-language
-        require_metering: Whether cost metering is required
-        max_claims_for_scoring: Maximum number of claims to score (0 = unlimited)
-        search_depth: Default search depth ("basic" or "advanced")
-    """
-
-    name: Literal["general", "deep", "deep_v2"]
-    allow_batch: bool
-    allow_clustering: bool
-    require_single_language: bool
-    require_metering: bool
-    max_claims_for_scoring: int
-    search_depth: Literal["basic", "advanced"]
-
-    def __str__(self) -> str:
-        return f"PipelineMode({self.name})"
-
-    def __repr__(self) -> str:
-        return (
-            f"PipelineMode(name={self.name!r}, allow_batch={self.allow_batch}, "
-            f"allow_clustering={self.allow_clustering}, "
-            f"require_single_language={self.require_single_language}, "
-            f"max_claims={self.max_claims_for_scoring}, "
-            f"search_depth={self.search_depth!r})"
-        )
-
-    @property
-    def api_analysis_mode(self) -> AnalysisMode:
-        """Get API-facing analysis mode name.
-        
-        Maps internal mode name to frontend-compatible AnalysisMode enum.
-        Use this for all API responses instead of raw mode.name.
-        """
-        try:
-            return AnalysisMode(self.name)
-        except ValueError:
-            return AnalysisMode.GENERAL
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Canonical Mode Instances

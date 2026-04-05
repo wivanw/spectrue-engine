@@ -11,12 +11,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from spectrue_core.pipeline.mode import AnalysisMode
+    from spectrue_core.domain.verification.verdict.model import AnalysisMode
 
-from spectrue_core.verification.evidence.evidence_pack import Claim, EvidencePack, ArticleIntent
+from spectrue_core.utils.evidence_pack import Claim, EvidencePack
+from spectrue_core.domain.evidence.model import ArticleIntent
 from spectrue_core.config import SpectrueConfig
 from spectrue_core.runtime_config import EngineRuntimeConfig
-from spectrue_core.agents.llm_client import LLMClient
+from spectrue_core.llm.llm_client import LLMClient
 
 
 from spectrue_core.llm.model_registry import ModelID
@@ -31,26 +32,29 @@ class FactCheckerAgent:
     def __init__(self, config: SpectrueConfig | None = None):
         # Lazy import to avoid circular dependency with pipeline
         from spectrue_core.agents.llm_router import LLMRouter
-        from spectrue_core.agents.skills.claims import ClaimExtractionSkill
-        from spectrue_core.agents.skills.clustering import ClusteringSkill
-        from spectrue_core.agents.skills.scoring import ScoringSkill
-        from spectrue_core.agents.skills.query import QuerySkill
-        from spectrue_core.agents.skills.article_cleaner import ArticleCleanerSkill
-        from spectrue_core.agents.skills.oracle_validation import OracleValidationSkill
-        from spectrue_core.agents.skills.relevance import RelevanceSkill
-        from spectrue_core.agents.skills.edge_typing import EdgeTypingSkill
-        from spectrue_core.agents.skills.evidence_summarizer import EvidenceSummarizerSkill
-        from spectrue_core.agents.skills.claim_judge import ClaimJudgeSkill
+        from spectrue_core.adapters.llm.claims import ClaimExtractionSkill
+        from spectrue_core.adapters.llm.clustering import ClusteringSkill
+        from spectrue_core.adapters.llm.scoring import ScoringSkill
+        from spectrue_core.adapters.llm.query import QuerySkill
+        from spectrue_core.adapters.llm.article_cleaner import ArticleCleanerSkill
+        from spectrue_core.adapters.llm.oracle_validation import OracleValidationSkill
+        from spectrue_core.adapters.llm.relevance import RelevanceSkill
+        from spectrue_core.adapters.llm.edge_typing import EdgeTypingSkill
+        from spectrue_core.adapters.llm.evidence_summarizer import EvidenceSummarizerSkill
+        from spectrue_core.adapters.llm.claim_judge import ClaimJudgeSkill
         
         self.config = config
         self.runtime = (config.runtime if config else None) or EngineRuntimeConfig.load_from_env()
         api_key = config.openai_api_key if config else None
 
+        llm_concurrency = max(1, min(getattr(self.runtime.llm, "concurrency", 8), 64))
+
         # Create OpenAI client (Responses API)
         openai_client = LLMClient(
             openai_api_key=api_key,
             default_timeout=float(self.runtime.llm.nano_timeout_sec),
-            max_retries=3,
+            max_retries=1,
+            max_concurrent_requests=llm_concurrency,
         )
 
         # Create DeepSeek client (Native API compatible with Chat Completions)
@@ -60,7 +64,8 @@ class FactCheckerAgent:
                 openai_api_key=self.runtime.llm.deepseek_api_key,
                 base_url=self.runtime.llm.deepseek_base_url,
                 default_timeout=float(self.runtime.llm.cluster_timeout_sec),
-                max_retries=3,
+                max_retries=1,
+                max_concurrent_requests=llm_concurrency,
             )
 
         # Create router that directs models to appropriate clients
@@ -90,11 +95,11 @@ class FactCheckerAgent:
 
 
     async def extract_claims(
-        self, text: str, *, lang: str = "en", max_claims: int = 20, anchors: list | None = None
+        self, text: str, *, lang: str = "en", max_claims: int = 20, anchors: list | None = None, skip_enrichment: bool = False
     ) -> tuple[list[Claim], bool, ArticleIntent, str]:
         """Extract claims with article intent for Oracle triggering."""
         return await self.claims_skill.extract_claims(
-            text, lang=lang, max_claims=max_claims, anchors=anchors
+            text, lang=lang, max_claims=max_claims, anchors=anchors, skip_enrichment=skip_enrichment
         )
 
     async def enrich_claims_post_evidence(
@@ -108,6 +113,19 @@ class FactCheckerAgent:
             claims,
             lang=lang,
             evidence_by_claim=evidence_by_claim,
+        )
+
+    async def enrich_claims_for_planning(
+        self,
+        claims: list[dict],
+        *,
+        lang: str = "en",
+        context: str | None = None,
+    ) -> list[dict]:
+        return await self.claims_skill.enrich_claims_for_planning(
+            claims,
+            lang=lang,
+            context=context,
         )
 
     async def cluster_evidence(

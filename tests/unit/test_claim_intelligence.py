@@ -18,7 +18,7 @@ Tests for Layer 2-4 functionality:
 - Evidence-Need Routing
 """
 
-from spectrue_core.graph.types import (
+from spectrue_core.domain.claims.graph.types import (
     GraphResult,
     RankedClaim,
 )
@@ -125,6 +125,7 @@ class TestEvidenceNeedType:
             "expert_opinion",
             "anecdotal",
             "news_report",
+            "definition",
             "unknown",
         }
         actual = {e.value for e in EvidenceNeedType}

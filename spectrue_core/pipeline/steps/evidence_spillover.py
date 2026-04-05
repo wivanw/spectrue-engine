@@ -7,235 +7,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from spectrue_core.use_cases.evidence.spillover import run_spillover
 from spectrue_core.pipeline.core import PipelineContext, Step
 from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.runtime_config import DeepV2Config
 from spectrue_core.utils.trace import Trace
-from spectrue_core.verification.retrieval.fixed_pipeline import normalize_url
-from spectrue_core.verification.evidence.slot_maps import (
-    merge_covers,
-    required_slots_for_verification_target,
-    slots_from_assertion_key,
-)
-from spectrue_core.verification.evidence.event_signature import (
-    claim_event_signature,
-    evidence_event_signature,
-    signature_compatible,
-)
-
-
-def _group_sources_by_claim(sources: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for s in sources:
-        if not isinstance(s, dict):
-            continue
-        cid = s.get("claim_id")
-        if not cid:
-            continue
-        grouped.setdefault(str(cid), []).append(s)
-    return grouped
-
-
-def _claim_assertion_keys(claim: dict[str, Any]) -> tuple[set[str], set[str]]:
-    """
-    Return (fact_keys, context_keys) from claim.assertions[] if present.
-    Deterministic and schema-driven.
-    """
-    fact: set[str] = set()
-    ctx: set[str] = set()
-    assertions = claim.get("assertions")
-    if not isinstance(assertions, list):
-        return fact, ctx
-
-    for a in assertions:
-        if not isinstance(a, dict):
-            continue
-        key = a.get("key")
-        if not key:
-            continue
-        dim = str(a.get("dimension") or "FACT").upper()
-        if dim == "CONTEXT":
-            ctx.add(str(key))
-        else:
-            fact.add(str(key))
-    return fact, ctx
-
-
-def _is_transfer_candidate(src: dict[str, Any]) -> bool:
-    """
-    Conservative: transfer only evidence with an explainability anchor.
-    No text heuristics.
-    """
-    stance = str(src.get("stance") or "").upper()
-    if stance in {"IRRELEVANT"}:
-        return False
-    # Prevent cascade: transferred items must not be used as donors.
-    if src.get("provenance") == "transferred":
-        return False
-    # Require an anchor for downstream explainability/judge
-    if src.get("quote") or src.get("quote_span") or src.get("contradiction_span"):
-        return True
-    return False
-
-
-def _compatible_for_claim(src: dict[str, Any], fact_keys: set[str], context_keys: set[str]) -> bool:
-    """
-    Deterministic compatibility using:
-    - assertion_key (evidence → which assertion it applies to)
-    - stance class (SUPPORT/REFUTE vs CONTEXT/MENTION)
-    - claim assertions dimension (FACT/CONTEXT)
-    """
-    akey = str(src.get("assertion_key") or "")
-    stance = str(src.get("stance") or "").upper()
-
-    # Legacy whole-claim evidence: allow (routing v2 keeps it conservative elsewhere)
-    if not akey:
-        return True
-
-    if stance in {"SUPPORT", "REFUTE", "MIXED"}:
-        return akey in fact_keys
-
-    if stance in {"CONTEXT", "MENTION"}:
-        return akey in context_keys
-
-    return False
-
-
-def _extract_verification_target(claim: dict[str, Any]) -> str:
-    """
-    Extract verification_target from claim metadata (schema-driven).
-    Handles both flattened and nested representations.
-    """
-    md = claim.get("metadata")
-    if isinstance(md, dict) and md.get("verification_target"):
-        return str(md.get("verification_target"))
-    if claim.get("verification_target"):
-        return str(claim.get("verification_target"))
-    return ""
-
-
-def _covers_ok_for_claim(src: dict[str, Any], claim: dict[str, Any]) -> bool:
-    """
-    Deterministic compatibility using slots:
-    required_slots(verification_target) must intersect evidence covers.
-    """
-    vt = _extract_verification_target(claim)
-    required = required_slots_for_verification_target(vt)
-    if not required:
-        return True
-
-    akey = str(src.get("assertion_key") or "")
-    covers = src.get("covers")
-    
-    # Relaxed: if evidence has no structured metadata, don't reject by slots
-    if not akey and not covers:
-        return True
-
-    derived = slots_from_assertion_key(akey)
-    merged = merge_covers(covers, derived)
-
-    return bool(merged & required)
-
-
-def _event_ok_for_claim(src: dict[str, Any], claim: dict[str, Any]) -> bool:
-    """
-    Deterministic gate using event signatures:
-    - build signature from claim metadata
-    - compare with evidence signature if present
-    """
-    c_sig = claim_event_signature(claim)
-    e_sig = evidence_event_signature(src)
-    
-    # Relaxed: if either has no signature, assume compatible for spillover
-    if not c_sig or not e_sig:
-        return True
-
-    return signature_compatible(c_sig, e_sig)
-
-
-def _score_for_transfer(src: dict[str, Any]) -> float:
-    """
-    Deterministic ranking using already computed fields.
-    Avoids new heuristics or LLM calls.
-    """
-    try:
-        rel = float(src.get("relevance_score", 0.0) or 0.0)
-    except Exception:
-        rel = 0.0
-    stance = str(src.get("stance") or "").upper()
-    stance_boost = 0.05 if stance in {"SUPPORT", "REFUTE"} else 0.0
-    quote_boost = 0.05 if (src.get("quote") or src.get("quote_span") or src.get("contradiction_span")) else 0.0
-    return rel + stance_boost + quote_boost
-
-
-def _claim_topic_signature(claim: dict[str, Any]) -> set[str]:
-    """
-    Deterministic topic signature for routing priors.
-    Uses only structured fields (no text parsing).
-    """
-    sig: set[str] = set()
-
-    # Legacy category fields
-    tg = claim.get("topic_group")
-    tk = claim.get("topic_key")
-    if tg:
-        sig.add(f"topic_group:{str(tg).strip()[:64]}")
-    if tk:
-        sig.add(f"topic_key:{str(tk).strip()[:64]}")
-
-    # Orchestration metadata topic_tags (if present)
-    md = claim.get("metadata")
-    if isinstance(md, dict):
-        tags = md.get("topic_tags")
-        if isinstance(tags, list):
-            for t in tags[:16]:
-                if t:
-                    sig.add(str(t).strip()[:64])
-
-    # Entities / seed terms (bounded)
-    se = claim.get("subject_entities")
-    if isinstance(se, list):
-        for e in se[:5]:
-            if e:
-                sig.add(f"ent:{str(e).strip()[:64]}")
-
-    st = claim.get("retrieval_seed_terms")
-    if isinstance(st, list):
-        for s in st[:5]:
-            if s:
-                sig.add(f"seed:{str(s).strip()[:64]}")
-
-    return sig
-
-
-def _topic_overlap_boost(origin_claim: dict[str, Any], target_claim: dict[str, Any]) -> float:
-    """
-    Soft prior: if origin/target claims share topic signature, boost score slightly.
-    No filtering. Purely ranking.
-    """
-    a = _claim_topic_signature(origin_claim)
-    b = _claim_topic_signature(target_claim)
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    if inter <= 0:
-        return 0.0
-    # Bounded linear boost (deterministic, not a threshold)
-    return min(0.10, 0.02 * inter)
-
-
-def _stable_key(src: dict[str, Any]) -> tuple[str, str]:
-    """
-    Deterministic tie-breaker key.
-    We use normalized URL (primary) + domain (secondary).
-    """
-    url = src.get("url") or ""
-    dom = src.get("domain") or ""
-    try:
-        nurl = normalize_url(str(url)) if url else ""
-    except Exception:
-        nurl = str(url)
-    return (nurl, str(dom))
+from spectrue_core.utils.retrieval_urls import normalize_url
 
 
 @dataclass
@@ -251,7 +28,7 @@ class EvidenceSpilloverStep(Step):
 
     config: Any
     name: str = "evidence_spillover"
-    weight: float = 2.0
+    weight: float = 1.0  # ~0s actual
 
 
 
@@ -273,151 +50,48 @@ class EvidenceSpilloverStep(Step):
         # Prefer existing grouped mapping if present
         by_claim = ctx.get_extra("evidence_by_claim")
         if not isinstance(by_claim, dict):
-            by_claim = _group_sources_by_claim([s for s in sources if isinstance(s, dict)])
+            by_claim = None
 
-        # claim_id -> claim dict (avoid mutation)
-        claim_lookup: dict[str, dict[str, Any]] = {}
-        for idx, c in enumerate(claims):
-            if not isinstance(c, dict):
-                continue
-            cid = str(c.get("id") or c.get("claim_id") or f"c{idx + 1}")
-            claim_lookup[cid] = c
+        result = run_spillover(
+            sources=sources,
+            claims=claims,
+            cluster_map=cluster_map,
+            top_k=top_k,
+            normalize_url=normalize_url,
+            evidence_by_claim=by_claim,
+        )
 
-        # cluster_id -> claim_ids
-        cluster_to_ids: dict[str, list[str]] = {}
-        for cid, clid in cluster_map.items():
-            cluster_to_ids.setdefault(clid, []).append(cid)
-
-        # Trace counters for rejections
-        rejections = {
-            "not_candidate": 0,    # excluded by _is_transfer_candidate
-            "compat_assertion": 0, # excluded by _compatible_for_claim (key/dim)
-            "required_slots": 0,   # excluded by _covers_ok_for_claim (Comp v3)
-            "event_signature": 0,  # excluded by _event_ok_for_claim (Comp v5)
-            "dedup": 0,            # excluded by existing_urls
-        }
-
-        transferred_items: list[dict[str, Any]] = []
-        transferred_total = 0
-        touched_claims = 0
-
-        for target_id, target_claim in claim_lookup.items():
-            clid = cluster_map.get(target_id)
-            if not clid:
-                continue
-            peers = cluster_to_ids.get(clid, [])
-            if len(peers) <= 1:
-                continue
-
-            fact_keys, context_keys = _claim_assertion_keys(target_claim)
-
-            # Existing URLs for dedup
-            existing_urls: set[str] = set()
-            for s in by_claim.get(target_id, []):
-                url = s.get("url")
-                if url:
-                    existing_urls.add(normalize_url(str(url)))
-
-            candidates: list[tuple[float, str, dict[str, Any]]] = []
-            topic_boost_used = 0
-            for peer_id in peers:
-                if peer_id == target_id:
-                    continue
-                for src in by_claim.get(peer_id, []):
-                    if not isinstance(src, dict):
-                        continue
-                    if not _is_transfer_candidate(src):
-                        rejections["not_candidate"] += 1
-                        continue
-                    if not _compatible_for_claim(src, fact_keys, context_keys):
-                        # Relaxed check: if target claim has no defined assertions, don't reject by key
-                        if fact_keys or context_keys:
-                            rejections["compat_assertion"] += 1
-                            continue
-                    # Compatibility v3: required slots for claim's verification_target
-                    if not _covers_ok_for_claim(src, target_claim):
-                        rejections["required_slots"] += 1
-                        continue
-                    # Compatibility v5: event signature (if present) must be consistent
-                    if not _event_ok_for_claim(src, target_claim):
-                        rejections["event_signature"] += 1
-                        continue
-                    url = src.get("url")
-                    if url and normalize_url(str(url)) in existing_urls:
-                        rejections["dedup"] += 1
-                        continue
-                    
-                    origin_claim = claim_lookup.get(peer_id)
-                    base = _score_for_transfer(src)
-                    boost = _topic_overlap_boost(origin_claim, target_claim) if origin_claim else 0.0
-                    if boost > 0:
-                        topic_boost_used += 1
-                    candidates.append((base + boost, peer_id, src))
-
-            if not candidates:
-                continue
-
-            # Stable deterministic ordering:
-            # 1) score desc
-            # 2) normalized url asc
-            # 3) origin claim id asc
-            candidates.sort(
-                key=lambda t: (
-                    -t[0],
-                    _stable_key(t[2])[0],
-                    str(t[1]),
-                )
-            )
-            chosen = candidates[:top_k]
-            if chosen:
-                touched_claims += 1
-
-            chosen_urls = []
-            for _, origin_id, src in chosen:
-                url = src.get("url")
-                if url:
-                    existing_urls.add(normalize_url(str(url)))
-                    chosen_urls.append(normalize_url(str(url)))
-                merged = dict(src)
-                merged["claim_id"] = target_id
-                merged["provenance"] = "transferred"
-                merged["origin_claim_id"] = origin_id
-                transferred_items.append(merged)
-                transferred_total += 1
-
+        for choice in result.choices:
             Trace.event(
                 "evidence_spillover.chosen",
                 {
-                    "claim_id": target_id,
-                    "cluster_id": clid,
-                    "count": len(chosen_urls),
-                    "urls": chosen_urls[:5],  # cap
-                    "topic_boost_used": topic_boost_used,
+                    "claim_id": choice.claim_id,
+                    "cluster_id": choice.cluster_id,
+                    "count": choice.count,
+                    "urls": choice.urls,
+                    "topic_boost_used": choice.topic_boost_used,
                 },
             )
-
-        if not transferred_items:
-            Trace.event(
-                "evidence_spillover.completed",
-                {"transferred": 0, "touched_claims": 0, "top_k": top_k, "rejections": rejections},
-            )
-            return ctx
-
-        combined_sources = list(sources) + transferred_items
-        by_claim2 = _group_sources_by_claim([s for s in combined_sources if isinstance(s, dict)])
 
         Trace.event(
             "evidence_spillover.completed",
             {
-                "transferred": transferred_total,
-                "touched_claims": touched_claims,
+                "transferred": result.transferred_total,
+                "touched_claims": result.touched_claims,
                 "top_k": top_k,
-                "rejections": rejections,
+                "rejections": result.rejections,
             },
         )
 
+        if not result.transferred_items:
+            return ctx
+
         # Build replacement context
-        new_ctx = ctx.with_update(sources=combined_sources).set_extra("evidence_by_claim", by_claim2).set_extra("spillover_transferred", transferred_total)
+        new_ctx = (
+            ctx.with_update(sources=result.combined_sources)
+            .set_extra("evidence_by_claim", result.evidence_by_claim)
+            .set_extra("spillover_transferred", result.transferred_total)
+        )
 
         # 8. M115/M119: Update EvidenceIndex if present
         from spectrue_core.pipeline.contracts import EVIDENCE_INDEX_KEY, EvidenceIndex, EvidencePackContract, EvidenceItem
@@ -426,12 +100,14 @@ class EvidenceSpilloverStep(Step):
             new_by_claim = dict(old_index.by_claim_id)
             
             # Group transferred by target claim
-            transferred_by_cid = _group_sources_by_claim(transferred_items)
+            transferred_by_cid = result.evidence_by_claim
             
             for cid, raw_shared in transferred_by_cid.items():
                 # Build EvidenceItem objects
                 shared_items = []
                 for raw in raw_shared:
+                    if raw.get("provenance") != "transferred":
+                        continue
                     shared_items.append(EvidenceItem(
                         url=str(raw.get("url") or raw.get("link") or ""),
                         source_id=raw.get("source_id"),
@@ -476,7 +152,7 @@ class EvidenceSpilloverStep(Step):
             # In standard mode, evidence is a dict with 'items' key
             ev_items = list(ctx.evidence.get("items", []))
             # Just append transferred items as raw dicts (backward compat)
-            ev_items.extend(transferred_items)
+            ev_items.extend(result.transferred_items)
             new_evidence = {**ctx.evidence, "items": ev_items}
             new_ctx = new_ctx.with_update(evidence=new_evidence)
 

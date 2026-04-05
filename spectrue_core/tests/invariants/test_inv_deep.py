@@ -1,6 +1,6 @@
 import pytest
-from spectrue_core.graph.propagation import propagate_belief
-from spectrue_core.graph.context import ClaimContextGraph
+from spectrue_core.domain.verification.verdict.propagation import propagate_belief
+from spectrue_core.adapters.graph.context import ClaimContextGraph
 from spectrue_core.schema.scoring import ClaimNode, ClaimEdge, BeliefState, ClaimRole, RelationType
 
 def test_inv_032_graph_propagation_bounds():

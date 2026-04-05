@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from spectrue_core.agents.llm_client import LLMClient, ReasoningEffort
+from spectrue_core.llm.llm_client import LLMClient, ReasoningEffort
 from spectrue_core.llm.model_registry import ModelID
 
 logger = logging.getLogger(__name__)
@@ -149,6 +149,7 @@ class LLMRouter:
         temperature: float | None = None,
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
+        fail_on_schema_error: bool = True,
     ) -> dict:
         """
         Route and execute LLM call, returning parsed JSON directly.
@@ -167,6 +168,7 @@ class LLMRouter:
             temperature=temperature,
             max_output_tokens=max_output_tokens,
             trace_kind=trace_kind,
+            fail_on_schema_error=fail_on_schema_error,
         )
 
     async def call_structured(
@@ -182,6 +184,7 @@ class LLMRouter:
         max_output_tokens: int | None = None,
         trace_kind: str = "llm_call",
         temperature: float | None = None,
+        fail_on_schema_error: bool = True,
     ) -> dict:
         """
         Route and execute structured output call.
@@ -200,7 +203,13 @@ class LLMRouter:
             max_output_tokens=max_output_tokens,
             trace_kind=trace_kind,
             temperature=temperature,
+            fail_on_schema_error=fail_on_schema_error,
         )
+
+    @property
+    def _aclient(self) -> Any:
+        """Expose the underlying AsyncOpenAI client from openai_client."""
+        return self.openai_client._aclient
 
     @property
     def _meter(self) -> Any | None:
