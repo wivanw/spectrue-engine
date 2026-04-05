@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from spectrue_core.domain.claims.model import ClaimDomain, ClaimType
+from spectrue_core.domain.claims.model import ClaimDomain, ClaimRole, ClaimType
 
 
 TOPIC_GROUPS = [
@@ -24,6 +24,8 @@ TOPIC_GROUPS = [
 ARTICLE_INTENTS = ["news", "evergreen", "official", "opinion", "prediction", "unknown", "other"]
 
 ALLOWED_CLAIM_CATEGORIES = {"FACTUAL", "SATIRE", "OPINION", "HYPERBOLIC"}
+
+_VALID_CLAIM_ROLES: frozenset[str] = frozenset(r.value for r in ClaimRole)
 
 DOMAIN_MAPPING = {
     "Politics": ClaimDomain.POLITICS,
@@ -130,12 +132,19 @@ def parse_claim_metadata_fields(
     cr_raw = rc.get("claim_role", "")
     if cr_raw:
         claim_role = str(cr_raw).lower()
-        if claim_role not in {"core", "context", "quote", "statistic"}:
-            claim_role = "core"
+        if claim_role not in _VALID_CLAIM_ROLES:
+            claim_role = "support"
             missing_count += 1
     else:
-        claim_role = "context" if verification_target == "none" else "core"
+        claim_role = "context" if verification_target == "none" else "support"
         missing_count += 1
+
+    # 2.5) Enforce verification_target consistency with explain-only roles.
+    # If claim_role is explain-only (context/background/meta/definition),
+    # verification_target should be "none" — no search needed.
+    _EXPLAIN_ONLY_ROLES = {"context", "meta", "background", "definition"}
+    if claim_role in _EXPLAIN_ONLY_ROLES and verification_target != "none":
+        verification_target = "none"
 
     # 3) search_locale_plan
     slp_raw = rc.get("search_locale_plan", {})

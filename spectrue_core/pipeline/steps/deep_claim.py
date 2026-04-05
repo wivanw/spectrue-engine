@@ -535,6 +535,8 @@ class AssembleDeepResultStep(Step):
                     if aid:
                         audit_by_id[str(aid)] = a
 
+                claim_id_to_role: dict[str, str] = {}
+                claim_id_to_extra: dict[str, dict] = {}
                 for i, c in enumerate(ctx.claims or []):
                     cid = c.get("id") or c.get("claim_id") or f"c{i + 1}"
                     explicit_type = c.get("type") or c.get("claim_type")
@@ -547,6 +549,33 @@ class AssembleDeepResultStep(Step):
                         if pred is None:
                             pred = c.get("predicate_type")
                         claim_id_to_type[cid] = _claim_type_from_predicate(pred)
+                    role = c.get("claim_role") or c.get("role")
+                    if role:
+                        claim_id_to_role[cid] = str(role).lower().strip()
+                    # Collect extra metadata for visualization
+                    extra: dict = {}
+                    vt = c.get("verification_target")
+                    if vt:
+                        extra["verification_target"] = str(vt).lower()
+                    cw = c.get("check_worthiness")
+                    if cw is not None:
+                        extra["check_worthiness"] = round(float(cw), 2)
+                    mc = c.get("metadata_confidence")
+                    if mc:
+                        extra["metadata_confidence"] = str(mc).lower()
+                    if extra:
+                        claim_id_to_extra[cid] = extra
+
+                # Add verdict + evidence_count from claim_results
+                for r in claim_results:
+                    cid = r.get("claim_id") or ""
+                    if cid not in claim_id_to_extra:
+                        claim_id_to_extra[cid] = {}
+                    verdict = r.get("verdict")
+                    if verdict:
+                        claim_id_to_extra[cid]["verdict"] = str(verdict)
+                    ev_count = len(r.get("sources", []))
+                    claim_id_to_extra[cid]["evidence_count"] = ev_count
                 if graph_result is not None and not getattr(graph_result, "disabled", True):
                     from spectrue_core.domain.claims.graph.report_serializer import (
                         serialize_graph_for_report,
@@ -556,6 +585,8 @@ class AssembleDeepResultStep(Step):
                         claim_id_to_text,
                         claim_id_to_rgba=claim_id_to_rgba,
                         claim_id_to_type=claim_id_to_type,
+                        claim_id_to_role=claim_id_to_role,
+                        claim_id_to_extra=claim_id_to_extra,
                     )
                 elif claim_results:
                     # Fallback: minimal graph (nodes only) when ClaimGraphStep was skipped
@@ -582,6 +613,12 @@ class AssembleDeepResultStep(Step):
                         }
                         if rgba is not None and len(rgba) >= 4:
                             node["rgba"] = [round(float(x), 4) for x in rgba[:4]]
+                        role = claim_id_to_role.get(cid)
+                        if role:
+                            node["claim_role"] = role
+                        extra = claim_id_to_extra.get(cid)
+                        if extra:
+                            node["extra"] = extra
                         nodes.append(node)
                     deep_analysis_payload["claim_graph"] = {
                         "nodes": nodes,

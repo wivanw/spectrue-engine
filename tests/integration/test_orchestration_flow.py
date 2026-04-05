@@ -397,8 +397,8 @@ async def test_metadata_fallback_defaults(claim_skill, mock_llm_client):
     assert metadata is not None
     # Default verification_target for factual claims should be "reality"
     assert metadata.verification_target == VerificationTarget.REALITY
-    # Default claim_role for reality-target should be "core"  
-    assert metadata.claim_role == ClaimRole.CORE
+    # Default claim_role for reality-target should be "support"
+    assert metadata.claim_role == ClaimRole.SUPPORT
     # Default locale should use article language
     assert metadata.search_locale_plan.primary == "en"
     # Default channels should include authoritative + reputable (harm_potential=2)

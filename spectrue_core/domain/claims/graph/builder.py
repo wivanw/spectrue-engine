@@ -290,6 +290,22 @@ class ClaimGraphBuilder:
                 structural_in=structural_in,
                 contradict_in=contradict_in,
             )
+
+            # Statistical key-claim classification: a claim is "key" only if
+            # its centrality (PageRank) is above mean + 1 standard deviation.
+            # This is standard outlier detection on the PageRank distribution.
+            # Guarantees at least 1 key claim (the highest centrality).
+            if ranked:
+                scores = [r.centrality_score for r in ranked]
+                n = len(scores)
+                mean_c = sum(scores) / n
+                var_c = sum((s - mean_c) ** 2 for s in scores) / n
+                std_c = var_c ** 0.5
+                threshold = mean_c + std_c
+                top_id = max(ranked, key=lambda r: r.centrality_score).claim_id
+                for r in ranked:
+                    r.is_key_claim = r.centrality_score > threshold or r.claim_id == top_id
+
             result.all_ranked = ranked
             result.key_claims = [r for r in ranked if r.is_key_claim]
 

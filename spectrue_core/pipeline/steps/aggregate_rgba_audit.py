@@ -54,6 +54,7 @@ class AggregateRGBAAuditStep:
                 sources=audit_sources,
                 trace_context=trace_context,
                 audit_errors=audit_errors,
+                claims=ctx.claims,
             )
 
             Trace.event(

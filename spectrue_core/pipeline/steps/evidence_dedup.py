@@ -20,27 +20,40 @@ from spectrue_core.use_cases.evidence.dedup import apply_dedup
 @dataclass
 class EvidenceDedupStep(Step):
     """
-    Compute exact-dup and near-dup fingerprints for EvidenceItems.
-    - publisher_id: normalized domain
-    - content_hash: sha256(normalized payload)
-    - similar_cluster_id: simhash bucket id
+    Compute exact-dup and near-dup fingerprints for EvidenceItems,
+    then remove exact duplicates (keep best source per content_hash group).
+
+    Runs in ALL analysis modes.
     """
     weight: float = 1.0
 
     name: str = "evidence_dedup"
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
-        if ctx.mode.api_analysis_mode != AnalysisMode.DEEP_V2:
-            return ctx
-
         sources = ctx.sources or []
         if not sources:
             return ctx
 
-        stats = apply_dedup(sources=sources)
+        filtered, stats = apply_dedup(sources=sources, filter_duplicates=True)
 
-        Trace.event(
-            "evidence_dedup.completed",
-            stats,
-        )
+        Trace.event("evidence_dedup.completed", stats)
+
+        if stats.get("removed", 0) > 0:
+            ctx = ctx.with_update(sources=filtered)
+
+            # Update evidence_by_claim if present
+            by_claim = ctx.get_extra("evidence_by_claim")
+            if isinstance(by_claim, dict):
+                kept_urls = {s.get("url") for s in filtered if s.get("url")}
+                updated_by_claim = {}
+                for cid, items in by_claim.items():
+                    if isinstance(items, list):
+                        updated_by_claim[cid] = [
+                            i for i in items
+                            if not i.get("url") or i.get("url") in kept_urls
+                        ]
+                    else:
+                        updated_by_claim[cid] = items
+                ctx = ctx.set_extra("evidence_by_claim", updated_by_claim)
+
         return ctx

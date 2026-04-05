@@ -363,22 +363,6 @@ class ClaimExtractionSkill(BaseSkill):
             final_claims = self._dedupe_claims(enriched_claims)
             final_claims.sort(key=lambda x: x.get("harm_potential", 1), reverse=True)
 
-            # Cap claims by text length: 1 claim per 500 chars, min 3, max max_claims
-            text_based_cap = max(3, min(max_claims, len(text) // 500))
-            if len(final_claims) > text_based_cap:
-                # Keep top-N by importance (secondary sort, harm is primary)
-                final_claims.sort(
-                    key=lambda x: (x.get("harm_potential", 1), float(x.get("importance", 0.5))),
-                    reverse=True,
-                )
-                dropped = len(final_claims) - text_based_cap
-                final_claims = final_claims[:text_based_cap]
-                Trace.event("claim_extraction.text_length_cap", {
-                    "text_len": len(text),
-                    "cap": text_based_cap,
-                    "dropped": dropped,
-                })
-
             # Tracing
             self._trace_extracted_claims(final_claims)
             self._trace_metadata_distribution(final_claims)
