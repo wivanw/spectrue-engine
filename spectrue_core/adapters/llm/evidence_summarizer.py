@@ -170,11 +170,15 @@ class EvidenceSummarizerSkill:
         def parse_refs(items: list[dict]) -> tuple[EvidenceReference, ...]:
             refs: list[EvidenceReference] = []
             for item in items:
-                if isinstance(item, dict):
-                    refs.append(EvidenceReference(
-                        evidence_id=str(item.get("evidence_id", "")),
-                        reason=str(item.get("reason", "")),
-                    ))
+                if not isinstance(item, dict):
+                    continue
+                eid = (item.get("evidence_id") or "").strip()
+                if not eid:
+                    continue
+                refs.append(EvidenceReference(
+                    evidence_id=eid,
+                    reason=str(item.get("reason", "")),
+                ))
             return tuple(refs)
 
         supporting = parse_refs(response.get("supporting_evidence", []))

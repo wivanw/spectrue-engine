@@ -44,25 +44,20 @@ class TestEvidenceItemSchema:
     def test_sentinel_default_scores(self):
         """Test that scores default to -1.0 sentinel."""
         evidence = EvidenceItem(claim_id="c1")
-        
-        assert evidence.retrieval_confidence == -1.0, "retrieval_confidence should be -1.0 sentinel"
+
         assert evidence.relevance_score == -1.0, "relevance_score should be -1.0 sentinel"
-        
+
         # Sentinel detection
-        assert evidence.retrieval_confidence < 0, "Sentinel should be detectable as < 0"
         assert evidence.relevance_score < 0, "Sentinel should be detectable as < 0"
 
     def test_actual_scores_override_sentinel(self):
         """Test that actual scores work correctly."""
         evidence = EvidenceItem(
             claim_id="c1",
-            retrieval_confidence=0.95,
             relevance_score=0.85,
         )
-        
-        assert evidence.retrieval_confidence == 0.95
+
         assert evidence.relevance_score == 0.85
-        assert evidence.retrieval_confidence >= 0
 
 
 class TestContentUnavailableHandling:
@@ -84,11 +79,9 @@ class TestContentUnavailableHandling:
             domain="treasury.gov",
             url="https://treasury.gov/ofac/list",
             content_status=ContentStatus.CONTENT_UNAVAILABLE,
-            unavailable_reason="Auth wall - content behind login",
         )
-        
+
         assert evidence.content_status == ContentStatus.CONTENT_UNAVAILABLE
-        assert evidence.unavailable_reason is not None
         
         # CONTENT_UNAVAILABLE is NOT actionable for verdict
         assert evidence.is_actionable() is False
@@ -101,7 +94,6 @@ class TestContentUnavailableHandling:
         evidence = EvidenceItem(
             claim_id="c1",
             content_status=ContentStatus.BLOCKED,
-            unavailable_reason="HTTP 429 Too Many Requests",
         )
         
         assert evidence.content_status == ContentStatus.BLOCKED

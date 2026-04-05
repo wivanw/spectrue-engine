@@ -122,9 +122,24 @@ class ClaimMetadata:
     topic_tags: list[str] = field(default_factory=list)
     """Thematic tags for the claim (e.g., 'Economy', 'War')."""
 
+    geographic_scope: str = "unknown"
+    """Scope: 'local', 'national', 'international', 'unknown'. Affects domain selection for search."""
+
+    temporal_class: str = "recent"
+    """Temporal class: 'breaking', 'recent', 'historical', 'timeless'. Affects cache TTL and search recency."""
+
+    claim_complexity: float = 0.5
+    """Complexity score 0-1 based on assertion count and dependencies. Affects evidence budget."""
+
     def __post_init__(self) -> None:
         # Clamp check_worthiness to [0, 1]
         self.check_worthiness = max(0.0, min(1.0, self.check_worthiness))
+        self.claim_complexity = max(0.0, min(1.0, self.claim_complexity))
+
+        if self.geographic_scope not in ("local", "national", "international", "unknown"):
+            self.geographic_scope = "unknown"
+        if self.temporal_class not in ("breaking", "recent", "historical", "timeless"):
+            self.temporal_class = "recent"
 
         # Ensure nested objects are proper types
         if isinstance(self.search_locale_plan, dict):
@@ -155,6 +170,9 @@ class ClaimMetadata:
             "retrieval_policy": self.retrieval_policy.to_dict(),
             "metadata_confidence": self.metadata_confidence.value,
             "topic_tags": self.topic_tags,
+            "geographic_scope": self.geographic_scope,
+            "temporal_class": self.temporal_class,
+            "claim_complexity": self.claim_complexity,
         }
 
     @classmethod
@@ -239,4 +257,7 @@ class ClaimMetadata:
             retrieval_policy=retrieval_policy,
             metadata_confidence=metadata_confidence,
             topic_tags=data.get("topic_tags") or [],
+            geographic_scope=str(data.get("geographic_scope", "unknown")),
+            temporal_class=str(data.get("temporal_class", "recent")),
+            claim_complexity=float(data.get("claim_complexity", 0.5)),
         )

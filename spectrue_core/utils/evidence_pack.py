@@ -415,7 +415,6 @@ class SearchResult(TypedDict, total=False):
     timeliness_status: str | None   # in_window | outdated | unknown_date
     key_snippet: str | None         # Most relevant quote from content
     quote_matches: list[str]        # Exact quotes that match claim
-    is_trusted: bool                # From trusted sources registry
     is_duplicate: bool              # Content duplicate of another result
     duplicate_of: str | None        # URL of original if duplicate
     evidence_tier: str | None       # A, A', B, C, D (if known)
@@ -434,7 +433,6 @@ class SearchResult(TypedDict, total=False):
 
     # Content availability status
     content_status: Literal["available", "unavailable", "blocked", "error"]
-    unavailable_reason: str | None  # Why content couldn't be retrieved
 
     # Bayesian stance posterior (M113+)
     # Soft probabilities instead of hard stance labels

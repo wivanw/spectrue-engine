@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .enums import ClaimRole, ClaimDomain, ClaimType, Dimension
-from .structure import ClaimStructure, EventQualifiers, Assertion, SourceSpan
+from .structure import ClaimStructure, EventQualifiers, Assertion
 
 
 @dataclass
@@ -25,12 +25,13 @@ class ClaimUnit:
     importance: float = 1.0
     check_worthiness: float = 0.5
     extraction_confidence: float = 1.0
-    source_span: SourceSpan | None = None
     language: str = "en"
     text: str = ""
     normalized_text: str = ""
     topic_group: str = "Other"
     topic_key: str = ""
+    polarity: str = "neutral"
+    """Claim polarity: 'positive', 'negative', 'neutral'. Affects search strategy for negations."""
 
     def get_fact_assertions(self) -> list[Assertion]:
         """Get only FACT assertions (for strict verification)."""

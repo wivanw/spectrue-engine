@@ -1,34 +1,15 @@
 zh:
   prompts:
     claim_judge: |
-      你是一名事实核查法官。请根据提供的证据评估以下声明并做出判决。
+      你是一名事实核查法官。请根据下方DATA部分提供的证据评估声明并做出判决。
 
-      ## 待判决声明
-
-      声明ID：{claim_id}
-      声明文本："{claim_text}"
-      声明语言：{claim_language}
-
-      你将收到：
-      - 声明
-      - 证据（片段/引用/摘录）
-      - 证据统计（结构化计数器）
-
-      ## 原始语境
-
-      {context_text}
-
-      ## 证据项目
-
-      {evidence_section}
-
-      ## 证据摘要（预分析）
-
-      {summary_section}
-
-      ## 证据统计
-
-      {stats_section}
+      你将在DATA部分收到：
+      - 声明（ID、文本、语言）
+      - 原始语境
+      - 证据项目（片段/引用/摘录）
+      - 证据摘要（预分析）
+      - 证据统计
+      - 来源URL列表
 
       ## 判决方法
 
@@ -78,18 +59,17 @@ zh:
 
       **信心**：0.0-1.0（若来源弱/矛盾则较低）
 
-      **解释**：使用{claim_language}的结构化格式：
+      **解释**：使用声明语言的结构化格式：
         - 第1行："证据：" - 引用来源
         - 第2行："缺口：" - 缺什么
         - 第3行："判决：" - 结论
         - 第4行："风格：" - 仅当 B < 0.7
 
-      **sources_used**：推理中使用的来自此列表的URL：
-      {urls_list}
+      **sources_used**：仅使用DATA部分列表中的URL。
 
       ## 输出格式 (JSON)
       {{
-        "claim_id": "{claim_id}",
+        "claim_id": "<来自数据>",
         "rgba": {{ "R": 0.0, "G": 0.0, "B": 0.0, "A": 0.0 }},
         "confidence": 0.5,
         "verdict": "Supported|Refuted|NEI|Mixed",

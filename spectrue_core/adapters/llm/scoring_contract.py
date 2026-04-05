@@ -161,25 +161,23 @@ Be concise.
 
 
 def build_single_claim_scoring_prompt(*, claim_info: dict, evidence: list[dict], judge_context: dict | None = None) -> str:
-    """Prompt for scoring a SINGLE claim.
+    """Prompt for scoring a SINGLE claim. Static prefix then --- DATA --- (cache-friendly).
 
     judge_context is a code-computed, auditable summary (coverage, stance distribution,
     dedup counters, etc.) that the model must treat as *signals*, not as truth.
     """
     ctx = judge_context or {}
-    return f"""Score this claim based on the evidence.
+    static = """Score this claim based on the evidence. Return JSON.
 
-Claim:
-{json.dumps(claim_info, indent=2, ensure_ascii=False)}
+--- DATA ---
 
-JudgeSignals (code-computed):
-{json.dumps(ctx, indent=2, ensure_ascii=False)}
-
-Evidence (raw items):
-{json.dumps(evidence, indent=2, ensure_ascii=False)}
-
-Return JSON.
 """
+    data = json.dumps(
+        {"claim": claim_info, "judge_signals": ctx, "evidence": evidence},
+        indent=2,
+        ensure_ascii=False,
+    )
+    return static + data
 
 
 # ==============================================================================
@@ -187,19 +185,22 @@ Return JSON.
 # ==============================================================================
 
 def build_score_evidence_prompt(*, safe_original_fact: str, claims_info: list[dict], sources_by_claim: dict) -> str:
-    return f"""Evaluate these claims based strictly on the Evidence.
+    """Prompt: static prefix (cache-friendly) then --- DATA --- with original_fact, claims, evidence."""
+    static = """Evaluate the following data strictly based on the Evidence. Return JSON with claim_verdicts, verified_score, and summaries as per the schema.
 
-Original Fact:
-{safe_original_fact}
+--- DATA ---
 
-Claims to Verify:
-{json.dumps(claims_info, indent=2, ensure_ascii=False)}
-
-Evidence:
-{json.dumps(sources_by_claim, indent=2, ensure_ascii=False)}
-
-Return JSON.
 """
+    data = json.dumps(
+        {
+            "original_fact": safe_original_fact,
+            "claims_to_verify": claims_info,
+            "evidence": sources_by_claim,
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+    return static + data
 
 
 # ==============================================================================
@@ -265,17 +266,18 @@ Return valid JSON.
 
 
 def build_score_evidence_structured_prompt(*, claims_data: list[dict], evidence_by_assertion: dict) -> str:
-    return f"""Score these claims with per-assertion verdicts.
+    """Prompt: static prefix (cache-friendly) then --- DATA --- with claims and evidence."""
+    static = """Score these claims with per-assertion verdicts. Remember: CONTEXT cannot refute FACT. Score each assertion independently. Return JSON.
 
-Claims with Assertions:
-{json.dumps(claims_data, indent=2, ensure_ascii=False)}
+--- DATA ---
 
-Evidence by Assertion:
-{json.dumps(evidence_by_assertion, indent=2, ensure_ascii=False)}
-
-Remember: CONTEXT cannot refute FACT. Score each assertion independently.
-Return JSON.
 """
+    data = json.dumps(
+        {"claims_with_assertions": claims_data, "evidence_by_assertion": evidence_by_assertion},
+        indent=2,
+        ensure_ascii=False,
+    )
+    return static + data
 
 
 def build_stance_matrix_instructions(*, num_sources: int, pass_type: str) -> str:
@@ -325,7 +327,7 @@ Your task is to map each Search Source to its BEST matching Claim AND Assertion.
 
 ## Relevance Scoring
 - Assign `relevance` (0.0-1.0).
-- If relevance < 0.4, you MUST mark stance as `IRRELEVANT` or `CONTEXT`.
+- If relevance < 0.25, you MUST mark stance as `IRRELEVANT` or `CONTEXT`.
 - If content is [UNAVAILABLE], judge relevance based on title/snippet.
 
 ## Quote Requirements
@@ -354,20 +356,19 @@ Your task is to map each Search Source to its BEST matching Claim AND Assertion.
 
 
 def build_stance_matrix_prompt(*, claims_lite: list[dict], sources_lite: list[dict]) -> str:
-    """Build prompt body for Evidence Matrix (stance clustering).
+    """Build prompt body for Evidence Matrix (stance clustering). Static prefix then --- DATA --- (cache-friendly).
 
     Contract:
     - Pure formatting: no logic, no filtering.
     - Caller provides claims_lite and sources_lite (already sanitized/capped).
     """
-    return (
-        "Map each source to the best matching claim and extract a direct quote when possible.\n\n"
-        "Claims:\n"
-        f"{json.dumps(claims_lite or [], indent=2, ensure_ascii=False)}\n\n"
-        "Sources:\n"
-        f"{json.dumps(sources_lite or [], indent=2, ensure_ascii=False)}\n\n"
-        "Return JSON matching the requested schema."
+    static = "Map each source to the best matching claim and extract a direct quote when possible. Return JSON matching the requested schema.\n\n--- DATA ---\n\n"
+    data = json.dumps(
+        {"claims": claims_lite or [], "sources": sources_lite or []},
+        indent=2,
+        ensure_ascii=False,
     )
+    return static + data
 
 
 CLAIM_JUDGE_SCHEMA = {

@@ -80,17 +80,23 @@ For each claim, provide orchestration metadata:
    "в інтерв'ю", "said", "told", "announced", "according to", "recalled"
    → DEFAULT to verification_target="attribution", NOT "reality"!
 
-2. **claim_role** (STRICT LIMITS):
-   - **"thesis"**: Main thesis or conclusion. (Use sparingly for the central points).
-   - **"support"**: Evidence supporting a thesis claim.
-   - **"background"**: Background context (explain-only).
+2. **claim_role** (STRICT LIMITS — read carefully!):
+   - **"thesis"**: Main thesis or conclusion of the article. MAX 1-2 per article!
+   - **"support"**: Supporting evidence or detail for a thesis claim. MOST claims should be this.
+   - **"background"**: Background context, definitions, general knowledge (explain-only, NO search needed).
+   - **"context"**: Surrounding information that is NOT a verifiable claim (explain-only, NO search needed).
+   - **"attribution"**: Direct quote or paraphrase attributed to a person/source.
    - **"example"**: Illustrative example for another claim.
-   - **"hedge"**: Qualified/uncertain statement ("may", "might").
+   - **"hedge"**: Qualified/uncertain statement ("may", "might", "possibly").
    - **"counterclaim"**: Opposing or rebuttal claim.
-   
-   ⚠️ ROLE DISTRIBUTION:
-   Prioritize "thesis" for the central arguments. Use "support" for the specific evidence backing them.
-   If EVERYTHING is a "thesis", you are doing it WRONG!
+   - **"definition"**: Definition or explanation of a term (explain-only, NO search needed).
+
+   ⚠️ CRITICAL ROLE DISTRIBUTION RULES:
+   - NEVER use "core" — use "thesis" or "support" instead.
+   - An article with 10+ claims should have: 1-2 "thesis", 4-6 "support", 1-3 "background"/"context"/"definition".
+   - If more than 30% of claims are "thesis", you are doing it WRONG!
+   - Background facts, general knowledge, and definitions → "background" or "definition" (saves search budget).
+   - Specific verifiable facts → "support" (gets searched and verified).
 
 3. **search_locale_plan**:
    - primary: Main search language ("en" for science, article language for local news)
@@ -133,10 +139,9 @@ For each **FACTUAL** claim, REASON about:
    - Scientific facts → Search in ENGLISH
    - Local news → Search in LOCAL language ({lang_name})
 
-4. **Search Method Selection**:
+4. **Search Method Selection** (only these two; search API does not support "academic"):
    - **"news"**: Recent events (last 30 days).
-   - **"general_search"**: Evergreen facts, medical advice, history.
-   - **"academic"**: specialized studies.
+   - **"general_search"**: Evergreen facts, medical advice, history, scientific/academic content.
 
 ## STEP 3: GENERATE QUERY CANDIDATES
 Generate 2-3 query candidates for each **FACTUAL** claim.
@@ -412,7 +417,8 @@ def build_claim_strategist_prompt(text_excerpt: str) -> str:
    - Separate compound sentences into individual atomic claims.
 3. For each claim, provide the full metadata as defined in the system instructions.
 
-ARTICLE:
+--- ARTICLE ---
+
 {text_excerpt}
 
 Return the result in JSON format.
@@ -471,19 +477,16 @@ Time zone references are NOT location claims!
         {{
           "key": "event.time",
           "value": "03:00",
-          "value_raw": "03:00 (за Києвом)",
           "dimension": "FACT"
         }},
         {{
           "key": "event.time_reference",
           "value": "Kyiv time",
-          "value_raw": "(за Києвом)",
           "dimension": "CONTEXT"
         }},
         {{
           "key": "event.location.city",
           "value": "Miami",
-          "value_raw": "in Miami",
           "dimension": "FACT"
         }}
       ],
@@ -534,9 +537,7 @@ Time zone references are NOT location claims!
 ## RULES
 
 1. **Extract only explicit claims** - don't infer unstated facts
-2. **Mark inferred fields** - if you infer something, set `is_inferred: true`
-3. **Preserve raw text** - store original excerpt in `value_raw`
-4. **Simple facts are valid** - single FACT assertion is fine for simple claims
+2. **Simple facts are valid** - single FACT assertion is fine for simple claims
 5. **Language**: Generate in {lang_name} for text/normalized_text, English for queries
 
 You MUST respond in valid JSON.
@@ -549,7 +550,8 @@ For each claim, identify FACT assertions (verifiable) and CONTEXT assertions (in
 
 CRITICAL: Time zone references like "(в Україні)", "(за Києвом)" are CONTEXT, not location!
 
-ARTICLE:
+--- ARTICLE ---
+
 {text_excerpt}
 
 Return structured ClaimUnits in JSON format.
@@ -653,7 +655,8 @@ If you cannot provide entity + time anchors, do NOT emit the claim.
 Extract ALL important verifiable claims, but ONLY those that pass the verifiability contract.
 It is better to extract 3 high-quality verifiable claims than 10 weak/vague claims.
 
-ARTICLE:
+--- ARTICLE ---
+
 {text_excerpt}
 
 Return JSON with list of verifiable claims only (or empty array if none found).
@@ -665,9 +668,8 @@ def build_retrieval_planning_prompt(
     article_context_sm: str,
     lang_name: str,
 ) -> str:
-    # article_context_sm should be a smaller/summarized version or just the full chunk if it fits.
-    # We will use the full chunk for now as we want deep context.
-    return f"""**CRITICAL OUTPUT RULES:**
+    # Prompt structure: static prefix (cache-friendly) then --- INPUT --- with claim + article.
+    static = f"""**CRITICAL OUTPUT RULES:**
 1. Output ONLY a single JSON object with retrieval-planning fields.
 2. Do NOT wrap in {{"claims": [...]}} or {{"article_intent": ...}}.
 3. Do NOT include "text" or "normalized_text" fields - those are already known.
@@ -675,17 +677,12 @@ def build_retrieval_planning_prompt(
 
 You are planning retrieval metadata for ONE specific claim that was already extracted.
 
-CLAIM TO PLAN: "{claim_text}"
-
-ARTICLE CONTEXT:
-{article_context_sm}
-
 **CRITICAL: search_queries FORMAT REQUIREMENTS:**
 - MUST be a non-empty array with 1-5 keyword queries (STRICTLY LIMITED to TOP 5)
 - Each query: 2-8 words, MAX 80 characters
 - Format: keyword phrases ONLY (NOT full sentences)
 - NO trailing periods or punctuation
-- Prefer "news" as search_method unless content is evergreen/academic
+- Prefer "news" for recent events; use "general_search" for evergreen or scientific content
 
 **GOOD search_queries examples:**
 - ["Ukraine military offensive Kherson", "Zelenskyy statement troops"]
@@ -701,7 +698,7 @@ ARTICLE CONTEXT:
 - claim_category: "FACTUAL" | "OPINION" | "SATIRE" | "HYPERBOLIC"
 - harm_potential: 1-5 (1=low, 5=critical)
 - verification_target: "reality" | "attribution" | "existence" | "none"
-- claim_role: "core" | "thesis" | "support" | "background" | "context" | "meta" | "attribution" | "aggregated" | "subclaim" | "example" | "hedge" | "counterclaim" | "definition" | "forecast"
+- claim_role: "thesis" | "support" | "background" | "context" | "attribution" | "example" | "hedge" | "counterclaim" | "definition" | "forecast" (NEVER use "core" — use "thesis" or "support" instead)
 - satire_likelihood: 0.0-1.0
 - importance: 0.0-1.0
 - check_worthiness: 0.0-1.0
@@ -710,14 +707,19 @@ ARTICLE CONTEXT:
 - retrieval_policy: {{"channels_allowed": [...]}} where ONLY these values are allowed: "authoritative", "reputable_news", "local_media", "social", "low_reliability_web" (NOT "academic"!)
 - metadata_confidence: "low" | "medium" | "high"
 - query_candidates: [{{"text": "...", "role": "CORE", "score": 1.0}}]
-- search_method: "news" | "general_search" | "academic" (DEFAULT to "news" for recent events)
+- search_method: "news" | "general_search" only (DEFAULT "news" for recent events; use "general_search" for scientific/evergreen content)
 - search_queries: ["keyword query 1", "keyword query 2"] (REQUIRED, non-empty, 2-8 words each)
 - evidence_req: {{"needs_primary": true/false, "needs_2_independent": true/false}}
 - evidence_need: "empirical_study" | "guideline" | "official_stats" | "expert_opinion" | "anecdotal" | "news_report" | "definition" | "unknown"
 - check_oracle: true/false
 
-Output the JSON object now (no markdown, no wrapper):
+Output the JSON object now (no markdown, no wrapper).
+
+--- INPUT ---
+
+CLAIM TO PLAN:
 """
+    return static + claim_text + "\n\nARTICLE CONTEXT:\n" + article_context_sm
 
 
 def build_metadata_enrichment_prompt(
@@ -731,8 +733,6 @@ def build_metadata_enrichment_prompt(
     return build_retrieval_planning_prompt(
         claim_text=claim_text,
         article_context_sm=article_context_sm,
-        intents_str=intents_str,
-        topics_str=topics_str,
         lang_name=lang_name,
     )
 
@@ -841,7 +841,8 @@ For EVERY item you extract, include:
 4. **Numbers → Measurements**: ANY numeric value should create a measurement
 5. **Speeches → Quotes**: ANY attributed statement should create a quote
 
-ARTICLE:
+--- ARTICLE ---
+
 {text_excerpt}
 
 Return JSON with all extracted skeleton items (empty arrays are OK for unused categories).

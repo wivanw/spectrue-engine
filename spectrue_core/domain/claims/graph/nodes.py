@@ -57,10 +57,17 @@ class ClaimNode:
         text = claim.get("normalized_text") or claim.get("text") or ""
         text_hash = hashlib.sha256(text.lower().encode()).hexdigest()[:16]
 
+        # Only trust explicit type if LLM returned something other than default "core"
+        explicit_type = claim.get("type")
+        if explicit_type and explicit_type != "core":
+            claim_type = explicit_type
+        else:
+            claim_type = _infer_claim_type(claim)
+
         return cls(
             claim_id=claim.get("id") or f"c{index + 1}",
             text=text,
-            claim_type=claim.get("type", "core"),
+            claim_type=claim_type,
             section_id=claim.get("section_id", "main"),
             anchor=text[:50] if text else "",
             importance=float(claim.get("importance", 0.5)),
@@ -68,3 +75,55 @@ class ClaimNode:
             harm_potential=int(claim.get("harm_potential", 1)),
             text_hash=text_hash,
         )
+
+
+# Mapping from claim_role → claim_type for 3D visualization shapes
+_ROLE_TO_TYPE: dict[str, str] = {
+    "core": "core",
+    "thesis": "core",
+    "target": "core",
+    "attribution": "attribution",
+    "aggregated": "attribution",
+    "support": "sidefact",
+    "subclaim": "sidefact",
+    "example": "sidefact",
+    "context": "sidefact",
+    "background": "sidefact",
+    "meta": "sidefact",
+    "hedge": "sidefact",
+}
+
+
+def _infer_claim_type(claim: dict) -> str:
+    """Infer claim_type from claim_role + heuristics when 'type' is not set by LLM."""
+    import re
+
+    # 1. Derive from claim_role if available (check multiple locations)
+    role = str(
+        claim.get("claim_role")
+        or claim.get("role")
+        or (claim.get("metadata") or {}).get("claim_role")
+        or ""
+    ).lower().strip()
+    base_type = _ROLE_TO_TYPE.get(role, "core")
+
+    # 2. Override with content heuristics
+    text = str(claim.get("normalized_text") or claim.get("text") or "")
+
+    # Very short text = likely noise/garbage, not a real claim
+    if len(text) < 30:
+        return "sidefact"
+
+    # Timeline: has time_anchor or temporal keywords
+    if claim.get("time_anchor"):
+        return "timeline"
+    if re.search(r"\b\d{4}\b", text):  # year like 2024
+        return "timeline"
+
+    # Numeric: has numbers with units or percentages
+    if re.search(r"\b\d+[\.,]?\d*\s*[%$€£₴]", text):
+        return "numeric"
+    if re.search(r"\b\d+[\.,]\d+\b", text) and re.search(r"(?:млн|тис|billion|million|thousand|percent)", text, re.IGNORECASE):
+        return "numeric"
+
+    return base_type

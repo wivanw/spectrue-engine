@@ -65,6 +65,18 @@ class ClaimAuditSkill:
         """Fill in missing fields with safe defaults to avoid validation crashes."""
         out = dict(response or {})
         
+        # 0. Repair broken keys from LLM (e.g., "specif icity" -> "specificity")
+        key_repairs = {
+            "specif icity": "specificity",
+            "uncertain ty": "uncertainty",
+            "assertion_stren gth": "assertion_strength",
+            "audit_confid ence": "audit_confidence",
+            "truth_condit ions": "truth_conditions",
+        }
+        for broken, fixed in key_repairs.items():
+            if broken in out and fixed not in out:
+                out[fixed] = out.pop(broken)
+
         # 1. Identity
         if not out.get("claim_id"):
             out["claim_id"] = claim_id

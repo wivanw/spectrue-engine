@@ -82,6 +82,13 @@ async def build_claim_graph(
     enriched_count = 0
     high_tension_count = 0
     if graph_result and not graph_result.disabled:
+        pre_meta = getattr(graph_result, "pre_meta", None) or {}
+        for claim in claims:
+            claim_id = claim.get("id")
+            if claim_id and claim_id in pre_meta:
+                meta = pre_meta[claim_id]
+                claim["graph_uncertainty"] = max(0.0, min(1.0, float(meta.uncertainty_proxy)))
+
         cfg = runtime_config.claim_graph
 
         if cfg.structural_prioritization_enabled:

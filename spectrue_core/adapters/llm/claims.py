@@ -362,7 +362,23 @@ class ClaimExtractionSkill(BaseSkill):
             # Dedupe and Sort
             final_claims = self._dedupe_claims(enriched_claims)
             final_claims.sort(key=lambda x: x.get("harm_potential", 1), reverse=True)
-            
+
+            # Cap claims by text length: 1 claim per 500 chars, min 3, max max_claims
+            text_based_cap = max(3, min(max_claims, len(text) // 500))
+            if len(final_claims) > text_based_cap:
+                # Keep top-N by importance (secondary sort, harm is primary)
+                final_claims.sort(
+                    key=lambda x: (x.get("harm_potential", 1), float(x.get("importance", 0.5))),
+                    reverse=True,
+                )
+                dropped = len(final_claims) - text_based_cap
+                final_claims = final_claims[:text_based_cap]
+                Trace.event("claim_extraction.text_length_cap", {
+                    "text_len": len(text),
+                    "cap": text_based_cap,
+                    "dropped": dropped,
+                })
+
             # Tracing
             self._trace_extracted_claims(final_claims)
             self._trace_metadata_distribution(final_claims)
@@ -440,10 +456,10 @@ class ClaimExtractionSkill(BaseSkill):
         # We inject system instructions separately to ensure they are never empty.
         instructions = DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS
         
-        # Trace guard: log if we're using fallback (this should always be the case now)
+        # Trace guard: log that instructions were injected as part of the normal flow.
         Trace.event("claim_extraction.guard.instructions_injected", {
             "instructions_len": len(instructions),
-            "fallback_used": True,  # We always inject now as a safety measure
+            "is_proactive_injection": True, 
         })
         
         # Define primary and fallback calls

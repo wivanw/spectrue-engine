@@ -10,12 +10,12 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 @dataclass
 class FreeSubsidyPool:
     available_balance_sc: Decimal = Decimal("0.0")
-    last_updated: datetime = field(default_factory=datetime.utcnow)
+    last_updated: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
     # Key: YYYY-MM-DD string, Value: Amount to be released
     locked_buckets: Dict[str, Decimal] = field(default_factory=dict)
 
@@ -23,7 +23,7 @@ class FreeSubsidyPool:
     def from_dict(cls, data: Dict[str, Any]) -> "FreeSubsidyPool":
         return cls(
             available_balance_sc=Decimal(str(data.get("available_balance_sc", 0.0))),
-            last_updated=data.get("last_updated", datetime.utcnow()),
+            last_updated=data.get("last_updated", datetime.now(tz=timezone.utc)),
             locked_buckets={k: Decimal(str(v)) for k, v in data.get("locked_buckets", {}).items()}
         )
 

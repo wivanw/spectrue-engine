@@ -16,7 +16,7 @@ Burn Logic:
 
 This protects purchased credits from unfair burn.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from firebase_admin import firestore
 
@@ -35,7 +35,7 @@ def burn_inactive_users(db, days_threshold: int = 365) -> int:
         Users with active paid plans are NEVER burned.
         For users with expired plans, the threshold starts from plan_expires_at.
     """
-    now = datetime.utcnow()
+    now = datetime.now(tz=timezone.utc)
     cutoff = now - timedelta(days=days_threshold)
     users_ref = db.collection("users")
 

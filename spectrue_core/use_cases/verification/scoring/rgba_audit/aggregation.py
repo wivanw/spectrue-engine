@@ -13,8 +13,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from spectrue_core.schema.rgba_audit import (
     ClaimAudit,
@@ -184,24 +187,29 @@ def aggregate_rgba_audit(
     claim_audits_list = _coerce_claim_audits(list(claim_audits))
     evidence_audits_list = _coerce_evidence_audits(list(evidence_audits))
 
+    # Initialize existence flags for fail-safe logic
+    has_claim_audits = len(claim_audits_list) > 0
+    has_evidence_audits = len(evidence_audits_list) > 0
+
+    # Cluster sources for redundancy check
+    clusters = cluster_sources(sources, config)
+    cluster_sizes = {c.cluster_id: c.size for c in clusters}
+
     # Robust check for errors: only TRUE if there's actually a non-empty error dict
-    has_audit_errors = any(bool(v) for v in audit_errors.values()) if audit_errors else False
-    has_claim_audits = bool(claim_audits_list)
-    has_evidence_audits = bool(evidence_audits_list)
+    # Calculate error rates for fail-safe logic
+    claim_errors = audit_errors.get("claim_audit", {}) if audit_errors else {}
+    evidence_errors = audit_errors.get("evidence_audit", {}) if audit_errors else {}
+    
+    total_claims_expected = len(claim_audits_list) + len(claim_errors)
+    claim_error_rate = len(claim_errors) / max(total_claims_expected, 1)
+    
+    total_evidence_expected = len(evidence_audits_list) + len(evidence_errors)
+    evidence_error_rate = len(evidence_errors) / max(total_evidence_expected, 1)
 
-    clusters = cluster_sources(sources, config) if sources else []
-    cluster_sizes: dict[str, int] = {}
-    for cluster in clusters:
-        for sid in cluster.source_ids:
-            cluster_sizes[str(sid)] = cluster.size
-
-    Trace.event(
-        "rgba_audit.clustering.summary",
-        {
-            "cluster_count": len(clusters),
-            "cluster_sizes": [cluster.size for cluster in clusters],
-        },
-    )
+    # Threshold for critical failure: > 50% errors OR zero successes when items were expected
+    is_claim_audit_broken = (claim_error_rate >= 0.5) or (total_claims_expected > 0 and not has_claim_audits)
+    is_evidence_audit_broken = (evidence_error_rate >= 0.5) or (total_evidence_expected > 0 and not has_evidence_audits)
+    is_critical_error = is_claim_audit_broken or is_evidence_audit_broken
 
     sources_by_id = {str(src.get("source_id")): src for src in sources if isinstance(src, dict)}
 
@@ -264,12 +272,13 @@ def aggregate_rgba_audit(
         "refute_mass": round(refute_mass, 4),
         "evidence_count": len(evidence_audits_list),
         "cluster_count": len(clusters),
+        "error_rate": round(evidence_error_rate, 4),
     }
     g_reasons: list[str] = []
 
-    if has_audit_errors:
+    if is_critical_error:
         g_status = RGBAStatus.PIPELINE_ERROR
-        g_reasons.append("audit_error")
+        g_reasons.append("critical_audit_failure")
         g_value = None
         g_confidence = None
     elif not has_evidence_audits or evidence_strength_total <= 0:
@@ -288,7 +297,8 @@ def aggregate_rgba_audit(
     else:
         g_status = RGBAStatus.OK
         g_value = support_mass / max(evidence_strength_total, 1e-6)
-        g_confidence = min(1.0, evidence_strength_total)
+        # Penalize confidence slightly by error rate if some audits failed
+        g_confidence = min(1.0, evidence_strength_total) * (1.0 - evidence_error_rate)
 
     g_metric = _build_metric(
         status=g_status,
@@ -301,19 +311,21 @@ def aggregate_rgba_audit(
     b_trace = {
         "assertion_strength_avg": 0.0,
         "evidence_strength": round(evidence_strength_total, 4),
+        "error_rate": round(claim_error_rate, 4),
     }
     b_reasons: list[str] = []
 
-    if has_audit_errors:
+    if is_critical_error:
         b_metric = _build_metric(
             status=RGBAStatus.PIPELINE_ERROR,
-            reasons=["audit_error"],
+            reasons=["critical_audit_failure"],
             trace=b_trace,
         )
     elif not has_claim_audits:
+        # Should be caught by is_critical_error if total_claims_expected > 0
         b_metric = _build_metric(
-            status=RGBAStatus.PIPELINE_ERROR,
-            reasons=["missing_claim_audits"],
+            status=RGBAStatus.INSUFFICIENT_EVIDENCE,
+            reasons=["no_claims_to_audit"],
             trace=b_trace,
         )
     elif not has_evidence_audits or evidence_strength_total <= 0:
@@ -333,30 +345,41 @@ def aggregate_rgba_audit(
         b_metric = _build_metric(
             status=RGBAStatus.OK,
             value=b_value,
-            confidence=min(1.0, evidence_strength_total),
+            confidence=min(1.0, evidence_strength_total) * (1.0 - claim_error_rate),
             reasons=b_reasons,
             trace=b_trace,
         )
 
     a_trace = {"trace_event_count": 0}
-    if not trace_context:
+    # Check both trace_context and audit_trace_context (some steps use different naming)
+    # Actually, the step passes trace_context.
+    if not trace_context and not audit_errors.get("audit_trace"):
         a_metric = _build_metric(
             status=RGBAStatus.PIPELINE_ERROR,
             reasons=["missing_trace"],
             trace=a_trace,
         )
+        Trace.event("rgba_audit.pipeline_error", {
+            "channel": "A",
+            "reason": "missing_trace",
+        })
+        logger.warning("[RGBA] A-channel PIPELINE_ERROR: missing trace_context and audit_trace")
     else:
-        event_count = len(trace_context.get("events", [])) if isinstance(trace_context, dict) else 0
+        # Calculate event count from whichever context is available
+        event_count = 0
+        if isinstance(trace_context, dict):
+            event_count = len(trace_context.get("events", []))
+        
         a_trace["trace_event_count"] = event_count
         a_metric = _build_metric(
             status=RGBAStatus.OK,
-            value=1.0 if event_count > 0 else 0.7,
+            value=1.0 if event_count > 10 else (0.5 + 0.05 * event_count), # More granular A
             confidence=1.0,
             reasons=[],
             trace=a_trace,
         )
 
-    r_trace = {"risk_facet_count": 0}
+    r_trace = {"risk_facet_count": 0, "error_rate": round(claim_error_rate, 4)}
     if not has_claim_audits:
         r_metric = _build_metric(
             status=RGBAStatus.INSUFFICIENT_EVIDENCE,
@@ -369,11 +392,12 @@ def aggregate_rgba_audit(
         avg_confidence = sum(audit.audit_confidence for audit in claim_audits_list) / max(
             len(claim_audits_list), 1
         )
+        # If we have some audits, we can still estimate risk
         r_value = min(1.0, config.risk_weight * (0.1 + 0.1 * risk_count))
         r_metric = _build_metric(
             status=RGBAStatus.OK,
             value=r_value,
-            confidence=avg_confidence,
+            confidence=avg_confidence * (1.0 - claim_error_rate),
             reasons=[],
             trace=r_trace,
         )
@@ -389,6 +413,15 @@ def aggregate_rgba_audit(
     if audit_errors:
         summary_trace["audit_errors"] = _sanitize_payload(audit_errors)
 
+    pipeline_errors: list[str] = []
+    for channel_name, metric in [("R", r_metric), ("G", g_metric), ("B", b_metric), ("A", a_metric)]:
+        if metric.status == RGBAStatus.PIPELINE_ERROR:
+            pipeline_errors.append(f"{channel_name}: {', '.join(metric.reasons)}")
+
+    if pipeline_errors:
+        summary_trace["pipeline_errors"] = pipeline_errors
+        logger.warning("[RGBA] Pipeline errors in channels: %s", pipeline_errors)
+
     Trace.event(
         "rgba_audit.run_summary",
         {
@@ -400,6 +433,7 @@ def aggregate_rgba_audit(
             },
             "claim_count": len(claim_audits_list),
             "evidence_count": len(evidence_audits_list),
+            "pipeline_errors": pipeline_errors,
         },
     )
 

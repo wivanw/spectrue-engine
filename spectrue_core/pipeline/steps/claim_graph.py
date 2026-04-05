@@ -57,8 +57,12 @@ class ClaimGraphStep:
                 
             # Adaptive execution gate (T031 + T033 + V3.1)
             # If the claims fit within top_k, graph ranking adds zero value.
+            # HOWEVER, for DEEP_V2 we always build the graph to preserve 3D tree metadata/edges.
+            from spectrue_core.pipeline.mode import AnalysisMode
+            is_deep_v2 = ctx.mode.api_analysis_mode == AnalysisMode.DEEP_V2
+            
             cfg = getattr(self.runtime_config, "claim_graph", None)
-            if cfg:
+            if cfg and not is_deep_v2:
                 top_k = getattr(cfg, "top_k", 7)
                 budget = getattr(cfg, "selection_budget", -1.0)
                 

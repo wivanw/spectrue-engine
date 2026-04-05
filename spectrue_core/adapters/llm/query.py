@@ -186,18 +186,16 @@ You MUST respond in valid JSON.
 {UNIVERSAL_METHODOLOGY_APPENDIX}
 """
 
-        prompt = f"""Generate web search queries for fact-checking.
+        # Prompt caching: static prefix then --- DATA --- then claim/context
+        prompt = """Generate web search queries for fact-checking. Return the result in JSON format.
+
+--- DATA ---
 
 TARGET_CLAIM:
-{full_statement}
+""" + full_statement + """
 
 CONTEXT:
-{full_context}
-"""
-
-        # Fix for OpenAI 400 "Response input messages must contain the word 'json'"
-        # REQUIRED: The word "JSON" must appear in the INPUT message, not just system instructions.
-        prompt += "\n\nReturn the result in JSON format."
+""" + full_context
 
         try:
             result = await self.llm_client.call_json(
@@ -214,6 +212,11 @@ CONTEXT:
             raw_queries = result.get("queries", [])
             if not raw_queries:
                  raise ValueError("Empty queries")
+
+            # Preserve topics from LLM for downstream domain filtering
+            self.last_query_meta = {
+                "topics": result.get("topics", []),
+            }
 
             # Validation (word count, etc.) can be added here
             sanitized_queries = [_sanitize_query(q) for q in raw_queries[:2]]

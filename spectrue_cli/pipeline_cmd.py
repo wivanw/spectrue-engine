@@ -247,8 +247,9 @@ async def _execute_run(args: argparse.Namespace, claims: list) -> int:
         lang = getattr(args, "lang", None) or "en"
 
         print(f"\n⚡ Running pipeline (mode={mode}, lang={lang})...")
-        print(f"   max_claim_concurrency={os.environ.get('SPECTRUE_MAX_CLAIM_CONCURRENCY', '4')}")
-        print(f"   max_doc_concurrency={os.environ.get('SPECTRUE_MAX_DOC_CONCURRENCY', '4')}")
+        print(f"   max_claim_concurrency={os.environ.get('SPECTRUE_MAX_CLAIM_CONCURRENCY', '6')}")
+        print(f"   max_doc_concurrency={os.environ.get('SPECTRUE_MAX_DOC_CONCURRENCY', '6')}")
+        print(f"   OPENAI_CONCURRENCY (LLM)={os.environ.get('OPENAI_CONCURRENCY', '8')}")
 
         result = await engine.analyze_text(
             text=input_text,
@@ -378,13 +379,13 @@ def create_parser() -> argparse.ArgumentParser:
         "--max-claim-concurrency",
         type=int,
         default=None,
-        help="Max parallel claim pipelines (default: 4, from SPECTRUE_MAX_CLAIM_CONCURRENCY)",
+        help="Max parallel claim pipelines (default: 6, from SPECTRUE_MAX_CLAIM_CONCURRENCY)",
     )
     run_parser.add_argument(
         "--max-doc-concurrency",
         type=int,
         default=None,
-        help="Max parallel document summarizations (default: 4, from SPECTRUE_MAX_DOC_CONCURRENCY)",
+        help="Max parallel document summarizations (default: 6, from SPECTRUE_MAX_DOC_CONCURRENCY). Also: OPENAI_CONCURRENCY (LLM global), TAVILY_CONCURRENCY (fetch).",
     )
     run_parser.add_argument(
         "--mode",

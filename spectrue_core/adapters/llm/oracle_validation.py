@@ -219,8 +219,7 @@ class OracleValidationSkill(BaseSkill):
             return self._empty_batch_result(f"LLM error: {e}")
 
     def _build_batch_prompt(self, user_claim: str, candidates: list[dict]) -> str:
-        """Build batch validation prompt with all candidates."""
-        # Format candidates for prompt
+        """Build batch validation prompt. Static prefix then --- DATA --- (cache-friendly)."""
         candidates_text = ""
         for i, c in enumerate(candidates):
             candidates_text += f"""
@@ -229,14 +228,7 @@ class OracleValidationSkill(BaseSkill):
     Publisher: {c.get('publisher', 'Unknown')}
     Summary: {c.get('title', '')[:200]}
 """
-
-        return f"""Analyze these fact-check candidates against the User's Claim.
-
-## User's Claim
-"{user_claim[:1500]}"
-
-## Fact-Check Candidates from Database
-{candidates_text}
+        static = """Analyze these fact-check candidates against the User's Claim.
 
 ## Task
 Find the BEST match (if any) that addresses the User's Claim.
@@ -272,14 +264,25 @@ IMPORTANT: Rating nuances matter!
 - "True" → verified_score: 0.90
 
 Output JSON:
-{{
-    "best_index": 0-{len(candidates)-1} or -1 if no match,
+{
+    "best_index": 0 to N-1 or -1 if no match,
     "relevance_score": 0.0-1.0,
     "status": "CONFIRMED" | "REFUTED" | "MIXED",
     "verified_score": 0.0-1.0,
     "danger_score": 0.0-1.0,
     "reasoning": "Brief explanation"
-}}"""
+}
+
+--- DATA ---
+
+"""
+        dynamic = f"""## User's Claim
+"{user_claim[:1500]}"
+
+## Fact-Check Candidates from Database
+{candidates_text}
+"""
+        return static + dynamic
 
     def _get_batch_instructions(self) -> str:
         return """You are a strict fact-check relevance analyzer.
@@ -299,23 +302,15 @@ Compare candidates AGAINST EACH OTHER to pick the most relevant one."""
         }
 
     def _build_prompt(
-        self, 
-        user_claim: str, 
-        oracle_claim: str, 
+        self,
+        user_claim: str,
+        oracle_claim: str,
         oracle_rating: str,
         oracle_summary: str
     ) -> str:
-        """Build the validation prompt with strict semantic matching requirements."""
+        """Build the validation prompt. Static prefix then --- DATA --- (cache-friendly)."""
         summary_section = f'\nFact-Check Summary: "{oracle_summary[:500]}"' if oracle_summary else ""
-
-        return f"""Compare the User's Claim with the Fact-Check Result.
-
-## User's Claim
-"{user_claim[:1500]}"
-
-## Fact-Check from Database
-Claim Reviewed: "{oracle_claim[:1000]}"
-Rating: "{oracle_rating}"{summary_section}
+        static = """Compare the User's Claim with the Fact-Check Result.
 
 ## Task
 Determine how well the Fact-Check addresses the User's Claim.
@@ -351,13 +346,25 @@ IMPORTANT: Rating nuances matter!
 - "True" → verified_score: 0.90
 
 Output JSON:
-{{
+{
     "relevance_score": 0.0-1.0,
     "status": "CONFIRMED" | "REFUTED" | "MIXED",
     "verified_score": 0.0-1.0,
     "danger_score": 0.0-1.0,
     "reasoning": "Brief explanation of why this score"
-}}"""
+}
+
+--- DATA ---
+
+"""
+        dynamic = f"""## User's Claim
+"{user_claim[:1500]}"
+
+## Fact-Check from Database
+Claim Reviewed: "{oracle_claim[:1000]}"
+Rating: "{oracle_rating}"{summary_section}
+"""
+        return static + dynamic
 
     def _get_instructions(self) -> str:
         return """You are a strict relevance checker for fact-check results.

@@ -120,6 +120,22 @@ class TestMedicalRedaction:
         assert "500 грн" in result
         assert "10 абзаців" in result
 
+    def test_decimal_ranges_not_redacted(self):
+        """Decimal score ranges like 0.3-0.7 must NOT be redacted."""
+        text = 'Mixed verdict with 0.3-0.7'
+        result = _redact_medical(text)
+        assert "0.3-0.7" in result
+        assert "[REDACTED_MEDICAL]" not in result
+
+    def test_decimal_score_thresholds_not_redacted(self):
+        """Score thresholds in prompt instructions must NOT be redacted."""
+        text = "G MUST match verdict: Supported 0.7-1.0, Refuted 0.0-0.3, Mixed 0.3-0.7"
+        result = _redact_medical(text)
+        assert "0.7-1.0" in result
+        assert "0.0-0.3" in result
+        assert "0.3-0.7" in result
+        assert "[REDACTED_MEDICAL]" not in result
+
     def test_empty_string_handled(self):
         """Empty string should return empty string."""
         assert _redact_medical("") == ""

@@ -100,9 +100,11 @@ class ArticleCleanerSkill:
     def __init__(self, config: SpectrueConfig = None, llm_client: LLMClient = None):
         self.config = config
         self.runtime = (config.runtime if config else None) or EngineRuntimeConfig.load_from_env()
+        llm_conc = max(1, min(getattr(self.runtime.llm, "concurrency", 8), 64))
         self.llm_client = llm_client or LLMClient(
             openai_api_key=config.openai_api_key if config else None,
             default_timeout=float(self.runtime.llm.nano_timeout_sec),
+            max_concurrent_requests=llm_conc,
         )
 
     def _calculate_timeout(self, text_len: int) -> float:

@@ -48,6 +48,28 @@ from spectrue_core.pipeline.claims.claim_frame_builder import (
 from spectrue_core.pipeline.claims.execution_context import ClaimExecutionContext
 from spectrue_core.adapters.llm.evidence_summarizer import EvidenceSummarizerSkill
 
+# Report claim_type must be one of: core, numeric, timeline, attribution, sidefact
+_PREDICATE_TO_CLAIM_TYPE: dict[str, str] = {
+    "event": "timeline",
+    "policy": "timeline",
+    "fact": "core",
+    "definition": "core",
+    "existence": "core",
+    "property": "core",
+    "causal": "core",
+    "measurement": "numeric",
+    "ranking": "numeric",
+    "quote": "attribution",
+    "other": "sidefact",
+}
+
+
+def _claim_type_from_predicate(predicate_type: Any) -> str:
+    """Derive report claim_type from extraction predicate_type."""
+    if not predicate_type or not isinstance(predicate_type, str):
+        return "core"
+    return _PREDICATE_TO_CLAIM_TYPE.get(str(predicate_type).lower().strip(), "core")
+
 
 @dataclass
 class DeepClaimContext:
@@ -489,6 +511,82 @@ class AssembleDeepResultStep(Step):
                 clusters_summary = ctx.get_extra("clusters_summary")
                 if isinstance(clusters_summary, list):
                     deep_analysis_payload["clusters_summary"] = clusters_summary
+                # Serialize claim graph for report (compact: numeric enum codes)
+                graph_result = ctx.get_extra("graph_result")
+                claim_id_to_text = {
+                    r["claim_id"]: r.get("claim_text") or r.get("text") or ""
+                    for r in claim_results
+                }
+                claim_id_to_rgba = {
+                    r["claim_id"]: r["rgba"]
+                    for r in claim_results
+                    if r.get("rgba") is not None
+                }
+                claim_id_to_type: dict[str, str] = {}
+                def _audit_field(audit: Any, field: str) -> Any:
+                    """Extract field from audit (dict or dataclass)."""
+                    if isinstance(audit, dict):
+                        return audit.get(field)
+                    return getattr(audit, field, None)
+
+                audit_by_id: dict[str, Any] = {}
+                for a in ctx.get_extra("claim_audits") or []:
+                    aid = _audit_field(a, "claim_id")
+                    if aid:
+                        audit_by_id[str(aid)] = a
+
+                for i, c in enumerate(ctx.claims or []):
+                    cid = c.get("id") or c.get("claim_id") or f"c{i + 1}"
+                    explicit_type = c.get("type") or c.get("claim_type")
+                    if explicit_type and str(explicit_type).strip():
+                        claim_id_to_type[cid] = str(explicit_type).lower().strip()
+                    else:
+                        pred = None
+                        if cid in audit_by_id:
+                            pred = _audit_field(audit_by_id[cid], "predicate_type")
+                        if pred is None:
+                            pred = c.get("predicate_type")
+                        claim_id_to_type[cid] = _claim_type_from_predicate(pred)
+                if graph_result is not None and not getattr(graph_result, "disabled", True):
+                    from spectrue_core.domain.claims.graph.report_serializer import (
+                        serialize_graph_for_report,
+                    )
+                    deep_analysis_payload["claim_graph"] = serialize_graph_for_report(
+                        graph_result,
+                        claim_id_to_text,
+                        claim_id_to_rgba=claim_id_to_rgba,
+                        claim_id_to_type=claim_id_to_type,
+                    )
+                elif claim_results:
+                    # Fallback: minimal graph (nodes only) when ClaimGraphStep was skipped
+                    # so the 3D tree button and shared report tree still work
+                    from spectrue_core.domain.claims.graph.report_serializer import (
+                        _claim_type_to_code,
+                        fallback_edges_for_nodes,
+                    )
+                    nodes = []
+                    for i, r in enumerate(claim_results):
+                        cid = r.get("claim_id") or f"c{i + 1}"
+                        ct = claim_id_to_type.get(cid, "core")
+                        rgba = claim_id_to_rgba.get(cid)
+                        node: dict = {
+                            "claim_id": cid,
+                            "text": claim_id_to_text.get(cid, ""),
+                            "pre_meta": {},
+                            "post_meta": {},
+                            "centrality": 0.0,
+                            "is_key_claim": 1 if i == 0 else 0,
+                            "in_structural_weight": 0.0,
+                            "in_contradict_weight": 0.0,
+                            "claim_type": _claim_type_to_code(ct),
+                        }
+                        if rgba is not None and len(rgba) >= 4:
+                            node["rgba"] = [round(float(x), 4) for x in rgba[:4]]
+                        nodes.append(node)
+                    deep_analysis_payload["claim_graph"] = {
+                        "nodes": nodes,
+                        "edges": fallback_edges_for_nodes(nodes),
+                    }
 
             final_result = {
                 "analysis_mode": analysis_mode,

@@ -337,6 +337,14 @@ class WebSearchStep:
                 pipeline_ctx.set_stage(2)
 
                 async def _stage2_one(cid: str, claim: dict) -> tuple[str, list[str]]:
+                    # Skip escalation for sidefact claims — their lower
+                    # sufficiency threshold (0.70) means they reach
+                    # SUFFICIENT status faster, but skipping the
+                    # compute_sufficiency call entirely saves the overhead.
+                    ct = str(claim.get("type") or claim.get("claim_type") or "core")
+                    if ct == "sidefact":
+                        return cid, []
+
                     metadata = _metadata_dict(claim.get("metadata")) or _metadata_dict(claim)
                     s_value = compute_sufficiency(metadata)
                     s_min = float(metadata.get("S_min", SUFFICIENCY_P_THRESHOLD))

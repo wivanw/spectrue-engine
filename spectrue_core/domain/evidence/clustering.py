@@ -98,8 +98,8 @@ def merge_stance_passes(
         support_rank = _tier_rank(support_tier)
         refute_rank = _tier_rank(refute_tier)
 
-        support_has = (support.get("stance") == "support") and bool(support_quote)
-        refute_has = (refute.get("stance") == "refute") and bool(refute_quote)
+        support_has = (support.get("stance") == "support")
+        refute_has = (refute.get("stance") == "refute")
 
         if refute_has and refute_rank >= support_rank:
             merged_result = dict(refute)

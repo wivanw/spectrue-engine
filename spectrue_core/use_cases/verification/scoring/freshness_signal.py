@@ -17,13 +17,13 @@ def _extract_year(url: str, text: str | None = None) -> int | None:
     """Extract year from URL or text."""
     # Look for explicitly format like /2023/05/
     if url:
-        match = re.search(r'/(20[0-2][0-9])/', url)
+        match = re.search(r'/(20\d{2})/', url)
         if match:
             return int(match.group(1))
 
     # Look for four digits in text/snippet
     if text:
-        match = re.search(r'\b(20[0-2][0-9])\b', text)
+        match = re.search(r'\b(20\d{2})\b', text)
         if match:
             return int(match.group(1))
 

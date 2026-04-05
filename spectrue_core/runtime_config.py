@@ -128,11 +128,11 @@ class EngineDebugFlags:
 @dataclass(frozen=True)
 class EngineLLMConfig:
     timeout_sec: float = 90.0
-    concurrency: int = 6
+    concurrency: int = 8
     nano_timeout_sec: float = 90.0
     # Concurrency configuration for parallel processing
-    max_claim_concurrency: int = 4
-    max_doc_concurrency: int = 4
+    max_claim_concurrency: int = 6
+    max_doc_concurrency: int = 6
 
     # Responses API configuration
     cluster_timeout_sec: float = 120.0
@@ -373,7 +373,7 @@ class ClaimGraphConfig:
     # NOTE: enabled flag is REMOVED - ClaimGraph is always enabled
 
     # B-Stage parameters
-    k_sim: int = 10              # Top-K by embedding similarity
+    k_sim: int = 5               # Top-K by embedding similarity (was 10, reduced to limit edge count)
     max_nodes_for_full_pairwise: int = 50  # When to allow full pairwise MST
     edge_pos_gamma: float = 0.6   # Position prior for edge weights (exp decay)
 
@@ -435,7 +435,7 @@ class EngineRuntimeConfig:
     @staticmethod
     def load_from_env() -> "EngineRuntimeConfig":
         llm_timeout = _parse_float(os.getenv("OPENAI_TIMEOUT"), default=60.0, min_v=5.0, max_v=300.0)
-        llm_conc = _parse_int(os.getenv("OPENAI_CONCURRENCY"), default=6, min_v=1, max_v=16)
+        llm_conc = _parse_int(os.getenv("OPENAI_CONCURRENCY"), default=8, min_v=1, max_v=16)
 
         # Query generation (nano) should be tighter than general analysis.
         nano_timeout = _parse_float(os.getenv("SPECTRUE_NANO_TIMEOUT"), default=60.0, min_v=5.0, max_v=120.0)
@@ -605,8 +605,8 @@ class EngineRuntimeConfig:
         deepseek_base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip()
         deepseek_api_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
 
-        max_claim_conc = _parse_int(os.getenv("SPECTRUE_MAX_CLAIM_CONCURRENCY"), default=4, min_v=1, max_v=16)
-        max_doc_conc = _parse_int(os.getenv("SPECTRUE_MAX_DOC_CONCURRENCY"), default=4, min_v=1, max_v=16)
+        max_claim_conc = _parse_int(os.getenv("SPECTRUE_MAX_CLAIM_CONCURRENCY"), default=6, min_v=1, max_v=16)
+        max_doc_conc = _parse_int(os.getenv("SPECTRUE_MAX_DOC_CONCURRENCY"), default=6, min_v=1, max_v=16)
 
         deepseek_models_env = os.getenv("DEEPSEEK_MODEL_NAMES")
         if deepseek_models_env is None:

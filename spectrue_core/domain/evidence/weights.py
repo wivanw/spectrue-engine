@@ -7,11 +7,11 @@ from dataclasses import dataclass
 class StanceWeights:
     """Logistic regression weights for P(stance needed)."""
 
-    intercept: float = -1.5
+    intercept: float = -0.5
     unlabeled_ratio: float = 0.8
     low_tier_ratio: float = 0.5
     log_claims: float = 0.3
-    uncertainty: float = 1.2  # Weight for evidence uncertainty
+    uncertainty: float = 2.5  # Weight for evidence uncertainty
 
 
 @dataclass(frozen=True)

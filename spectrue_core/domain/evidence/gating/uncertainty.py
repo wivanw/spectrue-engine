@@ -99,7 +99,7 @@ def compute_beta_uncertainty(evidence_index: Any) -> float:
     return var / VAR_MAX
 
 
-def compute_delta_utility(uncertainty: float, base_utility: float = 0.05) -> float:
+def compute_delta_utility(uncertainty: float, base_utility: float = 0.15) -> float:
     """Compute expected utility improvement from running a step."""
     k = 0.15
     return base_utility + k * uncertainty

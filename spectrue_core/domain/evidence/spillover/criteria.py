@@ -53,6 +53,32 @@ def is_transfer_candidate(src: dict[str, Any]) -> bool:
     return False
 
 
+# Claim-type compatibility for spillover: prevents e.g. numeric data
+# spilling into attribution claims.  Derived from the 5-type taxonomy
+# (core, numeric, timeline, attribution, sidefact) where each type has
+# distinct evidence requirements.
+_SPILLOVER_COMPATIBLE: dict[str, frozenset[str]] = {
+    "core": frozenset({"core", "timeline", "sidefact"}),
+    "timeline": frozenset({"timeline", "core"}),
+    "numeric": frozenset({"numeric"}),
+    "attribution": frozenset({"attribution"}),
+    "sidefact": frozenset({"sidefact", "core"}),
+}
+
+
+def claim_type_compatible(
+    origin_claim: dict[str, Any],
+    target_claim: dict[str, Any],
+) -> bool:
+    """Return True if evidence from *origin_claim* may spill into *target_claim*."""
+    origin_type = str(origin_claim.get("type") or origin_claim.get("claim_type") or "core").lower()
+    target_type = str(target_claim.get("type") or target_claim.get("claim_type") or "core").lower()
+    allowed = _SPILLOVER_COMPATIBLE.get(target_type)
+    if allowed is None:
+        return True  # unknown type — permissive fallback
+    return origin_type in allowed
+
+
 def compatible_for_claim(src: dict[str, Any], fact_keys: set[str], context_keys: set[str]) -> bool:
     """
     Deterministic compatibility using:

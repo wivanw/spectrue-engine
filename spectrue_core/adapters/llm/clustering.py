@@ -7,6 +7,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
+import asyncio
 import logging
 from typing import Union
 
@@ -93,17 +94,18 @@ class ClusteringSkill(BaseSkill):
         cluster_timeout = float(getattr(self.runtime.llm, "cluster_timeout_sec", 35.0) or 35.0)
         cluster_timeout = max(35.0, cluster_timeout)
 
-        async def run_pass(pass_type: str, trace_suffix: str) -> list[SearchResult]:
-            all_matrix_rows = []
+        MAX_CONCURRENT_STANCE = 3
 
-            # Process in batches
-            for i in range(0, num_sources, STANCE_BATCH_SIZE):
+        async def run_pass(pass_type: str, trace_suffix: str) -> list[SearchResult]:
+            sem = asyncio.Semaphore(MAX_CONCURRENT_STANCE)
+
+            async def process_batch(i: int) -> list[dict]:
                 raw_batch = sources_lite[i : i + STANCE_BATCH_SIZE]
                 batch_sources = [
                     {**src, "index": local_idx}
                     for local_idx, src in enumerate(raw_batch)
                 ]
-                batch_suffix = f"{trace_suffix}_b{i // STANCE_BATCH_SIZE}"
+                batch_suffix_local = f"{trace_suffix}_b{i // STANCE_BATCH_SIZE}"
 
                 prompt = build_stance_matrix_prompt(claims_lite=claims_lite, sources_lite=batch_sources)
                 batch_cache_key = build_ev_mat_cache_key(claims_lite=claims_lite, sources_lite=batch_sources)
@@ -113,27 +115,39 @@ class ClusteringSkill(BaseSkill):
                     pass_type=pass_type,
                 )
 
-                try:
-                    result = await self.llm_client.call_json(
-                        model=self.runtime.llm.model_clustering_stance,
-                        input=prompt,
-                        instructions=instructions,
-                        reasoning_effort="low",
-                        cache_key=f"{batch_cache_key}_{batch_suffix}",
-                        timeout=cluster_timeout,
-                        trace_kind="stance_clustering",
-                        temperature=0,  # Deterministic JSON output
-                    )
-                    batch_matrix = result.get("matrix", [])
-                    # Add to total matrix
-                    if batch_matrix:
-                        for row in batch_matrix:
-                            if isinstance(row, dict) and isinstance(row.get("source_index"), int):
-                                row["source_index"] = row["source_index"] + i
-                        all_matrix_rows.extend(batch_matrix)
-                except Exception as e:
-                    logger.warning("[Clustering] Batch %d failed: %s", i, e)
-                    # Proceed with partial results
+                async with sem:
+                    try:
+                        result = await self.llm_client.call_json(
+                            model=self.runtime.llm.model_clustering_stance,
+                            input=prompt,
+                            instructions=instructions,
+                            reasoning_effort="low",
+                            cache_key=f"{batch_cache_key}_{batch_suffix_local}",
+                            timeout=cluster_timeout,
+                            trace_kind="stance_clustering",
+                            temperature=0,  # Deterministic JSON output
+                        )
+                        batch_matrix = result.get("matrix", [])
+                        if batch_matrix:
+                            for row in batch_matrix:
+                                if isinstance(row, dict) and isinstance(row.get("source_index"), int):
+                                    row["source_index"] = row["source_index"] + i
+                        return batch_matrix
+                    except Exception as e:
+                        logger.warning("[Clustering] Batch %d failed: %s", i, e)
+                        return []
+
+            batch_results = await asyncio.gather(
+                *(process_batch(i) for i in range(0, num_sources, STANCE_BATCH_SIZE)),
+                return_exceptions=True,
+            )
+
+            all_matrix_rows = []
+            for br in batch_results:
+                if isinstance(br, list):
+                    all_matrix_rows.extend(br)
+                elif isinstance(br, Exception):
+                    logger.warning("[Clustering] Batch gather exception: %s", br)
 
             # Log LLM output for debugging claim assignment
             Trace.event("stance_clustering.matrix_output", {
@@ -164,53 +178,61 @@ class ClusteringSkill(BaseSkill):
             return clustered_results
 
         try:
+            results = []
             if (stance_pass_mode or "").lower() == "two_pass":
-                # Note: two_pass is legacy/slow, but we support it with batching internally too
-                support_results = await run_pass(STANCE_PASS_SUPPORT_ONLY, "support")
-                refute_results = await run_pass(STANCE_PASS_REFUTE_ONLY, "refute")
-                return merge_stance_passes(
+                support_results, refute_results = await asyncio.gather(
+                    run_pass(STANCE_PASS_SUPPORT_ONLY, "support"),
+                    run_pass(STANCE_PASS_REFUTE_ONLY, "refute"),
+                )
+                results = merge_stance_passes(
                     support_results=support_results,
                     refute_results=refute_results,
                     original_sources=search_results,
                 )
+            else:
+                results = await run_pass(STANCE_PASS_SINGLE, "single")
 
-            single_results = await run_pass(STANCE_PASS_SINGLE, "single")
+            # Apply stance restoration (M115/M140 fix)
+            # If Clustering LLM degraded pre-verified stances to CONTEXT, force restore them.
+            if results and len(results) == len(search_results):
+                results = self._apply_stance_restoration(results, search_results)
 
-            # FIX: Restore pre-verified stances (e.g. from PhaseRunner shortcuts)
-            # If Clustering LLM degraded them to CONTEXT, force restore them.
-            if single_results and len(single_results) == len(search_results):
-                count_restored = 0
-                # Assuming index alignment is preserved
-                for i, res in enumerate(single_results):
-                     original = search_results[i]
-                     pre_stance = (original.get("stance") or "").upper()
-                     curr_stance = (res.get("stance") or "").upper()
-
-                     # Only restore if it was explicit SUPPORT/REFUTE and Clustering dropped it
-                     if pre_stance in ("SUPPORT", "REFUTE") and curr_stance not in ("SUPPORT", "REFUTE"):
-                         final_stance = pre_stance.lower()
-                         res["stance"] = final_stance
-                         # Boost relevance if needed
-                         res["relevance_score"] = max(res.get("relevance_score", 0), 0.85)
-                         # If no quote found by LLM, use snippet as backup quote
-                         if not res.get("quote") and not res.get("quote_span"):
-                              res["quote"] = (original.get("snippet") or "")[:500]
-                              match final_stance:
-                                  case "support":
-                                      res["quote_span"] = res["quote"]
-                                  case "refute":
-                                      res["contradiction_span"] = res["quote"]
-                         count_restored += 1
-
-                     # FIX: Always propagate is_primary flag if present (even if stance wasn't restored)
-                     # The Scoring layer needs this to trigger the "[PRIMARY SOURCE]" prompt injection.
-                     if original.get("is_primary"):
-                         res["is_primary"] = True
-                         res["source_type"] = "primary"
-
-                if count_restored > 0:
-                     logger.info("[Clustering] Restored %d pre-verified stances (overwrote LLM context)", count_restored)
-
-            return single_results
+            return results
         except Exception as e:
             return exception_fallback_all_context(search_results=search_results, error=e)
+
+    def _apply_stance_restoration(
+        self, 
+        results: list[SearchResult], 
+        original_sources: list[dict]
+    ) -> list[SearchResult]:
+        """Restore pre-verified stances if LLM clustering dropped them."""
+        count_restored = 0
+        for i, res in enumerate(results):
+            original = original_sources[i]
+            pre_stance = (original.get("stance") or "").upper()
+            curr_stance = (res.get("stance") or "").upper()
+
+            # Only restore if it was explicit SUPPORT/REFUTE and Clustering dropped it
+            if pre_stance in ("SUPPORT", "REFUTE") and curr_stance not in ("SUPPORT", "REFUTE"):
+                final_stance = pre_stance.lower()
+                res["stance"] = final_stance
+                # Boost relevance if needed
+                res["relevance_score"] = max(res.get("relevance_score", 0), 0.85)
+                # If no quote found by LLM, use snippet as backup quote
+                if not res.get("quote") and not res.get("quote_span"):
+                    res["quote"] = (original.get("snippet") or "")[:500]
+                    if final_stance == "support":
+                        res["quote_span"] = res["quote"]
+                    elif final_stance == "refute":
+                        res["contradiction_span"] = res["quote"]
+                count_restored += 1
+
+            # Always propagate is_primary flag if present
+            if original.get("is_primary"):
+                res["is_primary"] = True
+                res["source_type"] = "primary"
+
+        if count_restored > 0:
+            logger.info("[Clustering] Restored %d pre-verified stances", count_restored)
+        return results

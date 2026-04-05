@@ -8,7 +8,7 @@
 # (at your option) any later version.
 
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from spectrue_core.billing.models import FreeSubsidyPool
 
@@ -27,7 +27,7 @@ class FreePoolAllocator:
         Updates the pool state in-place.
         """
         if timestamp is None:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(tz=timezone.utc)
 
         locked_amount = amount * lock_ratio
         available_amount = amount - locked_amount
