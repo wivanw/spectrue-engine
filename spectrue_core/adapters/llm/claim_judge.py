@@ -90,7 +90,7 @@ class ClaimJudgeSkill:
 
         try:
             # Call LLM with structured output
-            # Using gpt-5.2 for best quality RGBA scoring
+            # Using the PRO tier for best quality RGBA scoring
             response = await self.llm.call_structured(
                 user_prompt=user_prompt,
                 system_prompt=system_prompt,

@@ -46,7 +46,7 @@ class CreditPricingPolicy:
         if model in self.llm_prices:
             return self.llm_prices[model]
 
-        # 2. Prefix match (e.g. gpt-5.2-2025 -> gpt-5.2)
+        # 2. Prefix match (e.g. gpt-5.6-luna-2026-07-09 -> gpt-5.6-luna)
         # Try finding the longest prefix that matches
         best_match = None
         for known_model in self.llm_prices:

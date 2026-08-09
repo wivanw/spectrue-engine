@@ -619,7 +619,7 @@ class EngineRuntimeConfig:
 
         deepseek_models_env = os.getenv("DEEPSEEK_MODEL_NAMES")
         if deepseek_models_env is None:
-            deepseek_model_names = (ModelID.MID, "deepseek-reasoner")
+            deepseek_model_names = (ModelID.MID, "deepseek-v4-flash")
         elif not deepseek_models_env.strip():
             deepseek_model_names = ()
         else:

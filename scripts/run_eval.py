@@ -171,7 +171,7 @@ async def main_async(args: argparse.Namespace) -> int:
     cfg = SpectrueConfig(
         openai_api_key=os.environ.get("OPENAI_API_KEY"),
         tavily_api_key=os.environ.get("TAVILY_API_KEY"),
-        openai_model=os.environ.get("SPECTRUE_OPENAI_MODEL", "gpt-4o"),
+        openai_model=os.environ.get("SPECTRUE_OPENAI_MODEL", "gpt-5.6-terra"),
     )
     engine = SpectrueEngine(cfg)
 
