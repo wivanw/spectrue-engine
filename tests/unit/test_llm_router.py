@@ -31,14 +31,14 @@ class TestLLMRouterRouting:
         router = LLMRouter(
             openai_client=openai_client,
             chat_client=chat_client,
-            chat_model_names=[ModelID.MID, "deepseek-reasoner"],
+            chat_model_names=[ModelID.MID, "deepseek-v4-flash"],
         )
 
         # Test routing decision
         # Test routing decision
         assert router._get_client(ModelID.MID) is chat_client
-        assert router._get_client("deepseek-reasoner") is chat_client
-        assert router._get_client("DEEPSEEK-CHAT") is chat_client  # Case-insensitive
+        assert router._get_client("deepseek-v4-flash") is chat_client
+        assert router._get_client(ModelID.MID.value.upper()) is chat_client  # Case-insensitive
 
     def test_router_routes_openai_model_to_openai_client(self):
         """Models NOT in chat_model_names should use openai_client."""
@@ -242,7 +242,7 @@ class TestRuntimeConfigDeepSeek:
         from spectrue_core.runtime_config import EngineRuntimeConfig
 
         env_vars = {
-            "DEEPSEEK_MODEL_NAMES": "deepseek-chat, custom-local-model",
+            "DEEPSEEK_MODEL_NAMES": f"{ModelID.MID.value}, custom-local-model",
         }
 
         with patch.dict(os.environ, env_vars, clear=False):

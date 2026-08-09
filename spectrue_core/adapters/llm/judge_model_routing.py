@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from typing import Any, Literal
 
 from spectrue_core.billing import pricing, token_estimator
 from spectrue_core.billing.config_loader import load_pricing_config
+from spectrue_core.billing.types import CreditPricingPolicy
 from spectrue_core.llm.model_registry import ModelID
+
+logger = logging.getLogger(__name__)
 
 
 RequiredCapability = Literal["cheap", "mid", "high"]
+
+# Cost assigned to a model that has no entry in the pricing policy. Large enough
+# that such a model is never *preferred*, but finite so that min() stays well
+# defined (and traces stay JSON-serializable) if it is the only allowed option.
+UNPRICED_MODEL_CREDITS = 1e9
 
 
 @dataclass(frozen=True)
@@ -45,15 +55,45 @@ def _norm_int(x: int, hi: int) -> float:
     return _clamp01(float(x) / float(hi))
 
 
+@lru_cache(maxsize=1)
+def _pricing_policy() -> CreditPricingPolicy:
+    """Pricing policy, loaded once.
+
+    ``load_pricing_config`` reads and parses a JSON file, and routing runs once
+    per claim, so this is cached. Pricing is process-static; tests that need a
+    different policy can call ``_pricing_policy.cache_clear()``.
+    """
+    return load_pricing_config()
+
+
 def _estimate_credits_for_model(*, model: str, prompt_chars: int, out_tokens: int) -> float:
     """
     Deterministic cost estimate in *credits* (not USD).
-    Uses pricing config registry; if missing, pricing module provides a safe fallback mapping.
+
+    NOTE: reasoning tokens are not modelled — they are unpredictable before the
+    call. For reasoning models billed per reasoning token (the PRO tier) this
+    understates the true cost, so routing is, if anything, biased *towards* the
+    expensive tier rather than away from it.
     """
-    cfg = load_pricing_config()
-    mp = pricing.get_model_pricing(cfg, model)
+    policy = _pricing_policy()
+    price = policy.get_model_price(model)
+    if price is None:
+        logger.warning(
+            "[judge_routing] No pricing entry for model %r; treating as unaffordable", model
+        )
+        return UNPRICED_MODEL_CREDITS
+
     in_tokens = token_estimator.estimate_tokens_from_chars(prompt_chars)
-    return pricing.estimate_cost_credits(mp, input_tokens=in_tokens, output_tokens=out_tokens)
+    credits = pricing.llm_usage_to_credits(
+        price=price,
+        input_tokens=in_tokens,
+        output_tokens=out_tokens,
+        reasoning_tokens=None,
+        policy=policy,
+    )
+    # Callers do plain float arithmetic on these (expected-cost blending), and
+    # JudgeModelDecision declares dict[str, float].
+    return float(credits)
 
 
 def select_judge_model(
@@ -66,9 +106,9 @@ def select_judge_model(
 ) -> JudgeModelDecision:
     """
     Price-aware, deterministic routing for judge model:
-      - gpt-5-nano: cheapest, only for truly simple/low-risk claims with clean evidence
-      - deepseek-chat: mid tier for medium complexity, BUT with explicit failure fallback to gpt-5.2
-      - gpt-5.2: for high importance / high harm / conflict / high ambiguity / low coverage
+      - gpt-5.6-luna (NANO): cheapest, only for truly simple/low-risk claims with clean evidence
+      - deepseek-v4-flash (MID): mid tier for medium complexity, BUT with explicit failure fallback to PRO
+      - gpt-5.6-sol (PRO): for high importance / high harm / conflict / high ambiguity / low coverage
 
     Inputs:
       claim: expects fields like importance, check_worthiness, claim_role, harm_potential (optional)
@@ -143,7 +183,7 @@ def select_judge_model(
     difficulty = _clamp01(0.40 * complexity + 0.35 * ambiguity + 0.25 * risk)
 
     # ---- hard gates (quality constraints) ----
-    # Central / important / harmful / conflicting => gpt-5.2 directly
+    # Central / important / harmful / conflicting => PRO tier directly
     if importance >= 0.75 or harm_norm >= 0.75 or has_conflict or ambiguity >= 0.70:
         required_cap: RequiredCapability = "high"
     elif difficulty <= 0.35 and risk <= 0.35 and n_domains >= 2 and hi_tier_ratio >= 0.30:

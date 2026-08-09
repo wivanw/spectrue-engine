@@ -217,12 +217,16 @@ class ScoringSkill(BaseSkill):
             sources_by_claim=sources_by_claim,
         )
 
-        # Stable Cache Key
-        prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
-        cache_key = f"score_v7_plat_{prompt_hash}"
+        # Cache key must be STABLE across requests: OpenAI caches the shared
+        # prompt prefix, and prompt_cache_key only routes similar requests to the
+        # same cache partition. Hashing the variable `prompt` in here gave every
+        # request its own partition, so the instruction prefix never hit cache —
+        # traces showed cache_status=MISS on every single judge call.
+        instructions_hash = hashlib.sha256(instructions.encode()).hexdigest()[:32]
+        cache_key = f"score_v7_plat_{instructions_hash}"
 
         try:
-            m = ModelID.PRO
+            m = self.runtime.llm.model_judge
 
             result = await self.llm_client.call_json(
                 model=m,
@@ -628,8 +632,9 @@ class ScoringSkill(BaseSkill):
                 judge_context=judge_context,
             )
 
-            prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
-            cache_key = f"score_single_v1_{prompt_hash}"
+            # Stable across claims: only the instruction prefix is cacheable.
+            instructions_hash = hashlib.sha256(instructions.encode()).hexdigest()[:32]
+            cache_key = f"score_single_v1_{instructions_hash}"
 
             # --- MODEL ROUTING using spectrue_core.adapters.llm.judge_model_routing ---
             # Fast-path: no evidence => deterministic unverified; no LLM call.
@@ -666,7 +671,16 @@ class ScoringSkill(BaseSkill):
                 routed_model = decision.model
                 route_debug = decision.to_trace()
             except Exception as e:
-                # Fallback to PRO on any routing error
+                # Fallback to PRO on any routing error. This is a *degraded* path:
+                # it silently routes every claim to the most expensive model, so it
+                # must be loud — a bug here previously went unnoticed and sent the
+                # entire workload to PRO.
+                logger.error(
+                    "[judge] Model routing failed, falling back to %s (most expensive tier): %s",
+                    ModelID.PRO.value,
+                    e,
+                    exc_info=True,
+                )
                 routed_model = ModelID.PRO
                 route_debug = {
                     "model": ModelID.PRO,
@@ -676,7 +690,7 @@ class ScoringSkill(BaseSkill):
 
             Trace.event("judge.model_route", route_debug)
             
-            # Use standard deepseek model name if routing returned 'deepseek-chat'
+            # Use standard deepseek model name if routing returned the MID tier
             deepseek_names = tuple(getattr(self.runtime.llm, "deepseek_model_names", ()) or ())
             actual_deepseek_model = deepseek_names[0] if deepseek_names else ModelID.MID
             if routed_model == ModelID.MID:
@@ -880,7 +894,7 @@ Return valid JSON now."""
                 primary["routing"] = route_debug
                 return primary
 
-            # 2) DeepSeek is flaky: hard fallback to gpt-5.2 on ANY failure
+            # 2) DeepSeek is flaky: hard fallback to the PRO tier on ANY failure
             if routed_model == actual_deepseek_model:
                 Trace.event(
                     "judge.model_fallback",
@@ -1241,12 +1255,12 @@ Return valid JSON now."""
             evidence_by_assertion=evidence_by_assertion,
         )
 
-        # Cache key
-        prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
-        cache_key = f"score_struct_v1_{prompt_hash}"
+        # Cache key: hash the stable instructions only (see score_evidence above).
+        instructions_hash = hashlib.sha256(instructions.encode()).hexdigest()[:32]
+        cache_key = f"score_struct_v1_{instructions_hash}"
 
         try:
-            m = ModelID.PRO
+            m = self.runtime.llm.model_judge
 
             result = await self.llm_client.call_json(
                 model=m,

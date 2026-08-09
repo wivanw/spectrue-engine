@@ -41,7 +41,7 @@ class LLMRouter:
         router = LLMRouter(
             openai_client=openai_client,
             chat_client=chat_client,
-            chat_model_names=[ModelID.MID, "deepseek-reasoner"],
+            chat_model_names=[ModelID.MID, "deepseek-v4-flash"],
         )
         
         # Routes to local_client

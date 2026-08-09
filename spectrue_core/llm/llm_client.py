@@ -37,7 +37,8 @@ from spectrue_core.llm.model_registry import ModelID
 logger = logging.getLogger(__name__)
 
 
-ReasoningEffort = Literal["low", "medium", "high"]
+# GPT-5.6 accepts none/low/medium/high/xhigh/max; older GPT-5.x only low/medium/high.
+ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 CacheRetention = Literal["in_memory", "24h"]
 
 
@@ -342,7 +343,7 @@ class LLMClient:
         # OpenAI models that support structured outputs
         # See: https://platform.openai.com/docs/guides/structured-outputs
         supported_prefixes = (
-            "gpt-5",      # All GPT-5 variants
+            "gpt-5",      # All GPT-5.x variants, incl. gpt-5.6-{sol,terra,luna}
             "gpt-4o",     # GPT-4o and mini
             "gpt-4-turbo",
             "o1",         # o1 models
@@ -358,6 +359,20 @@ class LLMClient:
             return True
         # Default: try structured outputs for unknown OpenAI models
         return self.base_url is None  # Only for official OpenAI API
+
+    @staticmethod
+    def _supports_legacy_cache_retention(model: str) -> bool:
+        """Whether the model accepts the legacy `prompt_cache_retention` param.
+
+        gpt-5-nano rejects it, and gpt-5.5+ / gpt-5.6+ superseded it (the newer
+        families no longer accept "in_memory"). Everything else that we route to
+        the Responses API still takes it.
+        """
+        model_lower = model.lower()
+        if "nano" in model_lower:
+            return False
+        legacy_incompatible = ("gpt-5.5", "gpt-5.6", "gpt-5.7", "gpt-6")
+        return not any(model_lower.startswith(p) for p in legacy_incompatible)
 
     async def _call_chat_completions(
         self,
@@ -768,9 +783,10 @@ class LLMClient:
         }
 
         if temperature is not None:
-            # Skip temperature for models that don't support it in Responses API
-            # Based on empirical testing: gpt-5-nano, gpt-5, gpt-5.2, and O-series models reject temperature
-            is_gpt5 = "gpt-5" in model  # Covers gpt-5-nano, gpt-5.2
+            # Skip temperature for models that don't support it in Responses API.
+            # GPT-5.x reasoning models only accept temperature/top_p when
+            # reasoning.effort == "none"; we always send a real effort, so skip it.
+            is_gpt5 = "gpt-5" in model  # Covers gpt-5.6-{sol,terra,luna} and older gpt-5.x
             skip_temp_models = model.startswith("o") or is_gpt5
             if skip_temp_models:
                 logger.debug("[LLMClient] Temperature ignored for model %s (not supported)", model)
@@ -809,9 +825,13 @@ class LLMClient:
         # Prompt caching
         if cache_key:
             params["prompt_cache_key"] = cache_key
-            # gpt-5-nano throws 400 "invalid_parameter" for prompt_cache_retention,
-            # so only enable for models that support it.
-            if "nano" not in model:
+            # `prompt_cache_retention` is a legacy pre-GPT-5.6 parameter:
+            #   - gpt-5-nano rejects it outright with 400 "invalid_parameter"
+            #   - gpt-5.5+ dropped "in_memory" (24h is the only retention there)
+            #   - gpt-5.6+ replaced it with prompt cache options / ttl
+            # Caching still works on 5.6 via prompt_cache_key alone (default TTL),
+            # so we only send the legacy param on the older models that accept it.
+            if self._supports_legacy_cache_retention(model):
                 params["prompt_cache_retention"] = self.cache_retention
 
         # Calculate payload hash for debug correlation
@@ -1114,7 +1134,7 @@ class LLMClient:
             system_prompt: Optional system instructions
             schema: JSON schema for structured output
             schema_name: Name for the schema
-            model: Model to use (default: gpt-5-nano)
+            model: Model to use (default: gpt-5.6-luna)
             temperature: Optional temperature for sampling (0 = deterministic)
             
         Returns:

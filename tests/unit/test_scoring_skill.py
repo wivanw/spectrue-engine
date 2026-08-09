@@ -124,3 +124,63 @@ class TestScoringSkill:
         # Check style drop (honesty = (0.9+0.9)/2 = 0.9 > 0.8)
         # Note: logic inside analyze() also calls _strip_internal_source_markers AND _maybe_drop_style_section
         assert res["verified_score"] == 0.5
+
+
+@pytest.mark.unit
+class TestJudgeCacheKeyStability:
+    """The judge cache key must depend ONLY on the stable instruction prefix.
+
+    Regression: it used to hash `instructions + prompt`, giving every request a
+    unique prompt_cache_key. Since that key selects the cache partition, each
+    call landed in its own partition and the shared prefix never hit cache —
+    production traces showed cache_status=MISS on 100% of judge calls, paying
+    full input price on every run instead of the 90% cached rate.
+    """
+
+    @pytest.fixture
+    def skill(self, mock_llm_client, mock_config):
+        mock_config.openai_model = ModelID.PRO
+        return ScoringSkill(config=mock_config, llm_client=mock_llm_client)
+
+    def _pack(self, fact: str, snippet: str):
+        return {
+            "original_fact": fact,
+            "claims": [{"id": "c1", "text": fact, "importance": 0.5}],
+            "scored_sources": [
+                {"claim_id": "c1", "domain": "example.com", "url": "https://example.com/a",
+                 "title": "t", "snippet": snippet, "stance": "support"}
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_cache_key_identical_for_different_content(self, skill, mock_llm_client):
+        mock_llm_client.call_json.return_value = {
+            "claim_verdicts": [{"claim_id": "c1", "verdict_score": 0.8}],
+            "verified_score": 0.8, "explainability_score": 0.7,
+            "danger_score": 0.1, "style_score": 0.9, "rationale": "ok",
+        }
+
+        await skill.score_evidence(self._pack("Bamboo grows fast", "grows 90cm a day"), lang="en")
+        first = mock_llm_client.call_json.call_args.kwargs["cache_key"]
+
+        await skill.score_evidence(self._pack("Cats have nine lives", "myth, not literal"), lang="en")
+        second = mock_llm_client.call_json.call_args.kwargs["cache_key"]
+
+        assert first == second, (
+            "cache key varies with request content — every call gets its own cache "
+            f"partition and can never hit ({first} != {second})"
+        )
+        assert first.startswith("score_v7_plat_")
+
+    @pytest.mark.asyncio
+    async def test_judge_model_comes_from_config(self, skill, mock_llm_client):
+        mock_llm_client.call_json.return_value = {
+            "claim_verdicts": [{"claim_id": "c1", "verdict_score": 0.8}],
+            "verified_score": 0.8, "explainability_score": 0.7,
+            "danger_score": 0.1, "style_score": 0.9, "rationale": "ok",
+        }
+
+        await skill.score_evidence(self._pack("x", "y"), lang="en")
+        used = mock_llm_client.call_json.call_args.kwargs["model"]
+        assert used == skill.runtime.llm.model_judge
+        assert used != ModelID.PRO, "general-mode judge should not default to the max tier"

@@ -67,8 +67,10 @@ def test_evidence_spillover_general_mode():
     step = EvidenceSpilloverStep(config=config)
     
     # 3. Run Step
-    loop = asyncio.get_event_loop()
-    new_ctx = loop.run_until_complete(step.run(ctx))
+    # asyncio.get_event_loop() is deprecated and, inside a full-suite run, hands
+    # back a loop another test has already closed — this test passed in isolation
+    # and failed in the suite. asyncio.run() owns its own loop and is unaffected.
+    new_ctx = asyncio.run(step.run(ctx))
     
     # 4. Verify c2 has evidence in sources
     c2_sources = [s for s in new_ctx.sources if s.get("claim_id") == "c2"]

@@ -189,22 +189,25 @@ async def test_deep_v2_clustered_retrieval_no_state_bleed_between_disjoint_entit
 async def test_deep_v2_clustered_retrieval_caps_unique_urls_and_traces_phases(monkeypatch):
     config = MagicMock()
     config.runtime = MagicMock()
-    config.runtime.deep_v2 = DeepV2Config(max_unique_urls=2)
+    # The step computes max(20, min(claim_count * 8, configured_max)), so a
+    # configured cap below 20 can never take effect. To exercise capping at all
+    # the cap must sit above that floor and below claim_count * 8.
+    config.runtime.deep_v2 = DeepV2Config(max_unique_urls=25)
 
     search_mgr = MagicMock()
+    # Distinct snippets: the step dedupes URLs that share a snippet prefix, so
+    # reusing "s" everywhere collapsed all six results down to one URL.
     search_map = {
-        "q1": [
-            {"url": "https://source-a.test/doc-1", "title": "A1", "snippet": "s", "score": 0.99},
-            {"url": "https://source-a.test/doc-2", "title": "A2", "snippet": "s", "score": 0.60},
-        ],
-        "q2": [
-            {"url": "https://source-b.test/doc-3", "title": "B1", "snippet": "s", "score": 0.95},
-            {"url": "https://source-b.test/doc-4", "title": "B2", "snippet": "s", "score": 0.45},
-        ],
-        "q3": [
-            {"url": "https://source-c.test/doc-5", "title": "C1", "snippet": "s", "score": 0.70},
-            {"url": "https://source-c.test/doc-6", "title": "C2", "snippet": "s", "score": 0.40},
-        ],
+        f"q{q}": [
+            {
+                "url": f"https://source-{q}.test/doc-{i}",
+                "title": f"S{q}-{i}",
+                "snippet": f"snippet-{q}-{i}",
+                "score": 1.0 - (i * 0.01),
+            }
+            for i in range(1, 13)
+        ]
+        for q in (1, 2, 3)
     }
 
     async def _search_phase(query, max_results=5, depth="basic", topic="general", **kwargs):
@@ -223,7 +226,7 @@ async def test_deep_v2_clustered_retrieval_caps_unique_urls_and_traces_phases(mo
 
     monkeypatch.setattr(cluster_web_search_module.Trace, "event", staticmethod(_capture_event))
 
-    claims = [{"id": "c1", "text": "Claim A"}]
+    claims = [{"id": f"c{i}", "text": f"Claim {i}"} for i in range(1, 11)]
     ctx_v2 = PipelineContext(mode=DEEP_V2_MODE, claims=claims, lang="en")
     ctx_v2 = ctx_v2.set_extra(
         "cluster_search_plans",
@@ -239,16 +242,16 @@ async def test_deep_v2_clustered_retrieval_caps_unique_urls_and_traces_phases(mo
     out_ctx = await ClusterWebSearchStep(config=config, search_mgr=search_mgr).run(ctx_v2)
 
     called_urls = list(search_mgr.fetch_urls_content_batch.await_args.args[0])
-    assert len(called_urls) == 2
-    assert set(called_urls) == {
-        "https://source-a.test/doc-1",
-        "https://source-b.test/doc-3",
-    }
+    # 3 queries x 12 results = 36 unique URLs, capped to the configured 25.
+    assert len(called_urls) == 25
+    # Capping keeps the highest-scoring URLs; doc-1 of each source scores top.
+    assert "https://source-1.test/doc-1" in called_urls
+    assert "https://source-1.test/doc-12" not in called_urls
 
     trace_meta = out_ctx.get_extra("retrieval_search_trace")
-    assert trace_meta["urls_before_cap"] == 6
-    assert trace_meta["urls_total"] == 2
-    assert trace_meta["url_cap"] == 2
+    assert trace_meta["urls_before_cap"] == 36
+    assert trace_meta["urls_total"] == 25
+    assert trace_meta["url_cap"] == 25
 
     assert "retrieval.cluster_search.phase.search.start" in captured_events
     assert "retrieval.cluster_search.phase.search.complete" in captured_events

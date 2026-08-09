@@ -52,7 +52,8 @@ async def test_claim_extraction_uses_fallback_on_failure():
                 return {
                     "claims": [
                         {
-                            "claim_text": "Sky is blue",
+                            # >= 20 chars, else validate_core_claim rejects it
+                                "claim_text": "The sky appears blue from the ground",
                             "subject_entities": ["Sky"],
                             "retrieval_seed_terms": ["sky", "blue", "atmosphere"],
                             "falsifiability": {"is_falsifiable": True},

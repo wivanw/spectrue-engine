@@ -15,12 +15,13 @@ Default model IDs for OpenRouter. These can be overridden via ENV variables.
 See: https://openrouter.ai/models for available models.
 """
 
-# DeepSeek constant
-MODEL_DEEPSEEK_CHAT = ModelID.MID
-MODEL_DEEPSEEK_REASONER = "deepseek-reasoner"
+# DeepSeek constants (V4 generation; the deepseek-chat / deepseek-reasoner
+# aliases were retired 2026-07-24)
+MODEL_DEEPSEEK_PRO = ModelID.MID          # 1.6T/49B — used for the MID tier
+MODEL_DEEPSEEK_FLASH = "deepseek-v4-flash"  # 284B/13B — cheaper, weaker on reasoning
 
 # Default models for pipeline steps (Override via ENV)
-# Switched to DeepSeek-V3 (deepseek-chat) for cost/performance balance
+# MID = DeepSeek-V4 Pro: keeps V3-class reasoning quality at ~1/11 of PRO's input cost
 DEFAULT_MODEL_CLAIM_EXTRACTION = ModelID.MID
 DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION = ModelID.NANO
 DEFAULT_MODEL_CLUSTERING_STANCE = ModelID.NANO

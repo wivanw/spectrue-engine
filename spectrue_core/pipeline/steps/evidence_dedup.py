@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from spectrue_core.pipeline.core import PipelineContext, Step
-from spectrue_core.pipeline.mode import AnalysisMode
 from spectrue_core.utils.trace import Trace
 from spectrue_core.use_cases.evidence.dedup import apply_dedup
 

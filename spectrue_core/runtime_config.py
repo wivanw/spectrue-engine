@@ -147,6 +147,11 @@ class EngineLLMConfig:
     model_inline_source_verification: str = DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION
     model_clustering_stance: str = DEFAULT_MODEL_CLUSTERING_STANCE
 
+    # Evidence-scoring judge (general mode). This single call dominates run cost
+    # — ~60% of a typical check — so it is configurable via MODEL_JUDGE to allow
+    # A/B-ing quality against price without a code change.
+    model_judge: str = ModelID.HIGH
+
     # Fallback models
     model_claim_extraction_fallback: str = ModelID.PRO
 
@@ -605,6 +610,7 @@ class EngineRuntimeConfig:
         model_claim_extraction = (os.getenv("MODEL_CLAIM_EXTRACTION") or DEFAULT_MODEL_CLAIM_EXTRACTION).strip()
         model_inline_source_verification = (os.getenv("MODEL_INLINE_SOURCE_VERIFICATION") or DEFAULT_MODEL_INLINE_SOURCE_VERIFICATION).strip()
         model_clustering_stance = (os.getenv("MODEL_CLUSTERING_STANCE") or DEFAULT_MODEL_CLUSTERING_STANCE).strip()
+        model_judge = (os.getenv("MODEL_JUDGE") or ModelID.HIGH).strip()
 
         enable_inline_source_verification = _parse_bool(
             os.getenv("FEATURE_INLINE_SOURCE_VERIFICATION"), default=True
@@ -619,7 +625,7 @@ class EngineRuntimeConfig:
 
         deepseek_models_env = os.getenv("DEEPSEEK_MODEL_NAMES")
         if deepseek_models_env is None:
-            deepseek_model_names = (ModelID.MID, "deepseek-reasoner")
+            deepseek_model_names = (ModelID.MID, "deepseek-v4-flash")
         elif not deepseek_models_env.strip():
             deepseek_model_names = ()
         else:
@@ -635,6 +641,7 @@ class EngineRuntimeConfig:
             model_claim_extraction=model_claim_extraction,
             model_inline_source_verification=model_inline_source_verification,
             model_clustering_stance=model_clustering_stance,
+            model_judge=model_judge,
             model_claim_extraction_fallback=os.getenv("MODEL_CLAIM_EXTRACTION_FALLBACK", ModelID.PRO),
             enable_inline_source_verification=enable_inline_source_verification,
             max_claim_concurrency=max_claim_conc,

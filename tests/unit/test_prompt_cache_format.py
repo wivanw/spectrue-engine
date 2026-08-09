@@ -4,7 +4,6 @@ Prompts must follow: STATIC_PREFIX + DELIMITER + DYNAMIC_CONTENT
 so that OpenAI can cache the prefix. Delimiter is typically \"--- DATA ---\" or \"--- ARTICLE ---\".
 """
 
-import pytest
 
 from spectrue_core.adapters.llm.claims_prompts import (
     build_core_extraction_prompt,

@@ -9,12 +9,34 @@ from spectrue_core.llm.model_registry import ModelID
 # (at your option) any later version.
 
 
+import dataclasses
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.tools.web_search_tool import WebSearchTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
+from spectrue_core.runtime_config import EngineLLMConfig
+
+
+
+def apply_llm_defaults(config) -> None:
+    """Give ``config.runtime.llm`` real values from EngineLLMConfig.
+
+    Production code does arithmetic on these — e.g. FactCheckerAgent runs
+    ``min(getattr(runtime.llm, "concurrency", 8), 64)``. A bare MagicMock
+    attribute always "exists", so the getattr default never applies and the
+    comparison raises ``TypeError: '<' not supported between int and MagicMock``.
+
+    Copying field-by-field keeps this in sync with the dataclass automatically
+    while leaving the mock mutable, which tests that override a single model
+    rely on. Call this from any fixture that shadows ``mock_config``.
+    """
+    config.runtime.llm = MagicMock()
+    defaults = EngineLLMConfig()
+    for f in dataclasses.fields(EngineLLMConfig):
+        setattr(config.runtime.llm, f.name, getattr(defaults, f.name))
 
 
 @pytest.fixture
@@ -34,6 +56,15 @@ def mock_config():
     config.runtime.features = MagicMock()
     config.runtime.features.fulltext_fetch = False
     
+    # LLM config. Populated from the real dataclass defaults rather than left as
+    # a bare MagicMock: production code does arithmetic on these (e.g.
+    # `min(getattr(runtime.llm, "concurrency", 8), 64)` in FactCheckerAgent), and
+    # a MagicMock attribute always "exists", so the getattr default never applies
+    # and the comparison raises TypeError. Copying field-by-field keeps this in
+    # sync with EngineLLMConfig automatically while staying mutable, which tests
+    # that override individual models rely on.
+    apply_llm_defaults(config)
+
     # ClaimGraph config (disabled by default in tests)
     config.runtime.claim_graph = MagicMock()
     config.runtime.claim_graph.enabled = False
