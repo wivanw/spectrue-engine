@@ -666,7 +666,16 @@ class ScoringSkill(BaseSkill):
                 routed_model = decision.model
                 route_debug = decision.to_trace()
             except Exception as e:
-                # Fallback to PRO on any routing error
+                # Fallback to PRO on any routing error. This is a *degraded* path:
+                # it silently routes every claim to the most expensive model, so it
+                # must be loud — a bug here previously went unnoticed and sent the
+                # entire workload to PRO.
+                logger.error(
+                    "[judge] Model routing failed, falling back to %s (most expensive tier): %s",
+                    ModelID.PRO.value,
+                    e,
+                    exc_info=True,
+                )
                 routed_model = ModelID.PRO
                 route_debug = {
                     "model": ModelID.PRO,
@@ -676,7 +685,7 @@ class ScoringSkill(BaseSkill):
 
             Trace.event("judge.model_route", route_debug)
             
-            # Use standard deepseek model name if routing returned 'deepseek-chat'
+            # Use standard deepseek model name if routing returned the MID tier
             deepseek_names = tuple(getattr(self.runtime.llm, "deepseek_model_names", ()) or ())
             actual_deepseek_model = deepseek_names[0] if deepseek_names else ModelID.MID
             if routed_model == ModelID.MID:
@@ -880,7 +889,7 @@ Return valid JSON now."""
                 primary["routing"] = route_debug
                 return primary
 
-            # 2) DeepSeek is flaky: hard fallback to gpt-5.2 on ANY failure
+            # 2) DeepSeek is flaky: hard fallback to the PRO tier on ANY failure
             if routed_model == actual_deepseek_model:
                 Trace.event(
                     "judge.model_fallback",

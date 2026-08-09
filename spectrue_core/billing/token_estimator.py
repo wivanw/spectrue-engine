@@ -23,6 +23,18 @@ def estimate_tokens(text: str) -> int:
     return max(1, int(word_count * 1.3))
 
 
+def estimate_tokens_from_chars(char_count: int) -> int:
+    """Estimate token count when only the prompt length in characters is known.
+
+    Used by cost-aware routing, which sizes a prompt before it is built and so
+    has no text to feed :func:`estimate_tokens`. Uses the same ~4 chars/token
+    heuristic as the embedding fallback in ``billing.metering``.
+    """
+    if char_count <= 0:
+        return 0
+    return max(1, int(char_count // 4))
+
+
 def estimate_completion_usage(
     *, input_text: str, output_text: str, instructions: str | None = None
 ) -> dict[str, int]:
