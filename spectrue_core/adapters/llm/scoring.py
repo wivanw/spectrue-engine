@@ -217,12 +217,16 @@ class ScoringSkill(BaseSkill):
             sources_by_claim=sources_by_claim,
         )
 
-        # Stable Cache Key
-        prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
-        cache_key = f"score_v7_plat_{prompt_hash}"
+        # Cache key must be STABLE across requests: OpenAI caches the shared
+        # prompt prefix, and prompt_cache_key only routes similar requests to the
+        # same cache partition. Hashing the variable `prompt` in here gave every
+        # request its own partition, so the instruction prefix never hit cache —
+        # traces showed cache_status=MISS on every single judge call.
+        instructions_hash = hashlib.sha256(instructions.encode()).hexdigest()[:32]
+        cache_key = f"score_v7_plat_{instructions_hash}"
 
         try:
-            m = ModelID.PRO
+            m = self.runtime.llm.model_judge
 
             result = await self.llm_client.call_json(
                 model=m,
@@ -628,8 +632,9 @@ class ScoringSkill(BaseSkill):
                 judge_context=judge_context,
             )
 
-            prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
-            cache_key = f"score_single_v1_{prompt_hash}"
+            # Stable across claims: only the instruction prefix is cacheable.
+            instructions_hash = hashlib.sha256(instructions.encode()).hexdigest()[:32]
+            cache_key = f"score_single_v1_{instructions_hash}"
 
             # --- MODEL ROUTING using spectrue_core.adapters.llm.judge_model_routing ---
             # Fast-path: no evidence => deterministic unverified; no LLM call.
@@ -1250,12 +1255,12 @@ Return valid JSON now."""
             evidence_by_assertion=evidence_by_assertion,
         )
 
-        # Cache key
-        prompt_hash = hashlib.sha256((instructions + prompt).encode()).hexdigest()[:32]
-        cache_key = f"score_struct_v1_{prompt_hash}"
+        # Cache key: hash the stable instructions only (see score_evidence above).
+        instructions_hash = hashlib.sha256(instructions.encode()).hexdigest()[:32]
+        cache_key = f"score_struct_v1_{instructions_hash}"
 
         try:
-            m = ModelID.PRO
+            m = self.runtime.llm.model_judge
 
             result = await self.llm_client.call_json(
                 model=m,

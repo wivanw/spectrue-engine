@@ -23,10 +23,17 @@ class ModelID(str, Enum):
     # Mid tier (balance of reasoning and cost)
     MID = "deepseek-v4-pro"
 
-    # High / Pro tier (complex reasoning, high reliability)
+    # High tier — the default judge. Scores 55 vs PRO's 59 on the Artificial
+    # Analysis Intelligence Index and lands within ~2 points of it on
+    # judgement-style evals, at 40% of the price. This is the right default for
+    # evidence scoring; PRO is kept as the ceiling for escalation, not the norm.
+    HIGH = "gpt-5.6-terra"
+
+    # Pro / max tier (complex reasoning, escalation target for risky claims)
     PRO = "gpt-5.6-sol"
 
 # Backward compatibility aliases (to avoid breaking existing imports immediately)
 MODEL_NANO = ModelID.NANO
 MODEL_MID = ModelID.MID
+MODEL_HIGH = ModelID.HIGH
 MODEL_PRO = ModelID.PRO

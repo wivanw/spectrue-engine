@@ -7,6 +7,8 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
+import hashlib
+
 from spectrue_core.utils.evidence_pack import Claim, ClaimAnchor, EvidenceRequirement
 from spectrue_core.domain.evidence.model import ArticleIntent
 from .base_skill import BaseSkill, logger
@@ -154,6 +156,15 @@ def sanitize_post_evidence_response(data: dict) -> dict:
         return {}
     return {k: v for k, v in data.items() if k in POST_EVIDENCE_ALLOWED_FIELDS}
 
+
+
+def _chunk_cache_id(text: str) -> str:
+    """Stable cache id for a chunk.
+
+    Built-in hash() is salted per process (PYTHONHASHSEED), so it produced a
+    different cache key on every restart and the entry could never be reused.
+    """
+    return hashlib.sha256((text or "").encode()).hexdigest()[:32]
 
 class ClaimExtractionSkill(BaseSkill):
 
@@ -454,7 +465,7 @@ class ClaimExtractionSkill(BaseSkill):
                 instructions=instructions,
                 response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,
                 reasoning_effort="low",
-                cache_key=f"core_extract_v3_{hash(chunk.text)}",
+                cache_key=f"core_extract_v3_{_chunk_cache_id(chunk.text)}",
                 timeout=self._calculate_timeout(len(chunk.text)),
                 trace_kind="claim_extraction_core",
                 temperature=0.0,
@@ -469,7 +480,7 @@ class ClaimExtractionSkill(BaseSkill):
                 instructions=instructions,
                 response_schema=VERIFIABLE_CORE_CLAIM_SCHEMA,
                 reasoning_effort="low",
-                cache_key=f"core_extract_fallback_v3_{hash(chunk.text)}",
+                cache_key=f"core_extract_fallback_v3_{_chunk_cache_id(chunk.text)}",
                 timeout=self._calculate_timeout(len(chunk.text)),
                 trace_kind="claim_extraction_core.fallback",
                 temperature=0.0,

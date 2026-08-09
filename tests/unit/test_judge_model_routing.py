@@ -171,3 +171,46 @@ class TestDeepSeekFailureBlending:
         assert flaky.expected_credits[ModelID.MID] > reliable.expected_credits[ModelID.MID]
         # NANO and PRO carry no failure blending.
         assert flaky.expected_credits[ModelID.NANO] == flaky.est_credits[ModelID.NANO]
+
+
+class TestJudgeModelConfig:
+    """The general-mode judge dominates run cost (~60% of a typical check),
+    so it must stay configurable and must not silently default to the max tier."""
+
+    def test_default_judge_is_high_not_pro(self):
+        from spectrue_core.runtime_config import EngineRuntimeConfig
+
+        config = EngineRuntimeConfig.load_from_env()
+        assert config.llm.model_judge == ModelID.HIGH
+        assert config.llm.model_judge != ModelID.PRO, (
+            "defaulting the judge to the max tier is a ~2.5x cost regression"
+        )
+
+    def test_judge_model_overridable_via_env(self):
+        import os
+        from unittest.mock import patch
+        from spectrue_core.runtime_config import EngineRuntimeConfig
+
+        with patch.dict(os.environ, {"MODEL_JUDGE": ModelID.PRO.value}, clear=False):
+            config = EngineRuntimeConfig.load_from_env()
+        assert config.llm.model_judge == ModelID.PRO
+
+    def test_pro_remains_the_escalation_ceiling(self):
+        """Cheapening the default must not lower the ceiling for risky claims."""
+        decision = select_judge_model(
+            claim=SimpleNamespace(importance=0.95, check_worthiness=0.9, harm_potential=4.8),
+            evidence_items=_clean_evidence(),
+            prompt_chars=4000,
+        )
+        assert decision.model == ModelID.PRO
+        assert decision.fallback_model == ModelID.PRO
+
+    @pytest.mark.parametrize("tier", [ModelID.NANO, ModelID.MID, ModelID.HIGH, ModelID.PRO])
+    def test_every_tier_including_high_has_a_price(self, tier):
+        cost = _estimate_credits_for_model(model=tier, prompt_chars=4000, out_tokens=380)
+        assert cost < UNPRICED_MODEL_CREDITS, f"{tier.value} missing from default_pricing.json"
+
+    def test_high_is_materially_cheaper_than_pro(self):
+        high = _estimate_credits_for_model(model=ModelID.HIGH, prompt_chars=14000, out_tokens=1250)
+        pro = _estimate_credits_for_model(model=ModelID.PRO, prompt_chars=14000, out_tokens=1250)
+        assert high < pro * 0.5, f"expected HIGH well under half of PRO, got {high} vs {pro}"
