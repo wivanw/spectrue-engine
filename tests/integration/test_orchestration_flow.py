@@ -371,7 +371,11 @@ async def test_metadata_fallback_defaults(claim_skill, mock_llm_client):
         "article_intent": "news",
         "claims": [
             {
-                "text": "Some claim text",
+                # >= 20 chars: validate_core_claim rejects shorter text as
+                # claim_text_too_short, which routed this through the synthetic
+                # fallback claim (which carries no metadata) instead of the
+                # real enrichment path this test is about.
+                "text": "Some claim text that is long enough to validate",
                 "normalized_text": "Some claim text with context",
                 "type": "core",
                 # Missing: verification_target, claim_role, search_locale_plan, retrieval_policy
@@ -388,7 +392,7 @@ async def test_metadata_fallback_defaults(claim_skill, mock_llm_client):
         ],
     }
     
-    claims, _, _, _ = await claim_skill.extract_claims("Some claim text", lang="en")
+    claims, _, _, _ = await claim_skill.extract_claims("Some claim text that is long enough to validate", lang="en")
     
     assert len(claims) >= 1
     claim = claims[0]

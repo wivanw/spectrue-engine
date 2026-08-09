@@ -9,6 +9,8 @@ from spectrue_core.llm.model_registry import ModelID
 # (at your option) any later version.
 
 import pytest
+
+from tests.conftest import apply_llm_defaults
 from unittest.mock import AsyncMock, MagicMock
 from spectrue_core.pipeline.orchestration.verifier import FactVerifier
 
@@ -23,6 +25,8 @@ def mock_config():
     config.google_search_api_key = "test_key" # Added string key
     config.google_search_cse_id = "test_id"
     config.openai_model = ModelID.PRO
+    apply_llm_defaults(config)
+
     
     # Mock runtime config structure
     config.runtime.llm.timeout_sec = 60.0
