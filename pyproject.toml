@@ -42,7 +42,11 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.0.0",
-    "ruff>=0.1.0",
+    # Bounded: `ruff>=0.1.0` let CI install any future release, and 0.16 widened
+    # the default rule set enough to turn 48 findings into 1566 with no code
+    # change. [tool.ruff] now pins the rules explicitly, but an upper bound keeps
+    # a minor bump from changing behaviour inside the selected rules too.
+    "ruff>=0.16.2,<0.17",
     "mypy>=1.0.0",
 ]
 
