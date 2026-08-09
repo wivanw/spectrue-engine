@@ -2,7 +2,6 @@
 import asyncio
 import os
 import sys
-from pathlib import Path
 
 # Add spectrue_core to path
 sys.path.append(os.path.abspath(os.curdir))

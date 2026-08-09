@@ -58,3 +58,28 @@ markers = [
     "unit: proper unit tests (fast, no io)",
     "integration: end-to-end integration tests (slow, offline; external calls are mocked)"
 ]
+
+[tool.ruff]
+# Pin the rule set explicitly.
+#
+# There was no ruff config at all, so `ruff check .` ran with whatever defaults
+# the installed version shipped — and the dev extra allows any `ruff>=0.1.0`.
+# When CI picked up ruff 0.16, its expanded defaults turned 48 findings into
+# 1566 (413x I001, ~357x UP*, 197x FURB157, 186x BLE001) and the lint gate
+# started failing on style rules this project never opted into. An explicit
+# select makes the gate deterministic across ruff upgrades.
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Re-export facades. These modules import names solely to expose them to
+# callers, so F401 "unused import" and E402 "import not at top" are by design —
+# 65 modules import from verdict/model.py, 13 from search_policy.py, and
+# adapters/llm/claims.py plus the coverage tests import from extraction.py.
+# Deleting the "unused" imports would break every one of those callers.
+"spectrue_core/domain/claims/extraction.py" = ["F401", "E402"]
+"spectrue_core/domain/verification/verdict/model.py" = ["F401", "E402"]
+"spectrue_core/domain/verification/search/search_policy.py" = ["F401", "F811", "E402"]
+"spectrue_core/use_cases/verification/scoring/rgba_audit/aggregation.py" = ["F401", "E402"]

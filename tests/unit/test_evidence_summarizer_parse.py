@@ -1,7 +1,6 @@
 # Copyright (C) 2025 Spectrue Contributors
 # Tests for evidence summarizer parsing (empty refuting_evidence items, schema tolerance).
 
-import pytest
 from unittest.mock import MagicMock
 
 from spectrue_core.adapters.llm.evidence_summarizer import EvidenceSummarizerSkill

@@ -37,10 +37,7 @@ from .selection import greedy_budgeted_submodular
 from .types import (
     ClaimNode,
     ClaimPostGraphMeta,
-    EdgeRelation,
     GraphResult,
-    STRUCTURAL_RELATIONS,
-    CandidateEdge,
 )
 from .deduplication import deduplicate_claims
 from .edge_typing import type_edges

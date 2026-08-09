@@ -179,7 +179,6 @@ def _classify_nodes(nodes: list[dict[str, Any]]) -> None:
     if len(nodes) < 2:
         return
 
-    import math
 
     def _stats(values: list[float]) -> tuple[float, float]:
         n = len(values)
