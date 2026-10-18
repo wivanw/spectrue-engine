@@ -27,6 +27,28 @@ TAVILY_RETRY_BASE_DELAY_S = 0.5  # Base delay in seconds
 TAVILY_RETRY_BACKOFF_FACTOR = 2.0  # Exponential backoff multiplier
 TAVILY_RETRYABLE_STATUS_CODES = {429, 432, 500, 502, 503, 504}  # Rate limit + server errors
 
+# Tavily search pricing per request: advanced = 2 credits; basic/fast/ultra-fast = 1.
+# https://docs.tavily.com/documentation/api-credits
+TAVILY_SEARCH_CREDITS_BY_DEPTH = {"advanced": 2.0}
+TAVILY_SEARCH_CREDITS_DEFAULT = 1.0
+
+
+def tavily_search_credits(response: dict | None, depth: str | None) -> float:
+    """Credits Tavily charged for one search.
+
+    Prefers the ``usage.credits`` Tavily returns when ``include_usage`` is set;
+    otherwise falls back to the published per-depth price.
+    """
+    usage = response.get("usage") if isinstance(response, dict) else None
+    if isinstance(usage, dict):
+        try:
+            credits = float(usage.get("credits"))
+            if credits >= 0:
+                return credits
+        except (TypeError, ValueError):
+            pass
+    return TAVILY_SEARCH_CREDITS_BY_DEPTH.get((depth or "").lower(), TAVILY_SEARCH_CREDITS_DEFAULT)
+
 
 class TavilyClient:
     def __init__(
@@ -181,6 +203,7 @@ class TavilyClient:
         _allowed = ("general", "news", "finance")
         payload["topic"] = topic if (topic and topic.lower() in _allowed) else "general"
         payload["include_raw_content"] = include_raw_content  # Pass through from caller
+        payload["include_usage"] = True  # Response carries usage.credits for metering
 
         url = "https://api.tavily.com/search"
         async with self._sem:
@@ -210,7 +233,12 @@ class TavilyClient:
 
             if self._meter:
                 try:
-                    event = self._meter.record_search(response=result)
+                    credits_used = tavily_search_credits(result, depth)
+                    event = self._meter.record_search(
+                        response=result,
+                        credits_used=credits_used,
+                        meta={"credits_used": credits_used, "search_depth": depth},
+                    )
                     Trace.event("tavily.metering.recorded", {
                         "type": "search",
                         "cost_credits": str(event.cost_credits),
