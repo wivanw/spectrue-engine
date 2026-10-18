@@ -13,6 +13,7 @@
 import pytest
 
 from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.runtime_config import DecisionsConfig
 from spectrue_core.pipeline.mode import DEEP_MODE
 from spectrue_core.pipeline.steps.audit_claims import AuditClaimsStep
 from spectrue_core.pipeline.steps.audit_evidence import AuditEvidenceStep
@@ -72,7 +73,7 @@ async def test_evidence_audit_invalid_output_sets_pipeline_error():
     ctx = PipelineContext(mode=DEEP_MODE, claims=[{"id": "c1", "text": "Example claim"}])
     ctx = ctx.set_extra("deep_claim_ctx", DeepClaimContext(claim_frames=[_build_frame()]))
 
-    result_ctx = await AuditEvidenceStep(llm_client=DummyLLM()).run(ctx)
+    result_ctx = await AuditEvidenceStep(llm_client=DummyLLM(), decisions=DecisionsConfig()).run(ctx)
     errors = result_ctx.get_extra("audit_errors") or {}
     evidence_errors = errors.get("evidence_audit", {})
     assert evidence_errors["e1"]["status"] == RGBAStatus.PIPELINE_ERROR

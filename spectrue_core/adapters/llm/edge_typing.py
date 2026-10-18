@@ -98,6 +98,13 @@ class EdgeTypingSkill(BaseSkill):
         if not edges:
             return []
 
+        # M147 gate "edge_typing": on = one Decisions request per edge instead of the LLM batch.
+        from spectrue_core.adapters.llm.decision_gates import gate_mode
+        decisions = getattr(getattr(self, "runtime", None), "decisions", None)
+        if decisions is not None and gate_mode(decisions, "edge_typing") == "on":
+            from spectrue_core.adapters.llm.edge_sensor import type_edges
+            return await type_edges(self.llm_client, decisions, edges, node_map, max_claim_chars=max_claim_chars)
+
         # For small batches, process directly
         if len(edges) <= self.EDGE_SUB_BATCH:
             return await self._type_sub_batch(edges, node_map, max_claim_chars, offset=0)

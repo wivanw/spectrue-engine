@@ -145,7 +145,10 @@ def convert_evidence_items(
             )
 
         # Sanitize snippet and quote to remove HTML boilerplate (nav, footer, etc.)
-        raw_snippet = ev.get("snippet") or ev.get("content")
+        # Evidence text lives under different keys depending on the producer (search snippet,
+        # extracted page); an item with text under content_excerpt/extracted_content is not empty.
+        raw_snippet = next((ev.get(k) for k in ("snippet", "content", "content_excerpt", "extracted_content")
+                            if isinstance(ev.get(k), str) and ev.get(k).strip()), None)
         raw_quote = ev.get("quote")
         clean_snippet = ArticleCleanerSkill.sanitize_evidence_html(raw_snippet) if raw_snippet else raw_snippet
         clean_quote = ArticleCleanerSkill.sanitize_evidence_html(raw_quote) if raw_quote else raw_quote

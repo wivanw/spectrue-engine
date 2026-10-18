@@ -605,16 +605,21 @@ For every claim you extract, provide:
    - Example: ["Elon Musk", "Tesla", "SEC"]
 4. **predicate_type**: One of: "event", "measurement", "policy", "quote", "ranking", "causal", "existence", "definition", "property", "other"
 5. **time_anchor**: Object with {{"type": "explicit_date"|"range"|"relative"|"timeless"|"unknown", "value": "<extracted or unknown>"}}
-6. **location_anchor**: Geographic context or "unknown"
+6. **search_queries**: 2-3 web search queries (each ≤ 80 characters) that would find evidence confirming OR refuting THIS claim
+   - Include the key entity and the specific number, date or name the claim asserts
+   - Make them different: one with the asserted number/date/name, one for the primary record (census, report,
+     official statement, dataset) that would contain it
+   - Use the article's language; add one English query when the topic is international
+   - GOOD: ["Eiffel Tower height 330 metres", "висота Ейфелевої вежі"]
+   - BAD: ["Eiffel Tower"] (too broad), ["Is the Eiffel Tower really 330 metres tall or not"] (a question, too long)
 7. **falsifiability**: Object with:
    - is_falsifiable: boolean (MUST be true for claims you emit)
    - falsifiable_by: one of "public_records", "scientific_publication", "official_statement", "reputable_news", "dataset", "other"
-8. **expected_evidence**: Object with {{"evidence_kind": "primary_source"|"secondary_source"|"both", "likely_sources": [...]}}
-9. **retrieval_seed_terms**: Array of 3-10 KEYWORDS (not sentences!) derived from entities + key noun phrases
+8. **retrieval_seed_terms**: Array of 3-10 KEYWORDS (not sentences!) derived from entities + key noun phrases
    - STRICTLY LIMITED TO 10 terms. Choose the most specific ones.
    - GOOD: ["Tesla", "SEC", "fraud", "settlement", "2024"]
    - BAD: ["Tesla was sued by the SEC for fraud in 2024"]
-10. **importance**: Float 0.0-1.0 for prioritization
+9. **importance**: Float 0.0-1.0 for prioritization
 
 ## DO NOT EMIT (drop silently)
 
@@ -625,6 +630,17 @@ For every claim you extract, provide:
    - *Note*: Scientific definitions like "Water boils at 100C" are NOT generalizations; they are verifiable properties.
 ❌ **Predictions/forecasts**: "X will happen", "Expected to increase"
 ❌ **Subjective evaluations**: "X is the best", "Y is undervalued" (without metric)
+❌ **Ads and sponsor segments**: promotions, discount codes, "check out / try / subscribe", free-trial offers,
+   channel self-promotion ("Check out Liberty VPN: a 30-day free trial"). They are not claims of the text.
+❌ **Glosses**: a parenthetical or appositive that only explains a term the text uses
+   ("UPSC (i.e. the commission that recruits civil servants)"). It is context for the claim, not a claim.
+
+## THE MAIN ASSERTION IS NEVER DROPPED
+
+The sentence the text exists to assert MUST be extracted whenever external evidence could confirm or refute it,
+even if it is vague. A trend or comparison ("more X are suddenly doing Y", "X has increased") is checkable against
+statistics: keep it, with `time_anchor.type = "relative"`, and name the metric in `search_queries`.
+Never return only background, definitions or glosses while the main assertion is missing.
 
 ## TRANSFORM OR DROP
 
@@ -655,14 +671,10 @@ If you cannot provide entity + time anchors, do NOT emit the claim.
       "subject_entities": ["Entity1", "Entity2"],
       "predicate_type": "event",
       "time_anchor": {{"type": "explicit_date", "value": "January 5, 2025"}},
-      "location_anchor": "Washington, DC",
+      "search_queries": ["Entity1 Entity2 January 2025 announcement"],
       "falsifiability": {{
         "is_falsifiable": true,
         "falsifiable_by": "reputable_news"
-      }},
-      "expected_evidence": {{
-        "evidence_kind": "secondary_source",
-        "likely_sources": ["reputable_news", "authoritative"]
       }},
       "retrieval_seed_terms": ["Entity1", "Entity2", "key", "terms", "here"],
       "importance": 0.85

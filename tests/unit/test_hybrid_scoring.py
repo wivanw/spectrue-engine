@@ -56,9 +56,9 @@ class TestHybridScoring:
         
         result = await skill.score_evidence(pack)
         
-        # Check re-aggregated verified_score (Bayesian hybrid)
-        assert result["verified_score"] > 0.99
-        assert result["claim_verdicts"][0]["rgba"][1] > 0.99
+        # G is the evidence verdict; the prior (1.0) is not fused in (benchmark 2026-10-18)
+        assert result["verified_score"] == pytest.approx(0.8)
+        assert result["claim_verdicts"][0]["rgba"][1] == pytest.approx(0.8)
 
     @pytest.mark.asyncio
     async def test_hybrid_score_unverified_anchor_blocks(self, skill, mock_llm_client):
@@ -181,7 +181,7 @@ class TestHybridScoring:
         assert result["verified_score"] == 0.8
 
     @pytest.mark.asyncio
-    async def test_prior_influences_low_veracity(self, skill, mock_llm_client):
+    async def test_prior_does_not_move_low_veracity(self, skill, mock_llm_client):
         # G = 0.2, Prior = 0.8
         # L_g = -1.386, L_prior = 1.386
         # L_f = -1.386 + 0.2*1.386 = -1.109 -> sigmoid(-1.109) = 0.248
@@ -210,4 +210,4 @@ class TestHybridScoring:
         }
         
         result = await skill.score_evidence(pack)
-        assert result["verified_score"] == pytest.approx(0.248, abs=0.001)
+        assert result["verified_score"] == pytest.approx(0.2)  # prior 0.8 no longer pulls it to 0.248

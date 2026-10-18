@@ -1,0 +1,132 @@
+{
+ "article_intent": "other",
+ "claims": [
+  {
+   "claim_text": "Бамбук може вирости на 91 см за одну добу",
+   "normalized_text": "Bamboo can grow 91 cm in one day.",
+   "subject_entities": [
+    "Bamboo"
+   ],
+   "predicate_type": "measurement",
+   "time_anchor": {
+    "type": "timeless",
+    "value": "timeless"
+   },
+   "location_anchor": "unknown",
+   "falsifiability": {
+    "is_falsifiable": true,
+    "falsifiable_by": "scientific_publication"
+   },
+   "expected_evidence": {
+    "evidence_kind": "secondary_source",
+    "likely_sources": [
+     "scientific_publication",
+     "botany encyclopedia"
+    ]
+   },
+   "retrieval_seed_terms": [
+    "bamboo",
+    "growth rate",
+    "91 cm",
+    "day",
+    "fastest"
+   ],
+   "importance": 0.7
+  },
+  {
+   "claim_text": "це найшвидше зростання серед усіх рослин",
+   "normalized_text": "Bamboo's growth rate is the fastest among all plants.",
+   "subject_entities": [
+    "Bamboo"
+   ],
+   "predicate_type": "ranking",
+   "time_anchor": {
+    "type": "timeless",
+    "value": "timeless"
+   },
+   "location_anchor": "unknown",
+   "falsifiability": {
+    "is_falsifiable": true,
+    "falsifiable_by": "scientific_publication"
+   },
+   "expected_evidence": {
+    "evidence_kind": "secondary_source",
+    "likely_sources": [
+     "scientific_publication",
+     "botany encyclopedia"
+    ]
+   },
+   "retrieval_seed_terms": [
+    "bamboo",
+    "fastest",
+    "growth",
+    "plants",
+    "ranking"
+   ],
+   "importance": 0.75
+  },
+  {
+   "claim_text": "Ейфелева вежа має висоту 330 метрів",
+   "normalized_text": "The Eiffel Tower has a height of 330 meters.",
+   "subject_entities": [
+    "Eiffel Tower"
+   ],
+   "predicate_type": "measurement",
+   "time_anchor": {
+    "type": "unknown",
+    "value": "unknown"
+   },
+   "location_anchor": "Paris, France",
+   "falsifiability": {
+    "is_falsifiable": true,
+    "falsifiable_by": "official_statement"
+   },
+   "expected_evidence": {
+    "evidence_kind": "primary_source",
+    "likely_sources": [
+     "official Eiffel Tower website",
+     "architectural records"
+    ]
+   },
+   "retrieval_seed_terms": [
+    "Eiffel Tower",
+    "height",
+    "330 meters",
+    "official"
+   ],
+   "importance": 0.8
+  },
+  {
+   "claim_text": "Населення Києва перевищує 2,9 мільйона осіб",
+   "normalized_text": "The population of Kyiv exceeds 2.9 million people.",
+   "subject_entities": [
+    "Kyiv"
+   ],
+   "predicate_type": "measurement",
+   "time_anchor": {
+    "type": "unknown",
+    "value": "unknown"
+   },
+   "location_anchor": "Kyiv, Ukraine",
+   "falsifiability": {
+    "is_falsifiable": true,
+    "falsifiable_by": "official_statement"
+   },
+   "expected_evidence": {
+    "evidence_kind": "primary_source",
+    "likely_sources": [
+     "State Statistics Service of Ukraine",
+     "United Nations population data"
+    ]
+   },
+   "retrieval_seed_terms": [
+    "Kyiv",
+    "population",
+    "2.9 million",
+    "Ukraine",
+    "statistics"
+   ],
+   "importance": 0.7
+  }
+ ]
+}

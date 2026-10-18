@@ -78,6 +78,118 @@ de:
         "missing_evidence": []
       }}
 
+    decisions:
+      judge_routing:
+        difficulty: "Wie schwer ist es, diese Aussage anhand dieser Belege richtig zu beurteilen?"
+        levels: ["Trivial: die Belege sagen es direkt.", "Leicht: klare Belege, wenig Auslegung.", "Mittel: etwas Auslegung oder mehrere Quellen zu verbinden.", "Schwer: widersprüchliche oder indirekte Belege, feine Formulierung.", "Sehr schwer: viel steht auf dem Spiel, widersprüchliche Quellen und feine Formulierung."]
+      edge:
+        instructions: "Wie hängt Aussage C2 mit Aussage C1 zusammen?"
+        supports: "C2 liefert Belege für C1."
+        contradicts: "C2 widerspricht C1."
+        depends_on: "C1 ist nur wahr, wenn C2 wahr ist."
+        elaborates: "C2 ergänzt C1 um Details."
+        unrelated: "Kein relevanter Zusammenhang."
+      domain_tier:
+        instructions: "Was für eine Quelle ist diese Website?"
+        authoritative: "Eine offizielle oder Primärquelle: Behörde, internationale Organisation, Regulierer, Gericht, Universität, Fachzeitschrift, die Organisation selbst."
+        reputable_news: "Ein etabliertes Nachrichtenmedium mit redaktionellen Standards."
+        local_media: "Regionale oder lokale Medien."
+        social: "Ein soziales Netzwerk, Forum, Video- oder Nutzerinhalt-Plattform."
+        low_reliability: "Unbekannt, anonym, parteiisch oder unzuverlässig."
+      oracle:
+        best: "Welcher Faktencheck betrifft dieselbe Behauptung wie die des Nutzers?"
+        best_none: "Keiner betrifft diese Behauptung."
+        match: "Wie genau entspricht dieser Faktencheck der Behauptung des Nutzers?"
+        match_levels: ["Andere Behauptung, nur gemeinsame Wörter.", "Verwandtes Thema.", "Teilweise dieselbe Behauptung.", "Dieselbe Behauptung, andere Formulierung oder Details.", "Im Wesentlichen dieselbe Behauptung."]
+        status: "Zu welchem Ergebnis kam dieser Faktencheck?"
+        status_confirmed: "Wahr oder bestätigt."
+        status_refuted: "Falsch, Fake oder widerlegt."
+        status_mixed: "Teilweise wahr, irreführend oder ohne Kontext."
+        rating: "Wie wahr bewertet dieser Faktencheck die Behauptung?"
+        rating_levels: ["Falsch.", "Größtenteils falsch.", "Halb wahr.", "Größtenteils wahr.", "Wahr."]
+      plan:
+        evidence_need: "Welche Belege könnten diese Behauptung entscheiden?"
+        need_official_stats: "Amtliche Statistiken oder Register."
+        need_empirical_study: "Wissenschaftliche Studien oder Datenanalysen."
+        need_guideline: "Offizielle Leitlinien oder Regeln."
+        need_news_report: "Nachrichtenberichte über das Ereignis."
+        need_expert_opinion: "Einschätzung von Fachleuten."
+        need_definition: "Eine Definition oder ein Nachschlagewerk."
+        need_anecdotal: "Persönliche Berichte."
+        need_unknown: "Unklar."
+        search_method: "Wo sind diese Belege am ehesten zu finden?"
+        method_general_search: "Allgemeine Websuche."
+        method_news: "Nachrichten."
+        method_academic: "Fachliteratur."
+        needs_primary: "Braucht die Prüfung eine Primärquelle (Originaldokument, Datensatz oder Erklärung)?"
+        structure_type: "Was für eine Aussage ist das?"
+        type_empirical_numeric: "Eine Zahl oder Messung."
+        type_event: "Ein Ereignis, das stattgefunden hat."
+        type_causal: "Ein Ursache-Wirkungs-Zusammenhang."
+        type_attribution: "Die Wiedergabe einer Äußerung."
+        type_definition: "Eine Definition."
+        type_policy_plan: "Eine Politik, ein Plan oder eine Entscheidung."
+        type_forecast: "Eine Vorhersage."
+        type_meta_scientific: "Eine Aussage über wissenschaftliche Ergebnisse."
+        type_other: "Etwas anderes."
+      evidence_audit:
+        stance: "Stützt dieser Beleg die Behauptung, widerlegt er sie, lässt er sie offen oder ist er ohne Bezug?"
+        stance_support: "Stützt die Behauptung und ihre Details."
+        stance_refute: "Widerspricht der Behauptung oder einem ihrer Details."
+        stance_unclear: "Bezogen, entscheidet die Frage aber nicht."
+        stance_unrelated: "Handelt von etwas anderem."
+        directness: "Wie direkt bezieht sich der Beleg auf die Behauptung?"
+        directness_direct: "Er behandelt genau das Behauptete."
+        directness_indirect: "Nur über verwandte Fakten."
+        directness_tangential: "Er streift das Thema nur."
+        specificity: "Wie konkret entspricht der Beleg den Details der Behauptung?"
+        specificity_high: "Er nennt dieselben konkreten Fakten, Zahlen oder Namen."
+        specificity_medium: "Er nennt einen Teil der Details."
+        specificity_low: "Er ist allgemein."
+        quote_integrity: "Wird das Zitat getreu verwendet?"
+        quote_integrity_ok: "Genau und im Kontext."
+        quote_integrity_partial: "Teilweise oder gekürzt."
+        quote_integrity_out_of_context: "Aus dem Zusammenhang gerissen."
+        quote_integrity_not_applicable: "Es gibt kein Zitat."
+        novelty_vs_copy: "Ist das eigene Berichterstattung oder eine Kopie einer anderen Quelle?"
+        novelty_vs_copy_original: "Eigene Berichterstattung."
+        novelty_vs_copy_syndicated: "Kopie oder Nacherzählung eines anderen Mediums."
+        novelty_vs_copy_unknown: "Nicht erkennbar."
+      stance:
+        instructions: "Stützt diese Quelle die Behauptung, widerspricht sie ihr, liefert sie nur Kontext oder hat sie nichts damit zu tun?"
+        support: "Sie sagt oder berichtet, was die Behauptung aussagt, einschließlich ihrer konkreten Details."
+        refute: "Sie sagt oder berichtet etwas, das der Behauptung oder einem ihrer Details widerspricht."
+        context: "Sie behandelt dasselbe Thema, bestätigt die Behauptung aber weder noch widerlegt sie sie."
+        irrelevant: "Sie handelt von etwas anderem."
+      extract:
+        instructions: "Enthält dieses Suchergebnis wahrscheinlich Belege, die die Behauptung bestätigen oder widerlegen, sodass sich das Lesen der ganzen Seite lohnt?"
+      search_stop:
+        instructions: "Enthalten die bisher gefundenen Quellen bereits genug Belege, um die Behauptung zu beurteilen, sodass keine weitere Suche nötig ist?"
+      inline_source:
+        relevant: "Ist diese verlinkte Quelle für mindestens eine der Behauptungen relevant?"
+        primary: "Ist dies eine PRIMÄRQUELLE, also der ursprüngliche Herausgeber der Information (offizielle Erklärung, Originaldokument, eigene Plattform des Autors), und nicht Berichterstattung darüber?"
+      metadata:
+        verification_target: "Was lässt sich an dieser Behauptung überprüfen?"
+        vt_reality: "Ob sie in der Wirklichkeit zutrifft."
+        vt_attribution: "Ob eine genannte Person oder Organisation das wirklich gesagt oder geschrieben hat."
+        vt_existence: "Ob ein genanntes Dokument, Ereignis oder Ding existiert."
+        vt_none: "Nichts: Es ist eine Meinung, eine Prognose, ein Witz oder eine Anweisung."
+        claim_role: "Welche Rolle spielt diese Behauptung im Text?"
+        role_core: "Eine Hauptaussage des Textes."
+        role_support: "Eine Aussage, die eine Hauptaussage stützt."
+        role_context: "Kontext oder Hintergrund, der den Text einrahmt."
+        role_counterclaim: "Eine Aussage, gegen die der Text argumentiert."
+        role_attribution: "Eine Wiedergabe dessen, was jemand gesagt hat."
+        harm: "Wie schädlich wäre es, dieser Behauptung zu glauben, wenn sie falsch ist?"
+        harm_levels: ["Kein Schaden oder belanglos", "Gering", "Mäßig", "Ernst (Geld, Sicherheit, Ruf)", "Schwer (Gesundheit, Leben, öffentliche Sicherheit)"]
+        importance: "Wie wichtig ist diese Behauptung für den Text insgesamt?"
+        importance_levels: ["Nebensächlich", "Gering", "Relevant", "Wichtig", "Zentral"]
+        check_oracle: "Haben Faktencheck-Organisationen eine solche Behauptung wahrscheinlich schon bewertet?"
+        time_sensitive: "Kann sich der Wahrheitsgehalt dieser Behauptung mit der Zeit ändern, sodass nur aktuelle Quellen sie bestätigen können?"
+        satire: "Ist diese Behauptung Satire oder ein Witz statt einer ernsthaften Aussage?"
+      verifiability:
+        instructions: "Ist dies eine konkrete Tatsachenbehauptung, die anhand öffentlicher Quellen überprüft werden kann (keine Meinung, Prognose, kein Witz und keine Anleitung)?"
+
   ui:
     popup:
       not_available: "Nicht verfügbar"

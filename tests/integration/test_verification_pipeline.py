@@ -11,6 +11,7 @@ from spectrue_core.llm.model_registry import ModelID
 import pytest
 
 from tests.conftest import apply_llm_defaults
+from spectrue_core.runtime_config import DecisionsConfig
 from unittest.mock import AsyncMock, MagicMock
 from spectrue_core.pipeline.orchestration.verifier import FactVerifier
 
@@ -40,6 +41,7 @@ def mock_config():
     
     # Validation fix: Set default locale
     config.runtime.locale = "en"
+    config.runtime.decisions = DecisionsConfig()  # M145 gates off
     
     # Ensure nested objects are also Mocks
     config.runtime.features.trace_enabled = False

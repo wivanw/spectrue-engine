@@ -20,7 +20,6 @@ from spectrue_core.runtime_config import EngineRuntimeConfig
 from spectrue_core.llm.llm_client import LLMClient
 
 
-from spectrue_core.llm.model_registry import ModelID
 import logging
 
 logger = logging.getLogger(__name__)
@@ -169,74 +168,12 @@ class FactCheckerAgent:
         """Clean article text using LLM Nano."""
         return await self.article_cleaner.clean_article(raw_text)
 
-    async def verify_search_relevance(self, claims: list[Claim], search_results: list[dict]) -> dict:
-        """Verify if search results are semantically relevant to claims."""
-        return await self.relevance_skill.verify_search_relevance(claims, search_results)
-
-    async def evaluate_semantic_gating(self, claims: list) -> bool:
-        """
-        Evaluate semantic gating policy (e.g. reject unverifiable content).
-        Returns True if allowed, False if rejected.
-        """
-        # Delegate to relevance skill or scoring skill if available. 
-        # For now, default to True (allow) unless filtering logic is restored/implemented.
-        # Tests will mock this to return False.
-        if hasattr(self.relevance_skill, "evaluate_semantic_gating"):
-             return await self.relevance_skill.evaluate_semantic_gating(claims)
-        return True
-
-
-    async def verify_oracle_relevance(self, user_fact: str, oracle_claim: str, oracle_rating: str) -> bool:
-        """
-        Check if the Oracle result is semantically relevant to the user's fact.
-        Prevents false positives where keywords match but the topic differs (e.g. comet news vs comet alien fake).
-        """
-        # Quick length check
-        if not user_fact or not oracle_claim:
-            return False
-
-        prompt = f"""Compare the User Query with the Fact-Check Result.
-        
-User Query: "{user_fact[:1000]}"
-Fact-Check Claim: "{oracle_claim[:1000]}" (Rated: {oracle_rating})
-
-Task:
-Determine if the Fact-Check is discussing the SAME specific claim or event as the User Query.
-- If the User Query is about a normal event (e.g. "comet approaching Earth") and the Fact-Check is debunking a wild/fake story about it (e.g. "aliens found on comet"), they are DIFFERENT (Relevance: NO).
-- If the User Query IS the fake story (e.g. "aliens on comet?"), then it IS RELEVANT (Relevance: YES).
-- If the User Query is vague, but the Fact-Check is the primary context, it's relevant.
-
-Output JSON: {{ "is_relevant": true/false, "reason": "..." }}
-"""
-        try:
-            from spectrue_core.utils.trace import Trace
-            result = await self.llm_client.call_json(
-                model=ModelID.NANO,
-                input=prompt,
-                instructions="You are a relevance checking assistant.",
-                reasoning_effort="low",
-                timeout=10.0,
-                trace_kind="oracle_verification"
-            )
-            is_relevant = bool(result.get("is_relevant", False))
-            Trace.event("oracle.verification", {
-                "user_fact": user_fact[:50], 
-                "oracle_claim": oracle_claim[:50], 
-                "is_relevant": is_relevant
-            })
-            if not is_relevant:
-                 logger.debug("[Agent] Oracle hit rejected by LLM: %s", result.get("reason"))
-            return is_relevant
-
-        except Exception as e:
-            logger.warning("[Agent] Oracle verification failed: %s. Assuming relevant.", e)
-            return True
-
     async def verify_inline_source_relevance(
         self, 
         claims: list[dict], 
         inline_source: dict,
-        article_excerpt: str = ""
+        article_excerpt: str = "",
+        lang: str = "en",
     ) -> dict:
         """
         Check if an inline source is relevant to the extracted claims.
@@ -300,7 +237,9 @@ A SECONDARY source reports or discusses information from elsewhere.
 Output JSON: {{ "is_relevant": true/false, "is_primary": true/false, "reason": "one sentence explanation" }}
 """
 
-        try:
+        llm_reason: dict[str, str] = {}
+
+        async def _llm_check() -> tuple[bool, bool]:
             result = await self.llm_client.call_json(
                 model=self.runtime.llm.model_inline_source_verification,
                 input=prompt,
@@ -309,10 +248,40 @@ Output JSON: {{ "is_relevant": true/false, "is_primary": true/false, "reason": "
                 timeout=10.0,
                 trace_kind="inline_source_verification",
             )
+            llm_reason["reason"] = result.get("reason", "")
+            return bool(result.get("is_relevant", False)), bool(result.get("is_primary", False))
 
-            is_relevant = bool(result.get("is_relevant", False))
-            is_primary = bool(result.get("is_primary", False))
-            reason = result.get("reason", "")
+        try:
+            labels = None
+            if self.runtime.decisions.mode("inline_source") != "off":
+                # G5 (M145): Decisions is a sensor; the LLM call stays the reference path.
+                from spectrue_core.adapters.llm.decision_gates import read_sensor
+                from spectrue_core.agents.prompts import get_prompt
+                from spectrue_core.llm.decisions import DecisionQuestion
+                from spectrue_core.use_cases.retrieval.decision_gates import inline_labels_from_reading
+
+                lang = (lang or "en")[:2]
+                reading = await read_sensor(
+                    gate="inline_source",
+                    cfg=self.runtime.decisions,
+                    llm_client=self.llm_client,
+                    input_text=(
+                        f'Article excerpt:\n"{article_excerpt[:500]}"\n\nClaims:\n{claims_text}\n\n'
+                        f'Source:\n- URL: {url}\n- Domain: {domain}\n- Anchor: "{anchor}"'
+                    ),
+                    questions=[
+                        DecisionQuestion.predicate("is_relevant", get_prompt(lang, "prompts.decisions.inline_source.relevant")),
+                        DecisionQuestion.predicate("is_primary", get_prompt(lang, "prompts.decisions.inline_source.primary")),
+                    ],
+                    trace_meta={"url": url[:60], "domain": domain},
+                )
+                labels = inline_labels_from_reading(reading, self.runtime.calibration.decision_sensors)
+            if labels is not None:
+                is_relevant, is_primary = labels
+                reason = "decisions_api"
+            else:
+                is_relevant, is_primary = await _llm_check()
+                reason = llm_reason.get("reason", "")
 
             Trace.event("inline_source.verification", {
                 "url": url[:60],

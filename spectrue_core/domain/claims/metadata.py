@@ -122,10 +122,12 @@ def parse_claim_metadata_fields(
             verification_target = "reality"
             missing_count += 1
     else:
-        if claim_category in {"SATIRE", "OPINION", "HYPERBOLIC"} or satire_likelihood >= 0.7:
-            verification_target = "none"
-        else:
-            verification_target = "reality"
+        verification_target = "none" if claim_category == "HYPERBOLIC" else "reality"
+    # M146 T020: "should verify" has one encoding. Satire and opinion are not truth
+    # claims, so their category maps onto verification_target instead of being a
+    # second skip path (no likelihood threshold).
+    if claim_category in {"SATIRE", "OPINION"}:
+        verification_target = "none"
         missing_count += 1
 
     # 2) claim_role
@@ -139,12 +141,10 @@ def parse_claim_metadata_fields(
         claim_role = "context" if verification_target == "none" else "support"
         missing_count += 1
 
-    # 2.5) Enforce verification_target consistency with explain-only roles.
-    # If claim_role is explain-only (context/background/meta/definition),
-    # verification_target should be "none" — no search needed.
-    _EXPLAIN_ONLY_ROLES = {"context", "meta", "background", "definition"}
-    if claim_role in _EXPLAIN_ONLY_ROLES and verification_target != "none":
-        verification_target = "none"
+    # M146 T020: the discourse role no longer overrides verifiability. A background
+    # fact ("Berlin is the capital of Germany") is still a checkable claim; its role
+    # only sets its weight in the global score (policy.get_role_weight), and whether
+    # it is searched in standard mode is the EVOI budget's decision.
 
     # 3) search_locale_plan
     slp_raw = rc.get("search_locale_plan", {})
@@ -192,7 +192,7 @@ def parse_claim_metadata_fields(
         for c in (channels_raw or []):
             cc = normalize_channel_token(str(c))
             if cc == "low_reliability":
-                cc = "low_reliability"
+                cc = "low_reliability_web"  # enum value (was a no-op self-assignment)
             if cc:
                 channels.append(cc)
 

@@ -107,11 +107,15 @@ def evidence_sufficiency(
     claim_text: str = "",
     use_policy_by_channel: dict[str, Any] | None = None,
     claim_type: str = "core",
+    sensor_log_odds: float = 0.0,
 ) -> SufficiencyResult:
     """
     Bayesian Sufficiency Judge (Domain).
     
     Accumulates evidence signals in log-odds space based on source tiers.
+    `sensor_log_odds` adds a calibrated sensor reading as one more log-likelihood
+    term (Decisions gate G4; 0.0 = no reading). It cannot make a claim with no
+    sources sufficient.
     """
     result = SufficiencyResult(claim_id=claim_id)
 
@@ -184,6 +188,7 @@ def evidence_sufficiency(
             result.reputable_count += 1
 
     result.independent_domains = n_domains
+    total_log_odds += sensor_log_odds
     posterior_p = log_odds_to_prob(total_log_odds)
 
     threshold = _SUFFICIENCY_BY_TYPE.get(claim_type, SUFFICIENCY_P_THRESHOLD)

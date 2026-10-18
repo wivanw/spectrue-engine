@@ -40,6 +40,7 @@ from spectrue_core.use_cases.verification.orchestration.execution_state import (
 )
 
 logger = logging.getLogger(__name__)
+MIN_EXTRACT_SCORE = 0.15  # pre-extract relevance floor
 
 
 def _coerce_score(value: Any) -> float:
@@ -76,6 +77,7 @@ class ClusterWebSearchStep:
     config: Any
     search_mgr: Any
     embedding_client: Any | None = None  # Injected dependency
+    tier: str = "trusted"  # "trusted": trusted domains only; "general": the rest (post-stance round)
     name: str = "cluster_web_search"
     weight: float = 83.0  # ~83s actual
 
@@ -107,6 +109,17 @@ class ClusterWebSearchStep:
                 max_search_concurrency = getattr(runtime_config.llm, "max_doc_concurrency", 4)
             max_search_concurrency = _coerce_int(max_search_concurrency, default=4, min_v=1, max_v=16)
             search_sem = asyncio.Semaphore(max_search_concurrency)
+            # Dynamic URL cap: scale with article complexity (claim count)
+            configured_max = _coerce_int(
+                getattr(deep_v2_cfg, "max_unique_urls", 120),
+                default=120,
+                min_v=0,
+                max_v=500,
+            )
+            claim_count = len(ctx.claims) if ctx.claims else len(cluster_plans)
+            # ~8 URLs per claim, min 20, max configured
+            dynamic_cap = max(20, min(claim_count * 8, configured_max))
+            max_unique_urls = dynamic_cap
 
             # Stage 0: Aggregate and deduplicate unique queries across all clusters
             all_queries_to_run = []
@@ -146,30 +159,20 @@ class ClusterWebSearchStep:
                             merged.append(d)
                     trusted_domains = merged
 
+                # The general tier runs in a second round, after stance (GeneralTierSearchStep).
+                domain_filter = ({"include_domains": trusted_domains} if self.tier == "trusted"
+                                 else {"exclude_domains": trusted_domains})
                 _, trusted_sources = await _search_with_sem(
                     query,
                     max_results=max_results,
                     depth=search_depth,
                     topic="general",
-                    include_domains=trusted_domains,
+                    **domain_filter,
                 )
 
                 rep_claim = claims_for_query[0] if claims_for_query else {"text": query}
-                sufficiency = check_sufficiency_for_claim(rep_claim, trusted_sources or [])
-
-                general_sources: list[dict] = []
-                if sufficiency.status != SufficiencyStatus.SUFFICIENT:
-                    _, general_sources = await _search_with_sem(
-                        query,
-                        max_results=max_results,
-                        depth=search_depth,
-                        topic="general",
-                        exclude_domains=trusted_domains,
-                    )
-
-                sources = (trusted_sources or []) + (general_sources or [])
-                if general_sources:
-                    sufficiency = check_sufficiency_for_claim(rep_claim, sources)
+                sources = list(trusted_sources or [])
+                sufficiency = check_sufficiency_for_claim(rep_claim, sources)
 
                 # Fallback: if non-English query returned 0 results, retry without domain filter
                 if not sources and (ctx.lang or "en") != "en":
@@ -189,11 +192,7 @@ class ClusterWebSearchStep:
                         sufficiency = check_sufficiency_for_claim(rep_claim, sources)
 
                 Trace.event("retrieval.cluster_search.sequential_search", {
-                    "query": query,
-                    "trusted_count": len(trusted_sources or []),
-                    "general_count": len(general_sources),
-                    "general_skipped": not general_sources,
-                })
+                    "query": query, "trusted_count": len(trusted_sources or [])})
 
                 # Academic search only for SCIENTIFIC claims + insufficient evidence
                 is_scientific = any(
@@ -252,7 +251,6 @@ class ClusterWebSearchStep:
                 },
             )
             
-            # Map results back to queries
             query_to_sources = {q: (s, suf) for q, s, suf in search_results}
 
             # Step 2: Assemble results for each cluster
@@ -336,17 +334,6 @@ class ClusterWebSearchStep:
             unique_urls = sorted(url_metadata.keys())
             urls_before_cap = len(unique_urls)
 
-            # Dynamic URL cap: scale with article complexity (claim count)
-            configured_max = _coerce_int(
-                getattr(deep_v2_cfg, "max_unique_urls", 120),
-                default=120,
-                min_v=0,
-                max_v=500,
-            )
-            claim_count = len(ctx.claims) if ctx.claims else len(cluster_plans)
-            # ~8 URLs per claim, min 20, max configured
-            dynamic_cap = max(20, min(claim_count * 8, configured_max))
-            max_unique_urls = dynamic_cap
             if max_unique_urls > 0 and len(unique_urls) > max_unique_urls:
                 unique_urls = sorted(
                     unique_urls,
@@ -386,7 +373,6 @@ class ClusterWebSearchStep:
             unique_urls = deduped_urls
 
             # Pre-extract filter: drop URLs with very low relevance score
-            MIN_EXTRACT_SCORE = 0.15
             pre_filter_count = len(unique_urls)
             unique_urls = [
                 u for u in unique_urls

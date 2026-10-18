@@ -50,14 +50,10 @@ async def test_deep_v2_escalates_to_academic_for_scientific_claims():
 
     ctx_v2 = await ClusterWebSearchStep(config=config, search_mgr=search_mgr).run(ctx_v2)
 
-    assert len(call_kwargs_list) == 3, "Expected 3 search passes: trusted, open, academic"
-    
-    # Pass 1: Trusted
+    # The open tier is a later DAG step (GeneralTierSearchStep, after stance): here trusted + academic only.
+    assert len(call_kwargs_list) == 2, "Expected 2 search passes: trusted, academic"
     assert "include_domains" in call_kwargs_list[0]
-    # Pass 2: Open
-    assert "exclude_domains" in call_kwargs_list[1]
-    # Pass 3: Scientific escalation (Tavily topic must be general|news|finance)
-    assert call_kwargs_list[2].get("topic") == "general" or "include_domains" in call_kwargs_list[2]
+    assert call_kwargs_list[1].get("topic") == "general" and "exclude_domains" not in call_kwargs_list[1]
 
 @pytest.mark.asyncio
 async def test_deep_v2_does_not_escalate_to_academic_for_general_claims():
@@ -94,9 +90,6 @@ async def test_deep_v2_does_not_escalate_to_academic_for_general_claims():
 
     ctx_v2 = await ClusterWebSearchStep(config=config, search_mgr=search_mgr).run(ctx_v2)
 
-    assert len(call_kwargs_list) == 2, "Expected 2 search passes: trusted, open. NO academic."
-    
-    # Pass 1: Trusted
+    # Trusted only: no academic escalation, and the open tier runs later, after stance.
+    assert len(call_kwargs_list) == 1, "Expected 1 search pass: trusted. NO academic."
     assert "include_domains" in call_kwargs_list[0]
-    # Pass 2: Open
-    assert "exclude_domains" in call_kwargs_list[1]

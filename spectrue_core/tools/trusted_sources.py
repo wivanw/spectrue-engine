@@ -527,7 +527,31 @@ def get_domain_tier(domain: str) -> EvidenceChannel:
     if is_local_media(domain):
         return EvidenceChannel.LOCAL_MEDIA
 
+    learned = sensor_tier(domain)
+    if learned is not None:
+        return EvidenceChannel(learned)
     return EvidenceChannel.LOW_RELIABILITY
+
+
+# M147 T033: tiers of domains missing from the curated lists, read by the Decisions sensor
+# (adapters/llm/domain_tier_sensor.py) and cached for the process.
+_SENSOR_TIERS: dict[str, str] = {}
+
+
+def _norm(domain: str) -> str:
+    return (domain or "").lower().strip().removeprefix("www.")
+
+
+def is_known_domain(domain: str) -> bool:
+    return any(f(domain) for f in (is_authoritative, is_reputable_news, is_social_platform, is_local_media))
+
+
+def sensor_tier(domain: str) -> str | None:
+    return _SENSOR_TIERS.get(_norm(domain))
+
+
+def record_sensor_tier(domain: str, channel: str) -> None:
+    _SENSOR_TIERS[_norm(domain)] = channel
 
 
 def get_tier_code(domain: str) -> str:

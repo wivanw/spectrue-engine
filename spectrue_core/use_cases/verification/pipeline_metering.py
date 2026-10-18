@@ -32,7 +32,6 @@ from spectrue_core.utils.costs import (
     summarize_reason_codes,
 )
 from spectrue_core.utils.ledger_models import (
-    BudgetAllocation,
     ClaimLedgerEntry,
     PhaseUsage,
     PipelineCounts,
@@ -152,42 +151,6 @@ def create_metering_context() -> MeteringContext:
         progress_emitter=progress_emitter,
         run_ledger=run_ledger,
         phase_tracker=phase_tracker,
-    )
-
-
-def compute_budget_allocation(metadata: Any) -> BudgetAllocation:
-    """
-    Compute budget allocation based on claim metadata.
-
-    Args:
-        metadata: Claim metadata with check_worthiness field
-
-    Returns:
-        BudgetAllocation with tier and limits
-    """
-    worthiness = float(getattr(metadata, "check_worthiness", 0.5) or 0.5)
-    if worthiness >= 0.75:
-        return BudgetAllocation(
-            worthiness_tier="high",
-            max_queries=5,
-            max_docs=12,
-            max_escalations=3,
-            defer_allowed=False,
-        )
-    if worthiness <= 0.35:
-        return BudgetAllocation(
-            worthiness_tier="low",
-            max_queries=2,
-            max_docs=5,
-            max_escalations=1,
-            defer_allowed=True,
-        )
-    return BudgetAllocation(
-        worthiness_tier="medium",
-        max_queries=3,
-        max_docs=8,
-        max_escalations=2,
-        defer_allowed=False,
     )
 
 

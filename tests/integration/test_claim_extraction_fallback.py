@@ -5,6 +5,7 @@
 """Integration tests for Claim Extraction Fallback."""
 
 import pytest
+from spectrue_core.runtime_config import DecisionsConfig
 from unittest.mock import AsyncMock, patch, MagicMock
 from spectrue_core.adapters.llm.claims import ClaimExtractionSkill
 from spectrue_core.llm.model_registry import ModelID
@@ -20,6 +21,7 @@ async def test_claim_extraction_uses_fallback_on_failure():
     mock_config = MagicMock()
     # Mock runtime config for fallback model
     mock_config.runtime.llm.model_claim_extraction = ModelID.MID
+    mock_config.runtime.decisions = DecisionsConfig()  # M146: metadata sensor off
     mock_config.runtime.llm.model_claim_extraction_fallback = ModelID.PRO
     
     mock_client = AsyncMock()

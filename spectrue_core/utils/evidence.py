@@ -228,23 +228,6 @@ def needs_evidence_acquisition_ladder(sources: list[dict]) -> bool:
     return any_missing_quote
 
 
-def extract_quote_candidates(content: str, max_quotes: int = 2) -> list[str]:
-    """
-    Extract lightweight quote candidates from content.
-    """
-    if not content:
-        return []
-    # Split on sentence boundaries.
-    parts = [p.strip() for p in re.split(r"[.!?]\s+", content) if p.strip()]
-    quotes: list[str] = []
-    for part in parts:
-        if len(part) < 40:
-            continue
-        quotes.append(part[:280])
-        if len(quotes) >= max_quotes:
-            break
-    return quotes
-
 def evidence_view_for_claim(pack: EvidencePack, claim_id: str) -> dict[str, list[SearchResult]]:
     """
     Get a view of the EvidencePack filtered for a specific claim.

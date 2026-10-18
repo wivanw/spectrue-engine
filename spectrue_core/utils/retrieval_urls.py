@@ -26,7 +26,7 @@ ClaimId = str
 
 @dataclass
 class UrlMeta:
-    status: Literal["seen", "extracted", "failed"]
+    status: Literal["seen", "extracted", "failed", "extract_skipped"]
     first_seen_stage: int
     source_id: str
     seen_by_claims: set[ClaimId] = field(default_factory=set)
@@ -65,6 +65,8 @@ class FixedPipelineState:
 ExtractBatch = Callable[[list[NormalizedUrl]], Awaitable[dict[NormalizedUrl, ExtractedContent]]]
 CheapMatch = Callable[[ClaimId, NormalizedUrl, dict[str, Any]], bool]
 AuditMatch = Callable[[ClaimId, ExtractedContent], bool]
+# Given pending URLs, return the subset worth a paid extract (order kept).
+ExtractFilter = Callable[[list[NormalizedUrl]], Awaitable[list[NormalizedUrl]]]
 
 _state_ctx: ContextVar[FixedPipelineState | None] = ContextVar(
     "fixed_retrieval_state",
@@ -83,6 +85,10 @@ _audit_match_ctx: ContextVar[AuditMatch | None] = ContextVar(
     "fixed_retrieval_audit_match",
     default=None,
 )
+_extract_filter_ctx: ContextVar[ExtractFilter | None] = ContextVar(
+    "fixed_retrieval_extract_filter",
+    default=None,
+)
 
 
 class FixedPipelineContext:
@@ -95,6 +101,7 @@ class FixedPipelineContext:
         extract_batch: ExtractBatch,
         cheap_match: CheapMatch | None = None,
         audit_match: AuditMatch | None = None,
+        extract_filter: ExtractFilter | None = None,
         stage: int | None = None,
     ) -> None:
         self._state_token = _state_ctx.set(state)
@@ -102,6 +109,7 @@ class FixedPipelineContext:
         self._stage_token = _stage_ctx.set(stage)
         self._cheap_token = _cheap_match_ctx.set(cheap_match)
         self._audit_token = _audit_match_ctx.set(audit_match)
+        self._filter_token = _extract_filter_ctx.set(extract_filter)
 
     def set_stage(self, stage: int) -> None:
         _stage_ctx.set(stage)
@@ -115,6 +123,7 @@ class FixedPipelineContext:
         _stage_ctx.reset(self._stage_token)
         _cheap_match_ctx.reset(self._cheap_token)
         _audit_match_ctx.reset(self._audit_token)
+        _extract_filter_ctx.reset(self._filter_token)
 
 
 def init_state() -> FixedPipelineState:
@@ -218,10 +227,23 @@ async def extract_all_batches(batch_size: int = 5) -> None:
     registry = state.registry
 
     urls = extractor_queue.pending
-    pending_before = len(urls)
     extractor_queue.pending = []
-    processed = 0
     stage = _stage_ctx.get()
+
+    extract_filter = _extract_filter_ctx.get()
+    if extract_filter is not None and urls:
+        # Provider failures are typed inside the filter's gate; anything raised here is a bug.
+        keep = set(await extract_filter(list(urls)))
+        skipped = [u for u in urls if u not in keep]
+        if skipped:
+            for u in skipped:
+                if u in registry.urls:
+                    registry.urls[u].status = "extract_skipped"
+            Trace.event("extract_filter.skipped", {"stage": stage, "count": len(skipped), "kept": len(urls) - len(skipped)})
+            urls = [u for u in urls if u in keep]
+
+    pending_before = len(urls)
+    processed = 0
 
     for batch in _chunk_urls(urls, batch_size):
         batch_count = len(batch)
@@ -282,34 +304,3 @@ def bind_after_extract() -> None:
 
     stage = _stage_ctx.get()
     Trace.event("bind_completed", {"stage": stage})
-
-
-def _meta_value(source: Any, key: str, default: float) -> float:
-    if isinstance(source, dict) and key in source:
-        try:
-            return float(source.get(key, default))
-        except Exception:
-            return default
-    if hasattr(source, key):
-        try:
-            return float(getattr(source, key))
-        except Exception:
-            return default
-    return default
-
-
-def compute_sufficiency(claim_metadata: Any) -> float:
-    w1 = _meta_value(claim_metadata, "w1", 1.0)
-    w2 = _meta_value(claim_metadata, "w2", 1.0)
-    w3 = _meta_value(claim_metadata, "w3", 1.0)
-    w4 = _meta_value(claim_metadata, "w4", 1.0)
-    ce_cluster_count = _meta_value(claim_metadata, "CE_cluster_count", 0.0)
-    se_support_mass = _meta_value(claim_metadata, "SE_support_mass", 0.0)
-    conflict_mass = _meta_value(claim_metadata, "conflict_mass", 0.0)
-    missing_constraints = _meta_value(claim_metadata, "missing_constraints", 0.0)
-    return (
-        w1 * ce_cluster_count
-        + w2 * se_support_mass
-        - w3 * conflict_mass
-        - w4 * missing_constraints
-    )

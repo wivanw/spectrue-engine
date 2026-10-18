@@ -289,7 +289,8 @@ class AssembleStandardResultStep(Step):
                 "summary": _build_dual_summary(verdict),
                 "rationale": verdict.get("rationale"),
                 "analysis": verdict.get("analysis") or verdict.get("rationale"),
-                "verified_score": (_coerce_score(verdict.get("verified_score"), 0.0) + 1.0) / 2.0,  # Normalize [-1, 1] -> [0, 1]
+                # G is already a probability in [0, 1]; -1.0 = unverified (not a probability, never rescaled).
+                "verified_score": _coerce_score(verdict.get("verified_score"), -1.0),
                 "veracity_signed": verdict.get("verified_score"),  # Preserve signed score for debug/backend use
                 # A must be in [0, 1] for consumers. Internal -1.0 (unknown) is clamped to 0.0.
                 "explainability_score": _coerce_unit_score(

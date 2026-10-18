@@ -33,11 +33,6 @@ _VERDICT_ALIASES: dict[str, str] = {
 }
 
 
-def _normalize_verdict_label(verdict: str | None) -> str:
-    key = (verdict or "").strip().upper()
-    return _VERDICT_ALIASES.get(key, key)
-
-
 def _root_cause(exc: Exception) -> Exception:
     seen: set[int] = set()
     current: Exception = exc
@@ -239,53 +234,25 @@ async def judge_claims_independently(
             # US4: Connect prior_score, missing_evidence, and freshness adjustments to deep confidence/verdict composition
             original_conf = output.confidence
             original_verdict = output.verdict
-            original_verdict_norm = _normalize_verdict_label(original_verdict)
             new_conf = original_conf
             new_verdict = original_verdict
             reason_codes = []
 
-            # 1. Relaxed missing_evidence penalty (multiplicative or additive instead of hard cap)
-            if getattr(output, "missing_evidence", None) and len(output.missing_evidence) > 0:
-                # If judgment is supported but missing some "extra" evidence, don't kill confidence
-                if original_verdict_norm == "SUPPORTED":
-                    new_conf = max(0.4, new_conf - 0.1)
-                else:
-                    # Still cap for NEI/Refuted if missing key evidence
-                    new_conf = min(new_conf, 0.5)
-                reason_codes.append("missing_evidence_penalty")
-
-            # 2. Shift default "unverifiable" towards prior if prior is strong
-            g_score = float(getattr(output.rgba, "g", -1.0))
-            is_hard_negative = g_score <= 0.0 or original_verdict_norm in {"NEI", "REFUTED"}
-            if original_verdict_norm in {"NEI"} or g_score == -1.0:
-                # Lowered threshold further from 0.7 to 0.6 to be more helpful for common facts
-                if getattr(output, "prior_score", -1.0) >= 0.6:
-                    if is_hard_negative:
-                        reason_codes.append("prior_score_supported_blocked")
-                    else:
-                        new_conf = max(0.4, min(new_conf + 0.3, 0.65))
-                        new_verdict = "supported"
-                        reason_codes.append("prior_score_supported_shift")
-                elif getattr(output, "prior_score", -1.0) >= 0.0 and getattr(output, "prior_score", -1.0) <= 0.25:
-                    new_conf = max(0.4, min(new_conf + 0.3, 0.65))
-                    new_verdict = "refuted"
-                    reason_codes.append("prior_score_refuted_shift")
-
-            # 3. Apply FreshnessSignal modifier (aware of time sensitivity)
-            try:
-                from spectrue_core.use_cases.verification.scoring.freshness_signal import calculate_freshness_adjustment
-                claim_metadata = getattr(frame, "claim_metadata", None)
-                is_sensitive = getattr(claim_metadata, "time_sensitive", True)
-                freshness_adj = calculate_freshness_adjustment(
-                    frame.claim_id, 
-                    frame.evidence_items,
-                    is_time_sensitive=is_sensitive
-                )
-                if freshness_adj < 0:
-                    new_conf = max(0.0, new_conf + freshness_adj)
-                    reason_codes.append("freshness_penalty")
-            except Exception as e:
-                logger.warning("Freshness signal failed: %s", e)
+            # The judge's verdict and confidence are kept as returned. No midpoint caps for
+            # missing evidence and no verdict flips from the judge's own prior_score: on the
+            # fact-checker benchmark (2026-10-18) the prior only degraded Brier (see
+            # VERIFICATION_METRICS §7.0), and Constitution III forbids fixed midpoints.
+            # Only the old-evidence penalty applies, and only to time-sensitive claims.
+            from spectrue_core.use_cases.verification.scoring.freshness_signal import calculate_freshness_adjustment
+            claim_metadata = getattr(frame, "claim_metadata", None)
+            freshness_adj = calculate_freshness_adjustment(
+                frame.claim_id,
+                frame.evidence_items,
+                is_time_sensitive=bool(getattr(claim_metadata, "time_sensitive", False)),  # same default as ClaimMetadata
+            )
+            if freshness_adj < 0:
+                new_conf = max(0.0, new_conf + freshness_adj)
+                reason_codes.append("freshness_penalty")
 
             import dataclasses
             output = dataclasses.replace(

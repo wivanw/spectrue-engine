@@ -60,18 +60,11 @@ def should_skip_search(metadata: ClaimMetadata) -> bool:
     """
     Check if search should be skipped for this claim.
 
-    Skips when:
-    - verification_target is NONE (predictions, opinions), OR
-    - claim is explain-only (background, context, meta, definition)
-    Fail-open: LOW metadata confidence always allows search.
+    The single rule (M146 T020): skip iff verification_target is NONE
+    (predictions, opinions, satire). The claim's role does not decide search, and
+    there is no confidence-based override.
     """
-    if metadata.metadata_confidence == MetadataConfidence.LOW:
-        return False  # Fail-open overrides
-    if metadata.verification_target == VerificationTarget.NONE:
-        return True
-    if is_explain_only(metadata):
-        return True
-    return False
+    return metadata.verification_target == VerificationTarget.NONE
 
 
 def is_explain_only(metadata: ClaimMetadata) -> bool:

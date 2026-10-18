@@ -22,6 +22,11 @@
       "usd_per_output_token": 0.00003,
       "usd_per_reasoning_token": 0.00003
     },
+    "gpt-6-luna-decisions": {
+      "usd_per_input_token": 0.0000001,
+      "usd_per_output_token": 0,
+      "usd_per_reasoning_token": null
+    },
     "deepseek-v4-flash": {
       "usd_per_input_token": 0.00000014,
       "usd_per_output_token": 0.00000028,

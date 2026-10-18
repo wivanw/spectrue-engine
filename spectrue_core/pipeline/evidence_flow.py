@@ -110,6 +110,21 @@ def rebuild_evidence_pack(
     )
 
 
+def _deduplicated(collection: EvidenceCollection, inp: EvidenceFlowInput) -> EvidenceCollection:
+    """The pack is built at evidence_collect, before evidence_dedup; the judge and the
+    displayed sources must read it without exact duplicates (same single apply_dedup)."""
+    from spectrue_core.use_cases.evidence.dedup import apply_dedup
+    from spectrue_core.utils.evidence import build_evidence_pack
+
+    sources = list(collection.sources or [])
+    kept, _ = apply_dedup(sources=sources, filter_duplicates=True)
+    if len(kept) == len(sources):
+        return collection
+    Trace.event("evidence_flow.pack_deduplicated", {"before": len(sources), "after": len(kept)})
+    return rebuild_evidence_pack(build_evidence_pack=build_evidence_pack, collection=collection,
+                                 clustered_results=None, sources_override=kept, inp=inp)
+
+
 async def score_evidence_collection(
     *,
     agent,
@@ -120,6 +135,7 @@ async def score_evidence_collection(
     score_mode: str = "standard",
 ) -> dict:
     """Invoke judge on a pre-collected evidence pack."""
+    collection = _deduplicated(collection, inp)
     pack = collection.pack
     claims = collection.claims
     sources = collection.sources

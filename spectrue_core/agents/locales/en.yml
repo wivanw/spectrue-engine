@@ -79,6 +79,118 @@ en:
         "missing_evidence": []
       }}
 
+    decisions:
+      judge_routing:
+        difficulty: "How hard is it to judge this claim correctly from this evidence?"
+        levels: ["Trivial: the evidence states it directly.", "Easy: clear evidence, little interpretation.", "Moderate: some interpretation or several sources to combine.", "Hard: conflicting or indirect evidence, nuanced wording.", "Very hard: high stakes, conflicting sources and subtle wording."]
+      edge:
+        instructions: "How is claim C2 related to claim C1?"
+        supports: "C2 provides evidence for C1."
+        contradicts: "C2 contradicts C1."
+        depends_on: "C1 is true only if C2 is true."
+        elaborates: "C2 adds detail to C1."
+        unrelated: "No meaningful relation."
+      domain_tier:
+        instructions: "What kind of source is this website?"
+        authoritative: "An official or primary source: government, international body, regulator, court, university, scientific journal, the organisation itself."
+        reputable_news: "An established news outlet with editorial standards."
+        local_media: "Regional or local media."
+        social: "A social network, forum, video or user-generated platform."
+        low_reliability: "Unknown, anonymous, partisan or unreliable."
+      oracle:
+        best: "Which fact-check is about the same claim as the user's claim?"
+        best_none: "None of them is about this claim."
+        match: "How closely does that fact-check match the user's claim?"
+        match_levels: ["Different claim, shared keywords.", "Related topic.", "Overlapping claim.", "Same claim, different wording or details.", "Essentially the same claim."]
+        status: "What did that fact-check conclude about the claim?"
+        status_confirmed: "True or verified."
+        status_refuted: "False, fake or debunked."
+        status_mixed: "Partly true, misleading or missing context."
+        rating: "How true does that fact-check rate the claim?"
+        rating_levels: ["False.", "Mostly false.", "Half true or mixed.", "Mostly true.", "True."]
+      plan:
+        evidence_need: "What kind of evidence would settle this claim?"
+        need_official_stats: "Official statistics or registers."
+        need_empirical_study: "Scientific studies or data analyses."
+        need_guideline: "Official guidelines or rules."
+        need_news_report: "News reports of the event."
+        need_expert_opinion: "Expert assessment."
+        need_definition: "A definition or reference work."
+        need_anecdotal: "Personal accounts."
+        need_unknown: "Unclear."
+        search_method: "Where is that evidence most likely to be found?"
+        method_general_search: "General web search."
+        method_news: "News coverage."
+        method_academic: "Academic literature."
+        needs_primary: "Does checking this claim need a primary source (the original document, dataset or statement)?"
+        structure_type: "What kind of statement is this?"
+        type_empirical_numeric: "A number or measurement."
+        type_event: "An event that happened."
+        type_causal: "A cause-and-effect relation."
+        type_attribution: "A report of what someone said."
+        type_definition: "A definition."
+        type_policy_plan: "A policy, plan or decision."
+        type_forecast: "A prediction."
+        type_meta_scientific: "A statement about scientific findings."
+        type_other: "Something else."
+      evidence_audit:
+        stance: "Does this evidence support the claim, refute it, leave it unclear, or is it unrelated?"
+        stance_support: "Supports the claim and its details."
+        stance_refute: "Contradicts the claim or one of its details."
+        stance_unclear: "Related, but does not settle the claim."
+        stance_unrelated: "About something else."
+        directness: "How directly does the evidence address the claim?"
+        directness_direct: "It addresses exactly what the claim asserts."
+        directness_indirect: "It addresses it only through related facts."
+        directness_tangential: "It only touches the topic."
+        specificity: "How specific is the evidence about the claim's details?"
+        specificity_high: "It gives the same specific facts, numbers or names."
+        specificity_medium: "It gives some of the specifics."
+        specificity_low: "It is general."
+        quote_integrity: "Is the quoted text used faithfully?"
+        quote_integrity_ok: "Quoted accurately and in context."
+        quote_integrity_partial: "Partly quoted or shortened."
+        quote_integrity_out_of_context: "Taken out of context."
+        quote_integrity_not_applicable: "There is no quote."
+        novelty_vs_copy: "Is this original reporting or a copy of another source?"
+        novelty_vs_copy_original: "Original reporting."
+        novelty_vs_copy_syndicated: "A copy or rewrite of another outlet's report."
+        novelty_vs_copy_unknown: "Cannot tell."
+      stance:
+        instructions: "Does this source support the claim, contradict it, only give context, or is it unrelated?"
+        support: "It states or reports what the claim asserts, including its specific details."
+        refute: "It states or reports something that contradicts the claim or one of its details."
+        context: "It is about the same subject but neither confirms nor contradicts the claim."
+        irrelevant: "It is about something else."
+      extract:
+        instructions: "Does this search result likely contain evidence that confirms or refutes the claim, so that reading the full page is worthwhile?"
+      search_stop:
+        instructions: "Do the sources found so far already contain enough evidence to judge the claim, so that another search is unnecessary?"
+      inline_source:
+        relevant: "Is this linked source relevant to any of the claims?"
+        primary: "Is this source a PRIMARY source, i.e. the original issuer of the information (official statement, original document, the author's own platform), rather than coverage or reporting about it?"
+      metadata:
+        verification_target: "What can be checked about this claim?"
+        vt_reality: "Whether it is factually true in the world."
+        vt_attribution: "Whether a named person or organisation really said or wrote it."
+        vt_existence: "Whether a named document, event or thing exists."
+        vt_none: "Nothing: it is an opinion, a prediction, a joke or an instruction."
+        claim_role: "What role does this claim play in the text?"
+        role_core: "A main claim of the text."
+        role_support: "A claim that supports a main claim."
+        role_context: "Context or background that frames the text."
+        role_counterclaim: "A claim the text argues against."
+        role_attribution: "A report of what someone said."
+        harm: "How much harm could believing this claim cause if it were false?"
+        harm_levels: ["None or trivial", "Minor", "Moderate", "Serious (money, safety, reputation)", "Severe (health, life, public safety)"]
+        importance: "How important is this claim to the text as a whole?"
+        importance_levels: ["Marginal", "Minor", "Relevant", "Important", "Central"]
+        check_oracle: "Is this the kind of claim fact-checking organisations are likely to have already rated?"
+        time_sensitive: "Can the truth of this claim change over time, so that only recent sources can confirm it?"
+        satire: "Is this claim satire or a joke rather than a serious statement?"
+      verifiability:
+        instructions: "Is this a specific factual claim that can be checked against public sources (not an opinion, prediction, joke or instruction)?"
+
   ui:
     popup:
       not_available: "Not available"

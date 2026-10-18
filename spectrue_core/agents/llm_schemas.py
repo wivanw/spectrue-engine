@@ -542,11 +542,6 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                             },
                         },
                     },
-                    # Location anchor (optional but encouraged)
-                    "location_anchor": {
-                        "type": "string",
-                        "description": "Geographic context (city, country, region) or 'unknown'",
-                    },
                     # Falsifiability contract
                     "falsifiability": {
                         "type": "object",
@@ -564,21 +559,14 @@ VERIFIABLE_CORE_CLAIM_SCHEMA: dict[str, Any] = {
                             },
                         },
                     },
-                    # Evidence expectations (optional, relaxed schema)
-                    "expected_evidence": {
-                        "type": "object",
-                        "additionalProperties": True,  # Allow extra fields
-                        "properties": {
-                            "evidence_kind": {
-                                "type": "string",
-                                # Removed enum - LLM generates varied values
-                            },
-                            "likely_sources": {
-                                "type": "array",
-                                # Removed enum - LLM generates free-form source types
-                                "items": {"type": "string"},
-                            },
-                        },
+                    # M146 T030: per-claim web queries, produced with the full chunk as context
+                    # (replaces the unused location_anchor / expected_evidence).
+                    "search_queries": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 3, "maxLength": 80},
+                        "minItems": 1,
+                        "maxItems": 3,
+                        "description": "1-3 web search queries that would find evidence confirming or refuting this claim",
                     },
                     # Retrieval keywords (NOT full sentences)
                     "retrieval_seed_terms": {

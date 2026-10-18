@@ -9,6 +9,7 @@ from spectrue_core.billing import pricing, token_estimator
 from spectrue_core.billing.config_loader import load_pricing_config
 from spectrue_core.billing.types import CreditPricingPolicy
 from spectrue_core.llm.model_registry import ModelID
+from spectrue_core.domain.claims import fields as claim_fields
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ def select_judge_model(
     prompt_chars: int,
     out_tokens_estimate: int = 380,
     deepseek_fail_prob: float = 0.18,
+    required_capability_override: RequiredCapability | None = None,
 ) -> JudgeModelDecision:
     """
     Price-aware, deterministic routing for judge model:
@@ -116,8 +118,8 @@ def select_judge_model(
       prompt_chars: the constructed judge prompt size (chars)
     """
     # ---- claim signals (robust to missing fields) ----
-    importance = float(getattr(claim, "importance", 0.5) or 0.5)
-    worthiness = float(getattr(claim, "check_worthiness", 0.5) or 0.5)
+    importance = claim_fields.or_default(claim_fields.unit(claim, "importance"), 0.5)
+    worthiness = claim_fields.or_default(claim_fields.unit(claim, "check_worthiness"), 0.5)
     role = str(getattr(claim, "claim_role", "") or "")
     harm = getattr(claim, "harm_potential", None)
     if harm is None:
@@ -190,6 +192,10 @@ def select_judge_model(
         required_cap = "cheap"
     else:
         required_cap = "mid"
+
+    if required_capability_override is not None:
+        # M147 T026: the Decisions difficulty sensor decides the tier instead of the hand weights above.
+        required_cap = required_capability_override
 
     allowed: list[str]
     if required_cap == "high":

@@ -40,6 +40,8 @@ logger = logging.getLogger(__name__)
 def check_sufficiency_for_claim(
     claim: dict,
     sources: list[Any],
+    *,
+    sensor_log_odds: float = 0.0,
 ) -> SufficiencyResult:
     """
     Convenience wrapper that extracts metadata from claim.
@@ -68,6 +70,7 @@ def check_sufficiency_for_claim(
         verification_target=verification_target,
         claim_text=claim_text,
         use_policy_by_channel=use_policy_by_channel,
+        sensor_log_odds=sensor_log_odds,
     )
 
 

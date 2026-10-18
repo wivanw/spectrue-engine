@@ -75,6 +75,7 @@ class VerifyInlineSourcesStep:
                 search_mgr=self.search_mgr,
                 content_budget_config=content_budget_cfg,
                 progress_callback=progress_callback,
+                lang=ctx.lang or "en",
             )
 
             # Fallback logic if verification returned nothing but we had candidates and NO claims?

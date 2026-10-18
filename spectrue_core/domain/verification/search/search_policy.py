@@ -16,11 +16,7 @@ from spectrue_core.domain.verification.verdict.model import AnalysisMode
 from spectrue_core.domain.claims.model import (
     EvidenceChannel,
     UsePolicy,
-    MetadataConfidence,
-    ClaimMetadata,
 )
-# PolicyDecision is in domain.claims.policy
-from spectrue_core.domain.claims.policy import ClaimPolicyDecision, PolicyMode
 from .types import (
     SearchDepth,
     SearchProfileName,
@@ -48,22 +44,6 @@ from .ranking import (
     prefer_fallback_results,
 )
 
-from spectrue_core.domain.verification.verdict.model import AnalysisMode
-from spectrue_core.domain.claims.model import (
-    EvidenceChannel,
-    UsePolicy,
-    MetadataConfidence,
-    ClaimMetadata,
-)
-# PolicyDecision is in domain.claims.policy
-from spectrue_core.domain.claims.policy import ClaimPolicyDecision, PolicyMode
-from .types import (
-    SearchDepth,
-    SearchProfileName,
-    StancePassMode,
-)
-from spectrue_core.domain.verification.verdict.model import resolve_stance_pass_mode
-
 
 # Re-export for backward compatibility
 __all__ = [
@@ -81,7 +61,6 @@ __all__ = [
     "SearchPolicy",
     "resolve_profile_name",
     "default_search_policy",
-    "decide_claim_policy",
     "resolve_stance_pass_mode",
     "filter_search_results",
     "rerank_search_results",
@@ -173,44 +152,3 @@ def default_search_policy() -> SearchPolicy:
         ),
     }
     return SearchPolicy(profiles=profiles)
-
-
-def decide_claim_policy(metadata: ClaimMetadata | None) -> ClaimPolicyDecision:
-    """
-    Decide per-claim routing mode (SKIP/CHEAP/FULL) based on metadata signals.
-    """
-    if metadata is None:
-        return ClaimPolicyDecision(mode=PolicyMode.FULL, reason_codes=["metadata_missing"])
-
-    from spectrue_core.domain.claims.policy import should_skip_search
-    if should_skip_search(metadata):
-        return ClaimPolicyDecision(
-            mode=PolicyMode.SKIP,
-            reason_codes=["skip_signal"],
-        )
-
-    if metadata.metadata_confidence == MetadataConfidence.LOW:
-        return ClaimPolicyDecision(
-            mode=PolicyMode.CHEAP,
-            reason_codes=["low_metadata_confidence"],
-        )
-
-    low_threshold = 0.35
-    high_threshold = 0.75
-    worthiness = float(metadata.check_worthiness or 0.0)
-
-    if worthiness <= low_threshold:
-        return ClaimPolicyDecision(
-            mode=PolicyMode.CHEAP,
-            reason_codes=["low_worthiness"],
-        )
-    if worthiness >= high_threshold:
-        return ClaimPolicyDecision(
-            mode=PolicyMode.FULL,
-            reason_codes=["high_worthiness"],
-        )
-
-    return ClaimPolicyDecision(mode=PolicyMode.FULL, reason_codes=["default_worthiness"])
-
-
-

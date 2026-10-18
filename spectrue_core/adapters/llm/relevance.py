@@ -7,95 +7,89 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-from .base_skill import BaseSkill, logger
-from spectrue_core.utils.evidence_pack import Claim
-from spectrue_core.llm.model_registry import ModelID
+"""
+Semantic gating sensors (M66 restored in M145 Phase R).
 
-class RelevanceSkill(BaseSkill):
-    """
-    Semantic Gating for Search Results.
-    Filters out irrelevant search results using lightweight LLM checks before expensive processing.
-    """
-
-    async def verify_search_relevance(
-        self, 
-        claims: list[Claim], 
-        search_results: list[dict]
-    ) -> dict:
-        """
-        Check if search results contain relevant information to verify the claims.
-        
-        Args:
-            claims: List of extracted claims
-            search_results: List of SearchResult dicts
-            
-        Returns:
-            Dict: {"is_relevant": bool, "reason": str}
-        """
-        if not claims or not search_results:
-            return {"is_relevant": False, "reason": "No input data"}
-
-        # Prepare context for LLM
-        # Use top 3 claims
-        claims_text = "\n".join([
-            f"- {c.get('normalized_text') or c.get('text', '')}"
-            for c in claims[:3]
-        ])
-
-        # Use top 3 search snippets
-        snippets_text = "\n".join([
-            f"Source: {res.get('title', 'Unknown')}\nSnippet: {res.get('snippet', '')}\n---" 
-            for res in search_results[:3]
-        ])
-
-        prompt = f"""You are a semantic relevance router for a fact-checking system.
-        
-Input Claims:
-{claims_text}
-
-Search Results Snippets:
-{snippets_text}
-
-Task: Determine the semantic relationship between the snippets and the claims.
-Classify the MATCH TYPE:
-- "EXACT": The snippets explicitly mention the specific event, stats, or quotes in the claims. High verification value.
-- "TOPIC": The snippets discuss the same entities/topic but do NOT confirm/deny the specific details. Useful for context.
-- "UNRELATED": Completely unrelated (different entities, different context, spam).
-
-Return JSON:
-{{
-  "match_type": "EXACT" | "TOPIC" | "UNRELATED",
-  "reason": "Short explanation"
-}}
+Builds the typed Decisions questions for the gates and reads them through
+`read_sensor`. Readings are probabilities only; deterministic code in
+`use_cases/retrieval/decision_gates.py` fuses them with the step's existing
+signal and decides (Constitution II). Question text lives in
+`agents/locales/*.yml` under `prompts.decisions` (all 8 languages).
 """
 
-        try:
-            result = await self.llm_client.call_json(
-                model=ModelID.NANO,
-                input=prompt,
-                instructions="You are a semantic router. Be generous with TOPIC matches for context, strict with EXACT matches.",
-                reasoning_effort="low",
-                timeout=15.0,
-                trace_kind="semantic_gating"
-            )
+from __future__ import annotations
 
-            match_type = result.get("match_type", "TOPIC")
-            reason = result.get("reason", "No reason provided")
+from typing import Any
 
-            # Two-Level Gating
-            # Accept both EXACT and TOPIC as "RELEVANT" to prevent coverage loss
-            is_relevant = match_type in ("EXACT", "TOPIC")
-            status = "RELEVANT" if is_relevant else "OFF_TOPIC"
+from .base_skill import BaseSkill
+from spectrue_core.adapters.llm.decision_gates import SensorReading, read_sensor
+from spectrue_core.agents.prompts import get_prompt
+from spectrue_core.llm.decisions import DecisionQuestion
 
-            logger.debug("[M74] Semantic Router: match_type=%s → Status=%s. Reason: %s", match_type, status, reason)
+TOP_SNIPPETS = 3
+MAX_CLAIMS_PER_URL = 5
 
-            return {
-                "status": status,
-                "match_type": match_type,
-                "is_relevant": is_relevant,
-                "reason": reason
-            }
 
-        except Exception as e:
-            logger.warning("[M66] Semantic Gating failed: %s. Assuming relevant.", e)
-            return {"status": "RELEVANT", "is_relevant": True, "reason": "Error in check, fail open"}
+def claim_text(c: Any) -> str:
+    if isinstance(c, dict):
+        return str(c.get("normalized_text") or c.get("text") or "")
+    return str(getattr(c, "normalized_text", None) or getattr(c, "text", "") or "")
+
+
+def _snippets_text(results: list[Any]) -> str:
+    lines = []
+    for res in results[:TOP_SNIPPETS]:
+        get = res.get if isinstance(res, dict) else (lambda k, _r=res: getattr(_r, k, None))
+        lines.append(f"Source: {get('title') or 'Unknown'}\nSnippet: {get('snippet') or get('content') or ''}\n---")
+    return "\n".join(lines)
+
+
+def _p(lang: str, key: str) -> str:
+    return get_prompt((lang or "en")[:2], f"prompts.decisions.{key}")
+
+
+class RelevanceSkill(BaseSkill):
+    """Decisions sensors for semantic gating (G1–G4)."""
+
+    async def read_evidence(
+        self, claims: list[Any], *, title: str, snippet: str, gate: str, lang: str = "en",
+        trace_meta: dict[str, Any] | None = None,
+    ) -> SensorReading | None:
+        """One predicate per claim (`c0`, `c1`, ...): does this result hold evidence for it?
+
+        Shared by G3 (`extract`, per URL before extract) and G1
+        (`search_relevance`, per result before rerank).
+        """
+        claims = [c for c in claims if claim_text(c)][:MAX_CLAIMS_PER_URL]
+        if not claims:
+            return None
+        instr = _p(lang, "extract.instructions")
+        questions = [DecisionQuestion.predicate(f"c{i}", f"{instr}\nClaim {i}: {claim_text(c)}")
+                     for i, c in enumerate(claims)]
+        return await read_sensor(
+            gate=gate, cfg=self.runtime.decisions, llm_client=self.llm_client,
+            input_text=f"Search result title: {title}\nSnippet: {snippet}",
+            questions=questions, trace_meta={"locale": lang, "claims": len(claims), **(trace_meta or {})},
+        )
+
+    async def read_sufficiency(
+        self, claim: Any, sources: list[Any], *, lang: str = "en", claim_id: str | None = None
+    ) -> SensorReading | None:
+        """Predicate `sufficient`: do the sources found so far suffice to judge the claim? (G4)"""
+        return await read_sensor(
+            gate="search_stop", cfg=self.runtime.decisions, llm_client=self.llm_client,
+            input_text=f"Claim: {claim_text(claim)}\n\nSources found so far:\n{_snippets_text(sources)}",
+            questions=[DecisionQuestion.predicate("sufficient", _p(lang, "search_stop.instructions"))],
+            trace_meta={"claim_id": claim_id, "locale": lang, "n_sources": len(sources)},
+        )
+
+    async def read_verifiability(
+        self, claim: Any, *, lang: str = "en", claim_id: str | None = None
+    ) -> SensorReading | None:
+        """Predicate `checkable`: is this a checkable factual claim? (G2)"""
+        return await read_sensor(
+            gate="verifiability", cfg=self.runtime.decisions, llm_client=self.llm_client,
+            input_text=f"Claim: {claim_text(claim)}",
+            questions=[DecisionQuestion.predicate("checkable", _p(lang, "verifiability.instructions"))],
+            trace_meta={"claim_id": claim_id, "locale": lang},
+        )

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from spectrue_core.pipeline.contracts import (
     RAW_SEARCH_RESULTS_KEY,
@@ -24,6 +23,10 @@ from spectrue_core.pipeline.contracts import (
     RawSearchResults,
 )
 from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.domain.evidence.source_similarity import (
+    provider_score as source_provider_score,
+    similarity_score as source_similarity_score,
+)
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
 from spectrue_core.domain.verification.search.search_policy import (
@@ -32,14 +35,6 @@ from spectrue_core.domain.verification.search.search_policy import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _coerce_score(value: Any) -> float:
-    try:
-        score = float(value)
-    except Exception:
-        score = 0.0
-    return max(0.0, min(1.0, score))
 
 
 def _rank_items(items: list[RankedResultItem], max_results: int | None) -> tuple[RankedResultItem, ...]:
@@ -99,20 +94,8 @@ class RerankStep:
                     url = src.get("url") or src.get("link")
                     if not url:
                         continue
-                    provider_score = _coerce_score(
-                        src.get("provider_score")
-                        if src.get("provider_score") is not None
-                        else src.get("score")
-                    )
-                    similarity_score = _coerce_score(
-                        src.get("similarity_score")
-                        if src.get("similarity_score") is not None
-                        else src.get("sim")
-                    )
-                    if similarity_score == 0.0:
-                        similarity_score = _coerce_score(src.get("relevance_score"))
-                    if similarity_score == 0.0:
-                        similarity_score = provider_score
+                    provider_score = source_provider_score(src)
+                    similarity_score = source_similarity_score(src)
 
                     blended = rerank_lambda * provider_score + (1 - rerank_lambda) * similarity_score
 

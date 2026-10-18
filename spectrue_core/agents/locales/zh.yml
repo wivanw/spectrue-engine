@@ -78,6 +78,118 @@ zh:
         "missing_evidence": []
       }}
 
+    decisions:
+      judge_routing:
+        difficulty: "根据这些证据正确判断这一说法有多难？"
+        levels: ["极易：证据直接说明了这一点。", "容易：证据清楚，几乎无需解读。", "中等：需要一些解读或综合多个来源。", "困难：证据矛盾或间接，措辞微妙。", "非常困难：影响重大，来源矛盾且措辞微妙。"]
+      edge:
+        instructions: "说法C2与说法C1是什么关系？"
+        supports: "C2为C1提供证据。"
+        contradicts: "C2与C1相矛盾。"
+        depends_on: "只有C2为真时C1才为真。"
+        elaborates: "C2为C1补充细节。"
+        unrelated: "没有实质关系。"
+      domain_tier:
+        instructions: "这个网站属于哪类来源？"
+        authoritative: "官方或一手来源：政府、国际机构、监管机构、法院、大学、学术期刊、该组织本身。"
+        reputable_news: "具有编辑标准的知名新闻媒体。"
+        local_media: "地区或地方媒体。"
+        social: "社交网络、论坛、视频或用户生成内容平台。"
+        low_reliability: "未知、匿名、带有倾向性或不可靠。"
+      oracle:
+        best: "哪一条事实核查与用户的说法是同一说法？"
+        best_none: "没有一条涉及这一说法。"
+        match: "该事实核查与用户的说法有多接近？"
+        match_levels: ["不同说法，只有关键词相同。", "相关话题。", "部分相同的说法。", "相同说法，但措辞或细节不同。", "基本上是同一说法。"]
+        status: "该事实核查得出了什么结论？"
+        status_confirmed: "属实或已证实。"
+        status_refuted: "不实、虚假或已辟谣。"
+        status_mixed: "部分属实、误导或缺少背景。"
+        rating: "该事实核查认为这一说法有多真实？"
+        rating_levels: ["不实。", "大部分不实。", "一半属实。", "大部分属实。", "属实。"]
+      plan:
+        evidence_need: "什么样的证据可以判定这一说法？"
+        need_official_stats: "官方统计或登记资料。"
+        need_empirical_study: "科学研究或数据分析。"
+        need_guideline: "官方指南或规定。"
+        need_news_report: "关于该事件的新闻报道。"
+        need_expert_opinion: "专家评估。"
+        need_definition: "定义或参考资料。"
+        need_anecdotal: "个人陈述。"
+        need_unknown: "不清楚。"
+        search_method: "这些证据最可能在哪里找到？"
+        method_general_search: "普通网络搜索。"
+        method_news: "新闻报道。"
+        method_academic: "学术文献。"
+        needs_primary: "核查这一说法是否需要一手来源（原始文件、数据集或声明）？"
+        structure_type: "这是哪一类陈述？"
+        type_empirical_numeric: "一个数字或测量值。"
+        type_event: "一个已发生的事件。"
+        type_causal: "一种因果关系。"
+        type_attribution: "转述某人的话。"
+        type_definition: "一个定义。"
+        type_policy_plan: "一项政策、计划或决定。"
+        type_forecast: "一个预测。"
+        type_meta_scientific: "关于科学发现的陈述。"
+        type_other: "其他。"
+      evidence_audit:
+        stance: "该证据是支持该说法、反驳该说法、无法判断，还是与之无关？"
+        stance_support: "支持该说法及其细节。"
+        stance_refute: "与该说法或其某个细节相矛盾。"
+        stance_unclear: "相关，但不能下结论。"
+        stance_unrelated: "涉及其他内容。"
+        directness: "该证据在多大程度上直接涉及该说法？"
+        directness_direct: "正是该说法所主张的内容。"
+        directness_indirect: "仅通过相关事实涉及。"
+        directness_tangential: "只是触及该话题。"
+        specificity: "该证据对说法细节的对应有多具体？"
+        specificity_high: "给出相同的具体事实、数字或名称。"
+        specificity_medium: "给出部分具体内容。"
+        specificity_low: "内容笼统。"
+        quote_integrity: "引文是否被忠实使用？"
+        quote_integrity_ok: "准确且符合语境。"
+        quote_integrity_partial: "部分引用或经过删节。"
+        quote_integrity_out_of_context: "断章取义。"
+        quote_integrity_not_applicable: "没有引文。"
+        novelty_vs_copy: "这是原创报道还是对其他来源的复制？"
+        novelty_vs_copy_original: "原创报道。"
+        novelty_vs_copy_syndicated: "其他媒体报道的复制或改写。"
+        novelty_vs_copy_unknown: "无法判断。"
+      stance:
+        instructions: "该来源是支持该说法、反驳该说法、仅提供背景，还是与之无关？"
+        support: "它陈述或报道了该说法所主张的内容，包括其具体细节。"
+        refute: "它陈述或报道的内容与该说法或其某个细节相矛盾。"
+        context: "它涉及同一主题，但既不证实也不反驳该说法。"
+        irrelevant: "它涉及其他内容。"
+      extract:
+        instructions: "该搜索结果是否可能包含证实或反驳该声明的证据，因而值得阅读整个页面？"
+      search_stop:
+        instructions: "目前找到的来源是否已包含足以判断该声明的证据，因而无需再次搜索？"
+      inline_source:
+        relevant: "这个链接来源是否与任一声明相关？"
+        primary: "这是否是一手来源，即信息的原始发布方（官方声明、原始文件、作者自己的平台），而不是对其的报道或评论？"
+      metadata:
+        verification_target: "这条声明中可以核查什么？"
+        vt_reality: "它在现实中是否属实。"
+        vt_attribution: "被点名的个人或组织是否真的说过或写过这句话。"
+        vt_existence: "被提及的文件、事件或事物是否存在。"
+        vt_none: "无可核查：这是观点、预测、玩笑或指令。"
+        claim_role: "这条声明在文本中起什么作用？"
+        role_core: "文本的主要声明。"
+        role_support: "支持主要声明的声明。"
+        role_context: "为文本提供背景的上下文信息。"
+        role_counterclaim: "文本所反驳的声明。"
+        role_attribution: "转述某人所说的话。"
+        harm: "如果这条声明是假的，相信它可能造成多大危害？"
+        harm_levels: ["无害或微不足道", "轻微", "中等", "严重（金钱、安全、声誉）", "非常严重（健康、生命、公共安全）"]
+        importance: "这条声明对整篇文本有多重要？"
+        importance_levels: ["边缘", "次要", "相关", "重要", "核心"]
+        check_oracle: "事实核查机构是否很可能已经评估过这类声明？"
+        time_sensitive: "这条声明的真假是否会随时间变化，因此只有最新来源才能证实？"
+        satire: "这条声明是讽刺或玩笑，而不是严肃的陈述吗？"
+      verifiability:
+        instructions: "这是否是一条可以用公开来源核查的具体事实性声明（而不是观点、预测、玩笑或指令）？"
+
   ui:
     popup:
       not_available: "不可用"

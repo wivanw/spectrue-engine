@@ -10,6 +10,13 @@
 from spectrue_core.utils.evidence_pack import EvidencePack
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.trace import Trace
+from spectrue_core.domain.verification.verdict.global_aggregation import (
+    is_context_claim,
+    aggregate_global_veracity,
+    is_unverifiable_by_nature,
+)
+from spectrue_core.domain.verification.verdict.rgba import RGBAStatus
+from spectrue_core.domain.claims import fields as claim_fields
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.utils.security import sanitize_input
 from spectrue_core.agents.prompts import get_prompt
@@ -22,8 +29,6 @@ from typing import Literal
 
 from spectrue_core.domain.verification.verdict.model import (
     AnalysisMode,
-    prob_to_log_odds,
-    log_odds_to_prob,
 )
 
 # Structured output schemas
@@ -277,12 +282,17 @@ class ScoringSkill(BaseSkill):
             # - Else compute importance-weighted mean where unverified contributes 0.0
 
             # Build claim importance map
-            importance_by_id = {c["id"]: float(c.get("importance", 0.5) or 0.5) for c in claims_info if c.get("id")}
+            importance_by_id = {
+                c["id"]: claim_fields.or_default(claim_fields.unit(c, "importance"), 0.5)
+                for c in claims_info if c.get("id")
+            }
 
-            # Heuristic anchor: highest importance claim (stable even if anchors missing)
-            anchor_id = None
-            if importance_by_id:
-                anchor_id = max(importance_by_id.items(), key=lambda kv: kv[1])[0]
+            # Claims that are not verifiable by nature (verification_target = none) are
+            # excluded from global G and carry a typed status (global_aggregation.py).
+            unverifiable_ids = {
+                str(c.get("id")) for c in raw_claims
+                if isinstance(c, dict) and c.get("id") and is_unverifiable_by_nature(c)
+            }
 
             # Determine per-claim scores (ensure every claim has an entry)
             # Signal score mapping: evidence veracity + prior internal knowledge
@@ -298,25 +308,11 @@ class ScoringSkill(BaseSkill):
                 
                 prior_by_id[cid] = (p, pr)
                 
-                # Bayesian Hybrid Signal Calculation:
-                # 1. Evidence is primary. If G < 0 (unverified), result is unverified (-1.0).
-                # 2. Prior is a probabilistic "nudge" using additive log-odds.
-                # 3. If Prior is unknown (-1.0) or reason contains NEI, it's ignored.
-                if g < 0:
-                    score_by_id[cid] = -1.0
-                else:
-                    # Ignore prior if unknown or NEI
-                    if p < 0 or "NEI" in pr.upper():
-                        score_by_id[cid] = g
-                    else:
-                        # Bayesian Update in Log-Odds space:
-                        # L_posterior = L_evidence + W_prior * L_prior
-                        # This follows 'Weighing of Evidence' principles (Good, 1950).
-                        PRIOR_W = 0.2
-                        l_evidence = prob_to_log_odds(g)
-                        l_prior = prob_to_log_odds(p)
-                        l_final = l_evidence + (PRIOR_W * l_prior)
-                        score_by_id[cid] = log_odds_to_prob(l_final)
+                # G is the evidence verdict. The judge's prior_score is NOT fused in: the
+                # verdict already carries the model's own knowledge, and on the fact-checker
+                # benchmark (53 verdicts, 2026-10-18) any prior weight > 0 raised Brier
+                # (w=0: 0.125, w=0.2: 0.129, w=1: 0.163). prior_by_id stays for tracing.
+                score_by_id[cid] = g if g >= 0 else -1.0
 
             for ci in claims_info:
                 cid = ci.get("id")
@@ -325,29 +321,24 @@ class ScoringSkill(BaseSkill):
                 if cid not in score_by_id:
                     score_by_id[cid] = -1.0
 
-            if anchor_id and score_by_id.get(anchor_id, -1.0) < 0:
-                clamped["verified_score"] = -1.0
-                clamped["verified_score_policy"] = {
-                    "policy": "anchor_unverified_blocks_global",
-                    "anchor_claim_id": anchor_id,
-                }
-            else:
-                num = 0.0
-                den = 0.0
-                for cid, imp in importance_by_id.items():
-                    w = max(0.0, min(1.0, float(imp)))
-                    g = float(score_by_id.get(cid, -1.0))
-                    # Unverified -> contribute 0.0, but still counted in denominator
-                    contrib = g if g >= 0 else 0.0
-                    num += w * contrib
-                    den += w
-                clamped["verified_score"] = (num / den) if den > 0 else -1.0
-                clamped["verified_score_policy"] = {
-                    "policy": "importance_weighted_hybrid_signal",
-                    "anchor_claim_id": anchor_id,
-                    "prior_included": True,
-                }
-            
+            context_ids = {
+                str(c.get("id")) for c in raw_claims
+                if isinstance(c, dict) and c.get("id") and is_context_claim(c)
+            }
+            clamped["verified_score"], clamped["verified_score_policy"] = aggregate_global_veracity(
+                score_by_id, importance_by_id, unverifiable_ids, context_ids
+            )
+            anchor_id = clamped["verified_score_policy"].get("anchor_claim_id")
+            for cv in claim_verdicts:
+                if cv.get("claim_id") in unverifiable_ids:
+                    # Not a truth claim: G is not applicable (-1 = N/A), status says why.
+                    cv["status"] = RGBAStatus.UNVERIFIABLE_BY_NATURE.value
+                    cv["verdict"] = "unverified"
+                    cv["verdict_score"] = -1.0
+                    score_by_id[cv["claim_id"]] = -1.0
+                    if cv.get("rgba"):
+                        cv["rgba"][1] = -1.0
+
             # For trace/debug only: list of non-negative per-claim G values
             valid_g = [
                 float(g) for g in score_by_id.values()
@@ -374,6 +365,7 @@ class ScoringSkill(BaseSkill):
                     "valid_g_values": valid_g,
                     "computed_verified_score": clamped["verified_score"],
                     "claims_without_evidence": list(claims_without_evidence),
+                    "excluded_unverifiable_by_nature": sorted(unverifiable_ids),
                     "preserved_global_r": clamped.get("danger_score"),
                     "preserved_global_b": clamped.get("style_score"),
                     "preserved_global_a": clamped.get("explainability_score"),
@@ -507,7 +499,7 @@ class ScoringSkill(BaseSkill):
                 "id": cid,
                 "text": safe_text,
                 "importance": float(c.get("importance", 0.5)),
-                "check_worthiness": float(c.get("check_worthiness", 0.5) or 0.5),
+                "check_worthiness": claim_fields.or_default(claim_fields.unit(c, "check_worthiness"), 0.5),
                 "harm_potential": int(c.get("harm_potential", 1) or 1),
                 "claim_role": c.get("claim_role") or c.get("role") or "unknown",
                 "evidence_need": c.get("evidence_need") or "unknown",
@@ -661,9 +653,13 @@ class ScoringSkill(BaseSkill):
                 c_obj = DictAttr(claim_info)
                 ev_objs = [DictAttr(e) for e in evidence]
                 
+                from spectrue_core.adapters.llm.judge_routing_sensor import required_capability
                 decision = select_judge_model(
                     claim=c_obj,
                     evidence_items=ev_objs,
+                    required_capability_override=await required_capability(
+                        self.llm_client, self.runtime.decisions, claim_text=str(claim_info.get("text") or ""),
+                        evidence=evidence, claim_id=str(cid)),
                     prompt_chars=len(prompt),
                     out_tokens_estimate=int(getattr(self.runtime.llm, "judge_out_tokens_estimate", 380)),
                     deepseek_fail_prob=float(getattr(self.runtime.llm, "deepseek_fail_prob", 0.18)),
@@ -819,23 +815,10 @@ Return valid JSON now."""
                             max(0.0, min(1.0, float(rgba[3]))),
                         ]
 
-                        # --- Prior knowledge extraction & Bayesian Fusion ---
+                        # Prior knowledge is kept for tracing, not fused into G (see the batch path).
                         p_val = float(result.get("prior_score", -1.0))
                         p_reason = str(result.get("prior_reason", ""))
-                        
-                        # Apply hybrid signal to parallel verdict score
-                        if p_val >= 0 and "NEI" not in p_reason.upper():
-                            # If G is valid (not unknown), perform Bayesian update.
-                            if g_val >= 0:
-                                PRIOR_W = 0.2
-                                l_evidence = prob_to_log_odds(g_val)
-                                l_prior = prob_to_log_odds(p_val)
-                                l_final = l_evidence + (PRIOR_W * l_prior)
-                                
-                                result["verdict_score"] = log_odds_to_prob(l_final)
-                                result["rgba"][1] = result["verdict_score"]
-                                result["hybrid_signal"] = True
-                        
+
                         result["prior_score"] = p_val
                         result["prior_reason"] = p_reason
 

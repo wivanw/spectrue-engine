@@ -313,7 +313,7 @@ def rank_and_filter(
             return True
         try:
             now_year = datetime.datetime.now().year
-            years = {int(y) for y in re.findall(r"\\b(20\\d{2})\\b", blob)}
+            years = {int(y) for y in re.findall(r"\b(20\d{2})\b", blob)}
             return any(y >= now_year for y in years)
         except Exception:
             return False

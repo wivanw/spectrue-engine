@@ -68,12 +68,14 @@ class TestM62ClaimExtraction:
         
         # fields present
         assert claim["normalized_text"] == "Donald Trump announced new tariffs on China on December 19, 2025."
-        assert claim["topic_group"] == "Other"
+        # M146 T013: topics come from shared subject entities, not an LLM label
+        assert claim["topic_group"] == "china"  # most frequent entity, ties alphabetical
+        assert claim["topic_key"].startswith("tp_")
         assert claim["check_worthiness"] == 0.85
     
     @pytest.mark.asyncio
     async def test_topic_group_validation(self, skill, mock_llm_client):
-        """Invalid topic_group should fallback to 'Other'."""
+        """An LLM topic_group is ignored; the topic is derived from subject entities (M146 T013)."""
         
         core_response = {
             "claims": [{
@@ -101,7 +103,7 @@ class TestM62ClaimExtraction:
         # extract_claims returns 4-tuple now
         claims, _, _, _ = await skill.extract_claims("Text", lang="en")
         
-        assert claims[0]["topic_group"] == "Other"
+        assert claims[0]["topic_group"] == "test entity"
     
     @pytest.mark.asyncio
     async def test_check_worthiness_fallback(self, skill, mock_llm_client):

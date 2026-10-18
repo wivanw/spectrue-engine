@@ -34,6 +34,7 @@ async def verify_inline_sources(
     search_mgr: Any = None,
     content_budget_config: Optional[ContentBudgetConfig] = None,
     progress_callback: Optional[Callable] = None,
+    lang: str = "en",
 ) -> List[dict]:
     """
     Verify inline sources against claims.
@@ -87,7 +88,7 @@ async def verify_inline_sources(
     verified_inline_sources = []
 
     verification_tasks = [
-        agent.verify_inline_source_relevance(claims, src, article_excerpt)
+        agent.verify_inline_source_relevance(claims, src, article_excerpt, lang=lang)
         for src in inline_sources
     ]
     verification_results = await asyncio.gather(*verification_tasks, return_exceptions=True)

@@ -27,6 +27,22 @@ SCORING_SCALE = """# SCORING SCALE (-1.0 to 1.0)
 - **0.0 - 0.2 (Refuted)**: Evidence contradicts the claim.
 - **-1.0 (Unverified/Unknown)**: NO usable evidence found. Cannot judge at all. (Do NOT use 0.5 for lack of info)."""
 
+# Shared by the standard and the deep (per-claim) judge, so both modes score the same thing (I0).
+ASSERTION_RULES = """# WHAT IS SCORED
+Score the claim's specific assertion: its predicate and every detail it adds (numbers, qualifiers such as
+"controversial", "suddenly", "for 12 people", causal words such as "causes"). Evidence that only confirms the
+subject (the law exists, the event happened, the person appeared) is context, not support.
+- Subject confirmed, asserted detail not addressed by any excerpt -> -1.0 (unverified), not "plausible".
+- Asserted detail contradicted, or shown absent where the evidence would report it -> 0.0-0.4.
+- Only the confirmed detail itself moves the score above 0.6.
+
+# ATTRIBUTION CLAIMS ("X reported / said / announced Y")
+The assertion is that X made the statement. It is supported by X's own statement OR by reputable reports that X
+made it; it is refuted by X denying it or by reports attributing the statement to someone else. Do not require X's
+primary statement when several independent reputable outlets report it."""
+
+SCORING_SCALE = SCORING_SCALE + "\n\n" + ASSERTION_RULES
+
 RGBA_EXPLANATION = """# RGBA SCORING
 Return `rgba`: [R, G, B, A] where:
 - R = danger (0=harmless, 1=dangerous misinformation)

@@ -136,6 +136,7 @@ class PipelineFactory:
             BuildQueriesStep,
             WebSearchStep,
             RerankStep,
+            SearchRelevanceGateStep,
             FetchChunksStep,
             AssembleRetrievalItemsStep,
             TargetSelectionStep,
@@ -179,7 +180,11 @@ class PipelineFactory:
                 depends_on=["extract_claims"],
             ),
             StepNode(
-                step=EvaluateSemanticGatingStep(agent=self.agent),
+                step=EvaluateSemanticGatingStep(
+                    agent=self.agent,
+                    decisions=config.runtime.decisions,
+                    sensors=config.runtime.calibration.decision_sensors,
+                ),
                 depends_on=["extract_claims"],
                 optional=True,
             ),
@@ -218,12 +223,23 @@ class PipelineFactory:
                     config=config,
                     search_mgr=self.search_mgr,
                     agent=self.agent,
+                    decisions=config.runtime.decisions,
+                    sensors=config.runtime.calibration.decision_sensors,
                 ),
                 depends_on=["build_queries"],
             ),
+            # Semantic relevance gate (G1): no-op unless DECISIONS_GATE_SEARCH_RELEVANCE is shadow/on
+            StepNode(
+                step=SearchRelevanceGateStep(
+                    agent=self.agent,
+                    decisions=config.runtime.decisions,
+                    sensors=config.runtime.calibration.decision_sensors,
+                ),
+                depends_on=["web_search"],
+            ),
             StepNode(
                 step=RerankStep(),
-                depends_on=["web_search"],
+                depends_on=["search_relevance_gate"],
             ),
             # Fulltext fetch always included (improves quality)
             StepNode(
@@ -421,6 +437,8 @@ class PipelineFactory:
                     config=config,
                     search_mgr=self.search_mgr,
                     agent=self.agent,
+                    decisions=config.runtime.decisions,
+                    sensors=config.runtime.calibration.decision_sensors,
                 ),
                 depends_on=["build_queries"],
             ),
@@ -509,7 +527,7 @@ class PipelineFactory:
                         depends_on=["build_claim_frames"],
                     ),
                     StepNode(
-                        step=AuditEvidenceStep(llm_client=llm_client),
+                        step=AuditEvidenceStep(llm_client=llm_client, decisions=config.runtime.decisions),
                         depends_on=["audit_claims"],
                     ),
                 ]
@@ -620,6 +638,7 @@ class PipelineFactory:
         from spectrue_core.pipeline.steps.retrieval.build_cluster_queries import (
             BuildClusterQueriesStep,
         )
+        from spectrue_core.pipeline.steps.retrieval.general_tier_search import GeneralTierSearchStep
         from spectrue_core.pipeline.steps.retrieval.cluster_web_search import (
             ClusterWebSearchStep,
         )
@@ -756,10 +775,24 @@ class PipelineFactory:
                 optional=True,
             ),
 
+            # General search tier, decided after stance: only clusters still insufficient (M147)
+            StepNode(
+                step=GeneralTierSearchStep(round_steps=(
+                    ClusterWebSearchStep(config=config, search_mgr=self.search_mgr,
+                                         embedding_client=self.embedding_client, tier="general"),
+                    ClusterAttributionStep(config=config),
+                    ClusterEvidenceEnrichStep(config=config, search_mgr=self.search_mgr),
+                    EvidenceCollectStep(agent=self.agent, search_mgr=self.search_mgr, include_global_pack=False),
+                    StanceAnnotateStep(agent=self.agent),
+                    ClusterEvidenceStep(agent=self.agent),
+                )),
+                depends_on=["cluster_evidence"],
+            ),
+
             # Spillover routing inside claim clusters (no new search / no new LLM calls)
             StepNode(
                 step=EvidenceSpilloverStep(config=config),
-                depends_on=["cluster_evidence"],
+                depends_on=["general_tier_search"],
             ),
 
             # Re-annotate transferred evidence under target claims (top-K, no search)
@@ -804,7 +837,7 @@ class PipelineFactory:
                         depends_on=["build_claim_frames"],
                     ),
                     StepNode(
-                        step=AuditEvidenceStep(llm_client=llm_client),
+                        step=AuditEvidenceStep(llm_client=llm_client, decisions=config.runtime.decisions),
                         depends_on=["audit_claims"],
                     ),
                 ]

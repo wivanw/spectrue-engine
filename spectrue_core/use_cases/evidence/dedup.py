@@ -60,13 +60,14 @@ def apply_dedup(*, sources: list[dict], filter_duplicates: bool = True) -> tuple
     if not filter_duplicates:
         return sources, {"items": len(sources), "exact_groups": exact_groups, "similar_groups": sim_groups, "removed": 0}
 
-    # Group by content_hash, keep best source per group
-    by_hash: dict[str, list[dict]] = {}
+    # Group by (claim, content_hash), keep best source per group. The same passage
+    # bound to two claims is evidence for each of them, not a duplicate.
+    by_hash: dict[tuple[str, str], list[dict]] = {}
     no_hash: list[dict] = []
     for s in sources:
         ch = s.get("content_hash", "")
         if ch:
-            by_hash.setdefault(ch, []).append(s)
+            by_hash.setdefault((str(s.get("claim_id") or ""), ch), []).append(s)
         else:
             no_hash.append(s)
 

@@ -32,6 +32,7 @@ class AuditEvidenceStep:
     """Produce evidence-level audit records via LLM."""
 
     llm_client: LLMClient
+    decisions: Any  # DecisionsConfig (gate "evidence_audit", M147 T021)
     name: str = "audit_evidence"
     weight: float = 17.0  # ~17s actual
 
@@ -54,6 +55,7 @@ class AuditEvidenceStep:
                 claim_frames=deep_ctx.claim_frames,
                 llm_client=self.llm_client,
                 error_status=RGBAStatus.PIPELINE_ERROR,
+                decisions=self.decisions,
             )
 
             audits: list[EvidenceAudit] = list(result.audits)

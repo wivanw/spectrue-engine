@@ -22,7 +22,6 @@ class TestOracleOptimization:
         agent.clean_article = AsyncMock()
         agent.cluster_evidence = AsyncMock()
         agent.score_evidence = AsyncMock()
-        agent.verify_oracle_relevance = AsyncMock()
         agent.verify_inline_source_relevance = AsyncMock()
         return agent
 

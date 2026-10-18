@@ -8,22 +8,18 @@
 # (at your option) any later version.
 
 """
-Unit tests for retrieval query selection and topic defaults.
+Unit tests for retrieval query repair.
 
 Tests for the retrieval regression fix:
 - Empty search_queries are repaired with keyword extraction
-- normalized_text is never used as fallback for queries
-- Default topic is "news" when search_method is missing/invalid
 """
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import patch
 
 from spectrue_core.adapters.llm.claims import (
     sanitize_retrieval_response,
     extract_keywords_deterministic,
 )
-from spectrue_core.use_cases.verification.orchestration.phase_runner import PhaseRunner
 
 
 class TestKeywordExtraction:
@@ -98,118 +94,3 @@ class TestSanitizeRetrievalResponse:
             result = sanitize_retrieval_response(data, claim_text=claim_text)
         
         assert result["search_queries"] == ["Ukraine offensive Kherson"]
-
-
-class TestSelectClaimQueryNoNormalizedText:
-    """Test that _select_claim_query never uses normalized_text."""
-
-    def test_never_uses_normalized_text(self):
-        """Query fallback uses text, NOT normalized_text."""
-        search_mgr = MagicMock()
-        runner = PhaseRunner(search_mgr, use_retrieval_loop=False)
-        
-        claim = {
-            "id": "c1",
-            "text": "Оригінальний український текст",
-            "normalized_text": "English translation of the claim",
-            "search_queries": [],
-            "query_candidates": [],
-        }
-        
-        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
-            query = runner._select_claim_query(claim)
-        
-        assert "English" not in query
-        assert "translation" not in query
-        assert "оригінальний" in query.lower() or "український" in query.lower()
-
-    def test_prefers_search_queries(self):
-        """When search_queries exist, use them."""
-        search_mgr = MagicMock()
-        runner = PhaseRunner(search_mgr, use_retrieval_loop=False)
-        
-        claim = {
-            "id": "c1",
-            "text": "Some claim",
-            "search_queries": ["Explicit query from planner"],
-        }
-        
-        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
-            query = runner._select_claim_query(claim)
-        
-        assert query == "Explicit query from planner"
-
-
-class TestDefaultTopicIsNews:
-    """Test that default topic is 'news' when search_method missing/invalid."""
-
-    @pytest.mark.asyncio
-    async def test_default_topic_news_when_method_missing(self):
-        """Topic defaults to 'news' when search_method is missing."""
-        search_mgr = MagicMock()
-        search_mgr.search_phase = AsyncMock(return_value=(None, []))
-        
-        runner = PhaseRunner(search_mgr, use_retrieval_loop=False)
-        
-        claim = {
-            "id": "c1",
-            "text": "Test claim",
-            "search_queries": ["test query"],
-        }
-        
-        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
-            await runner._search_by_phase(claim, phase=None, query_override="test")
-        
-        call_args = search_mgr.search_phase.call_args
-        assert call_args is not None
-        _, kwargs = call_args
-        assert kwargs.get("topic") == "news"
-
-    @pytest.mark.asyncio
-    async def test_topic_selection_ignores_search_method(self):
-        """Topic selection relies on structured claim fields, ignoring legacy search_method."""
-        search_mgr = MagicMock()
-        search_mgr.search_phase = AsyncMock(return_value=(None, []))
-        
-        runner = PhaseRunner(search_mgr, use_retrieval_loop=False)
-        
-        claim = {
-            "id": "c1",
-            "text": "Test claim",
-            "search_queries": ["test query"],
-            "search_method": "general_search",
-        }
-        
-        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
-            await runner._search_by_phase(claim, phase=None, query_override="test")
-        
-        call_args = search_mgr.search_phase.call_args
-        _, kwargs = call_args
-        assert kwargs.get("topic") == "news"
-
-
-class TestRegressionGoldenScenario:
-    """Golden test for the regression scenario."""
-
-    def test_empty_queries_normalized_text_scenario(self):
-        """
-        Regression scenario: empty queries should use keywords from text,
-        NOT normalized_text.
-        """
-        search_mgr = MagicMock()
-        runner = PhaseRunner(search_mgr, use_retrieval_loop=False)
-        
-        claim = {
-            "id": "c1",
-            "text": "Землетрус зруйнував будівлю в Києві",
-            "normalized_text": "The earthquake destroyed the building in Kyiv",
-            "search_queries": [],
-            "query_candidates": [],
-        }
-        
-        with patch("spectrue_core.use_cases.verification.orchestration.phase_runner.Trace"):
-            query = runner._select_claim_query(claim)
-        
-        assert "earthquake" not in query.lower()
-        assert "destroyed" not in query.lower()
-        assert any(w in query.lower() for w in ["землетрус", "зруйнував", "будівлю", "києві"])

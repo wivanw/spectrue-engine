@@ -8,12 +8,11 @@
 # (at your option) any later version.
 
 """
-Bayesian Budget Allocation for Dynamic Extract and Query Limits.
+Bayesian Budget Allocation for Dynamic Extract Limits.
 
 This module uses the same EVOI (Expected Value of Information) framework
-as target_selection.py to dynamically compute:
-1. Maximum extracts based on evidence quality (marginal value vs cost)
-2. Number of search queries based on claim complexity
+as target_selection.py to dynamically compute the maximum number of extracts
+based on evidence quality (marginal value vs cost).
 
 Mathematical Foundation:
 ------------------------
@@ -112,28 +111,6 @@ class ExtractBudgetParams:
     weight_quote: float = 1.5
     weight_authoritative: float = 1.2
     weight_relevance: float = 1.0
-
-
-@dataclass(frozen=True)
-class QueryBudgetParams:
-    """
-    Parameters for Bayesian query count computation.
-    
-    Query count depends on:
-    - Claim complexity (affects search difficulty)
-    - Named entities (enable targeted queries)
-    - Current evidence sufficiency
-    """
-    # Base query count
-    base_queries: int = 3
-    
-    # Complexity thresholds
-    high_complexity_threshold: float = 0.7
-    low_complexity_threshold: float = 0.3
-    
-    # Hard limits
-    min_queries: int = 1
-    max_queries: int = 6
 
 
 # -----------------------------------------------------------------------------
@@ -377,6 +354,40 @@ class BudgetState:
         return True, "continue_evoi_positive"
 
 
+def select_extracts_by_evoi(
+    qualities: list[float],
+    *,
+    params: ExtractBudgetParams | None = None,
+    extracts_used: int = 0,
+) -> list[bool]:
+    """Which candidates to extract, by the same EVOI rule as `BudgetState`.
+
+    `qualities[i]` is P(candidate i is useful evidence) — the per-candidate analogue
+    of `posterior_mean`. Candidates are taken in descending quality; the k-th
+    taken (counting `extracts_used` earlier extracts) has
+        EVOI = value_uncertainty * H(prior) * quality * decay^k
+    and is extracted iff EVOI >= max(min_evoi_threshold, marginal_cost_per_extract),
+    within [min_extracts, max_extracts]. H(prior) is the entropy of the Beta prior
+    on the hit rate. Returns a mask aligned with `qualities`.
+    """
+    p = params or ExtractBudgetParams()
+    prior_mean = p.alpha_prior / (p.alpha_prior + p.beta_prior)
+    entropy = _entropy_bernoulli(prior_mean)
+    floor = max(p.min_evoi_threshold, p.marginal_cost_per_extract)
+    order = sorted(range(len(qualities)), key=lambda i: qualities[i], reverse=True)
+    take = [False] * len(qualities)
+    k = extracts_used
+    for i in order:
+        if k >= p.max_extracts:
+            break
+        evoi = p.value_uncertainty * entropy * float(qualities[i]) * (p.diminishing_returns_decay ** k)
+        if k >= p.min_extracts and evoi < floor:
+            break
+        take[i] = True
+        k += 1
+    return take
+
+
 # -----------------------------------------------------------------------------
 # Global Budget Tracker
 # -----------------------------------------------------------------------------
@@ -429,141 +440,3 @@ class GlobalBudgetTracker:
             "computed_limit": self.state.compute_extract_limit(),
             "total_cost_estimate": round(self.total_cost_estimate, 2),
         }
-
-
-# -----------------------------------------------------------------------------
-# Query Budget Functions
-# -----------------------------------------------------------------------------
-
-def estimate_claim_complexity(claim: dict) -> float:
-    """
-    Estimate complexity of a claim for query budget allocation.
-
-    Combines structural signals (text, verification target, role) with
-    claim-centric metadata (check_worthiness, harm_potential, centrality)
-    when available.
-    """
-    text = claim.get("text", "") or claim.get("normalized_text", "")
-
-    # Length factor (log scale, saturates at ~300 chars)
-    length_score = min(1.0, math.log1p(len(text)) / math.log1p(300))
-
-    # Verification target factor
-    target = claim.get("verification_target", "reality")
-    target_scores = {
-        "attribution": 0.7,  # Need to find who said what
-        "reality": 0.5,      # Standard fact check
-        "existence": 0.3,    # Just verify something exists
-        "none": 0.1,         # No verification needed
-    }
-    target_score = target_scores.get(target, 0.5)
-
-    # Claim role factor
-    role = claim.get("claim_role", "support")
-    role_scores = {
-        "thesis": 0.8,       # Main claim, needs thorough check
-        "core": 0.7,         # Central verifiable fact
-        "counterclaim": 0.7, # Opposing view
-        "support": 0.5,      # Supporting evidence
-        "attribution": 0.5,  # Quote verification
-        "hedge": 0.4,        # Qualified statement
-        "example": 0.3,      # Illustrative
-        "forecast": 0.3,     # Limited verifiability
-        "definition": 0.2,   # Explain-only
-        "background": 0.2,   # Context only
-        "context": 0.1,      # Not verifiable
-        "meta": 0.1,         # Article metadata
-    }
-    role_score = role_scores.get(role, 0.5)
-
-    # Claim metadata factors (from LLM extraction + graph)
-    check_worthiness = float(claim.get("check_worthiness", 0.5))
-    harm_potential = int(claim.get("harm_potential", 1))
-    harm_score = min(1.0, (harm_potential - 1) / 4.0)  # Normalize 1-5 → 0-1
-    centrality = float(claim.get("_centrality", 0.0))  # From graph, 0 if absent
-
-    # Combine: structural (40%) + metadata (60%)
-    structural = 0.3 * length_score + 0.4 * target_score + 0.3 * role_score
-    metadata = 0.4 * check_worthiness + 0.35 * harm_score + 0.25 * centrality
-
-    # If no metadata available, fall back to structural only
-    has_metadata = claim.get("check_worthiness") is not None
-    if has_metadata:
-        complexity = 0.4 * structural + 0.6 * metadata
-    else:
-        complexity = structural
-
-    return complexity
-
-
-def has_named_entities(claim: dict) -> bool:
-    """
-    Check if claim has specific named entities for targeted search.
-    
-    Heuristic: capitalized words (not at sentence start) or digits.
-    """
-    text = claim.get("normalized_text", "") or claim.get("text", "")
-    
-    words = text.split()
-    if len(words) < 2:
-        return False
-    
-    # Check for capitalized words (potential entities)
-    entity_count = sum(
-        1 for i, w in enumerate(words[1:], 1)
-        if w and w[0].isupper() and len(w) > 2
-    )
-    
-    # Check for numbers/dates
-    has_numbers = any(c.isdigit() for c in text)
-    
-    return entity_count >= 1 or has_numbers
-
-
-def compute_query_count(
-    claim: dict,
-    evidence_sufficiency: float = 0.0,
-    params: QueryBudgetParams | None = None,
-) -> int:
-    """
-    Compute optimal number of queries for a claim.
-    
-    Uses EVOI-like reasoning:
-    - Complex claims need more queries (higher potential value)
-    - Named entities allow more targeted queries
-    - High evidence sufficiency reduces need
-    """
-    params = params or QueryBudgetParams()
-    
-    complexity = estimate_claim_complexity(claim)
-    has_entities = has_named_entities(claim)
-    
-    base = params.base_queries
-    
-    # Complexity adjustment
-    if complexity > params.high_complexity_threshold:
-        complexity_adj = 1
-    elif complexity < params.low_complexity_threshold:
-        complexity_adj = -1
-    else:
-        complexity_adj = 0
-    
-    # Entity bonus (enables targeted queries)
-    entity_adj = 1 if has_entities else 0
-    
-    # Sufficiency penalty (already have evidence)
-    sufficiency_adj = -1 if evidence_sufficiency > 0.7 else 0
-    
-    result = base + complexity_adj + entity_adj + sufficiency_adj
-    result = max(params.min_queries, min(params.max_queries, result))
-    
-    Trace.event("budget.query_count_computed", {
-        "claim_id": claim.get("id"),
-        "complexity": round(complexity, 3),
-        "has_entities": has_entities,
-        "evidence_sufficiency": round(evidence_sufficiency, 3),
-        "computed_count": result,
-    })
-    
-    return result
-

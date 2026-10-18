@@ -210,6 +210,9 @@ def match_claim_to_pool(claim: Dict[str, Any], pool: EvidencePool) -> EvidenceBu
     match_terms |= set(claim.get("context_entities", []))
     match_terms |= set(claim.get("document_context_entities", []))
     match_terms |= set(claim.get("anchor_terms", []))
+    # The claim's own seed terms (call A) say what the evidence must mention; with
+    # entities alone every page about the subject ties (e.g. all "Nigeria" pages).
+    match_terms |= {t for t in (claim.get("retrieval_seed_terms") or []) if isinstance(t, str)}
     
     # Normalize all terms to tokens (same as content)
     raw_terms = list(match_terms)
@@ -246,13 +249,11 @@ def match_claim_to_pool(claim: Dict[str, Any], pool: EvidencePool) -> EvidenceBu
         if has_number_anchor and _contains_number(content_text):
             score += 0.5
         
-        # Small bonus for source score
-        score += (item.source_meta.score * 0.1)
-        
         scored_items.append((score, item))
-             
-    # Pick Top N=3
-    scored_items.sort(key=lambda x: x[0], reverse=True)
+
+    # Pick Top N=3. Whole pages saturate the term overlap (every long page mentions every term),
+    # so equal coverage is broken by the search relevance score, not by insertion order.
+    scored_items.sort(key=lambda x: (x[0], x[1].source_meta.score), reverse=True)
     top_items = [x[1] for x in scored_items[:3]]
     top_scores = [x[0] for x in scored_items[:3]]
     
@@ -344,12 +345,23 @@ def build_doc_query_plan(claims: List[Dict[str, Any]], anchors: List[Anchor]) ->
         break
     
     queries: List[str] = []
-    
+
+    def _join(parts: List[str]) -> str:
+        """Join parts, dropping words already present (no "Nigeria Nigeria urban")."""
+        seen: Set[str] = set()
+        words: List[str] = []
+        for part in parts:
+            for w in str(part).split():
+                if w.lower() not in seen:
+                    seen.add(w.lower())
+                    words.append(w)
+        return " ".join(words)
+
     # Q1: Top 3 entities + optional date anchor (C)
     q1_parts = top_entities[:3]
     if date_anchor:
         q1_parts = q1_parts + [date_anchor]
-    q1 = " ".join(q1_parts)
+    q1 = _join(q1_parts)
     queries.append(q1)
     
     # Q2: Top 3 entities + optional numeric anchor (C)
@@ -366,14 +378,14 @@ def build_doc_query_plan(claims: List[Dict[str, Any]], anchors: List[Anchor]) ->
     elif date_anchor and not numeric_anchor:
         # If no numeric but we have date, use entities only for Q2
         pass
-    q2 = " ".join(q2_parts)
+    q2 = _join(q2_parts)
     if q2.lower() != q1.lower():  # Avoid duplicate
         queries.append(q2)
     
     # Q3: Top 2 entities + top 2 seed terms (C)
     if seed_terms:
         q3_parts = top_entities[:2] + seed_terms[:2]
-        q3 = " ".join(q3_parts)
+        q3 = _join(q3_parts)
         if q3.lower() not in {q.lower() for q in queries}:
             queries.append(q3)
     
@@ -387,7 +399,7 @@ def build_doc_query_plan(claims: List[Dict[str, Any]], anchors: List[Anchor]) ->
     if high_risk_claims and len(queries) < 4:
         # Add fixed vocabulary token for guideline search
         q4_parts = top_entities[:2] + ["guideline", "recommendation"]
-        q4 = " ".join(q4_parts)
+        q4 = _join(q4_parts)
         if q4.lower() not in {q.lower() for q in queries}:
             queries.append(q4)
     

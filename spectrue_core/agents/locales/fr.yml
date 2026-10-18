@@ -78,6 +78,118 @@ fr:
         "missing_evidence": []
       }}
 
+    decisions:
+      judge_routing:
+        difficulty: "À quel point est-il difficile de juger correctement cette affirmation avec ces preuves ?"
+        levels: ["Trivial : les preuves le disent directement.", "Facile : preuves claires, peu d'interprétation.", "Modéré : un peu d'interprétation ou plusieurs sources à combiner.", "Difficile : preuves contradictoires ou indirectes, formulation subtile.", "Très difficile : enjeux élevés, sources contradictoires et formulation subtile."]
+      edge:
+        instructions: "Quel est le lien entre l'affirmation C2 et l'affirmation C1 ?"
+        supports: "C2 apporte des preuves en faveur de C1."
+        contradicts: "C2 contredit C1."
+        depends_on: "C1 n'est vraie que si C2 l'est."
+        elaborates: "C2 ajoute des détails à C1."
+        unrelated: "Aucun lien significatif."
+      domain_tier:
+        instructions: "Quel type de source est ce site web ?"
+        authoritative: "Une source officielle ou primaire : gouvernement, organisme international, régulateur, tribunal, université, revue scientifique, l'organisation elle-même."
+        reputable_news: "Un média d'information établi avec des normes éditoriales."
+        local_media: "Médias régionaux ou locaux."
+        social: "Un réseau social, forum, vidéo ou plateforme de contenu d'utilisateurs."
+        low_reliability: "Inconnue, anonyme, partisane ou peu fiable."
+      oracle:
+        best: "Quelle vérification porte sur la même affirmation que celle de l'utilisateur ?"
+        best_none: "Aucune ne porte sur cette affirmation."
+        match: "Dans quelle mesure cette vérification correspond-elle à l'affirmation de l'utilisateur ?"
+        match_levels: ["Autre affirmation, seulement des mots en commun.", "Sujet lié.", "Affirmation en partie identique.", "Même affirmation, autre formulation ou détails.", "Essentiellement la même affirmation."]
+        status: "Quelle conclusion cette vérification a-t-elle tirée ?"
+        status_confirmed: "Vrai ou vérifié."
+        status_refuted: "Faux, infox ou démenti."
+        status_mixed: "En partie vrai, trompeur ou sans contexte."
+        rating: "À quel point cette vérification juge-t-elle l'affirmation vraie ?"
+        rating_levels: ["Faux.", "Plutôt faux.", "À moitié vrai.", "Plutôt vrai.", "Vrai."]
+      plan:
+        evidence_need: "Quelles preuves pourraient trancher cette affirmation ?"
+        need_official_stats: "Statistiques ou registres officiels."
+        need_empirical_study: "Études scientifiques ou analyses de données."
+        need_guideline: "Lignes directrices ou règles officielles."
+        need_news_report: "Articles de presse sur l'événement."
+        need_expert_opinion: "Avis d'experts."
+        need_definition: "Une définition ou un ouvrage de référence."
+        need_anecdotal: "Témoignages personnels."
+        need_unknown: "Pas clair."
+        search_method: "Où ces preuves ont-elles le plus de chances d'être trouvées ?"
+        method_general_search: "Recherche web générale."
+        method_news: "Actualités."
+        method_academic: "Littérature académique."
+        needs_primary: "La vérification nécessite-t-elle une source primaire (document, jeu de données ou déclaration d'origine) ?"
+        structure_type: "De quel type d'affirmation s'agit-il ?"
+        type_empirical_numeric: "Un chiffre ou une mesure."
+        type_event: "Un événement qui a eu lieu."
+        type_causal: "Une relation de cause à effet."
+        type_attribution: "Ce que quelqu'un a dit."
+        type_definition: "Une définition."
+        type_policy_plan: "Une politique, un plan ou une décision."
+        type_forecast: "Une prédiction."
+        type_meta_scientific: "Une affirmation sur des résultats scientifiques."
+        type_other: "Autre chose."
+      evidence_audit:
+        stance: "Cette preuve soutient-elle l'affirmation, la réfute-t-elle, la laisse-t-elle incertaine ou est-elle sans rapport ?"
+        stance_support: "Soutient l'affirmation et ses détails."
+        stance_refute: "Contredit l'affirmation ou l'un de ses détails."
+        stance_unclear: "Liée, mais ne tranche pas la question."
+        stance_unrelated: "Porte sur autre chose."
+        directness: "Dans quelle mesure la preuve traite-t-elle directement de l'affirmation ?"
+        directness_direct: "Elle traite exactement de ce qui est affirmé."
+        directness_indirect: "Seulement par des faits liés."
+        directness_tangential: "Elle ne fait qu'effleurer le sujet."
+        specificity: "Dans quelle mesure la preuve est-elle précise sur les détails de l'affirmation ?"
+        specificity_high: "Elle donne les mêmes faits, chiffres ou noms précis."
+        specificity_medium: "Elle donne une partie des détails."
+        specificity_low: "Elle est générale."
+        quote_integrity: "La citation est-elle utilisée fidèlement ?"
+        quote_integrity_ok: "Exacte et en contexte."
+        quote_integrity_partial: "Partielle ou abrégée."
+        quote_integrity_out_of_context: "Sortie de son contexte."
+        quote_integrity_not_applicable: "Il n'y a pas de citation."
+        novelty_vs_copy: "S'agit-il d'un reportage original ou d'une copie d'une autre source ?"
+        novelty_vs_copy_original: "Reportage original."
+        novelty_vs_copy_syndicated: "Copie ou reprise d'un autre média."
+        novelty_vs_copy_unknown: "Impossible à dire."
+      stance:
+        instructions: "Cette source soutient-elle l'affirmation, la contredit-elle, ne donne-t-elle que du contexte ou est-elle sans rapport ?"
+        support: "Elle affirme ou rapporte ce que dit l'affirmation, y compris ses détails précis."
+        refute: "Elle affirme ou rapporte quelque chose qui contredit l'affirmation ou l'un de ses détails."
+        context: "Elle porte sur le même sujet mais ne confirme ni ne contredit l'affirmation."
+        irrelevant: "Elle porte sur autre chose."
+      extract:
+        instructions: "Ce résultat de recherche contient-il probablement des éléments qui confirment ou réfutent l'affirmation, de sorte qu'il vaille la peine de lire la page entière ?"
+      search_stop:
+        instructions: "Les sources trouvées jusqu'ici contiennent-elles déjà assez d'éléments pour juger l'affirmation, de sorte qu'une nouvelle recherche soit inutile ?"
+      inline_source:
+        relevant: "Cette source liée est-elle pertinente pour au moins une des affirmations ?"
+        primary: "S'agit-il d'une source PRIMAIRE, c'est-à-dire de l'émetteur d'origine de l'information (déclaration officielle, document original, plateforme propre de l'auteur), et non d'une couverture ou d'un reportage à son sujet ?"
+      metadata:
+        verification_target: "Que peut-on vérifier dans cette affirmation ?"
+        vt_reality: "Si elle est vraie dans les faits."
+        vt_attribution: "Si une personne ou une organisation nommée l'a réellement dit ou écrit."
+        vt_existence: "Si un document, un événement ou un objet nommé existe."
+        vt_none: "Rien : c'est une opinion, une prédiction, une plaisanterie ou une consigne."
+        claim_role: "Quel rôle cette affirmation joue-t-elle dans le texte ?"
+        role_core: "Une affirmation principale du texte."
+        role_support: "Une affirmation qui appuie une affirmation principale."
+        role_context: "Un contexte ou un arrière-plan qui encadre le texte."
+        role_counterclaim: "Une affirmation que le texte réfute."
+        role_attribution: "Un compte rendu de ce que quelqu'un a dit."
+        harm: "Quel tort pourrait causer le fait de croire cette affirmation si elle était fausse ?"
+        harm_levels: ["Aucun ou insignifiant", "Mineur", "Modéré", "Grave (argent, sécurité, réputation)", "Très grave (santé, vie, sécurité publique)"]
+        importance: "Quelle importance cette affirmation a-t-elle pour l'ensemble du texte ?"
+        importance_levels: ["Marginale", "Mineure", "Pertinente", "Importante", "Centrale"]
+        check_oracle: "Des organisations de fact-checking ont-elles probablement déjà évalué ce type d'affirmation ?"
+        time_sensitive: "La véracité de cette affirmation peut-elle changer avec le temps, de sorte que seules des sources récentes puissent la confirmer ?"
+        satire: "Cette affirmation est-elle de la satire ou une plaisanterie plutôt qu'une déclaration sérieuse ?"
+      verifiability:
+        instructions: "S'agit-il d'une affirmation factuelle précise, vérifiable à partir de sources publiques (et non d'une opinion, d'une prédiction, d'une blague ou d'une instruction) ?"
+
   ui:
     popup:
       not_available: "Non disponible"

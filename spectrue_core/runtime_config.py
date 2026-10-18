@@ -183,7 +183,72 @@ class CalibrationModelPolicy:
 
 
 @dataclass(frozen=True)
+class DecisionSensorCalibration:
+    """Fitted log-odds model of one Decisions sensor (M145 R028).
+
+    delta(p) = weight * logit(p) + bias, fitted offline by logistic regression on
+    shadow data. weight = bias = 0 means uncalibrated: the reading changes nothing.
+    `reference_error_rate` is the measured error of the path the sensor may
+    replace (G5); None = not measured, so the sensor never replaces it.
+    """
+
+    version: str
+    weight: float = 0.0
+    bias: float = 0.0
+    reference_error_rate: float | None = None
+
+
+DECISION_SENSORS: tuple[str, ...] = (
+    "search_relevance",
+    "verifiability",
+    "extract",
+    "search_stop",
+    "inline_relevant",
+    "inline_primary",
+    # M146 T031 metadata sensor, one per field
+    "meta_verification_target",
+    "meta_claim_role",
+    "meta_harm",
+    "meta_importance",
+    "meta_check_oracle",
+    "meta_time_sensitive",
+    "meta_satire",
+    # M147 T020 evidence stance sensor
+    "stance",
+)
+
+
+def uncalibrated_sensors() -> dict[str, "DecisionSensorCalibration"]:
+    return {n: DecisionSensorCalibration(version=f"{n}-uncalibrated") for n in DECISION_SENSORS}
+
+
+# M146 T032 fit (2026-10-18): logistic regression of P(sensor field correct | confidence).
+# Data: 48 golden/edge claims (8 locales, assistant-labeled, owner-reviewed) + 135 AVeriTeC dev
+# + 312 Google Fact Check claims (8 locales; human: checkable, fact-checked, satire, misattributed
+# quote). reference_error_rate = call B's error on the same rows. Kept only where the
+# leave-one-out pipeline error <= call B's; check_oracle / time_sensitive / satire stay uncalibrated.
+_M146_METADATA_FIT = "m146-t032-2026-10-18"
+_FITTED_SENSORS: dict[str, tuple[float, float, float]] = {
+    "meta_verification_target": (1.265, 2.989, 0.022),
+    "meta_claim_role": (0.638, 0.920, 0.292),
+    "meta_harm": (2.022, -0.146, 0.146),
+    "meta_importance": (0.529, 0.105, 0.630),
+}
+
+
+def fitted_sensors() -> dict[str, "DecisionSensorCalibration"]:
+    """Default calibration: uncalibrated, plus the fitted metadata fields."""
+    out = uncalibrated_sensors()
+    for name, (w, b, ref) in _FITTED_SENSORS.items():
+        out[name] = DecisionSensorCalibration(
+            version=f"{name}-{_M146_METADATA_FIT}", weight=w, bias=b, reference_error_rate=ref)
+    return out
+
+
+
+@dataclass(frozen=True)
 class CalibrationPolicyConfig:
+    decision_sensors: dict[str, DecisionSensorCalibration] = field(default_factory=fitted_sensors)
     claim_utility: CalibrationModelPolicy = field(
         default_factory=lambda: CalibrationModelPolicy(
             version="claim-utility-v1",
@@ -434,6 +499,63 @@ class ClaimGraphConfig:
 
 
 @dataclass(frozen=True)
+class DecisionsConfig:
+    """OpenAI Decisions API gates (M145 Phase R).
+
+    Each gate runs in one of three modes:
+      off    - current behaviour only, no Decisions call
+      shadow - current behaviour decides; Decisions result is only traced
+      on     - the reading feeds the step's own decision rule (Bayesian fusion /
+               EVOI); billed to the run
+    All gates default to "off". There are no thresholds here: see
+    `CalibrationPolicyConfig.decision_sensors` and VERIFICATION_METRICS §5.6.
+    """
+
+    model: str = "gpt-6-luna"
+    timeout_sec: float = 10.0
+    shadow_sample_rate: float = 1.0
+    max_input_chars: int = 12000
+    gate_modes: dict[str, str] = field(default_factory=dict)
+
+    def mode(self, gate: str) -> str:
+        return self.gate_modes.get(gate, "off")
+
+
+DECISION_GATES: tuple[str, ...] = (
+    "search_relevance",
+    "verifiability",
+    "extract",
+    "search_stop",
+    "inline_source",
+    "metadata",
+    "stance",  # M147 T020
+    "evidence_audit",  # M147 T021
+    "retrieval_plan",  # M147 T022: replaces call B in "on"
+    "oracle",  # M147 T025: fact-check DB matching
+    "domain_tier",  # M147 T033: tier of domains missing from the curated lists
+    "edge_typing",  # M147: claim-graph edge relation (deep)
+    "judge_routing",  # M147 T026: judge model from a difficulty score (deep)
+)
+_DECISION_GATE_MODES = ("off", "shadow", "on")
+
+
+def _load_decisions_config() -> DecisionsConfig:
+    modes: dict[str, str] = {}
+    for gate in DECISION_GATES:
+        raw = (os.getenv(f"DECISIONS_GATE_{gate.upper()}") or "off").strip().lower()
+        if raw not in _DECISION_GATE_MODES:
+            raise ValueError(f"DECISIONS_GATE_{gate.upper()} must be one of {_DECISION_GATE_MODES}, got {raw!r}")
+        modes[gate] = raw
+    return DecisionsConfig(
+        model=(os.getenv("MODEL_DECISIONS") or "gpt-6-luna").strip(),
+        timeout_sec=_parse_float(os.getenv("DECISIONS_TIMEOUT"), default=10.0, min_v=1.0, max_v=60.0),
+        shadow_sample_rate=_parse_float(os.getenv("DECISIONS_SHADOW_SAMPLE_RATE"), default=1.0, min_v=0.0, max_v=1.0),
+        max_input_chars=_parse_int(os.getenv("DECISIONS_MAX_INPUT_CHARS"), default=12000, min_v=500, max_v=400000),
+        gate_modes=modes,
+    )
+
+
+@dataclass(frozen=True)
 class EngineRuntimeConfig:
     llm: EngineLLMConfig
     features: EngineFeatureFlags
@@ -446,6 +568,8 @@ class EngineRuntimeConfig:
     content_budget: ContentBudgetConfig
     deep_v2: DeepV2Config
     claim_graph: ClaimGraphConfig
+    decisions: DecisionsConfig = field(default_factory=DecisionsConfig)
+
     @staticmethod
     def load_from_env() -> "EngineRuntimeConfig":
         llm_timeout = _parse_float(os.getenv("OPENAI_TIMEOUT"), default=60.0, min_v=5.0, max_v=300.0)
@@ -696,6 +820,7 @@ class EngineRuntimeConfig:
             content_budget=content_budget,
             deep_v2=deep_v2,
             claim_graph=claim_graph,
+            decisions=_load_decisions_config(),
         )
 
     def to_safe_log_dict(self) -> dict[str, Any]:
@@ -751,6 +876,16 @@ class EngineRuntimeConfig:
                 "max_claim_concurrency": int(self.llm.max_claim_concurrency),
                 "max_doc_concurrency": int(self.llm.max_doc_concurrency),
                 "enable_inline_source_verification": bool(self.llm.enable_inline_source_verification),
+            },
+            "decisions": {
+                "model": self.decisions.model,
+                "timeout_sec": float(self.decisions.timeout_sec),
+                "shadow_sample_rate": float(self.decisions.shadow_sample_rate),
+                "max_input_chars": int(self.decisions.max_input_chars),
+                "gate_modes": dict(self.decisions.gate_modes),
+                "sensor_calibration": {
+                    n: c.version for n, c in self.calibration.decision_sensors.items()
+                },
             },
             "search": {
                 "google_cse_cost": int(self.search.google_cse_cost),

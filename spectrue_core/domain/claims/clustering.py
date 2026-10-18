@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from spectrue_core.domain.claims.graph.types import GraphResult
+from spectrue_core.domain.claims.topics import normalize_entities
+from spectrue_core.domain.verification.verdict.global_aggregation import is_unverifiable_by_nature
 
 
 @dataclass(frozen=True)
@@ -17,12 +19,15 @@ class ClaimCluster:
     centrality_scores: dict[str, float]
     anchor_density_scores: dict[str, float]
     size: int
+    # Entities of verifiable claims the representatives cover (set cover result).
+    covered_entities: tuple[str, ...] = ()
 
     def to_summary(self) -> dict[str, Any]:
         return {
             "cluster_id": self.cluster_id,
             "claim_ids": list(self.claim_ids),
             "representative_claim_ids": list(self.representative_claim_ids),
+            "covered_entities": list(self.covered_entities),
             "size": self.size,
         }
 
@@ -85,6 +90,49 @@ def _representative_k(cluster_size: int, min_k: int, max_k: int) -> int:
     if cluster_size <= max_k:
         return min_k
     return max_k
+
+
+def _entities(claim: dict[str, Any]) -> frozenset[str]:
+    return normalize_entities(claim.get("subject_entities"))
+
+
+def select_representatives(
+    ranked_ids: list[str],
+    claim_lookup: dict[str, dict[str, Any]],
+    k_floor: int,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Representatives that cover every verifiable claim's subject entities.
+
+    Cluster queries are built from representatives only, so a claim whose
+    entities no representative carries gets no search at all. Greedy set cover
+    over the entities of claims with verification_target != none: repeatedly
+    take the claim that covers the most still-uncovered entities, ties broken by
+    `ranked_ids` order (the existing importance score). Then top up to
+    `k_floor` from `ranked_ids`. Coverage wins over any size cap.
+
+    Returns (representative ids, covered entities).
+    """
+    verifiable = [cid for cid in ranked_ids if not is_unverifiable_by_nature(claim_lookup.get(cid, {}))]
+    ents = {cid: _entities(claim_lookup.get(cid, {})) for cid in verifiable}
+    uncovered = set().union(*ents.values()) if ents else set()
+    covered = set(uncovered)
+    chosen: list[str] = []
+    while uncovered:
+        best = max(
+            (cid for cid in verifiable if cid not in chosen),
+            key=lambda cid: (len(ents[cid] & uncovered), -ranked_ids.index(cid)),
+        )
+        if not ents[best] & uncovered:
+            break
+        chosen.append(best)
+        uncovered -= ents[best]
+    pool = verifiable or ranked_ids
+    for cid in pool:
+        if len(chosen) >= k_floor:
+            break
+        if cid not in chosen:
+            chosen.append(cid)
+    return tuple(chosen), tuple(sorted(covered))
 
 
 def _build_components(
@@ -176,7 +224,9 @@ def build_claim_clusters(
 
         scored.sort(key=lambda item: (-item[1], item[0]))
         k = _representative_k(len(cluster_claims), representative_min_k, representative_max_k)
-        representative_claim_ids = tuple([cid for cid, _ in scored[:k]])
+        representative_claim_ids, covered_entities = select_representatives(
+            [cid for cid, _ in scored], claim_lookup, k
+        )
 
         clusters.append(
             ClaimCluster(
@@ -186,6 +236,7 @@ def build_claim_clusters(
                 centrality_scores={cid: float(centrality.get(cid, 0.0)) for cid in cluster_claims},
                 anchor_density_scores={cid: float(anchor_density.get(cid, 0.0)) for cid in cluster_claims},
                 size=len(cluster_claims),
+                covered_entities=covered_entities,
             )
         )
 

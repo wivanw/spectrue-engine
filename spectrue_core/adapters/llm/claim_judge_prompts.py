@@ -260,7 +260,9 @@ def build_claim_judge_system_prompt(*, lang: str = "en") -> str:
         return system_prompt
 
     # Fallback to English hardcoded
-    return """You are an impartial fact-checking judge. Your role is to evaluate claims based on evidence.
+    from spectrue_core.adapters.llm.scoring_contract import ASSERTION_RULES
+
+    return f"""You are an impartial fact-checking judge. Your role is to evaluate claims based on evidence.
 
 ## CORE PRINCIPLES
 
@@ -293,6 +295,8 @@ Increase R for claims that:
 ## EXPLANATION FORMAT
 
 Generate **simple_summary**: 1-3 concise bullet points for a general audience. No jargon.
+
+{ASSERTION_RULES}
 
 ## ABSOLUTE RULES
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.pipeline.contracts import (
@@ -26,176 +26,35 @@ from spectrue_core.pipeline.contracts import (
 )
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
-from spectrue_core.utils.trace import Trace
-from spectrue_core.use_cases.claims.sufficiency import check_sufficiency_for_claim, SUFFICIENCY_P_THRESHOLD
+from spectrue_core.pipeline.retrieval.cegs_mvp import match_claim_to_pool
+from spectrue_core.runtime_config import DecisionSensorCalibration, DecisionsConfig, uncalibrated_sensors
+from spectrue_core.pipeline.retrieval.web_search_support import (
+    apply_metadata,
+    build_evidence_pool,
+    build_sources_for_urls,
+    claim_id_for,
+    first_query_for_claim,
+    query_dedup_key,
+    record_sources,
+)
+from spectrue_core.use_cases.claims.sufficiency import (
+    SufficiencyStatus,
+    check_sufficiency_for_claim,
+)
+from spectrue_core.use_cases.retrieval.decision_gates import build_extract_filter, sufficiency_sensor_log_odds
+from spectrue_core.use_cases.verification.pipeline_queries import is_fuzzy_duplicate
 from spectrue_core.utils.retrieval_urls import (
     ExtractedContent,
     FixedPipelineContext,
     bind_after_extract,
-    compute_sufficiency,
     current_stage,
     extract_all_batches,
     init_state,
-    normalize_url,
     register_urls,
-    source_id_for_url,
 )
-from spectrue_core.pipeline.retrieval.cegs_mvp import (
-    EvidenceItem,
-    EvidencePool,
-    EvidenceSourceMeta,
-    _compute_content_hash,
-    match_claim_to_pool,
-)
+from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
-
-
-def _claim_id_for(claim: dict[str, Any], idx: int) -> str:
-    raw = claim.get("id") or claim.get("claim_id")
-    if raw:
-        return str(raw)
-    return f"c{idx + 1}"
-
-
-def _coerce_score(value: Any) -> float:
-    try:
-        score = float(value)
-    except Exception:
-        return 0.0
-    return score
-
-
-def _metadata_dict(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return dict(value)
-    if hasattr(value, "to_dict"):
-        try:
-            return dict(value.to_dict())
-        except Exception:
-            return {}
-    return {}
-
-
-def _first_query_for_claim(
-    plan: SearchPlan | None,
-    claim_id: str,
-    claim: dict[str, Any],
-) -> str | None:
-    if plan and plan.per_claim_queries:
-        queries = list(plan.per_claim_queries.get(claim_id) or [])
-        for q in queries:
-            if isinstance(q, str) and q.strip():
-                return q
-    raw_queries = claim.get("search_queries") or []
-    if isinstance(raw_queries, list):
-        for q in raw_queries:
-            if isinstance(q, str) and q.strip():
-                return q
-    return None
-
-
-def _record_sources(
-    sources: list[dict[str, Any]],
-    url_metadata: dict[str, dict[str, Any]],
-) -> list[str]:
-    urls: list[str] = []
-    for source in sources:
-        if not isinstance(source, dict):
-            continue
-        url = source.get("url") or source.get("link")
-        if not url:
-            continue
-        nurl = normalize_url(str(url))
-        if not nurl:
-            continue
-        source_id = source_id_for_url(nurl)
-        urls.append(nurl)
-        if nurl not in url_metadata:
-            score = source.get("score")
-            if score is None:
-                score = source.get("relevance_score")
-            if score is None:
-                score = source.get("provider_score")
-            url_metadata[nurl] = {
-                "url": nurl,
-                "title": source.get("title") or "",
-                "snippet": source.get("content") or source.get("snippet") or "",
-                "score": _coerce_score(score),
-                "source_id": source_id,
-                "provider_meta": dict(source, source_id=source_id),
-            }
-    return urls
-
-
-def _apply_metadata(
-    extracted: dict[str, ExtractedContent],
-    url_metadata: dict[str, dict[str, Any]],
-) -> None:
-    for url, content in extracted.items():
-        meta = url_metadata.get(url)
-        if meta:
-            content.metadata.update(meta)
-        content.metadata.setdefault("url", url)
-        content.metadata.setdefault("source_id", meta.get("source_id") if meta else source_id_for_url(url))
-
-
-def _build_evidence_pool(
-    extracted: dict[str, ExtractedContent],
-    url_metadata: dict[str, dict[str, Any]],
-) -> EvidencePool:
-    pool = EvidencePool()
-    items: list[EvidenceItem] = []
-    for url, content in extracted.items():
-        meta = url_metadata.get(url, {})
-        source_meta = EvidenceSourceMeta(
-            url=url,
-            title=str(meta.get("title") or ""),
-            snippet=str(meta.get("snippet") or ""),
-            score=_coerce_score(meta.get("score")),
-            provider_meta=dict(meta.get("provider_meta") or {}),
-        )
-        items.append(
-            EvidenceItem(
-                url=url,
-                extracted_text=str(content.text or ""),
-                citations=[],
-                content_hash=_compute_content_hash(str(content.text or "")),
-                source_meta=source_meta,
-            )
-        )
-    if items:
-        pool.add_items(items)
-    return pool
-
-
-def _build_sources_for_urls(
-    urls: list[str],
-    extracted: dict[str, ExtractedContent],
-    url_metadata: dict[str, dict[str, Any]],
-    *,
-    claim_id: str | None = None,
-) -> list[dict[str, Any]]:
-    sources: list[dict[str, Any]] = []
-    for url in urls:
-        content = extracted.get(url)
-        meta = url_metadata.get(url, {})
-        src = dict(meta.get("provider_meta") or {})
-        src["url"] = url
-        src.setdefault("source_id", meta.get("source_id") or source_id_for_url(url))
-        src["title"] = meta.get("title") or ""
-        src["snippet"] = meta.get("snippet") or ""
-        if content and content.text:
-            src["content"] = content.text
-            src["fulltext"] = True
-        score = meta.get("score")
-        if score is not None:
-            src["provider_score"] = score
-            src["score"] = score
-        if claim_id is not None:
-            src["claim_id"] = str(claim_id)
-        sources.append(src)
-    return sources
 
 
 @dataclass
@@ -205,6 +64,8 @@ class WebSearchStep:
     config: Any
     search_mgr: Any
     agent: Any
+    decisions: DecisionsConfig = field(default_factory=DecisionsConfig)  # M145 gates; all off by default
+    sensors: dict[str, DecisionSensorCalibration] = field(default_factory=uncalibrated_sensors)
     name: str = "web_search"
     weight: float = 25.0
 
@@ -229,7 +90,7 @@ class WebSearchStep:
 
             claim_id_map: dict[str, dict[str, Any]] = {}
             for idx, claim in enumerate(safe_claims):
-                claim_id_map[_claim_id_for(claim, idx)] = claim
+                claim_id_map[claim_id_for(claim, idx)] = claim
 
             all_claim_ids = set(claim_id_map.keys())
             url_metadata: dict[str, dict[str, Any]] = {}
@@ -253,25 +114,58 @@ class WebSearchStep:
                     return False
                 return url in audited_urls_by_claim.get(str(claim_id), set())
 
-            async def _run_search_queries(queries: list[str]) -> list[str]:
-                valid_queries = [q for q in queries if q]
+            # Every query issued in this step (any stage, global or per-claim),
+            # keyed by normalized text. A repeat (exact or fuzzy) awaits the
+            # first search instead of paying for the same provider call again.
+            query_tasks: dict[str, asyncio.Task[list[str]]] = {}
+
+            async def _search_one(query: str) -> list[str]:
+                async with search_sem:
+                    _, sources = await self.search_mgr.search_phase(
+                        query,
+                        max_results=5,
+                        depth="basic",
+                        topic="general",
+                    )
+                    return record_sources(sources, url_metadata)
+
+            def _task_for_query(query: str, claim_id: str | None) -> asyncio.Task[list[str]]:
+                key = query_dedup_key(query)
+                prior_key = key if key in query_tasks else next(
+                    (k for k in query_tasks if is_fuzzy_duplicate(key, [k], threshold=0.9)),
+                    None,
+                )
+                if prior_key is not None:
+                    Trace.event(
+                        "retrieval.search.duplicate_query_skipped",
+                        {
+                            "plan_id": plan.plan_id,
+                            "stage": current_stage(),
+                            "claim_id": claim_id,
+                            "query": query[:120],
+                            "matched_query": prior_key[:120],
+                        },
+                    )
+                    return query_tasks[prior_key]
+                task = asyncio.ensure_future(_search_one(query))
+                query_tasks[key] = task
+                return task
+
+            async def _run_search_queries(
+                queries: list[str],
+                *,
+                claim_id: str | None = None,
+            ) -> list[str]:
+                valid_queries = [q for q in queries if q and q.strip()]
                 if not valid_queries:
                     return []
 
-                async def _search_one(query: str) -> list[str]:
-                    async with search_sem:
-                        _, sources = await self.search_mgr.search_phase(
-                            query,
-                            max_results=5,
-                            depth="basic",
-                            topic="general",
-                        )
-                        return _record_sources(sources, url_metadata)
-
-                results = await asyncio.gather(
-                    *[_search_one(q) for q in valid_queries],
-                    return_exceptions=True,
-                )
+                tasks: list[asyncio.Task[list[str]]] = []
+                for q in valid_queries:
+                    task = _task_for_query(q, claim_id)
+                    if task not in tasks:
+                        tasks.append(task)
+                results = await asyncio.gather(*tasks, return_exceptions=True)
                 urls: list[str] = []
                 for r in results:
                     if isinstance(r, list):
@@ -280,26 +174,49 @@ class WebSearchStep:
                         logger.warning("[WebSearchStep] Query failed: %s", r)
                 return urls
 
+            def _claim_sources(claim_id: str) -> list[dict[str, Any]]:
+                # bind_after_extract keeps state.bindings.audited up to date
+                claim_urls = state.bindings.audited.get(claim_id, set())
+                return build_sources_for_urls(
+                    list(claim_urls),
+                    state.extractor_queue.extracted,
+                    url_metadata,
+                    claim_id=claim_id,
+                )
+
             def _refresh_audit_matches() -> None:
                 nonlocal audited_urls_by_claim
-                pool = _build_evidence_pool(state.extractor_queue.extracted, url_metadata)
+                pool = build_evidence_pool(state.extractor_queue.extracted, url_metadata)
                 audited_urls_by_claim = {}
                 for idx, claim in enumerate(safe_claims):
-                    claim_id = _claim_id_for(claim, idx)
+                    claim_id = claim_id_for(claim, idx)
                     bundle = match_claim_to_pool(claim, pool)
                     audited_urls_by_claim[claim_id] = {item.url for item in bundle.matched_items}
+
+            decisions = self.decisions
+            content_lang = ctx.lang or "en"
+            extract_filter = build_extract_filter(  # G3 (M145)
+                self.agent,
+                decisions,
+                self.sensors,
+                url_metadata=url_metadata,
+                seen_by_claims=lambda u: state.registry.urls[u].seen_by_claims,
+                claim_id_map=claim_id_map,
+                lang=content_lang,
+            )
 
             with FixedPipelineContext(
                 state=state,
                 extract_batch=_extract_batch,
                 audit_match=_audit_match,
+                extract_filter=extract_filter,
             ) as pipeline_ctx:
                 # Stage 0: Universal search
                 pipeline_ctx.set_stage(0)
                 stage0_urls = await _run_search_queries(list(plan.global_queries))
                 register_urls(stage=0, claim_ids=all_claim_ids, urls=stage0_urls)
                 await extract_all_batches()
-                _apply_metadata(state.extractor_queue.extracted, url_metadata)
+                apply_metadata(state.extractor_queue.extracted, url_metadata)
                 _refresh_audit_matches()
                 bind_after_extract()
 
@@ -311,10 +228,10 @@ class WebSearchStep:
                     claim = claim_id_map.get(str(cid))
                     if not claim:
                         return str(cid), []
-                    query = _first_query_for_claim(plan, str(cid), claim)
+                    query = first_query_for_claim(plan, str(cid), claim)
                     if not query:
                         return str(cid), []
-                    urls = await _run_search_queries([query])
+                    urls = await _run_search_queries([query], claim_id=str(cid))
                     return str(cid), urls
 
                 stage1_results = await asyncio.gather(
@@ -329,7 +246,7 @@ class WebSearchStep:
                     if urls:
                         register_urls(stage=1, claim_ids={cid}, urls=urls)
                 await extract_all_batches()
-                _apply_metadata(state.extractor_queue.extracted, url_metadata)
+                apply_metadata(state.extractor_queue.extracted, url_metadata)
                 _refresh_audit_matches()
                 bind_after_extract()
 
@@ -339,26 +256,41 @@ class WebSearchStep:
                 async def _stage2_one(cid: str, claim: dict) -> tuple[str, list[str]]:
                     # Skip escalation for sidefact claims — their lower
                     # sufficiency threshold (0.70) means they reach
-                    # SUFFICIENT status faster, but skipping the
-                    # compute_sufficiency call entirely saves the overhead.
+                    # SUFFICIENT status faster, so escalation is not worth it.
                     ct = str(claim.get("type") or claim.get("claim_type") or "core")
                     if ct == "sidefact":
                         return cid, []
 
-                    metadata = _metadata_dict(claim.get("metadata")) or _metadata_dict(claim)
-                    s_value = compute_sufficiency(metadata)
-                    s_min = float(metadata.get("S_min", SUFFICIENCY_P_THRESHOLD))
-                    if s_value >= s_min:
+                    # Escalate only when the evidence already bound to this
+                    # claim (stages 0-1) is not sufficient.
+                    claim_sources = _claim_sources(cid)
+                    res = check_sufficiency_for_claim(claim, claim_sources)
+                    if res.status == SufficiencyStatus.INSUFFICIENT:  # G4 (M145): sensor term in the posterior
+                        delta = await sufficiency_sensor_log_odds(
+                            self.agent, decisions, self.sensors, claim, claim_sources, lang=content_lang, claim_id=cid
+                        )
+                        if delta:
+                            res = check_sufficiency_for_claim(claim, claim_sources, sensor_log_odds=delta)
+                    if res.status != SufficiencyStatus.INSUFFICIENT:
+                        Trace.event(
+                            "retrieval.stage2.skipped",
+                            {
+                                "plan_id": plan.plan_id,
+                                "claim_id": cid,
+                                "status": res.status.value,
+                                "posterior_p": res.posterior_p,
+                            },
+                        )
                         return cid, []
-                    query = _first_query_for_claim(plan, cid, claim)
+                    query = first_query_for_claim(plan, cid, claim)
                     if not query:
                         return cid, []
-                    urls = await _run_search_queries([query])
+                    urls = await _run_search_queries([query], claim_id=cid)
                     return cid, urls
 
                 stage2_results = await asyncio.gather(
                     *[
-                        _stage2_one(_claim_id_for(c, i), c)
+                        _stage2_one(claim_id_for(c, i), c)
                         for i, c in enumerate(safe_claims)
                     ],
                     return_exceptions=True,
@@ -371,26 +303,18 @@ class WebSearchStep:
                     if urls:
                         register_urls(stage=2, claim_ids={cid}, urls=urls)
                 await extract_all_batches()
-                _apply_metadata(state.extractor_queue.extracted, url_metadata)
+                apply_metadata(state.extractor_queue.extracted, url_metadata)
                 _refresh_audit_matches()
                 bind_after_extract()
 
                 # Record final Bayesian sufficiency for each claim
                 for claim_id, claim in claim_id_map.items():
-                    # bind_after_extract ensures state.bindings.audited is up to date
-                    claim_urls = state.bindings.audited.get(claim_id, set())
-                    claim_sources = _build_sources_for_urls(
-                        list(claim_urls),
-                        state.extractor_queue.extracted,
-                        url_metadata,
-                        claim_id=claim_id
-                    )
-                    res = check_sufficiency_for_claim(claim, claim_sources)
+                    res = check_sufficiency_for_claim(claim, _claim_sources(claim_id))
                     claim_sufficiency[claim_id] = res.posterior_p
 
             # Build sources for downstream steps
             extracted_urls = list(state.extractor_queue.extracted.keys())
-            global_sources = _build_sources_for_urls(
+            global_sources = build_sources_for_urls(
                 extracted_urls,
                 state.extractor_queue.extracted,
                 url_metadata,
@@ -399,7 +323,7 @@ class WebSearchStep:
             by_claim_sources: dict[str, list[dict[str, Any]]] = {}
             for claim_id, urls in state.bindings.audited.items():
                 ordered = [u for u in extracted_urls if u in urls]
-                by_claim_sources[str(claim_id)] = _build_sources_for_urls(
+                by_claim_sources[str(claim_id)] = build_sources_for_urls(
                     ordered,
                     state.extractor_queue.extracted,
                     url_metadata,
@@ -432,7 +356,7 @@ class WebSearchStep:
                     )
                 )
 
-            audit_sources = _build_sources_for_urls(
+            audit_sources = build_sources_for_urls(
                 extracted_urls,
                 state.extractor_queue.extracted,
                 url_metadata,

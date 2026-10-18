@@ -83,3 +83,15 @@ async def test_standard_result_contract_fields():
     assert "deep_analysis" not in final_result
     assert "cost_summary" in final_result
     assert final_result.get("credits") == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("g, expected", [(0.07, 0.07), (0.98, 0.98), (-1.0, -1.0)])
+async def test_verified_score_is_g_not_rescaled(g, expected):
+    """Pilot 2026-10-18: a refuted claim with G=0.07 was reported as 0.54 by a [-1,1]->[0,1] rescale."""
+    verdict = {"judge_mode": ScoringMode.STANDARD, "rgba": [0.1, g, 0.3, 0.4], "verified_score": g,
+               "rationale": "r", "sources": [], "anchor_claim": {"id": "c1", "text": "t"}}
+    ctx = PipelineContext(mode=GENERAL_MODE, claims=[{"id": "c1", "text": "t"}]).with_update(verdict=verdict, sources=[])
+    ctx = ctx.set_extra("prepared_fact", "t").set_extra("cost_summary", {"credits_used": 1})
+    final_result = (await AssembleStandardResultStep().run(ctx)).get_extra("final_result")
+    assert final_result["verified_score"] == pytest.approx(expected)

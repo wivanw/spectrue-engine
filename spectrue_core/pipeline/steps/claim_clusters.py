@@ -83,6 +83,7 @@ class ClaimClustersStep(Step):
             {
                 "clusters": len(clusters),
                 "cluster_sizes": [c.size for c in clusters],
+                "representatives": {c.cluster_id: list(c.representative_claim_ids) for c in clusters},
             },
         )
 

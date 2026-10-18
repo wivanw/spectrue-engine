@@ -38,10 +38,6 @@ from spectrue_core.scoring.budget_allocation import (
     BudgetState,
     GlobalBudgetTracker,
     ExtractBudgetParams,
-    QueryBudgetParams,
-    estimate_claim_complexity,
-    has_named_entities,
-    compute_query_count,
 )
 
 __all__ = [
@@ -54,14 +50,10 @@ __all__ = [
     "process_updates",
     "sigmoid_impact",
     "calculate_consensus",
-    "estimate_claim_complexity",
-    "has_named_entities",
-    "compute_query_count",
     # Classes
     "RGBABeliefState",
     "create_rgba_belief_from_tier",
     "BudgetState",
     "GlobalBudgetTracker",
     "ExtractBudgetParams",
-    "QueryBudgetParams",
 ]

@@ -136,6 +136,16 @@ class LLMMeter:
             raise ValueError(f"Missing pricing for model: {model}")
         return price
 
+    def quote_completion(self, *, model: str, input_tokens: int, output_tokens: int = 0) -> tuple[float, Any]:
+        """(usd, credits) for a completion, without writing a ledger entry.
+
+        For spend that is traced but not charged to the user (e.g. shadow
+        experiments attributed to Spectrue itself).
+        """
+        price = self._get_model_price(model)
+        kw = dict(price=price, input_tokens=int(input_tokens), output_tokens=int(output_tokens), reasoning_tokens=None)
+        return self._calculator.usd_cost(**kw), self._calculator.credits_cost(**kw)
+
     def record_completion(
         self,
         *,

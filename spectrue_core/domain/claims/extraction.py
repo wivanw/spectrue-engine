@@ -100,12 +100,16 @@ def validate_core_claim(claim: dict[str, Any]) -> tuple[bool, list[str]]:
     reason_codes: list[str] = []
 
     claim_text = claim.get("claim_text") or claim.get("text") or ""
+    # The length bound is measured on the English normalized_text, which extraction
+    # produces for every language. Raw character counts are script-dependent: a full
+    # CJK sentence (東京は日本の首都です。) has 11 characters.
+    measured = claim.get("normalized_text") or claim_text
 
     if not claim_text:
         reason_codes.append("empty_claim_text")
-    elif len(claim_text) < 20:
+    elif len(measured) < 20:
         reason_codes.append("claim_text_too_short")
-    elif len(claim_text) > 500:
+    elif len(measured) > 500:
         reason_codes.append("claim_text_too_long")
 
     entities = claim.get("subject_entities")

@@ -9,11 +9,13 @@
 
 import hashlib
 
+from spectrue_core.domain.claims.topics import assign_topics
 from spectrue_core.utils.evidence_pack import Claim, ClaimAnchor, EvidenceRequirement
 from spectrue_core.domain.evidence.model import ArticleIntent
 from .base_skill import BaseSkill, logger
 from spectrue_core.utils.text_chunking import CoverageSampler, TextChunk
 from spectrue_core.utils.trace import Trace
+from spectrue_core.adapters.llm.decision_gates import gate_mode
 from spectrue_core.constants import SUPPORTED_LANGUAGES
 from spectrue_core.domain.claims.extraction import (
     DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS as DEFAULT_CLAIM_EXTRACTION_INSTRUCTIONS,
@@ -166,6 +168,10 @@ def _chunk_cache_id(text: str) -> str:
     """
     return hashlib.sha256((text or "").encode()).hexdigest()[:32]
 
+class _PlanFromSensor(Exception):
+    """Control flow: the retrieval plan comes from the Decisions sensor, not call B."""
+
+
 class ClaimExtractionSkill(BaseSkill):
 
   
@@ -315,15 +321,17 @@ class ClaimExtractionSkill(BaseSkill):
                 core_claims_only = []
                 for idx, (core_data, _) in enumerate(valid_core_claims):
                     cid = f"c{idx+1}"
-                    # Provide essential fields to prevent downstream crashes
+                    # Keep every core field (subject_entities, retrieval_seed_terms,
+                    # time_anchor, ...): the stage-2 planning call does not produce them,
+                    # so dropping them here left deep mode without entities.
+                    # claim_role / verification_target are left to stage-2 enrichment.
                     c = {
+                        **core_data,
                         "id": cid,
                         "claim_id": cid,
                         "text": core_data.get("text", ""),
                         "normalized_text": core_data.get("normalized_text", core_data.get("text", "")),
                         "importance": core_data.get("importance", 0.5),
-                        "verification_target": "reality", # Default
-                        "claim_role": "target", # Default
                     }
                     core_claims_only.append(c)
                 
@@ -372,6 +380,8 @@ class ClaimExtractionSkill(BaseSkill):
 
             # Dedupe and Sort
             final_claims = self._dedupe_claims(enriched_claims)
+            assign_topics(final_claims)  # M146 T013: topics from shared entities
+            await self._apply_metadata_sensor(final_claims, text=stitched_text, lang=lang)
             final_claims.sort(key=lambda x: x.get("harm_potential", 1), reverse=True)
 
             # Tracing
@@ -420,8 +430,10 @@ class ClaimExtractionSkill(BaseSkill):
         enrich_tasks = []
         for idx, c in enumerate(claims):
             cid = c.get("id") or f"c{idx+1}"
-            context = c.get("context_text", "") # May exist if passed
-            enrich_tasks.append(rate_limited_enrich(cid, c, context, lang))
+            # Claim-specific context if present; the closure falls back to the article
+            # `context`. (Reusing the name `context` here overwrote the article text.)
+            claim_context = c.get("context_text", "")
+            enrich_tasks.append(rate_limited_enrich(cid, c, claim_context, lang))
             
         enriched = await asyncio.gather(*enrich_tasks, return_exceptions=True)
         final_claims = []
@@ -431,6 +443,8 @@ class ClaimExtractionSkill(BaseSkill):
                 final_claims.append(claims[i])
             else:
                 final_claims.append(res)
+        assign_topics(final_claims)  # M146 T013
+        await self._apply_metadata_sensor(final_claims, text=context or "", lang=lang)
         return final_claims
 
     async def _extract_core_from_chunk(self, chunk: TextChunk) -> tuple[list[dict], ArticleIntent, ExtractionStats]:
@@ -580,7 +594,11 @@ class ClaimExtractionSkill(BaseSkill):
             "Output only the JSON object with the required fields. Do NOT wrap in claims[] array."
         )
 
+        plan_mode = gate_mode(self.runtime.decisions, "retrieval_plan")
+        sensor_plan = await self._plan_from_sensor(claim_id, core_data, context_text, lang) if plan_mode != "off" else None
         try:
+            if plan_mode == "on" and sensor_plan is not None:
+                raise _PlanFromSensor
             # Using Nano for enrichment to save cost
             result = await self.llm_client.call_json(
                 model=DEFAULT_MODEL_OPENAI_NANO,
@@ -588,15 +606,21 @@ class ClaimExtractionSkill(BaseSkill):
                 instructions=instructions,
                 response_schema=CLAIM_RETRIEVAL_SCHEMA,
                 reasoning_effort="low",
-                cache_key=f"retrieval_plan_v1_{hash(claim_text)}",
+                # Stable across processes (built-in hash() is salted per process).
+                cache_key="retrieval_plan_v1_" + hashlib.sha256(claim_text.encode("utf-8")).hexdigest()[:32],
                 timeout=45.0, # Nano is faster usually
                 trace_kind="claim_retrieval_plan",
                 temperature=0.0, # Keep steady
             )
+        except _PlanFromSensor:
+            result = dict(sensor_plan)
         except Exception as e:
             logger.warning("Enrichment failed for %s: %s", claim_id, e)
             # Return minimal claim if meaningful
             result = {}
+        if plan_mode == "shadow" and sensor_plan is not None:
+            from spectrue_core.use_cases.claims.retrieval_plan import compare_plans
+            Trace.event("retrieval_plan_sensor.compare", {"claim_id": claim_id, "fields": compare_plans(result, sensor_plan)})
 
         # Fallback: unwrap if LLM returned {"claims": [...]} or {"article_intent": ...}
         if "claims" in result and isinstance(result.get("claims"), list):
@@ -663,11 +687,7 @@ class ClaimExtractionSkill(BaseSkill):
         search_queries = merged.get("search_queries", [])
         query_candidates = merged.get("query_candidates", [])
         from spectrue_core.domain.claims.policy import should_skip_search
-        should_skip_search_val = (
-            satire_likelihood >= 0.8
-            or claim_category == "SATIRE"
-            or should_skip_search(metadata)
-        )
+        should_skip_search_val = should_skip_search(metadata)  # M146 T020: one rule
         if should_skip_search_val:
             search_queries = []
             query_candidates = []
@@ -696,6 +716,7 @@ class ClaimExtractionSkill(BaseSkill):
             retrieval_seed_terms=merged.get("retrieval_seed_terms", []),
             context_entities=merged.get("context_entities", []),
             time_anchor=merged.get("time_anchor"),
+            predicate_type=merged.get("predicate_type"),
             normalized_text=normalized,
             topic_group=topic,
             check_worthiness=worthiness,
@@ -728,6 +749,30 @@ class ClaimExtractionSkill(BaseSkill):
             metadata_confidence=metadata.metadata_confidence.value if metadata else "medium",
         )
         return c
+
+    async def _plan_from_sensor(self, claim_id: str, core_data: dict, context_text: str, lang: str) -> dict | None:
+        """M147 T022: call-B plan from the Decisions sensor; None when the reading is unusable."""
+        from spectrue_core.adapters.llm.retrieval_plan_sensor import read_retrieval_plan
+        from spectrue_core.use_cases.claims.metadata_sensor import local_window
+        from spectrue_core.use_cases.claims.retrieval_plan import plan_from_reading
+
+        text = str(core_data.get("normalized_text") or core_data.get("text") or "")
+        reading = await read_retrieval_plan(self.llm_client, self.runtime.decisions, claim_text=text,
+                                            window=local_window(context_text, str(core_data.get("text") or "")),
+                                            lang=lang, claim_id=claim_id)
+        if reading is None:
+            return None
+        return plan_from_reading(reading, normalized_text=text, search_queries=core_data.get("search_queries") or [],
+                                 lang=lang)
+
+    async def _apply_metadata_sensor(self, claims: list, *, text: str, lang: str) -> None:
+        """M146 T031: Decisions metadata sensor (off / shadow / on per DECISIONS_GATE_METADATA)."""
+        from spectrue_core.use_cases.claims.metadata_sensor import apply_metadata_sensor
+
+        await apply_metadata_sensor(
+            self.llm_client, self.runtime.decisions, self.runtime.calibration.decision_sensors,
+            claims, text=text, lang=lang,
+        )
 
     def _trace_extracted_claims(self, claims: list[Claim]) -> None:
         """

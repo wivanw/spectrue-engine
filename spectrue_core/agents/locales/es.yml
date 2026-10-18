@@ -78,6 +78,118 @@ es:
         "missing_evidence": []
       }}
 
+    decisions:
+      judge_routing:
+        difficulty: "¿Qué tan difícil es juzgar correctamente esta afirmación con estas pruebas?"
+        levels: ["Trivial: las pruebas lo dicen directamente.", "Fácil: pruebas claras, poca interpretación.", "Moderado: requiere interpretación o combinar varias fuentes.", "Difícil: pruebas contradictorias o indirectas, redacción sutil.", "Muy difícil: mucho en juego, fuentes contradictorias y redacción sutil."]
+      edge:
+        instructions: "¿Qué relación tiene la afirmación C2 con la afirmación C1?"
+        supports: "C2 aporta pruebas a favor de C1."
+        contradicts: "C2 contradice a C1."
+        depends_on: "C1 solo es verdadera si C2 lo es."
+        elaborates: "C2 añade detalles a C1."
+        unrelated: "No hay una relación significativa."
+      domain_tier:
+        instructions: "¿Qué tipo de fuente es este sitio web?"
+        authoritative: "Una fuente oficial o primaria: gobierno, organismo internacional, regulador, tribunal, universidad, revista científica, la propia organización."
+        reputable_news: "Un medio de noticias consolidado con estándares editoriales."
+        local_media: "Medios regionales o locales."
+        social: "Una red social, foro, vídeo o plataforma de contenido de usuarios."
+        low_reliability: "Desconocida, anónima, partidista o poco fiable."
+      oracle:
+        best: "¿Qué verificación trata de la misma afirmación que la del usuario?"
+        best_none: "Ninguna trata de esta afirmación."
+        match: "¿En qué medida coincide esa verificación con la afirmación del usuario?"
+        match_levels: ["Otra afirmación, solo palabras en común.", "Tema relacionado.", "Afirmación en parte coincidente.", "Misma afirmación, otra redacción o detalles.", "Esencialmente la misma afirmación."]
+        status: "¿Qué concluyó esa verificación?"
+        status_confirmed: "Verdadero o verificado."
+        status_refuted: "Falso, bulo o desmentido."
+        status_mixed: "Parcialmente cierto, engañoso o sin contexto."
+        rating: "¿Qué tan verdadera califica esa verificación la afirmación?"
+        rating_levels: ["Falso.", "Mayormente falso.", "Medio verdadero.", "Mayormente verdadero.", "Verdadero."]
+      plan:
+        evidence_need: "¿Qué pruebas podrían resolver esta afirmación?"
+        need_official_stats: "Estadísticas o registros oficiales."
+        need_empirical_study: "Estudios científicos o análisis de datos."
+        need_guideline: "Directrices o normas oficiales."
+        need_news_report: "Noticias sobre el hecho."
+        need_expert_opinion: "Valoración de expertos."
+        need_definition: "Una definición u obra de referencia."
+        need_anecdotal: "Testimonios personales."
+        need_unknown: "No está claro."
+        search_method: "¿Dónde es más probable encontrar esas pruebas?"
+        method_general_search: "Búsqueda general en la web."
+        method_news: "Noticias."
+        method_academic: "Literatura académica."
+        needs_primary: "¿Requiere la verificación una fuente primaria (el documento, conjunto de datos o declaración original)?"
+        structure_type: "¿Qué tipo de afirmación es?"
+        type_empirical_numeric: "Una cifra o medición."
+        type_event: "Un hecho ocurrido."
+        type_causal: "Una relación de causa y efecto."
+        type_attribution: "Lo que alguien dijo."
+        type_definition: "Una definición."
+        type_policy_plan: "Una política, plan o decisión."
+        type_forecast: "Una predicción."
+        type_meta_scientific: "Una afirmación sobre resultados científicos."
+        type_other: "Otra cosa."
+      evidence_audit:
+        stance: "¿Esta prueba respalda la afirmación, la refuta, la deja sin aclarar o no tiene relación?"
+        stance_support: "Respalda la afirmación y sus detalles."
+        stance_refute: "Contradice la afirmación o alguno de sus detalles."
+        stance_unclear: "Relacionada, pero no resuelve la cuestión."
+        stance_unrelated: "Trata de otra cosa."
+        directness: "¿Con qué grado de directitud aborda la prueba la afirmación?"
+        directness_direct: "Aborda exactamente lo que se afirma."
+        directness_indirect: "Solo mediante hechos relacionados."
+        directness_tangential: "Solo roza el tema."
+        specificity: "¿Con qué concreción responde la prueba a los detalles de la afirmación?"
+        specificity_high: "Da los mismos hechos, cifras o nombres concretos."
+        specificity_medium: "Da parte de los detalles."
+        specificity_low: "Es general."
+        quote_integrity: "¿Se usa la cita con fidelidad?"
+        quote_integrity_ok: "Exacta y en contexto."
+        quote_integrity_partial: "Parcial o abreviada."
+        quote_integrity_out_of_context: "Sacada de contexto."
+        quote_integrity_not_applicable: "No hay cita."
+        novelty_vs_copy: "¿Es información original o una copia de otra fuente?"
+        novelty_vs_copy_original: "Información original."
+        novelty_vs_copy_syndicated: "Copia o reescritura de otro medio."
+        novelty_vs_copy_unknown: "No se puede saber."
+      stance:
+        instructions: "¿Esta fuente respalda la afirmación, la contradice, solo aporta contexto o no tiene relación con ella?"
+        support: "Afirma o informa lo mismo que la afirmación, incluidos sus detalles concretos."
+        refute: "Afirma o informa algo que contradice la afirmación o alguno de sus detalles."
+        context: "Trata del mismo tema, pero ni confirma ni contradice la afirmación."
+        irrelevant: "Trata de otra cosa."
+      extract:
+        instructions: "¿Es probable que este resultado de búsqueda contenga pruebas que confirmen o refuten la afirmación, de modo que valga la pena leer la página completa?"
+      search_stop:
+        instructions: "¿Contienen ya las fuentes encontradas suficientes pruebas para evaluar la afirmación, de modo que no haga falta otra búsqueda?"
+      inline_source:
+        relevant: "¿Es esta fuente enlazada relevante para alguna de las afirmaciones?"
+        primary: "¿Es esta una fuente PRIMARIA, es decir, el emisor original de la información (declaración oficial, documento original, plataforma propia del autor), y no una cobertura o reportaje sobre ella?"
+      metadata:
+        verification_target: "¿Qué se puede verificar de esta afirmación?"
+        vt_reality: "Si es cierta en el mundo real."
+        vt_attribution: "Si una persona u organización nombrada realmente lo dijo o escribió."
+        vt_existence: "Si existe un documento, evento u objeto nombrado."
+        vt_none: "Nada: es una opinión, una predicción, una broma o una instrucción."
+        claim_role: "¿Qué papel desempeña esta afirmación en el texto?"
+        role_core: "Una afirmación principal del texto."
+        role_support: "Una afirmación que respalda una afirmación principal."
+        role_context: "Contexto o antecedentes que enmarcan el texto."
+        role_counterclaim: "Una afirmación que el texto rebate."
+        role_attribution: "Un relato de lo que alguien dijo."
+        harm: "¿Cuánto daño podría causar creer esta afirmación si fuera falsa?"
+        harm_levels: ["Ninguno o trivial", "Menor", "Moderado", "Grave (dinero, seguridad, reputación)", "Muy grave (salud, vida, seguridad pública)"]
+        importance: "¿Qué importancia tiene esta afirmación para el texto en su conjunto?"
+        importance_levels: ["Marginal", "Menor", "Relevante", "Importante", "Central"]
+        check_oracle: "¿Es probable que organizaciones de verificación ya hayan calificado una afirmación así?"
+        time_sensitive: "¿Puede la veracidad de esta afirmación cambiar con el tiempo, de modo que solo fuentes recientes la confirmen?"
+        satire: "¿Es esta afirmación sátira o una broma en lugar de una afirmación seria?"
+      verifiability:
+        instructions: "¿Es una afirmación fáctica concreta que se puede verificar con fuentes públicas (no una opinión, predicción, broma o instrucción)?"
+
   ui:
     popup:
       not_available: "No disponible"

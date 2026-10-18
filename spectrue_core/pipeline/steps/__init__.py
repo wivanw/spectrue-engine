@@ -33,6 +33,7 @@ from .retrieval import (
     FetchChunksStep,
     ClusterWebSearchStep,
     RerankStep,
+    SearchRelevanceGateStep,
     WebSearchStep,
     ClusterAttributionStep,
 )
@@ -81,6 +82,7 @@ __all__ = [
     "ClusterWebSearchStep",
     "ClusterEvidenceEnrichStep",
     "RerankStep",
+    "SearchRelevanceGateStep",
     "FetchChunksStep",
     "AssembleRetrievalItemsStep",
     "ClusterAttributionStep",

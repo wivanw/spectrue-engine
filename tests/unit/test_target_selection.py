@@ -244,32 +244,32 @@ def test_bayesian_evoi_empty_claims():
     assert trace.get("reason") == "no_claims"
 
 
-def test_bayesian_evoi_custom_params():
-    """Custom parameters should affect target selection."""
+def test_knapsack_targets_every_checkable_claim_up_to_ceiling():
+    """M146 T022: the bamboo text — 3 checkable facts, an opinion and a forecast.
+
+    Before, EVOI was cut against a 0.5 cost constant on another scale and standard
+    mode fell to the floor of 1 target. Now every checkable claim is a target up to
+    the minimal ceiling (3), and claims not verifiable by nature never are.
+    """
     claims = [
-        {"id": "c1", "check_worthiness": 0.9, "harm_potential": 4.0},
-        {"id": "c2", "check_worthiness": 0.8, "harm_potential": 3.5},
-        {"id": "c3", "check_worthiness": 0.7, "harm_potential": 3.0},
+        {"id": "c1", "importance": 0.45, "harm_potential": 1, "verification_target": "reality"},
+        {"id": "c2", "importance": 0.45, "harm_potential": 1, "verification_target": "reality"},
+        {"id": "c3", "importance": 0.35, "harm_potential": 1, "verification_target": "reality"},
+        {"id": "op", "importance": 0.9, "harm_potential": 1, "verification_target": "none"},
+        {"id": "fc", "importance": 0.9, "harm_potential": 1, "verification_target": "none"},
     ]
-    
-    # Higher marginal cost -> fewer targets
-    expensive_params = TargetBudgetParams(
-        marginal_cost_per_target=0.9,  # Very expensive
-        budget_ceilings={"minimal": 10},
-        budget_floors={"minimal": 1},
-    )
-    
-    cheap_params = TargetBudgetParams(
-        marginal_cost_per_target=0.1,  # Very cheap
-        budget_ceilings={"minimal": 10},
-        budget_floors={"minimal": 1},
-    )
-    
-    k_expensive, _ = compute_optimal_target_count(claims, budget_class="minimal", params=expensive_params)
-    k_cheap, _ = compute_optimal_target_count(claims, budget_class="minimal", params=cheap_params)
-    
-    # Cheaper targets should allow selecting more
-    assert k_cheap >= k_expensive
+    k, trace = compute_optimal_target_count(claims, budget_class="minimal")
+    assert k == 3
+    assert trace["params"]["rule"] == "unit_cost_knapsack"
+    values = {m["index"]: m["raw_evoi"] for m in trace["marginal_analysis"]}
+    assert values[3] == 0.0 and values[4] == 0.0  # not verifiable by nature
+
+
+def test_knapsack_ceiling_caps_targets():
+    claims = [{"id": f"c{i}", "importance": 0.8, "harm_potential": 3} for i in range(10)]
+    params = TargetBudgetParams(budget_ceilings={"minimal": 4}, budget_floors={"minimal": 1})
+    k, _ = compute_optimal_target_count(claims, budget_class="minimal", params=params)
+    assert k == 4
 
 
 def test_evoi_function_high_entropy_at_uncertainty():

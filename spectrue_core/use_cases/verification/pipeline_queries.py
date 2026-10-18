@@ -365,3 +365,21 @@ def get_claim_units_for_evidence_mapping(claim_units: list, sources: list[dict])
             mapping[unit.id] = fact_keys
 
     return mapping
+
+
+def preplanned_global_queries(claims: list, max_queries: int) -> list[str]:
+    """Round-robin over the claims' own search_queries (call A), deduplicated, <= max_queries.
+
+    Standard mode uses them before the CEGS doc plan, as deep cluster planning does (I0).
+    """
+    lists = [[q for q in (c.get("search_queries") or []) if isinstance(q, str)]
+             for c in claims if isinstance(c, dict)]
+    out: list[str] = []
+    for i in range(max((len(x) for x in lists), default=0)):
+        for qs in lists:
+            if i >= len(qs) or len(out) >= max_queries:
+                continue
+            q = normalize_and_sanitize(qs[i])
+            if q and not is_fuzzy_duplicate(q, out, threshold=0.9):
+                out.append(q)
+    return out

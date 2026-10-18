@@ -17,6 +17,7 @@ from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.tools.web_search_tool import WebSearchTool
 from spectrue_core.tools.google_cse_search import GoogleCSESearchTool
 from spectrue_core.config import SpectrueConfig
+from spectrue_core.runtime_config import DecisionsConfig
 from spectrue_core.runtime_config import EngineLLMConfig
 
 
@@ -49,7 +50,10 @@ def mock_config():
     config.google_fact_check_key = "test-fc-key"
     
     # Mock runtime config
+    # Decisions gates (M145): a real config, all gates off. A MagicMock here would be
+    # rejected as an invalid gate mode (Constitution III: wiring must not degrade).
     config.runtime = MagicMock()
+    config.runtime.decisions = DecisionsConfig()
     config.runtime.search = MagicMock()
     config.runtime.search.tavily_concurrency = 1
     config.runtime.search.tavily_exclude_domains = []

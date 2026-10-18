@@ -13,7 +13,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+from typing import Any
 
 from spectrue_core.llm.llm_client import LLMClient
 from spectrue_core.agents.llm_schemas import EVIDENCE_AUDIT_SCHEMA
@@ -30,10 +32,33 @@ from spectrue_core.llm.model_registry import ModelID
 class EvidenceAuditSkill:
     """LLM-driven evidence audit annotation (no scoring)."""
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, decisions: Any):
         self.llm = llm_client
+        self.decisions = decisions
 
     async def audit(self, frame: ClaimFrame, evidence: EvidenceItemFrame) -> EvidenceAudit:
+        """M147 T021 gate "evidence_audit": off = LLM audit; shadow = LLM audit + sensor compare;
+        on = the audit is built from the Decisions sensor (no LLM call); a missing reading falls back to the LLM."""
+        from spectrue_core.adapters.llm.decision_gates import gate_mode
+        from spectrue_core.use_cases.evidence.audit_sensor import audit_from_reading, compare_audit
+
+        mode = gate_mode(self.decisions, "evidence_audit")
+        if mode == "off":
+            return await self._audit_llm(frame, evidence)
+        from spectrue_core.adapters.llm.evidence_audit_sensor import read_evidence_audit
+
+        lang = getattr(frame, "claim_language", None) or "en"
+        if mode == "on":
+            reading = await read_evidence_audit(self.llm, self.decisions, frame, evidence, lang)
+            if reading is not None:
+                return audit_from_reading(frame, evidence, reading)
+            return await self._audit_llm(frame, evidence)
+        audit, reading = await asyncio.gather(
+            self._audit_llm(frame, evidence), read_evidence_audit(self.llm, self.decisions, frame, evidence, lang))
+        compare_audit(audit, reading)
+        return audit
+
+    async def _audit_llm(self, frame: ClaimFrame, evidence: EvidenceItemFrame) -> EvidenceAudit:
         user_prompt = build_evidence_audit_prompt(frame, evidence)
         system_prompt = build_evidence_audit_system_prompt()
         source_id = evidence.source_id or evidence.url

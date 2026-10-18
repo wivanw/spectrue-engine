@@ -33,6 +33,7 @@ from spectrue_core.billing.meter_context import get_current_llm_meter
 from spectrue_core.utils.trace import Trace
 from spectrue_core.llm.errors import LLMFailureKind, LLMCallError
 from spectrue_core.llm.model_registry import ModelID
+from spectrue_core.llm.decisions import DecisionQuestion, DecisionResult, parse_decision_response
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,10 @@ logger = logging.getLogger(__name__)
 # GPT-5.6 accepts none/low/medium/high/xhigh/max; older GPT-5.x only low/medium/high.
 ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 CacheRetention = Literal["in_memory", "24h"]
+
+# Decisions calls bill input tokens only, at a rate distinct from the same
+# model's Responses API rate, so they meter under "<model>-decisions".
+DECISIONS_PRICING_SUFFIX = "-decisions"
 
 
 def _is_number(value: Any) -> bool:
@@ -1157,6 +1162,153 @@ class LLMClient:
             temperature=temperature,
             fail_on_schema_error=fail_on_schema_error,
         )
+
+    async def call_decision(
+        self,
+        *,
+        model: str,
+        input: str,  # noqa: A002 - 'input' is the official API param name
+        questions: list[DecisionQuestion],
+        timeout: float | None = None,
+        trace_kind: str = "decision_call",
+        stage: str | None = None,
+        billing: Literal["user", "internal"] = "user",
+    ) -> DecisionResult:
+        """
+        Typed decision call via the OpenAI Decisions API (POST /v1/decisions).
+
+        No text is generated; the result holds probabilities per question.
+        Billed on input tokens only. Raises LLMCallError (typed kind) on failure;
+        never returns a synthesized answer.
+
+        billing="internal": the cost is traced (`llm.cost.internal`, attribution
+        `spectrue_internal_experiment`) but not written to the run's ledger, so
+        it is never charged to the user (shadow experiments).
+        """
+        if self._use_chat_completions:
+            raise LLMCallError(
+                message="Decisions API is only available on the OpenAI endpoint",
+                kind=LLMFailureKind.UNSUPPORTED_ROUTE,
+            )
+        if not questions:
+            raise ValueError("call_decision requires at least one question")
+
+        import time
+        import openai as _openai
+
+        effective_timeout = timeout or self.default_timeout
+        body = {"model": model, "input": input, "questions": [q.payload for q in questions]}
+        Trace.event(f"{trace_kind}.prompt", {
+            "model": model,
+            "api_mode": "decisions",
+            "input_chars": len(input),
+            "questions": [q.name for q in questions],
+            "input_text": input[:10000],
+        })
+
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries):
+            start_time = time.time()
+            try:
+                async with self._sem:
+                    if attempt > 0:
+                        await asyncio.sleep(min(2 ** attempt, 30))
+                    raw = await self.client.post(
+                        "/decisions",
+                        cast_to=object,
+                        body=body,
+                        options={"timeout": effective_timeout},
+                    )
+                latency_ms = int((time.time() - start_time) * 1000)
+                result = parse_decision_response(raw, questions)
+            except _openai.RateLimitError as e:
+                last_error = LLMCallError(message=str(e)[:200], kind=LLMFailureKind.RATE_LIMITED)
+                continue
+            except _openai.BadRequestError as e:
+                msg = str(e).lower()
+                kind = (
+                    LLMFailureKind.INPUT_TOO_LONG
+                    if "context" in msg or "too long" in msg or "maximum" in msg
+                    else LLMFailureKind.PROVIDER_ERROR
+                )
+                last_error = LLMCallError(message=str(e)[:200], kind=kind)
+                break  # 4xx does not converge on retry
+            except _openai.APITimeoutError as e:
+                last_error = LLMCallError(message=str(e)[:200], kind=LLMFailureKind.TIMEOUT)
+                continue
+            except _openai.APIConnectionError as e:
+                last_error = LLMCallError(message=str(e)[:200], kind=LLMFailureKind.CONNECTION_ERROR)
+                continue
+            except _openai.APIStatusError as e:
+                last_error = LLMCallError(message=str(e)[:200], kind=LLMFailureKind.PROVIDER_ERROR)
+                continue
+            except LLMCallError as e:
+                last_error = e
+                break  # malformed response: schema problems don't converge on retry
+            else:
+                usage = {
+                    "input_tokens": int(result.usage.get("input_tokens") or 0),
+                    "output_tokens": 0,
+                    "reasoning_tokens": None,
+                    "latency_ms": latency_ms,
+                }
+                meter = self._meter or get_current_llm_meter()
+                if meter and billing == "internal":
+                    usd, credits = meter.quote_completion(
+                        model=f"{model}{DECISIONS_PRICING_SUFFIX}", input_tokens=usage["input_tokens"]
+                    )
+                    Trace.event("llm.cost.internal", {
+                        "stage": stage or trace_kind,
+                        "model": model,
+                        "api_mode": "decisions",
+                        "input_tokens": usage["input_tokens"],
+                        "cost_usd": float(usd),
+                        "cost_credits": str(credits),
+                        "attribution": "spectrue_internal_experiment",
+                    })
+                elif meter:
+                    try:
+                        event = meter.record_completion(
+                            model=f"{model}{DECISIONS_PRICING_SUFFIX}",
+                            stage=stage or trace_kind,
+                            usage=usage,
+                            input_text=input,
+                            output_text="",
+                        )
+                        Trace.event("llm.metering.recorded", {
+                            "stage": stage or trace_kind,
+                            "cost_credits": str(event.cost_credits),
+                            "api_mode": "decisions",
+                        })
+                    except Exception as exc:
+                        Trace.event("llm.metering.failed", {"error": str(exc)[:200]})
+                Trace.event(f"{trace_kind}.response", {
+                    "model": result.model or model,
+                    "api_mode": "decisions",
+                    "attempt": attempt + 1,
+                    "latency_ms": latency_ms,
+                    "input_tokens": usage["input_tokens"],
+                    "answers": {
+                        n: {
+                            "type": a.type,
+                            "probability": a.probability,
+                            "choice": a.choice,
+                            "score": a.score,
+                            "confidence": a.confidence,
+                        }
+                        for n, a in result.answers.items()
+                    },
+                })
+                return result
+
+        assert last_error is not None
+        Trace.event(f"{trace_kind}.error", {
+            "model": model,
+            "api_mode": "decisions",
+            "error": str(last_error)[:200],
+            "kind": last_error.kind.value if isinstance(last_error, LLMCallError) else "unknown",
+        })
+        raise last_error
 
     async def close(self) -> None:
         """Clean up resources."""

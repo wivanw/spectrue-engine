@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext
+from spectrue_core.use_cases.verification.pipeline_oracle import oracle_stance, oracle_verified_score
 from spectrue_core.utils.trace import Trace
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ class OracleFlowStep:
             "evidence_tier": "A",
             "is_trusted": True,
             "relevance_score": oracle_result.get("relevance_score", 0.0),
-            "stance": "SUPPORT" if oracle_result.get("relevance_score", 0.0) > 0.7 else "REFUTE", # Simple heuristic
+            "stance": oracle_stance(oracle_result.get("status", "")),
             "publisher": oracle_result.get("publisher"),
         }
 
@@ -60,17 +61,9 @@ class OracleFlowStep:
         """
         relevance = oracle_result.get("relevance_score", 0.95)
         status = str(oracle_result.get("status", "")).upper()
-        
-        verified_score = relevance
-        if status in ("REFUTED", "FALSE", "MISLEADING", "INCORRECT", "FAKE"):
-            verified_score = max(0.0, 1.0 - relevance)
-        
-        match status:
-             case "REFUTED" | "FALSE":
-                 stance = "REFUTE"
-             case _:
-                 stance = "SUPPORT"
-            
+        verified_score = oracle_verified_score(oracle_result)
+        stance = oracle_stance(status)
+
         return {
             "verified_score": verified_score,
             "rationale": f"Authoritative Check ({status}): {oracle_result.get('publisher', 'Oracle')} - {oracle_result.get('summary', '')}",

@@ -18,6 +18,7 @@ from .web_search import WebSearchStep
 from .cluster_web_search import ClusterWebSearchStep
 from .cluster_evidence_enrich import ClusterEvidenceEnrichStep
 from .rerank import RerankStep
+from .search_relevance_gate import SearchRelevanceGateStep
 from .fetch_chunks import FetchChunksStep
 from .assemble_items import AssembleRetrievalItemsStep
 from .cluster_attribution import ClusterAttributionStep
@@ -29,6 +30,7 @@ __all__ = [
     "ClusterWebSearchStep",
     "ClusterEvidenceEnrichStep",
     "RerankStep",
+    "SearchRelevanceGateStep",
     "FetchChunksStep",
     "AssembleRetrievalItemsStep",
     "ClusterAttributionStep",

@@ -78,6 +78,118 @@ ja:
         "missing_evidence": []
       }}
 
+    decisions:
+      judge_routing:
+        difficulty: "この証拠でこの主張を正しく判断するのはどの程度難しいですか？"
+        levels: ["非常に簡単：証拠が直接述べている。", "簡単：明確な証拠で、解釈はほとんど不要。", "中程度：多少の解釈や複数の情報源の統合が必要。", "難しい：矛盾または間接的な証拠、微妙な表現。", "非常に難しい：重大で、情報源が矛盾し表現も微妙。"]
+      edge:
+        instructions: "主張C2は主張C1とどのように関係していますか？"
+        supports: "C2はC1を裏付ける証拠になる。"
+        contradicts: "C2はC1と矛盾する。"
+        depends_on: "C2が正しい場合にのみC1が正しい。"
+        elaborates: "C2はC1に詳細を加える。"
+        unrelated: "意味のある関係はない。"
+      domain_tier:
+        instructions: "このウェブサイトはどのような情報源ですか？"
+        authoritative: "公式または一次情報源：政府、国際機関、規制当局、裁判所、大学、学術誌、当該組織自身。"
+        reputable_news: "編集基準を持つ定評ある報道機関。"
+        local_media: "地方・地域メディア。"
+        social: "SNS、掲示板、動画、ユーザー投稿型プラットフォーム。"
+        low_reliability: "不明、匿名、偏向的、または信頼性が低い。"
+      oracle:
+        best: "ユーザーの主張と同じ主張を扱っているファクトチェックはどれですか？"
+        best_none: "どれもこの主張を扱っていない。"
+        match: "そのファクトチェックはユーザーの主張とどの程度一致していますか？"
+        match_levels: ["別の主張で、共通するのは単語だけ。", "関連する話題。", "部分的に同じ主張。", "同じ主張だが表現や詳細が異なる。", "実質的に同じ主張。"]
+        status: "そのファクトチェックはどのような結論を出しましたか？"
+        status_confirmed: "正しい、または確認済み。"
+        status_refuted: "誤り、偽情報、または反証済み。"
+        status_mixed: "部分的に正しい、誤解を招く、または文脈不足。"
+        rating: "そのファクトチェックは主張をどの程度正しいと評価していますか？"
+        rating_levels: ["誤り。", "ほぼ誤り。", "半分正しい。", "ほぼ正しい。", "正しい。"]
+      plan:
+        evidence_need: "この主張を決着させるのはどのような証拠ですか？"
+        need_official_stats: "公式統計や登録簿。"
+        need_empirical_study: "科学的研究やデータ分析。"
+        need_guideline: "公式のガイドラインや規則。"
+        need_news_report: "出来事に関するニュース報道。"
+        need_expert_opinion: "専門家の評価。"
+        need_definition: "定義や参考文献。"
+        need_anecdotal: "個人的な証言。"
+        need_unknown: "不明。"
+        search_method: "その証拠はどこで見つかる可能性が最も高いですか？"
+        method_general_search: "一般的なウェブ検索。"
+        method_news: "ニュース。"
+        method_academic: "学術文献。"
+        needs_primary: "この主張の確認には一次資料（原文書、データセット、声明）が必要ですか？"
+        structure_type: "これはどのような種類の記述ですか？"
+        type_empirical_numeric: "数値や測定値。"
+        type_event: "起きた出来事。"
+        type_causal: "因果関係。"
+        type_attribution: "誰かの発言の伝聞。"
+        type_definition: "定義。"
+        type_policy_plan: "政策・計画・決定。"
+        type_forecast: "予測。"
+        type_meta_scientific: "科学的な結果についての記述。"
+        type_other: "その他。"
+      evidence_audit:
+        stance: "この証拠は主張を裏付けますか、否定しますか、判断がつきませんか、それとも無関係ですか？"
+        stance_support: "主張とその詳細を裏付ける。"
+        stance_refute: "主張またはその詳細の一つと矛盾する。"
+        stance_unclear: "関連はあるが、結論は出せない。"
+        stance_unrelated: "別の話題。"
+        directness: "証拠はどの程度直接的に主張を扱っていますか？"
+        directness_direct: "主張している内容そのものを扱っている。"
+        directness_indirect: "関連する事実を通じてのみ扱っている。"
+        directness_tangential: "話題に触れているだけ。"
+        specificity: "証拠は主張の詳細にどの程度具体的に対応していますか？"
+        specificity_high: "同じ具体的な事実・数値・名前を示している。"
+        specificity_medium: "具体的な内容の一部を示している。"
+        specificity_low: "一般的な内容。"
+        quote_integrity: "引用は忠実に使われていますか？"
+        quote_integrity_ok: "正確で文脈どおり。"
+        quote_integrity_partial: "部分的または短縮されている。"
+        quote_integrity_out_of_context: "文脈から切り離されている。"
+        quote_integrity_not_applicable: "引用はない。"
+        novelty_vs_copy: "これは独自の報道ですか、それとも他の情報源のコピーですか？"
+        novelty_vs_copy_original: "独自の報道。"
+        novelty_vs_copy_syndicated: "他媒体の記事のコピーまたは書き直し。"
+        novelty_vs_copy_unknown: "判断できない。"
+      stance:
+        instructions: "この情報源は主張を裏付けていますか、否定していますか、文脈を示すだけですか、それとも無関係ですか？"
+        support: "主張の内容を、その具体的な詳細も含めて述べている、または報じている。"
+        refute: "主張またはその詳細の一つと矛盾する内容を述べている、または報じている。"
+        context: "同じ話題を扱っているが、主張を裏付けも否定もしていない。"
+        irrelevant: "別の話題を扱っている。"
+      extract:
+        instructions: "この検索結果には主張を裏付ける、または否定する証拠が含まれている可能性が高く、ページ全体を読む価値がありますか？"
+      search_stop:
+        instructions: "これまでに見つかった情報源には、主張を判断するのに十分な証拠がすでに含まれており、追加の検索は不要ですか？"
+      inline_source:
+        relevant: "このリンク先の情報源は、いずれかの主張に関連していますか？"
+        primary: "これは一次情報源（公式声明、原本文書、著者自身のプラットフォームなど、情報の発信元）であり、それについての報道や解説ではありませんか？"
+      metadata:
+        verification_target: "この主張について何を検証できますか？"
+        vt_reality: "現実に事実として正しいかどうか。"
+        vt_attribution: "名前の挙がった人物や組織が本当にそう言ったり書いたりしたかどうか。"
+        vt_existence: "名前の挙がった文書・出来事・物が存在するかどうか。"
+        vt_none: "何も検証できない：意見、予測、冗談、または指示である。"
+        claim_role: "この主張は文章の中でどんな役割を果たしていますか？"
+        role_core: "文章の主要な主張。"
+        role_support: "主要な主張を裏付ける主張。"
+        role_context: "文章の背景や前提となる情報。"
+        role_counterclaim: "文章が反論している主張。"
+        role_attribution: "誰かが言ったことの伝聞。"
+        harm: "この主張が誤りだった場合、信じることでどの程度の害が生じますか？"
+        harm_levels: ["害はない、または些細", "軽微", "中程度", "深刻（お金・安全・評判）", "重大（健康・生命・公共の安全）"]
+        importance: "この主張は文章全体にとってどの程度重要ですか？"
+        importance_levels: ["周辺的", "小さい", "関連がある", "重要", "中心的"]
+        check_oracle: "ファクトチェック団体がすでにこの種の主張を評価している可能性は高いですか？"
+        time_sensitive: "この主張の真偽は時間とともに変わり得るため、最近の情報源でしか確認できませんか？"
+        satire: "この主張は真面目な発言ではなく、風刺や冗談ですか？"
+      verifiability:
+        instructions: "これは公開情報源で検証できる具体的な事実の主張ですか（意見、予測、冗談、指示ではない）？"
+
   ui:
     popup:
       not_available: "利用不可"

@@ -94,7 +94,9 @@ class ClusteringSkill(BaseSkill):
         cluster_timeout = float(getattr(self.runtime.llm, "cluster_timeout_sec", 35.0) or 35.0)
         cluster_timeout = max(35.0, cluster_timeout)
 
-        MAX_CONCURRENT_STANCE = 3
+        # One wave per run: each batch is a ~35-60 s call (deepseek-v4-pro). With 3 at a time the
+        # 22 deep-mode batches ran in ~8 waves (192 s of an 8-minute check, trace 2026-10-18_20-22-24).
+        MAX_CONCURRENT_STANCE = 10
 
         async def run_pass(pass_type: str, trace_suffix: str) -> list[SearchResult]:
             sem = asyncio.Semaphore(MAX_CONCURRENT_STANCE)
@@ -197,9 +199,24 @@ class ClusteringSkill(BaseSkill):
             if results and len(results) == len(search_results):
                 results = self._apply_stance_restoration(results, search_results)
 
+            await self._apply_stance_sensor(claims, results)
             return results
         except Exception as e:
             return exception_fallback_all_context(search_results=search_results, error=e)
+
+    async def _apply_stance_sensor(self, claims: list, rows: list) -> None:
+        """M147 T020: Decisions stance sensor (off / shadow / on per DECISIONS_GATE_STANCE)."""
+        from spectrue_core.use_cases.evidence.stance_sensor import apply_stance_sensor
+
+        claims_by_id = {
+            str(c.get("id") or c.get("claim_id")): str(c.get("normalized_text") or c.get("text") or "")
+            for c in (x if isinstance(x, dict) else getattr(x, "__dict__", {}) for x in claims or [])
+            if c.get("id") or c.get("claim_id")
+        }
+        await apply_stance_sensor(
+            self.llm_client, self.runtime.decisions, self.runtime.calibration.decision_sensors,
+            rows, claims_by_id, lang=getattr(self.runtime, "lang", None) or "en",
+        )
 
     def _apply_stance_restoration(
         self, 

@@ -14,7 +14,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from spectrue_core.domain.claims.model import ClaimMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -130,44 +129,6 @@ def aggregate_weighted(claim_scores: list[ClaimScore]) -> AggregatedRGBA:
         result.explainability = weighted_explainability / weight_a
     
     return result
-
-
-def claim_to_score(
-    claim: dict,
-    *,
-    verified_score: float | None,
-    danger_score: float | None,
-    style_score: float | None = None,
-    explainability_score: float | None = None,
-    evidence_quality: float = 1.0,
-) -> ClaimScore:
-    """
-    Convert claim dict to ClaimScore using metadata.
-    """
-    claim_id = claim.get("id", "unknown")
-
-    # Get metadata
-    metadata = claim.get("metadata")
-    if metadata and isinstance(metadata, ClaimMetadata):
-        from spectrue_core.domain.claims.policy import get_role_weight
-        role_weight = get_role_weight(metadata)
-        check_worthiness = metadata.check_worthiness
-    else:
-
-        # Default: full weight for backward compat
-        role_weight = 1.0
-        check_worthiness = 0.5
-
-    return ClaimScore(
-        claim_id=claim_id,
-        verified_score=verified_score,
-        danger_score=danger_score,
-        style_score=style_score,
-        explainability_score=explainability_score,
-        role_weight=role_weight,
-        check_worthiness=check_worthiness,
-        evidence_quality=evidence_quality,
-    )
 
 
 def _safe_score(value: Any) -> float | None:

@@ -20,10 +20,12 @@ from typing import Any
 from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.utils.trace import Trace
+from spectrue_core.domain.verification.verdict.global_aggregation import is_unverifiable_by_nature
 from spectrue_core.utils.coverage_anchors import extract_all_anchors
 from spectrue_core.use_cases.verification.pipeline_queries import (
     is_fuzzy_duplicate,
     normalize_and_sanitize,
+    preplanned_global_queries,
     resolve_budgeted_max_queries,
     select_diverse_queries,
 )
@@ -31,10 +33,6 @@ from spectrue_core.pipeline.retrieval.cegs_mvp import build_doc_query_plan
 from spectrue_core.domain.verification.search.search_policy import (
     default_search_policy,
     resolve_profile_name,
-)
-from spectrue_core.use_cases.verification.search.search_escalation import (
-    build_query_variants,
-    trace_query_variants,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +65,15 @@ def _append_query(
     if is_fuzzy_duplicate(normalized, queries, threshold=0.9):
         return
     queries.append(normalized)
+
+
+def _claim_skips_search(claim: dict[str, Any]) -> bool:
+    """
+    M146 T020: the single rule — skip iff the claim is not verifiable by nature
+    (verification_target = none, top level or metadata). Satire and opinion are
+    mapped onto verification_target when metadata is parsed.
+    """
+    return is_unverifiable_by_nature(claim)
 
 
 _PREDICATE_QUERY_SUFFIX: dict[str, str] = {
@@ -187,10 +194,34 @@ class BuildQueriesStep:
         
         # Ensure claims are dicts
         safe_claims = [c for c in claims_for_plan if isinstance(c, dict)]
-        
+
+        # Honour skip-search (explain-only / verification_target=none / satire):
+        # those claims get no per-claim queries and do not seed the doc plan.
+        skipped_claim_ids = {
+            _claim_id_for(c, idx)
+            for idx, c in enumerate(claims_for_plan)
+            if isinstance(c, dict) and _claim_skips_search(c)
+        }
+        planning_claims = [
+            c
+            for idx, c in enumerate(claims_for_plan)
+            if isinstance(c, dict) and _claim_id_for(c, idx) not in skipped_claim_ids
+        ]
+        if skipped_claim_ids:
+            Trace.event("retrieval.plan.skip_search", {
+                "skipped_claim_ids": sorted(skipped_claim_ids),
+                "all_skipped": not planning_claims,
+            })
+        if not planning_claims:
+            # Every claim is skip-search. Keep the previous behaviour (plan
+            # from all claims) so the terminal guard below does not abort the
+            # run; per-claim queries are still suppressed.
+            planning_claims = safe_claims
+
+        preplanned = preplanned_global_queries(planning_claims, max_queries)
         try:
-            # Use CEGS planner
-            cegs_queries = build_doc_query_plan(safe_claims, anchors)
+            # Claims' own search_queries first (as in deep cluster planning), CEGS otherwise
+            cegs_queries = preplanned or build_doc_query_plan(planning_claims, anchors)
             
             # (A) Handle empty doc-plan with fallback
             if not cegs_queries:
@@ -202,7 +233,7 @@ class BuildQueriesStep:
                 
                 # Fallback to legacy query builder
                 global_queries = select_diverse_queries(
-                    claims_for_plan,
+                    planning_claims,
                     max_queries=max_queries,
                     fact_fallback=fact_fallback,
                 )
@@ -225,7 +256,7 @@ class BuildQueriesStep:
             })
             
             global_queries = select_diverse_queries(
-                claims_for_plan,
+                planning_claims,
                 max_queries=max_queries,
                 fact_fallback=fact_fallback,
             )
@@ -249,6 +280,9 @@ class BuildQueriesStep:
             if not isinstance(claim, dict):
                 continue
             claim_id = _claim_id_for(claim, idx)
+            if claim_id in skipped_claim_ids:
+                per_claim_queries[claim_id] = ()
+                continue
             queries = _build_claim_queries(claim, max_queries=max_queries)
             per_claim_queries[claim_id] = tuple(queries)
         
@@ -262,13 +296,6 @@ class BuildQueriesStep:
             claim_copy = dict(claim)
             if queries:
                 claim_copy["search_queries"] = list(queries)
-            
-            # Add query variants for escalation ladder
-            variants = build_query_variants(claim)
-            if variants:
-                claim_copy["query_variants"] = [v.to_dict() for v in variants]
-                trace_query_variants(claim_id, variants)
-            
             updated_claims.append(claim_copy)
 
         plan_id = uuid.uuid4().hex[:10]

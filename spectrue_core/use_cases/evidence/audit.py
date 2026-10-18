@@ -13,9 +13,10 @@ def run_audit(
     claim_frames: list,
     llm_client: Any,
     error_status: Any,
+    decisions: Any,
     max_concurrency: int | None = None,
 ) -> Any:
-    skill = EvidenceAuditSkill(llm_client)
+    skill = EvidenceAuditSkill(llm_client, decisions)
     return run_evidence_audit(
         claim_frames=claim_frames,
         audit_fn=skill.audit,

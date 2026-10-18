@@ -22,6 +22,7 @@ from spectrue_core.pipeline.contracts import SEARCH_PLAN_KEY, SearchPlan
 from spectrue_core.pipeline.core import PipelineContext
 from spectrue_core.pipeline.errors import PipelineExecutionError
 from spectrue_core.utils.trace import Trace
+from spectrue_core.domain.verification.verdict.global_aggregation import is_unverifiable_by_nature
 from spectrue_core.utils.coverage_anchors import extract_all_anchors
 from spectrue_core.use_cases.verification.pipeline_queries import (
     normalize_and_sanitize,
@@ -90,8 +91,7 @@ class BuildClusterQueriesStep:
             cluster_plans: list[dict[str, Any]] = []
             all_queries: list[str] = []
 
-            # Roles that should be skipped from search (explain-only, no verification value)
-            SKIP_ROLES = {"context", "meta", "background", "definition"}
+            # M146 T020: skip only clusters whose claims are all not verifiable by nature
 
             for cluster_id, rep_claims in clusters.items():
                 rep_claims_list = [c for c in (rep_claims or []) if isinstance(c, dict)]
@@ -99,12 +99,8 @@ class BuildClusterQueriesStep:
                     c for c in (cluster_claims.get(cluster_id, []) or []) if isinstance(c, dict)
                 ]
 
-                # Skip clusters where ALL claims are explain-only
-                if claims_for_plan and all(
-                    str(c.get("claim_role") or c.get("role") or "").lower() in SKIP_ROLES
-                    for c in claims_for_plan
-                ):
-                    Trace.event("retrieval.cluster_plan.skipped_explain_only", {
+                if claims_for_plan and all(is_unverifiable_by_nature(c) for c in claims_for_plan):
+                    Trace.event("retrieval.cluster_plan.skipped_unverifiable", {
                         "cluster_id": cluster_id,
                         "claim_count": len(claims_for_plan),
                         "roles": [c.get("claim_role") or c.get("role") for c in claims_for_plan],

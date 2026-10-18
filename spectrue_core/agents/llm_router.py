@@ -20,8 +20,9 @@ NOT on model name prefixes.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
+from spectrue_core.llm.decisions import DecisionQuestion, DecisionResult
 from spectrue_core.llm.llm_client import LLMClient, ReasoningEffort
 from spectrue_core.llm.model_registry import ModelID
 
@@ -204,6 +205,32 @@ class LLMRouter:
             trace_kind=trace_kind,
             temperature=temperature,
             fail_on_schema_error=fail_on_schema_error,
+        )
+
+    async def call_decision(
+        self,
+        *,
+        model: str,
+        input: str,  # noqa: A002
+        questions: list[DecisionQuestion],
+        timeout: float | None = None,
+        trace_kind: str = "decision_call",
+        stage: str | None = None,
+        billing: Literal["user", "internal"] = "user",
+    ) -> DecisionResult:
+        """
+        Route a typed decision call. Only the OpenAI client supports it;
+        LLMClient.call_decision raises UNSUPPORTED_ROUTE for chat endpoints.
+        """
+        client = self._get_client(model)
+        return await client.call_decision(
+            model=model,
+            input=input,
+            questions=questions,
+            timeout=timeout,
+            trace_kind=trace_kind,
+            stage=stage,
+            billing=billing,
         )
 
     @property

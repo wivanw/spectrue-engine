@@ -97,11 +97,20 @@ _ROLE_TO_TYPE: dict[str, str] = {
 }
 
 
-def _infer_claim_type(claim: dict) -> str:
-    """Infer claim_type from claim_role, with content heuristics only for 'core' base type."""
-    import re
+# Call A's predicate_type refines a "core" role into a subtype (M147 T032). It replaced
+# regexes (any 4-digit number -> timeline, "%" -> numeric, < 30 chars -> sidefact) that
+# decided which claims skip search escalation.
+_PREDICATE_TO_TYPE = {
+    "measurement": "numeric",
+    "ranking": "numeric",
+    "event": "timeline",
+    "quote": "attribution",
+    "definition": "sidefact",
+}
 
-    # 1. Derive from claim_role (authoritative source)
+
+def _infer_claim_type(claim: dict) -> str:
+    """claim_type from claim_role; a core role is refined by call A's predicate_type."""
     role = str(
         claim.get("claim_role")
         or claim.get("role")
@@ -109,11 +118,10 @@ def _infer_claim_type(claim: dict) -> str:
         or ""
     ).lower().strip()
     base_type = _ROLE_TO_TYPE.get(role, "core")
-
-    # 2. Content heuristics ONLY refine "core" base type into subtypes.
-    #    Non-core roles (sidefact, attribution) are NOT overridden by heuristics.
     if base_type != "core":
         return base_type
+    predicate = str(claim.get("predicate_type") or "").lower().strip()
+    return _PREDICATE_TO_TYPE.get(predicate, base_type)
 
     text = str(claim.get("normalized_text") or claim.get("text") or "")
 

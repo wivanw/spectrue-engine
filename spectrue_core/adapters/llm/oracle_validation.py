@@ -41,90 +41,6 @@ class OracleValidationSkill(BaseSkill):
     - MISS (<0.5): Not relevant, ignore
     """
 
-    async def validate(
-        self, 
-        user_claim: str, 
-        oracle_claim: str, 
-        oracle_rating: str,
-        oracle_summary: str = ""
-    ) -> dict:
-        """
-        Validate semantic relevance between user claim and Oracle result.
-        
-        Args:
-            user_claim: The original claim from user's text
-            oracle_claim: The claim text from fact-check database
-            oracle_rating: The verdict/rating from fact-checker (e.g., "False", "Mostly True")
-            oracle_summary: Optional explanation/summary from fact-checker
-            
-        Returns:
-            {
-                "relevance_score": float (0.0-1.0),
-                "status": "CONFIRMED" | "REFUTED" | "MIXED",
-                "reasoning": str,
-                "is_jackpot": bool
-            }
-        """
-        if not user_claim or not oracle_claim:
-            return self._empty_result("Missing claim text")
-
-        prompt = self._build_prompt(user_claim, oracle_claim, oracle_rating, oracle_summary)
-
-        try:
-            result = await self.llm_client.call_json(
-                model=ModelID.NANO,
-                input=prompt,
-                instructions=self._get_instructions(),
-                reasoning_effort="low",
-                timeout=15.0,
-                trace_kind="oracle_validation"
-            )
-
-            relevance_score = float(result.get("relevance_score", 0.0))
-            relevance_score = max(0.0, min(1.0, relevance_score))  # Clamp to 0-1
-
-            status = self._map_status(result.get("status", ""))
-            is_jackpot = relevance_score > JACKPOT_THRESHOLD
-
-            # Extract LLM-determined scores (no heuristics!)
-            verified_score = float(result.get("verified_score", -1.0))
-            danger_score = float(result.get("danger_score", -1.0))
-
-            # Warning only - no fallback! If -1, it's a bug and should be visible.
-            if verified_score < 0 or danger_score < 0:
-                logger.warning("[OracleValidation] ⚠️ LLM did not return verified_score/danger_score. BUG!")
-
-            validated_result = {
-                "relevance_score": relevance_score,
-                "status": status,
-                "verified_score": verified_score,
-                "danger_score": danger_score,
-                "reasoning": result.get("reasoning", ""),
-                "is_jackpot": is_jackpot
-            }
-
-            Trace.event("oracle.validation", {
-                "user_claim": user_claim[:80],
-                "oracle_claim": oracle_claim[:80],
-                "relevance_score": relevance_score,
-                "verified_score": verified_score,
-                "danger_score": danger_score,
-                "status": status,
-                "is_jackpot": is_jackpot
-            })
-
-            log_level = logging.INFO if is_jackpot else logging.DEBUG
-            logger.log(log_level, 
-                "[OracleValidation] score=%.2f, v=%.2f, status=%s, jackpot=%s", 
-                relevance_score, verified_score, status, is_jackpot
-            )
-
-            return validated_result
-
-        except Exception as e:
-            logger.warning("[OracleValidation] LLM call failed: %s. Returning MISS.", e)
-            return self._empty_result(f"LLM error: {e}")
-
     async def validate_batch(
         self,
         user_claim: str,
@@ -153,6 +69,26 @@ class OracleValidationSkill(BaseSkill):
         if not user_claim or not candidates:
             return self._empty_batch_result("Missing claim or candidates")
 
+        # M147 T025 gate "oracle": off = LLM; shadow = LLM + sensor compare; on = sensor (LLM if no reading).
+        from spectrue_core.adapters.llm.decision_gates import gate_mode
+        decisions = self.config.runtime.decisions
+        mode = gate_mode(decisions, "oracle")
+        if mode != "off":
+            from spectrue_core.adapters.llm.oracle_sensor import read_oracle
+            from spectrue_core.use_cases.verification.oracle_sensor import compare_oracle, oracle_result_from_reading
+            reading = await read_oracle(self.llm_client, decisions, user_claim=user_claim, candidates=candidates,
+                                        lang=getattr(self.config.runtime, "lang", None) or "en")
+            sensor = oracle_result_from_reading(reading, len(candidates), jackpot_threshold=JACKPOT_THRESHOLD) if reading else None
+            if mode == "on" and sensor is not None:
+                Trace.event("oracle.batch_validation", {"source": "decisions", **{k: sensor[k] for k in ("best_index", "relevance_score", "status", "is_jackpot")}})
+                return sensor
+            if sensor is not None:
+                llm = await self._validate_batch_llm(user_claim, candidates)
+                Trace.event("oracle_sensor.compare", compare_oracle(llm, sensor))
+                return llm
+        return await self._validate_batch_llm(user_claim, candidates)
+
+    async def _validate_batch_llm(self, user_claim: str, candidates: list[dict]) -> dict:
         prompt = self._build_batch_prompt(user_claim, candidates)
 
         try:
@@ -301,77 +237,6 @@ Compare candidates AGAINST EACH OTHER to pick the most relevant one."""
             "is_jackpot": False
         }
 
-    def _build_prompt(
-        self,
-        user_claim: str,
-        oracle_claim: str,
-        oracle_rating: str,
-        oracle_summary: str
-    ) -> str:
-        """Build the validation prompt. Static prefix then --- DATA --- (cache-friendly)."""
-        summary_section = f'\nFact-Check Summary: "{oracle_summary[:500]}"' if oracle_summary else ""
-        static = """Compare the User's Claim with the Fact-Check Result.
-
-## Task
-Determine how well the Fact-Check addresses the User's Claim.
-
-Score the relevance from 0.0 to 1.0:
-- 1.0: EXACT same claim (same event, same people, same timeframe, same core assertion)
-- 0.8-0.9: Same topic and very similar claim, minor differences in wording
-- 0.5-0.7: Related topic, but different specific claim (e.g., old hoax vs new claim about same topic)
-- 0.2-0.4: Loosely related, shares some keywords but different stories
-- 0.0-0.1: Unrelated, keyword coincidence only
-
-## Critical Checks (Lower score if ANY fail):
-1. Same EVENT? (e.g., both about Zelenskyy yacht purchase, not just "Zelenskyy")
-2. Same TIMEFRAME? (e.g., both about 2024 claim, not one from 2019)
-3. Same ASSERTION? (e.g., both claiming he bought it, not one about a different purchase)
-4. CONCLUSIVE verdict? (e.g., "False" is conclusive; "Needs context" is not)
-
-## Determine Status AND Scores:
-- CONFIRMED: Claim is TRUE/VERIFIED → verified_score: 0.85-0.95
-- REFUTED: Claim is FALSE/FAKE/DEBUNKED → verified_score: 0.05-0.15
-- MIXED: Partially true or NEEDS CONTEXT → verified_score: 0.50-0.70
-
-Determined danger_score (0.0-1.0):
-- How harmful/dangerous is this claim if believed?
-- High (0.8-1.0): Medical misinfo, scams, hate speech.
-- Low (0.0-0.3): Scientific nuances, minor inaccuracies, satire.
-
-IMPORTANT: Rating nuances matter!
-- "Pants on Fire" / "Fake" → verified_score: 0.05
-- "Mostly False" → verified_score: 0.20
-- "Half True" / "Mixture" → verified_score: 0.55
-- "Mostly True" → verified_score: 0.75
-- "True" → verified_score: 0.90
-
-Output JSON:
-{
-    "relevance_score": 0.0-1.0,
-    "status": "CONFIRMED" | "REFUTED" | "MIXED",
-    "verified_score": 0.0-1.0,
-    "danger_score": 0.0-1.0,
-    "reasoning": "Brief explanation of why this score"
-}
-
---- DATA ---
-
-"""
-        dynamic = f"""## User's Claim
-"{user_claim[:1500]}"
-
-## Fact-Check from Database
-Claim Reviewed: "{oracle_claim[:1000]}"
-Rating: "{oracle_rating}"{summary_section}
-"""
-        return static + dynamic
-
-    def _get_instructions(self) -> str:
-        return """You are a strict relevance checker for fact-check results.
-Your job is to prevent false positive matches where keywords overlap but the actual claims differ.
-Be CONSERVATIVE with high scores (0.8+). Only give 0.9+ if the claims are essentially identical.
-A score of 0.5-0.7 means "related but not the same claim" - this is useful context but not conclusive."""
-
     def _map_status(self, llm_status: str) -> OracleStatus:
         """Map LLM status to OracleStatus. No heuristics - LLM must provide valid status."""
         status_upper = (llm_status or "").upper()
@@ -382,12 +247,3 @@ A score of 0.5-0.7 means "related but not the same claim" - this is useful conte
         # No fallback! If LLM didn't return valid status, it's a bug.
         logger.warning("[OracleValidation] ⚠️ LLM returned invalid status '%s'. BUG!", llm_status)
         return "MIXED"  # Return MIXED but log the bug
-
-    def _empty_result(self, reason: str) -> dict:
-        """Return a MISS result for empty/error cases."""
-        return {
-            "relevance_score": 0.0,
-            "status": "EMPTY",
-            "reasoning": reason,
-            "is_jackpot": False
-        }

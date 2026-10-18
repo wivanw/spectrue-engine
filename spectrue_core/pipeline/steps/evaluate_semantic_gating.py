@@ -10,68 +10,32 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2024-2025 Spectrue Contributors
 
-"""Semantic rejection step for unverifiable content.
+"""Semantic gating step: verifiability gate G2 (M145 Phase R).
 
-This step runs EARLY in the pipeline (before retrieval) and performs:
-1. Semantic gating rejection policy (block unverifiable content)
-
-Does NOT compute EVOI gates — that's done by EvidenceGatingStep after evidence collection.
+Runs before target selection. Scales each claim's `check_worthiness` by the
+calibrated P(checkable), so the Bayesian target-selection EVOI decides which
+claims get searched. Logic: `use_cases.retrieval.decision_gates.apply_verifiability`.
 """
 
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.pipeline.core import PipelineContext
-from spectrue_core.utils.trace import Trace
-
-logger = logging.getLogger(__name__)
+from spectrue_core.runtime_config import DecisionSensorCalibration, DecisionsConfig, uncalibrated_sensors
+from spectrue_core.use_cases.retrieval.decision_gates import apply_verifiability
 
 
 @dataclass
 class EvaluateSemanticGatingStep:
-    """Evaluate semantic rejection policy for unverifiable content.
-
-    This is a rejection policy step, NOT an EVOI gating step.
-    If content is rejected, sets gating_rejected flag for downstream steps.
-
-    EVOI gates for stance/cluster are computed later by EvidenceGatingStep.
-    """
-
     agent: Any
+    decisions: DecisionsConfig = field(default_factory=DecisionsConfig)  # all gates off
+    sensors: dict[str, DecisionSensorCalibration] = field(default_factory=uncalibrated_sensors)
     name: str = "semantic_gating"
     weight: float = 1.0
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
-        """Evaluate semantic rejection policy."""
-        try:
-            if not hasattr(self.agent, "evaluate_semantic_gating"):
-                return ctx
-
-            candidates = ctx.get_extra("search_candidates", [])
-            claims_to_check = candidates if candidates else ctx.get_extra(
-                "eligible_claims", ctx.claims or []
-            )
-
-            if not claims_to_check:
-                return ctx
-
-            is_allowed = await self.agent.evaluate_semantic_gating(claims_to_check)
-
-            if not is_allowed:
-                Trace.event("semantic_gating.rejected")
-                ctx = ctx.set_extra("search_candidates", [])
-                ctx = ctx.with_update(verdict={
-                    "verified_score": 0.0,
-                    "rationale": "Content validation rejected by semantic gating policy.",
-                    "analysis": "Rejected by policy."
-                })
-                ctx = ctx.set_extra("gating_rejected", True)
-
-            return ctx
-
-        except Exception as e:
-            logger.warning("[SemanticGatingStep] Failure: %s", e)
-            return ctx
+        claims = ctx.get_extra("eligible_claims", ctx.claims or [])
+        updated = await apply_verifiability(self.agent, self.decisions, self.sensors, list(claims), ctx.lang or "en")
+        return ctx if updated is None else ctx.set_extra("eligible_claims", updated)

@@ -18,7 +18,6 @@ from spectrue_core.config import SpectrueConfig
 from spectrue_core.domain.evidence.model import OracleCheckResult
 from spectrue_core.utils.evidence import (
     needs_evidence_acquisition_ladder,
-    extract_quote_candidates,
 )
 from spectrue_core.domain.verification.search.types import SearchResponse
 from spectrue_core.domain.verification.search.search_policy import (
@@ -50,6 +49,7 @@ class SearchManager:
         """
         self.config = config
         self.web_tool = WebSearchTool(config)
+        self.oracle_validator = oracle_validator
         # Pass validator to GoogleFactCheckTool for hybrid mode
         self.oracle_tool = GoogleFactCheckTool(config, oracle_validator=oracle_validator)
         self.cse_tool = GoogleCSESearchTool(config)
@@ -107,107 +107,6 @@ class SearchManager:
 
     def set_policy_profile(self, profile: SearchPolicyProfile | None) -> None:
         self.policy_profile = profile
-
-    def decide_retrieval_action(
-        self,
-        *,
-        retrieval_eval: dict | None = None,
-        retrieval_confidence: float | None = None,
-        claim: dict | None = None,
-    ) -> tuple[str, str]:
-        """
-        Decide stop/continue/correction action for retrieval evaluation.
-        """
-        if retrieval_eval is not None and retrieval_confidence is None:
-            try:
-                retrieval_confidence = float(retrieval_eval.get("retrieval_confidence", 0.0))
-            except Exception:
-                retrieval_confidence = 0.0
-        retrieval_confidence = float(retrieval_confidence or 0.0)
-
-        expected_gain = None
-        expected_cost = None
-        value_per_cost = None
-        if isinstance(retrieval_eval, dict):
-            expected_gain = retrieval_eval.get("expected_gain")
-            expected_cost = retrieval_eval.get("expected_cost")
-            value_per_cost = retrieval_eval.get("value_per_cost")
-
-        calibration = getattr(getattr(self.config, "runtime", None), "calibration", None)
-        min_value_per_cost = float(getattr(calibration, "retrieval_min_value_per_cost", 0.25) or 0.25)
-        gain_floor = float(getattr(calibration, "retrieval_gain_floor", 0.15) or 0.15)
-        cost_weight = float(getattr(calibration, "retrieval_cost_weight", 1.0) or 1.0)
-
-        if expected_gain is not None:
-            try:
-                expected_gain = float(expected_gain)
-            except Exception:
-                expected_gain = None
-        if expected_cost is not None:
-            try:
-                expected_cost = float(expected_cost)
-            except Exception:
-                expected_cost = None
-        if value_per_cost is None and expected_gain is not None and expected_cost is not None:
-            denom = max(1e-6, expected_cost * max(1e-6, cost_weight))
-            value_per_cost = expected_gain / denom
-
-        if expected_gain is not None and value_per_cost is not None:
-            if expected_gain <= gain_floor or value_per_cost < min_value_per_cost:
-                return "stop_early", "marginal_gain_below_cost"
-
-        calibration = getattr(getattr(self.config, "runtime", None), "calibration", None)
-        low_threshold = float(getattr(calibration, "retrieval_confidence_low", 0.35) or 0.35)
-        high_threshold = float(getattr(calibration, "retrieval_confidence_high", 0.70) or 0.70)
-        guard_applied = False
-        if self.policy_profile is not None:
-            base = float(self.policy_profile.quality_thresholds.min_relevance_score or 0.0)
-            if base > 0:
-                low_threshold = max(low_threshold, base)
-                high_threshold = max(high_threshold, base)
-        if high_threshold <= low_threshold:
-            high_threshold = min(1.0, low_threshold + 0.05)
-            guard_applied = True
-        if guard_applied:
-            Trace.event(
-                "retrieval.threshold_guard_applied",
-                {
-                    "low_threshold": float(low_threshold),
-                    "high_threshold": float(high_threshold),
-                    "policy_profile_enabled": self.policy_profile is not None,
-                    "base_min_relevance": float(
-                        getattr(getattr(self.policy_profile, "quality_thresholds", None), "min_relevance_score", 0.0)
-                        or 0.0
-                    )
-                    if self.policy_profile is not None
-                    else 0.0,
-                },
-            )
-
-        if retrieval_confidence >= high_threshold:
-            return "stop_early", "confidence_high"
-
-        if retrieval_confidence <= low_threshold:
-            metadata = claim.get("metadata") if isinstance(claim, dict) else None
-            tension = 0.0
-            if isinstance(claim, dict):
-                try:
-                    tension = float(claim.get("graph_tension_score") or 0.0)
-                except Exception:
-                    tension = 0.0
-            if tension >= 0.6:
-                return "change_channel", "low_confidence_high_tension"
-            locale_plan = getattr(metadata, "search_locale_plan", None) if metadata else None
-            fallbacks = list(getattr(locale_plan, "fallback", []) or [])
-            if fallbacks:
-                return "change_language", "low_confidence_locale_fallback"
-            retrieval_policy = getattr(metadata, "retrieval_policy", None) if metadata else None
-            allowed = getattr(retrieval_policy, "channels_allowed", None) if retrieval_policy else None
-            if allowed:
-                return "restrict_domains", "low_confidence_restrict_domains"
-            return "refine_query", "low_confidence_refine_query"
-
-        return "continue", "confidence_medium"
 
     def calculate_cost(self) -> int:
         # Tavily costs 1 credit per search, CSE is estimated from config
@@ -494,101 +393,33 @@ class SearchManager:
         enriched_count = 0
 
         if sources_for_quote_extraction:
-            try:
-                from spectrue_core.utils.embedding_service import (
-                    extract_best_quotes_batch_async,
-                    EmbedService,
-                )
-                if EmbedService.is_available():
-                    # Prepare batch items
-                    batch_items = [
-                        (src.get("claim_text", ""), src.get("content") or src.get("snippet") or "")
-                        for _, src in sources_for_quote_extraction
-                    ]
+            from spectrue_core.utils.embedding_service import (
+                extract_best_quotes_batch_async,
+                EmbedService,
+            )
+            if EmbedService.is_available():
+                # Prepare batch items
+                batch_items = [
+                    (src.get("claim_text", ""), src.get("content") or src.get("snippet") or "")
+                    for _, src in sources_for_quote_extraction
+                ]
 
-                    # Single async batch call
-                    quotes = await extract_best_quotes_batch_async(batch_items)
+                # Single async batch call
+                quotes = await extract_best_quotes_batch_async(batch_items)
 
-                    # Assign quotes to sources
-                    for i, (_, src) in enumerate(sources_for_quote_extraction):
-                        best_quote = quotes[i] if i < len(quotes) else None
+                # Assign quotes to sources
+                for i, (_, src) in enumerate(sources_for_quote_extraction):
+                    best_quote = quotes[i] if i < len(quotes) else None
 
-                        if best_quote:
-                            src["quote"] = best_quote
-                            src["quote_method"] = "semantic_batch"
-                            src["eal_enriched"] = True
-                            enriched_count += 1
-                            quoted_count += 1
-                            # If we did NOT fetch (cache_only miss / snippet-only),
-                            # the tracker never saw this source, so total_sources stays 0.
-                            # That breaks downstream evidence stats and explainability A.
-                            relevance = float(src.get("relevance_score", 0.5) or 0.5)
-                            is_authoritative = src.get("source_tier") in ("A", "B")
-                            if not src.get("_budget_observed"):
-                                tracker.state.update_from_source(
-                                    relevance_score=relevance,
-                                    has_quote=True,
-                                    is_authoritative=is_authoritative,
-                                )
-                                src["_budget_observed"] = True
-                            else:
-                                # We already counted this source (via fetch). Only mark quote.
-                                tracker.state.quotes_found += 1
-                                tracker.state.alpha += 0.5  # Bonus for quote
-                        else:
-                            # Fallback to heuristic extraction
-                            content = src.get("content") or src.get("snippet") or ""
-                            heuristic_quotes = extract_quote_candidates(content)
-                            if heuristic_quotes:
-                                src["quote"] = heuristic_quotes[0]
-                                src["quote_method"] = "heuristic"
-                                src["eal_enriched"] = True
-                                enriched_count += 1
-                                quoted_count += 1
-                                relevance = float(src.get("relevance_score", 0.5) or 0.5)
-                                is_authoritative = src.get("source_tier") in ("A", "B")
-                                if not src.get("_budget_observed"):
-                                    tracker.state.update_from_source(
-                                        relevance_score=relevance,
-                                        has_quote=True,
-                                        is_authoritative=is_authoritative,
-                                    )
-                                    src["_budget_observed"] = True
-                                else:
-                                    tracker.state.quotes_found += 1
-                else:
-                    # Embeddings unavailable - use heuristic for all
-                    for _, src in sources_for_quote_extraction:
-                        content = src.get("content") or src.get("snippet") or ""
-                        heuristic_quotes = extract_quote_candidates(content)
-                        if heuristic_quotes:
-                            src["quote"] = heuristic_quotes[0]
-                            src["quote_method"] = "heuristic"
-                            src["eal_enriched"] = True
-                            enriched_count += 1
-                            quoted_count += 1
-                            relevance = float(src.get("relevance_score", 0.5) or 0.5)
-                            is_authoritative = src.get("source_tier") in ("A", "B")
-                            if not src.get("_budget_observed"):
-                                tracker.state.update_from_source(
-                                    relevance_score=relevance,
-                                    has_quote=True,
-                                    is_authoritative=is_authoritative,
-                                )
-                                src["_budget_observed"] = True
-                            else:
-                                tracker.state.quotes_found += 1
-            except ImportError:
-                # Fallback to heuristic extraction
-                for _, src in sources_for_quote_extraction:
-                    content = src.get("content") or src.get("snippet") or ""
-                    heuristic_quotes = extract_quote_candidates(content)
-                    if heuristic_quotes:
-                        src["quote"] = heuristic_quotes[0]
-                        src["quote_method"] = "heuristic"
+                    if best_quote:
+                        src["quote"] = best_quote
+                        src["quote_method"] = "semantic_batch"
                         src["eal_enriched"] = True
                         enriched_count += 1
                         quoted_count += 1
+                        # If we did NOT fetch (cache_only miss / snippet-only),
+                        # the tracker never saw this source, so total_sources stays 0.
+                        # That breaks downstream evidence stats and explainability A.
                         relevance = float(src.get("relevance_score", 0.5) or 0.5)
                         is_authoritative = src.get("source_tier") in ("A", "B")
                         if not src.get("_budget_observed"):
@@ -599,7 +430,15 @@ class SearchManager:
                             )
                             src["_budget_observed"] = True
                         else:
+                            # We already counted this source (via fetch). Only mark quote.
                             tracker.state.quotes_found += 1
+                            tracker.state.alpha += 0.5  # Bonus for quote
+                    # No semantically matched sentence -> no quote. A first-sentence
+                    # "quote" used to count as direct evidence and could satisfy
+                    # sufficiency with one domain (M147 T030, 2026-10-18).
+            else:
+                # Embeddings unavailable: no quote can be selected; sources keep no quote.
+                Trace.event("eal.quote_selection_unavailable", {"sources": len(sources_for_quote_extraction)})
 
         # ------------------------------------------------------------------
         # Reconcile evidence counters AFTER enrichment.
@@ -755,7 +594,7 @@ class SearchManager:
         exclude_domains: list[str] | None = None,
     ) -> SearchResponse:
         """
-        PhaseRunner search primitive.
+        Pipeline search primitive (retrieval steps).
         
         Unlike `search_unified` (legacy pipeline with topic fallback ladder and
         additional filtering for older Tavily response shapes), this is a thin
@@ -765,7 +604,7 @@ class SearchManager:
         - returns the canonical tuple `(context, sources)`
         """
         self.tavily_calls += 1
-        return await self.web_tool.search(
+        context, sources = await self.web_tool.search(
             query,
             num_results=max_results,
             depth=depth,
@@ -774,6 +613,20 @@ class SearchManager:
             topic=topic,
             skip_enrichment=True,  # Centralized enrichment at orchestration level
         )
+        await self._resolve_domain_tiers(sources)
+        return context, sources
+
+    async def _resolve_domain_tiers(self, sources: list) -> None:
+        """M147 T033: tier unknown domains with the Decisions sensor (gate "domain_tier")."""
+        from spectrue_core.adapters.llm.domain_tier_sensor import resolve_unknown_domains
+        from spectrue_core.utils.url_utils import get_registrable_domain
+
+        titles: dict[str, list[str]] = {}
+        for s in sources or []:
+            if isinstance(s, dict) and s.get("url"):
+                titles.setdefault(get_registrable_domain(str(s["url"])) or "", []).append(str(s.get("title") or ""))
+        llm = getattr(self.oracle_validator, "llm_client", None)
+        await resolve_unknown_domains(llm, self.config.runtime.decisions, titles)
 
     async def search_tier1(self, query: str, domains: list[str]) -> SearchResponse:
         """Perform Tier 1 search on trusted domains (Legacy/Fallback)."""

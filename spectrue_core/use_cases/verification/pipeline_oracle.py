@@ -26,6 +26,26 @@ CreateEvidenceSource = Callable[[dict], dict]
 ProgressCallback = Callable[[str], Awaitable[None]]
 
 
+
+def oracle_stance(status: str) -> str:
+    """Evidence stance from the fact-checker's verdict (OracleStatus), never from relevance.
+
+    Relevance says how close the fact-check is to the claim, not which way it rules.
+    """
+    return {"CONFIRMED": "SUPPORT", "REFUTED": "REFUTE"}.get(str(status or "").upper(), "CONTEXT")
+
+
+def oracle_verified_score(oracle_result: dict) -> float:
+    """Jackpot G: relevance toward the verdict; MIXED keeps the validator's own score (-1 = unverified)."""
+    relevance = float(oracle_result.get("relevance_score", 0.0) or 0.0)
+    stance = oracle_stance(oracle_result.get("status", ""))
+    if stance == "SUPPORT":
+        return relevance
+    if stance == "REFUTE":
+        return max(0.0, 1.0 - relevance)
+    v = oracle_result.get("verified_score")
+    return float(v) if isinstance(v, (int, float)) and 0.0 <= v <= 1.0 else -1.0
+
 @dataclass(frozen=True, slots=True)
 class OracleFlowInput:
     original_fact: str

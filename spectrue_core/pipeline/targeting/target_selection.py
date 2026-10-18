@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from spectrue_core.utils.trace import Trace
+from spectrue_core.domain.claims import fields as claim_fields
+from spectrue_core.domain.claims.priority import claim_value
 from spectrue_core.domain.verification.plan import BudgetClass
 
 logger = logging.getLogger(__name__)
@@ -37,27 +39,13 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class TargetBudgetParams:
     """
-    Parameters for Bayesian target budget computation.
-    
-    The model computes optimal number of targets by maximizing:
-        EVOI(k) - Cost(k)
-    
-    Where:
-        EVOI(k) = sum of expected value of information for k claims
-        Cost(k) = marginal_cost_per_target * k
+    Target budget (M146 T022): a unit-cost knapsack. Every claim with value > 0
+    (domain/claims/priority.py) is a target, highest value first, bounded by the
+    budget class floor and ceiling. The ceiling is the product's budget; there is
+    no marginal-cost constant.
     """
-    # Marginal cost per target claim (in normalized units, ~1 Tavily search)
-    marginal_cost_per_target: float = 0.5
-
-    # How valuable uncertainty reduction is (domain constant)
+    # Scale of claim value (domain constant)
     value_uncertainty: float = 1.0
-
-    # Diminishing returns factor: EVOI_i = base * (decay ^ i)
-    # Models that later targets have less marginal value
-    diminishing_returns_decay: float = 0.85
-
-    # Minimum EVOI threshold to include a target
-    min_evoi_threshold: float = 0.05
 
     # Hard ceiling per budget class (safety net)
     # Maps to BudgetClass enum: MINIMAL, BALANCED, COMPREHENSIVE
@@ -89,47 +77,8 @@ def _expected_value_of_information(
     prior_p: float = 0.5,
     value_uncertainty: float = 1.0,
 ) -> float:
-    """
-    Compute Expected Value of Information (EVOI) for a claim.
-    
-    EVOI = value_uncertainty * entropy(prior) * claim_worthiness * harm_factor
-    
-    High EVOI claims:
-    - High uncertainty (prior near 0.5)
-    - High check_worthiness / importance
-    - High harm_potential
-    """
-    # Entropy captures uncertainty - max at p=0.5
-    entropy = _entropy_bernoulli(prior_p)
-
-    # Claim-specific factors
-    worthiness = float(claim.get("check_worthiness", claim.get("importance", 0.5)) or 0.5)
-    harm = float(claim.get("harm_potential", 0.5) or 0.5)
-    # Clamp to 0-1 range
-    worthiness = max(0.0, min(1.0, worthiness))
-    harm = max(0.0, min(1.0, harm))
-
-    # Confidence inversely affects EVOI (certain claims need less verification)
-    conf = claim.get("metadata_confidence")
-    if conf:
-        conf_str = str(conf).lower()
-        if conf_str == "high":
-            conf_factor = 0.6
-        elif conf_str == "medium":
-            conf_factor = 0.8
-        else:
-            conf_factor = 1.0
-    else:
-        conf_factor = 1.0
-
-    # Graph uncertainty (from pre_meta) boosts EVOI when present
-    gu = claim.get("graph_uncertainty")
-    if gu is not None:
-        gu_val = max(0.0, min(1.0, float(gu)))
-        conf_factor = max(conf_factor, 0.5 + 0.5 * gu_val)
-
-    evoi = value_uncertainty * entropy * worthiness * harm * conf_factor
-    return max(0.0, evoi)
+    """Claim value for targeting (single definition: domain/claims/priority.py)."""
+    return claim_value(claim, prior_p=prior_p, value_uncertainty=value_uncertainty)
 
 
 def compute_optimal_target_count(
@@ -176,40 +125,17 @@ def compute_optimal_target_count(
         )
         evoi_values.append(evoi)
 
-    # Greedy selection: add targets while marginal EVOI > marginal cost
-    # With diminishing returns: EVOI_effective(i) = EVOI_i * decay^i
-    optimal_k = 0
-    cumulative_value = 0.0
+    # Unit-cost knapsack (M146 T022): every claim with value > 0 is worth a target;
+    # the budget class ceiling is the only cap. Non-checkable claims (value 0) are
+    # never targets. No marginal-cost constant on a different scale.
+    marginal_values = [
+        {"index": i, "raw_evoi": v, "decay_factor": 1.0, "marginal_evoi": v, "marginal_cost": 0.0, "net_value": v}
+        for i, v in enumerate(evoi_values)
+    ]
+    positive = sorted((v for v in evoi_values if v > 0), reverse=True)[:ceiling]
+    optimal_k = len(positive)
+    cumulative_value = float(sum(positive))
     cumulative_cost = 0.0
-    marginal_values: list[float] = []
-
-    for i, evoi in enumerate(evoi_values):
-        if i >= ceiling:
-            break
-
-        # Diminishing returns for later targets
-        decay_factor = params.diminishing_returns_decay ** i
-        marginal_evoi = evoi * decay_factor
-        marginal_cost = params.marginal_cost_per_target
-
-        marginal_values.append({
-            "index": i,
-            "raw_evoi": evoi,
-            "decay_factor": decay_factor,
-            "marginal_evoi": marginal_evoi,
-            "marginal_cost": marginal_cost,
-            "net_value": marginal_evoi - marginal_cost,
-        })
-
-        # Stop if marginal value is below threshold or negative
-        if marginal_evoi < params.min_evoi_threshold:
-            break
-        if marginal_evoi < marginal_cost:
-            break
-
-        cumulative_value += marginal_evoi
-        cumulative_cost += marginal_cost
-        optimal_k = i + 1
 
     # Apply floor constraint
     optimal_k = max(floor, optimal_k)
@@ -227,10 +153,8 @@ def compute_optimal_target_count(
         "net_value": cumulative_value - cumulative_cost,
         "marginal_analysis": marginal_values[:min(10, len(marginal_values))],
         "params": {
-            "marginal_cost_per_target": params.marginal_cost_per_target,
+            "rule": "unit_cost_knapsack",
             "value_uncertainty": params.value_uncertainty,
-            "diminishing_returns_decay": params.diminishing_returns_decay,
-            "min_evoi_threshold": params.min_evoi_threshold,
         },
     }
 
@@ -415,41 +339,11 @@ def select_verification_targets(
             except Exception:
                 continue
 
-    def _conf_score(val):
-        if not val:
-            return 0.6
-        v = str(val).lower()
-        if v == "high":
-            return 1.0
-        if v == "medium":
-            return 0.8
-        if v == "low":
-            return 0.6
-        return 0.6
-
-    def _ev(claim_id: str) -> float:
+    def _ev(claim_id: str) -> tuple[float, float]:
+        """Order by the single claim value; graph centrality breaks ties."""
         c = claim_by_id.get(claim_id, {})
-        worthiness = float(c.get("check_worthiness", c.get("importance", 0.5)) or 0.5)
-        harm = float(c.get("harm_potential", 1) or 1) / 5.0
-        gu = c.get("graph_uncertainty")
-        if gu is not None:
-            uncertainty = max(0.0, min(1.0, float(gu)))
-        else:
-            uncertainty = 1.0 - _conf_score(c.get("metadata_confidence"))
         centrality = centrality_map.get(claim_id, float(c.get("centrality") or 0.0))
-        thesis = (
-            1.0
-            if str(c.get("claim_role", "core")).lower() in {"core", "thesis"}
-            else 0.0
-        )
-        cost = float(c.get("cost_estimate", 1.0) or 1.0)
-        w_h = 0.55
-        w_u = 0.20
-        w_c = 0.15
-        w_t = 0.10
-        confidence = _conf_score(c.get("metadata_confidence"))
-        signal = w_h * harm + w_u * uncertainty + w_c * centrality + w_t * thesis
-        return (signal * worthiness * confidence) / max(cost, 1e-3)
+        return (claim_value(c), centrality)
 
     ordered_ids: list[str] = []
     if graph_result and not getattr(graph_result, "disabled", False):
@@ -588,168 +482,6 @@ def select_verification_targets(
                 for cid in (c.get("id") or c.get("claim_id") for c in result.deferred)
                 if cid is not None
             ],
-        },
-    )
-
-    return result
-
-
-def propagate_deferred_verdicts(
-    result: dict,
-    evidence_sharing: dict[str, Any],
-    deferred_claims: list[dict],
-) -> dict:
-    """
-    Propagate verdicts from target claims to deferred claims.
-
-    Deferred claims inherit verdicts from their target claim (same cluster)
-    with a penalty applied and reason marked as "derived".
-
-    Args:
-        result: Evidence flow result containing claim_verdicts
-        evidence_sharing: Map of deferred_claim_id -> share payload
-        deferred_claims: List of deferred claim dicts
-
-    Returns:
-        Updated result with verdicts for deferred claims
-    """
-    if not evidence_sharing or not deferred_claims:
-        return result
-
-
-    claim_verdicts = result.get("claim_verdicts")
-    if not isinstance(claim_verdicts, list):
-        return result
-
-    # Build lookup: target_claim_id -> verdict
-    target_verdicts: dict[str, dict] = {}
-    verdict_index: dict[str, int] = {}
-    for idx, cv in enumerate(claim_verdicts):
-        if isinstance(cv, dict):
-            cid = str(cv.get("claim_id") or "")
-            if cid:
-                target_verdicts[cid] = cv
-                verdict_index[cid] = idx
-
-    # Propagate to deferred claims
-    propagated_count = 0
-    for claim in deferred_claims:
-        claim_id = str(claim.get("id") or claim.get("claim_id") or "")
-        if not claim_id:
-            continue
-
-        share = evidence_sharing.get(claim_id)
-        if not share:
-            # No target to inherit from - mark as NEI
-            payload = {
-                "claim_id": claim_id,
-                "verdict_score": 0.5,
-                "verdict": "insufficient_evidence",
-                "verdict_state": "insufficient_evidence",
-                "derived_from": None,
-                "derived_reason": "no_target_in_cluster",
-            }
-            if claim_id in verdict_index:
-                claim_verdicts[verdict_index[claim_id]] = payload
-            else:
-                claim_verdicts.append(payload)
-            propagated_count += 1
-            continue
-
-        if isinstance(share, dict):
-            target_id = str(share.get("target_id") or "")
-            similarity = float(share.get("similarity") or 0.0)
-            cohesion = float(share.get("cohesion") or 0.0)
-        else:
-            target_id = str(share)
-            similarity = 0.0
-            cohesion = 0.0
-
-        if not target_id:
-            continue
-
-        target_cv = target_verdicts.get(target_id)
-        if not target_cv:
-            # Target has no verdict
-            payload = {
-                "claim_id": claim_id,
-                "verdict_score": 0.5,
-                "verdict": "insufficient_evidence",
-                "verdict_state": "insufficient_evidence",
-                "derived_from": target_id,
-                "derived_reason": "target_no_verdict",
-            }
-            if claim_id in verdict_index:
-                claim_verdicts[verdict_index[claim_id]] = payload
-            else:
-                claim_verdicts.append(payload)
-            propagated_count += 1
-            continue
-
-        # Minimum similarity threshold for verdict inheritance
-        # Claims with low similarity should NOT copy sources/reason from unrelated targets
-        MIN_INHERITANCE_SIMILARITY = 0.25
-        if similarity < MIN_INHERITANCE_SIMILARITY:
-            # Too dissimilar - mark as NEI, don't copy sources/reason
-            payload = {
-                "claim_id": claim_id,
-                "verdict_score": 0.5,
-                "verdict": "insufficient_evidence",
-                "verdict_state": "insufficient_evidence",
-                "derived_from": target_id,
-                "derived_reason": "similarity_below_threshold",
-                "reasons_short": [f"Claim too dissimilar to target (similarity={similarity:.2f} < {MIN_INHERITANCE_SIMILARITY})"],
-                "propagation": {
-                    "similarity": similarity,
-                    "cohesion": cohesion,
-                    "mode": "rejected_low_similarity",
-                    "threshold": MIN_INHERITANCE_SIMILARITY,
-                },
-            }
-            if claim_id in verdict_index:
-                claim_verdicts[verdict_index[claim_id]] = payload
-            else:
-                claim_verdicts.append(payload)
-            propagated_count += 1
-            continue
-
-        # Inherit directly from target (no shrinkage/postprocessing per Spec)
-        # "Deep analysis returns per-claim results... no backend postprocessing"
-        target_score = float(target_cv.get("verdict_score", 0.5) or 0.5)
-        derived_score = target_score
-
-        payload = {
-            "claim_id": claim_id,
-            "verdict_score": derived_score,
-            "verdict": target_cv.get("verdict", "ambiguous"),
-            "verdict_state": target_cv.get("verdict_state", "insufficient_evidence"),
-            "derived_from": target_id,
-            "derived_reason": "inherited_from_cluster_target",
-            "reasons_short": ["Verdict derived from key claim in same cluster"],
-            "propagation": {
-                "similarity": similarity,
-                "cohesion": cohesion,
-                "mode": "direct_copy",
-            },
-            # Inherit sources and reason
-            "sources": target_cv.get("sources", []),
-            "reason": f"(Derived from {target_id}) " + (target_cv.get("reason") or ""),
-            # Copy RGBA directly (same verdict = same color)
-            "rgba": target_cv.get("rgba"),
-        }
-
-        if claim_id in verdict_index:
-            claim_verdicts[verdict_index[claim_id]] = payload
-        else:
-            claim_verdicts.append(payload)
-        propagated_count += 1
-
-    sharing_sample = list(evidence_sharing.items())[:5]
-    Trace.event(
-        "deferred_verdicts.propagated",
-        {
-            "propagated_count": propagated_count,
-            "evidence_sharing_sample": sharing_sample,
         },
     )
 

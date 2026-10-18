@@ -11,6 +11,9 @@ class LLMFailureKind(str, Enum):
     PROVIDER_ERROR = "provider_error"
     INVALID_JSON = "invalid_json"
     SCHEMA_VALIDATION_FAILED = "schema_validation_failed"
+    RATE_LIMITED = "rate_limited"
+    INPUT_TOO_LONG = "input_too_long"
+    UNSUPPORTED_ROUTE = "unsupported_route"
     UNKNOWN = "unknown"
 
 

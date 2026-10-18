@@ -264,32 +264,31 @@ for claim in core_claims:
 extract_all_batches()
 bind_after_extract()
 
-Stage 2 — Escalation (algorithmic)
-for claim in claims:
-  S = compute_sufficiency(claim.metadata)
-  if S < S_min:
+Stage 2 — Escalation (sufficiency-gated)
+for claim in claims (except sidefact):
+  res = check_sufficiency_for_claim(claim, sources_bound_to(claim))
+  if res.status == INSUFFICIENT:
     urls = tavily.search(query_for(claim))
     register_urls(stage=2, claim_ids={claim.id}, urls=urls)
 extract_all_batches()
 bind_after_extract()
 ```
 
-**Sufficiency formula (fixed):**
+**Sufficiency:** the Bayesian judge in `domain/claims/sufficiency.py`
+(`evidence_sufficiency`: source tiers in log-odds space, threshold by claim type).
+`SUFFICIENT` and `SKIP` (verification_target = none) do not escalate.
 
-```
-S = (w1 * CE_cluster_count
-     + w2 * SE_support_mass
-     - w3 * conflict_mass
-     - w4 * missing_constraints)
-```
-
-There are no additional heuristics or early-stop rules beyond `S < S_min`.
+**Query dedup:** every `tavily.search` in the step is keyed by normalized query
+text (fuzzy Jaccard ≥ 0.9). A repeated query across stages or claims reuses the
+first search's URLs instead of calling the provider again.
 
 **Trace events (retrieval):**
 - `urls_registered(stage, count)`
 - `extract_batch_started(batch_size)`
 - `extract_batch_finished(success_count)`
 - `bind_completed(stage)`
+- `retrieval.stage2.skipped(claim_id, status, posterior_p)`
+- `retrieval.search.duplicate_query_skipped(stage, claim_id, query, matched_query)`
 
 **Code location:** `spectrue_core/adapters/retrieval/extraction_coordinator.py`,
 `spectrue_core/pipeline/steps/retrieval/web_search.py`

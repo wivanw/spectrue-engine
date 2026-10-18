@@ -114,7 +114,10 @@ def process_single_claim_verdict(
             
     try:
         from spectrue_core.use_cases.verification.scoring.freshness_signal import calculate_freshness_adjustment
-        freshness_adj = calculate_freshness_adjustment(claim_id, items)
+        from spectrue_core.domain.claims import fields
+        # Freshness applies only to claims about a mutable current state (VERIFICATION_METRICS §3.1).
+        freshness_adj = calculate_freshness_adjustment(
+            claim_id, items, is_time_sensitive=bool(fields.raw(claim_obj or {}, "time_sensitive")))
         if freshness_adj < 0:
             if llm_score > 0.5:
                 llm_score = max(0.5, llm_score + freshness_adj)
