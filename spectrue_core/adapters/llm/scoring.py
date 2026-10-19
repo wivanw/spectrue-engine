@@ -49,6 +49,12 @@ from .scoring_contract import (
     build_single_claim_scoring_prompt,
 )
 from .scoring_parsing import clamp_score_evidence_result, parse_structured_verdict
+from spectrue_core.domain.verification.verdict.consistency import (
+    contradictions as verdict_contradictions,
+    label_score_contradiction,
+    mark_inconsistent,
+    retry_note as consistency_retry_note,
+)
 from .scoring_sanitization import (
     MAX_QUOTE_LEN,
     MAX_SNIPPET_LEN,
@@ -243,6 +249,24 @@ class ScoringSkill(BaseSkill):
                 timeout=float(self.runtime.llm.timeout_sec),
                 trace_kind="score_evidence",
             )
+            # Verdict label vs score: re-ask once with the contradiction named; still contradictory -> unverified.
+            found = verdict_contradictions(result.get("claim_verdicts") or [])
+            if found:
+                Trace.event("score_evidence.inconsistent", {"attempt": 1, "claims": found})
+                result = await self.llm_client.call_json(
+                    model=m,
+                    input=prompt + consistency_retry_note(found),
+                    instructions=instructions,
+                    response_schema=SCORING_RESPONSE_SCHEMA,
+                    reasoning_effort="medium",
+                    timeout=float(self.runtime.llm.timeout_sec),
+                    trace_kind="score_evidence_consistency_retry",
+                )
+                still = verdict_contradictions(result.get("claim_verdicts") or [])
+                for cv in result.get("claim_verdicts") or []:
+                    if isinstance(cv, dict) and str(cv.get("claim_id")) in still:
+                        mark_inconsistent(cv, still[str(cv.get("claim_id"))])
+                Trace.event("score_evidence.inconsistent", {"attempt": 2, "claims": still})
             # Parse and normalize result
             clamped = clamp_score_evidence_result(result)
 
@@ -794,10 +818,19 @@ Return valid JSON now."""
                                 "model": model_name,
                             }
 
+                        # Verdict label vs score: one repair attempt with the contradiction named.
+                        why = label_score_contradiction(result.get("verdict"), result.get("verdict_score"))
+                        if why and attempt < max_attempts:
+                            Trace.event("score_single_claim.inconsistent", {"claim_id": cid, "attempt": attempt, "why": why})
+                            local_prompt = prompt + consistency_retry_note({cid: why})
+                            continue
                         # SUCCESS: All fields valid
                         result["claim_id"] = cid
                         result["text"] = claim_info.get("text", "")
                         result["status"] = "ok"
+                        if why:  # still contradictory after the repair attempt -> unverified
+                            mark_inconsistent(result, why)
+                            Trace.event("score_single_claim.inconsistent", {"claim_id": cid, "attempt": attempt, "why": why})
                         result["model"] = model_name
 
                         # Clamp RGBA values

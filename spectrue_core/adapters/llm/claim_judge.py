@@ -31,6 +31,7 @@ from spectrue_core.domain.claims.frame import (
     RGBAScore,
 )
 from spectrue_core.utils.trace import Trace
+from spectrue_core.domain.verification.verdict.consistency import label_score_contradiction, retry_note as consistency_retry_note
 from spectrue_core.domain.verification.verdict.model import AnalysisMode, normalize_verdict_enum
 from spectrue_core.llm.model_registry import ModelID
 
@@ -103,6 +104,23 @@ class ClaimJudgeSkill:
 
             # Parse response into JudgeOutput (no modifications)
             judge_output = self._parse_response(response, frame)
+
+            # Verdict vs G: re-ask once with the contradiction named; still contradictory -> NEI (G = -1).
+            why = label_score_contradiction(judge_output.verdict, judge_output.rgba.g)
+            if why:
+                Trace.event("claim_judge.inconsistent", {"claim_id": frame.claim_id, "attempt": 1, "why": why})
+                response = await self.llm.call_structured(
+                    user_prompt=user_prompt + consistency_retry_note({frame.claim_id: why}),
+                    system_prompt=system_prompt, schema=CLAIM_JUDGE_SCHEMA, schema_name="claim_judge",
+                    model=ModelID.PRO, temperature=0, fail_on_schema_error=False,
+                )
+                judge_output = self._parse_response(response, frame)
+                why = label_score_contradiction(judge_output.verdict, judge_output.rgba.g)
+                if why:
+                    import dataclasses
+                    Trace.event("claim_judge.inconsistent", {"claim_id": frame.claim_id, "attempt": 2, "why": why})
+                    judge_output = dataclasses.replace(
+                        judge_output, verdict="NEI", rgba=dataclasses.replace(judge_output.rgba, g=-1.0))
 
             # Validate sources_used constraint
             judge_output = self._validate_sources_used(judge_output, frame)
